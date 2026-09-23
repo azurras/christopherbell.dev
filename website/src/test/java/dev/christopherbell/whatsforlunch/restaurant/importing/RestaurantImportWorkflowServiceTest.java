@@ -175,6 +175,60 @@ class RestaurantImportWorkflowServiceTest {
     org.junit.jupiter.api.Assertions.assertTrue(freshness.cityCoverage().contains("Austin, TX"));
   }
 
+  @Test
+  void startupRetriesWhenTheLatestMonthlyOccurrenceIsNewerThanTheLastSuccess() throws Exception {
+    var now = Instant.parse("2026-09-16T12:00:00Z");
+    var lastSuccess = dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState.builder()
+        .id(RestaurantImportWorkflowService.STATE_ID)
+        .lastCompletedOn(Instant.parse("2026-08-02T22:44:50Z"))
+        .lastCompletedMonth("2026-08")
+        .build();
+    var snapshot = snapshot("checksum-a");
+    when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.of(lastSuccess));
+    when(leases.tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(now), any()))
+        .thenReturn(true);
+    when(restaurantService.prepareConfiguredMetroImport()).thenReturn(snapshot);
+    when(leases.renew(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(now), any()))
+        .thenReturn(true);
+    when(restaurantService.applyPreparedImport(eq(snapshot), any())).thenReturn(result());
+    var startupWorkflow = new RestaurantImportWorkflowService(
+        Clock.fixed(now, ZoneOffset.UTC),
+        leases,
+        permissionService,
+        previews,
+        states,
+        restaurantService,
+        new WflProperties());
+
+    startupWorkflow.runMissedMonthlyOpenStreetMapImport();
+
+    verify(restaurantService).applyPreparedImport(eq(snapshot), any());
+    verify(leases).release(eq(RestaurantImportWorkflowService.LEASE_NAME), any());
+  }
+
+  @Test
+  void startupDoesNotRepeatWhenTheLatestMonthlyOccurrenceAlreadyCompleted() throws Exception {
+    var lastSuccess = dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState.builder()
+        .id(RestaurantImportWorkflowService.STATE_ID)
+        .lastCompletedOn(Instant.parse("2026-08-16T12:00:00Z"))
+        .lastCompletedMonth("2026-08")
+        .build();
+    when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.of(lastSuccess));
+    var beforeNextOccurrence = new RestaurantImportWorkflowService(
+        Clock.fixed(Instant.parse("2026-09-14T12:00:00Z"), ZoneOffset.UTC),
+        leases,
+        permissionService,
+        previews,
+        states,
+        restaurantService,
+        new WflProperties());
+
+    beforeNextOccurrence.runMissedMonthlyOpenStreetMapImport();
+
+    verify(leases, never()).tryAcquire(any(), any(), any(), any());
+    verify(restaurantService, never()).prepareConfiguredMetroImport();
+  }
+
   private RestaurantImportSnapshot snapshot(String checksum) {
     var counts = new RestaurantImportPreviewCounts(2, 1, 0, 0, 1, 0);
     return new RestaurantImportSnapshot(checksum, List.of(), counts, List.of("New Cafe"));

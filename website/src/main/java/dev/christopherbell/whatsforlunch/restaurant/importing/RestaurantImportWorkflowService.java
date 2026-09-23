@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.context.event.EventListener;
 import org.springframework.web.server.ResponseStatusException;
@@ -113,14 +114,23 @@ public class RestaurantImportWorkflowService {
     if (!properties.getRestaurantImport().getMonthly().isEnabled()) {
       return;
     }
-    var previousMonth = currentMonth().minusMonths(1);
-    var completedMonth = states.findById(STATE_ID)
-        .map(RestaurantImportState::getLastCompletedMonth)
-        .flatMap(this::parseYearMonth)
-        .orElse(null);
-    if (completedMonth == null || completedMonth.isBefore(previousMonth)) {
+    var state = states.findById(STATE_ID).orElse(null);
+    if (state == null || isMonthlyCatchUpDue(state, Instant.now(clock))) {
       runScheduled("startup-catch-up");
     }
+  }
+
+  private boolean isMonthlyCatchUpDue(RestaurantImportState state, Instant now) {
+    var zone = ZoneId.of(properties.getRestaurantImport().getMonthly().getZone());
+    var lastCompletedOn = state.getLastCompletedOn();
+    if (lastCompletedOn != null) {
+      var cron = CronExpression.parse(properties.getRestaurantImport().getMonthly().getCron());
+      var nextScheduledOn = cron.next(lastCompletedOn.atZone(zone));
+      return nextScheduledOn != null && !nextScheduledOn.toInstant().isAfter(now);
+    }
+
+    var completedMonth = parseYearMonth(state.getLastCompletedMonth()).orElse(null);
+    return completedMonth == null || completedMonth.isBefore(currentMonth().minusMonths(1));
   }
 
   private void runScheduled(String trigger) {
