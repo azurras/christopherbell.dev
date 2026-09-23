@@ -1268,7 +1268,10 @@ function New-ProductionPostgreSqlCutoverPreflight {
         Assert-ReleasePath -Config $Config -Path $currentRelease | Out-Null
         $appEnvPath = Join-Path $Config.programDataRoot 'config\app.env'
         $appEnvironment = Read-ProductionEnvironment -Path $appEnvPath
-        if ([string]$appEnvironment.APP_PERSISTENCE_BACKEND -cne 'mongodb') {
+        $currentBackend = if ($appEnvironment.ContainsKey('APP_PERSISTENCE_BACKEND')) {
+            [string]$appEnvironment['APP_PERSISTENCE_BACKEND']
+        } else { 'mongodb' }
+        if ($currentBackend -cne 'mongodb') {
             throw 'The current production release is not using MongoDB.'
         }
         $website = Get-Service -Name 'ChristopherBellDev' -ErrorAction Stop
