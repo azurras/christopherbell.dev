@@ -545,7 +545,187 @@ function Invoke-ProductionPostgreSqlReconcile {
 
 function Get-ProductionPostgreSqlCutoverJournalPath {
     param([Parameter(Mandatory)][pscustomobject]$Config)
-    Join-Path $Config.programDataRoot 'migration\postgresql-cutover.json'
+    $migrationRoot = Join-Path $Config.programDataRoot 'migration'
+    $active = Get-ProductionPostgreSqlCutoverActiveToken -Config $Config
+    if ($active) {
+        return Join-Path (Join-Path (Join-Path $migrationRoot 'postgresql-cutover-attempts') $active) 'journal.json'
+    }
+    Join-Path $migrationRoot 'postgresql-cutover.json'
+}
+
+function Get-ProductionPostgreSqlCutoverActiveToken {
+    param([Parameter(Mandatory)][pscustomobject]$Config)
+    $migrationRoot = Join-Path $Config.programDataRoot 'migration'
+    $attempts = Join-Path $migrationRoot 'postgresql-cutover-attempts'
+    $path = Join-Path $migrationRoot 'postgresql-cutover-active.json'
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw 'The PostgreSQL cutover active-attempt pointer is not a file.'
+    }
+    Assert-ProductionPathNotReparse -Path $migrationRoot | Out-Null
+    Assert-ProtectedProductionPath -Path $migrationRoot | Out-Null
+    Assert-ProductionPathNotReparse -Path $attempts | Out-Null
+    Assert-ProtectedProductionPath -Path $attempts | Out-Null
+    Assert-ProductionPathNotReparse -Path $path | Out-Null
+    Assert-ProtectedProductionPath -Path $path | Out-Null
+    try {
+        $pointer = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -Depth 5 -ErrorAction Stop
+        $token = [guid]::Empty
+        $expected = [ordered]@{ version = 1; lockToken = [string]$pointer.lockToken }
+        $digest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+            [Text.Encoding]::UTF8.GetBytes(($expected | ConvertTo-Json -Compress)))).ToLowerInvariant()
+        if (@($pointer.PSObject.Properties.Name).Count -ne 3 -or
+            @('version','lockToken','digest' | Where-Object {
+                @($pointer.PSObject.Properties.Name) -cnotcontains $_ }).Count -ne 0 -or
+            [int]$pointer.version -ne 1 -or
+            -not [guid]::TryParse([string]$pointer.lockToken, [ref]$token) -or
+            $token -eq [guid]::Empty -or
+            $token.ToString() -cne [string]$pointer.lockToken -or
+            [string]$pointer.digest -cnotmatch '^[0-9a-f]{64}$' -or
+            [string]$pointer.digest -cne $digest) {
+            throw 'The PostgreSQL cutover active-attempt pointer is invalid.'
+        }
+        $directory = Join-Path $attempts $token.ToString()
+        Assert-ProductionPathNotReparse -Path $directory | Out-Null
+        Assert-ProtectedProductionPath -Path $directory | Out-Null
+        Assert-ProductionTreeNotReparse -Path $directory | Out-Null
+        $allowedFiles = @('journal.json','postgresql-cutover-writers-stopped.json',
+            'postgresql-cutover-mongo-archive.json','postgresql-cutover-postgresql-finalized.json',
+            'postgresql-cutover-postgresql-reconciled.json','postgresql-cutover-postgresql-backup.json',
+            'postgresql-cutover-candidate.json','postgresql-cutover-authority-intent.json',
+            'postgresql-cutover-authority.json','postgresql-cutover-production-active.json',
+            'postgresql-cutover-production-verified.json','postgresql-cutover-soak.json')
+        foreach ($item in Get-ChildItem -LiteralPath $directory -Force -Recurse -ErrorAction Stop) {
+            if ($item.PSIsContainer -or $allowedFiles -cnotcontains $item.Name) {
+                throw 'The PostgreSQL cutover attempt archive contains an unexpected path.'
+            }
+            Assert-ProtectedProductionPath -Path $item.FullName | Out-Null
+        }
+        return $token.ToString()
+    } catch {
+        if ($_.Exception.Message -like '*active-attempt pointer is invalid*') { throw }
+        throw [IO.InvalidDataException]::new(
+            'The PostgreSQL cutover active-attempt pointer is invalid.', $_.Exception)
+    }
+}
+
+function Set-ProductionPostgreSqlCutoverActiveToken {
+    param([Parameter(Mandatory)][pscustomobject]$Config,[Parameter(Mandatory)][guid]$Token)
+    if ($Token -eq [guid]::Empty) { throw 'The PostgreSQL cutover attempt token is invalid.' }
+    $root = Join-Path $Config.programDataRoot 'migration'
+    $attempts = Join-Path $root 'postgresql-cutover-attempts'
+    $directory = Join-Path $attempts $Token.ToString()
+    Assert-ProductionPathNotReparse -Path $root | Out-Null
+    Assert-ProtectedProductionPath -Path $root | Out-Null
+    Assert-ProductionPathNotReparse -Path $attempts | Out-Null
+    Assert-ProtectedProductionPath -Path $attempts | Out-Null
+    Assert-ProductionTreeNotReparse -Path $directory | Out-Null
+    Assert-ProtectedProductionPath -Path $directory | Out-Null
+    $allowedFiles = @('journal.json','postgresql-cutover-writers-stopped.json',
+        'postgresql-cutover-mongo-archive.json','postgresql-cutover-postgresql-finalized.json',
+        'postgresql-cutover-postgresql-reconciled.json','postgresql-cutover-postgresql-backup.json',
+        'postgresql-cutover-candidate.json','postgresql-cutover-authority-intent.json',
+        'postgresql-cutover-authority.json','postgresql-cutover-production-active.json',
+        'postgresql-cutover-production-verified.json','postgresql-cutover-soak.json')
+    foreach ($item in Get-ChildItem -LiteralPath $directory -Force -Recurse -ErrorAction Stop) {
+        if ($item.PSIsContainer -or $allowedFiles -cnotcontains $item.Name) {
+            throw 'The PostgreSQL cutover attempt archive contains an unexpected path.'
+        }
+        Assert-ProtectedProductionPath -Path $item.FullName | Out-Null
+    }
+    $journalPath = Join-Path $directory 'journal.json'
+    if (-not (Test-Path -LiteralPath $journalPath -PathType Leaf)) {
+        throw 'The PostgreSQL cutover attempt journal is missing before pointer activation.'
+    }
+    $journal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json -Depth 30 -DateKind String
+    Assert-ProductionPostgreSqlCutoverJournal -Journal $journal | Out-Null
+    if ([string]$journal.lockToken -cne $Token.ToString()) {
+        throw 'The PostgreSQL cutover attempt journal does not match its directory.'
+    }
+    $body = [ordered]@{ version = 1; lockToken = $Token.ToString() }
+    $digest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+        [Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Compress)))).ToLowerInvariant()
+    $pointer = [ordered]@{ version = 1; lockToken = $Token.ToString(); digest = $digest }
+    $path = Join-Path $root 'postgresql-cutover-active.json'
+    $temporary = "$path.$PID.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        $pointer | ConvertTo-Json -Compress | Set-Content -LiteralPath $temporary -Encoding utf8 -NoNewline
+        Protect-ProductionPath -Path $temporary | Out-Null
+        [IO.File]::Move($temporary, $path, $true)
+        Protect-ProductionPath -Path $path | Out-Null
+        if ((Get-ProductionPostgreSqlCutoverActiveToken -Config $Config) -cne $Token.ToString()) {
+            throw 'The PostgreSQL cutover active-attempt pointer did not persist.'
+        }
+    } finally {
+        if (Test-Path -LiteralPath $temporary) {
+            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-ProductionPostgreSqlCutoverAttemptDirectory {
+    param([Parameter(Mandatory)][pscustomobject]$Config,[Parameter(Mandatory)][guid]$Token)
+    if ($Token -eq [guid]::Empty) { throw 'The PostgreSQL cutover attempt token is invalid.' }
+    Join-Path (Join-Path (Join-Path $Config.programDataRoot 'migration') 'postgresql-cutover-attempts') $Token.ToString()
+}
+
+function Copy-ProductionPostgreSqlCutoverLegacyAttempt {
+    param([Parameter(Mandatory)][pscustomobject]$Config,[Parameter(Mandatory)]$Journal)
+    $token = [guid]::Parse([string]$Journal.lockToken)
+    $root = Join-Path $Config.programDataRoot 'migration'
+    $directory = Get-ProductionPostgreSqlCutoverAttemptDirectory -Config $Config -Token $token
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+        $parent = Split-Path -Parent $directory
+        if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent | Out-Null }
+        Protect-ProductionPath -Path $parent | Out-Null
+        New-Item -ItemType Directory -Path $directory | Out-Null
+        Protect-ProductionPath -Path $directory | Out-Null
+    }
+    $files = @(@{ Name='journal.json'; Source=(Join-Path $root 'postgresql-cutover.json') })
+    foreach ($name in @('writers-stopped','mongo-archive','postgresql-finalized','postgresql-reconciled',
+        'postgresql-backup','candidate','authority-intent','authority','production-active',
+        'production-verified','soak')) {
+        $source = Join-Path $root "postgresql-cutover-$name.json"
+        if (Test-Path -LiteralPath $source) {
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+                throw 'A legacy PostgreSQL cutover sidecar path is not a file.'
+            }
+            $files += @{ Name="postgresql-cutover-$name.json"; Source=$source }
+        }
+    }
+    foreach ($file in $files) {
+        if (-not (Test-Path -LiteralPath $file.Source -PathType Leaf)) {
+            throw 'Legacy cutover journal is missing during archival.'
+        }
+        Assert-ProductionPathNotReparse -Path $file.Source | Out-Null
+        Assert-ProtectedProductionPath -Path $file.Source | Out-Null
+        $destination = Join-Path $directory $file.Name
+        $sourceHash = (Get-FileHash -LiteralPath $file.Source -Algorithm SHA256).Hash
+        if (Test-Path -LiteralPath $destination -PathType Leaf) {
+            if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -cne $sourceHash) {
+                throw 'A conflicting PostgreSQL cutover archive already exists.'
+            }
+        } else {
+            Copy-Item -LiteralPath $file.Source -Destination $destination
+            Protect-ProductionPath -Path $destination | Out-Null
+        }
+        if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -cne $sourceHash -or
+            (Get-FileHash -LiteralPath $file.Source -Algorithm SHA256).Hash -cne $sourceHash) {
+            throw 'A PostgreSQL cutover archive failed byte-hash verification.'
+        }
+    }
+    Assert-ProtectedProductionTree -Path $directory | Out-Null
+    $allowedFiles = @('journal.json','postgresql-cutover-writers-stopped.json',
+        'postgresql-cutover-mongo-archive.json','postgresql-cutover-postgresql-finalized.json',
+        'postgresql-cutover-postgresql-reconciled.json','postgresql-cutover-postgresql-backup.json',
+        'postgresql-cutover-candidate.json','postgresql-cutover-authority-intent.json',
+        'postgresql-cutover-authority.json','postgresql-cutover-production-active.json',
+        'postgresql-cutover-production-verified.json','postgresql-cutover-soak.json')
+    foreach ($item in Get-ChildItem -LiteralPath $directory -Force -Recurse -ErrorAction Stop) {
+        if ($item.PSIsContainer -or $allowedFiles -cnotcontains $item.Name) {
+            throw 'The PostgreSQL cutover attempt archive contains an unexpected path.'
+        }
+    }
 }
 
 function Get-ProductionPostgreSqlCutoverJournalBody {
@@ -663,13 +843,21 @@ function Assert-ProductionPostgreSqlCutoverJournal {
 function Read-ProductionPostgreSqlCutoverJournal {
     param([Parameter(Mandatory)][pscustomobject]$Config)
     $path = Get-ProductionPostgreSqlCutoverJournalPath -Config $Config
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw 'The PostgreSQL cutover journal path is not a file.'
+    }
     Assert-ProductionPathNotReparse -Path $path | Out-Null
     Assert-ProtectedProductionPath -Path $path | Out-Null
     try {
         $journal = Get-Content -LiteralPath $path -Raw |
             ConvertFrom-Json -Depth 30 -DateKind String -ErrorAction Stop
-        return Assert-ProductionPostgreSqlCutoverJournal -Journal $journal
+        $journal = Assert-ProductionPostgreSqlCutoverJournal -Journal $journal
+        $active = Get-ProductionPostgreSqlCutoverActiveToken -Config $Config
+        if ($active -and [string]$journal.lockToken -cne $active) {
+            throw 'The PostgreSQL cutover active-attempt pointer does not match its journal.'
+        }
+        return $journal
     } catch {
         if ($_.Exception.Message -like '*cutover journal is invalid*') { throw }
         throw [IO.InvalidDataException]::new(
@@ -682,7 +870,65 @@ function Write-ProductionPostgreSqlCutoverJournal {
         [Parameter(Mandatory)][pscustomobject]$Config,
         [Parameter(Mandatory)]$Journal
     )
-    $path = Get-ProductionPostgreSqlCutoverJournalPath -Config $Config
+    $active = Get-ProductionPostgreSqlCutoverActiveToken -Config $Config
+    $legacyPath = Join-Path $Config.programDataRoot 'migration\postgresql-cutover.json'
+    $oldToken = $null
+    $journalToken = [guid]::Empty
+    $journalTokenProperty = $Journal.PSObject.Properties['lockToken']
+    if (-not $journalTokenProperty -or
+        -not [guid]::TryParse([string]$journalTokenProperty.Value, [ref]$journalToken) -or
+        $journalToken -eq [guid]::Empty) {
+        Write-ProductionPostgreSqlCutoverJournalFile -Path $legacyPath -Journal $Journal
+        return
+    }
+    Assert-ProductionPostgreSqlCutoverJournal -Journal $Journal | Out-Null
+    if ($active -and $active -cne [string]$Journal.lockToken) {
+        $current = Read-ProductionPostgreSqlCutoverJournal -Config $Config
+        if ([string]$Journal.phase -cne 'PLANNED' -or [bool]$Journal.authorityPublished -or
+            -not $current -or [string]$current.phase -cne 'ROLLED_BACK' -or
+            [bool]$current.authorityPublished -or
+            (Test-Path -LiteralPath (Get-ProductionPostgreSqlCutoverSidecarPath -Config $Config -Name 'authority'))) {
+            throw 'A new PostgreSQL cutover attempt cannot replace a nonterminal or authoritative attempt.'
+        }
+        $oldToken = $active
+    } elseif (-not $active -and (Test-Path -LiteralPath $legacyPath -PathType Leaf)) {
+        $legacy = Read-ProductionPostgreSqlCutoverJournal -Config $Config
+        if ([string]$legacy.lockToken -cne [string]$Journal.lockToken) {
+            if ([string]$Journal.phase -cne 'PLANNED' -or [bool]$Journal.authorityPublished -or
+                [string]$legacy.phase -cne 'ROLLED_BACK' -or [bool]$legacy.authorityPublished -or
+                (Test-Path -LiteralPath (Join-Path $Config.programDataRoot 'migration\postgresql-cutover-authority.json'))) {
+                throw 'A new PostgreSQL cutover attempt cannot replace a nonterminal or authoritative legacy attempt.'
+            }
+            Copy-ProductionPostgreSqlCutoverLegacyAttempt -Config $Config -Journal $legacy
+            $oldToken = [string]$legacy.lockToken
+        } else {
+            Write-ProductionPostgreSqlCutoverJournalFile -Path $legacyPath -Journal $Journal
+            return
+        }
+    }
+    if ((-not $active -and -not (Test-Path -LiteralPath $legacyPath -PathType Leaf)) -or
+        ($oldToken)) {
+        $token = [guid]::Parse([string]$Journal.lockToken)
+        $directory = Get-ProductionPostgreSqlCutoverAttemptDirectory -Config $Config -Token $token
+        $parent = Split-Path -Parent $directory
+        if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+            New-Item -ItemType Directory -Path $parent | Out-Null
+            Protect-ProductionPath -Path $parent | Out-Null
+        }
+        if (Test-Path -LiteralPath $directory) { throw 'A PostgreSQL cutover attempt directory already exists without being active.' }
+        New-Item -ItemType Directory -Path $directory | Out-Null
+        Protect-ProductionPath -Path $directory | Out-Null
+        $path = Join-Path $directory 'journal.json'
+        Write-ProductionPostgreSqlCutoverJournalFile -Path $path -Journal $Journal
+        Set-ProductionPostgreSqlCutoverActiveToken -Config $Config -Token $token
+        return
+    }
+    $path = if ($active) { Get-ProductionPostgreSqlCutoverJournalPath -Config $Config } else { $legacyPath }
+    Write-ProductionPostgreSqlCutoverJournalFile -Path $path -Journal $Journal
+}
+
+function Write-ProductionPostgreSqlCutoverJournalFile {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)]$Journal)
     $parent = Split-Path -Parent $path
     if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
         New-Item -ItemType Directory -Path $parent | Out-Null
@@ -798,6 +1044,10 @@ function Get-ProductionPostgreSqlCutoverSidecarPath {
             'authority','production-active','production-verified','soak')]
         [string]$Name
     )
+    $active = Get-ProductionPostgreSqlCutoverActiveToken -Config $Config
+    if ($active) {
+        return Join-Path (Join-Path (Get-ProductionPostgreSqlCutoverAttemptDirectory -Config $Config -Token ([guid]::Parse($active))) "postgresql-cutover-$Name.json")
+    }
     Join-Path $Config.programDataRoot "migration\postgresql-cutover-$Name.json"
 }
 
@@ -986,7 +1236,8 @@ function Invoke-ProductionPostgreSqlCutoverJava {
 function New-ProductionPostgreSqlCutoverPreflight {
     param(
         [Parameter(Mandatory)][pscustomobject]$Config,
-        $ExistingJournal
+        $ExistingJournal,
+        [switch]$ForRetry
     )
     Assert-ProductionPostgreSqlConfig -Config $Config -RequireInstalled | Out-Null
     if ([string]$Config.programDataRoot -cne 'C:\ProgramData\christopherbell.dev' -or
@@ -1000,8 +1251,33 @@ function New-ProductionPostgreSqlCutoverPreflight {
         throw 'The PostgreSQL cutover target is not ready.'
     }
     $releaseSha = Resolve-OriginMainRelease -Config $Config
-    if ($ExistingJournal -and [string]$ExistingJournal.release -cne $releaseSha) {
+    if ($ExistingJournal -and -not $ForRetry -and [string]$ExistingJournal.release -cne $releaseSha) {
         throw 'The PostgreSQL cutover release changed during the maintenance window.'
+    }
+    if ($ForRetry) {
+        if (-not $ExistingJournal -or [string]$ExistingJournal.phase -cne 'ROLLED_BACK' -or
+            [bool]$ExistingJournal.authorityPublished -or
+            (Test-Path -LiteralPath (Get-ProductionPostgreSqlCutoverSidecarPath -Config $Config -Name 'authority'))) {
+            throw 'Only a pre-authority rolled-back cutover can be retried.'
+        }
+        $mongo = Get-Service -Name 'MongoDB' -ErrorAction Stop
+        if ([string]$mongo.Status -cne 'Running') { throw 'MongoDB must be running before a cutover retry.' }
+        Assert-ProductionPostgreSqlCutoverMongoUnlocked -Config $Config
+        $current = Join-Path $Config.programDataRoot 'current'
+        $currentRelease = Get-JunctionTarget $current
+        Assert-ReleasePath -Config $Config -Path $currentRelease | Out-Null
+        $appEnvPath = Join-Path $Config.programDataRoot 'config\app.env'
+        $appEnvironment = Read-ProductionEnvironment -Path $appEnvPath
+        if ([string]$appEnvironment.APP_PERSISTENCE_BACKEND -cne 'mongodb') {
+            throw 'The current production release is not using MongoDB.'
+        }
+        $website = Get-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+        if ([string]$website.Status -cne 'Running') { throw 'The Mongo-backed production website must be running before retry.' }
+        Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
+        Test-ProductionPublicEndpoints -Config $Config | Out-Null
+        if (-not (Get-ProductionPostgreSqlCutoverActiveToken -Config $Config)) {
+            Copy-ProductionPostgreSqlCutoverLegacyAttempt -Config $Config -Journal $ExistingJournal
+        }
     }
     if (-not $ExistingJournal -and (Test-Path -LiteralPath (
             Get-ProductionPostgreSqlCutoverSidecarPath -Config $Config -Name 'authority'))) {
@@ -1016,7 +1292,7 @@ function New-ProductionPostgreSqlCutoverPreflight {
     $targetHash = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($target))
     [pscustomobject][ordered]@{
         release = $releaseSha
-        lockToken = if ($ExistingJournal) {
+        lockToken = if ($ExistingJournal -and -not $ForRetry) {
             [string]$ExistingJournal.lockToken
         } else {
             [guid]::NewGuid().ToString()
@@ -1757,6 +2033,8 @@ function New-ProductionPostgreSqlCutoverActions {
     $actions = @{
         Preflight = { param($Value,$Existing) & $commands.Preflight `
             -Config $Value -ExistingJournal $Existing }.GetNewClosure()
+        RetryPreflight = { param($Existing) & $commands.Preflight `
+            -Config $cutoverConfig -ExistingJournal $Existing -ForRetry }.GetNewClosure()
         StopWriters = {
             param($State) & $commands.StopWriters `
                 -Config $cutoverConfig -Journal $State
@@ -1846,17 +2124,33 @@ function Invoke-ProductionPostgreSqlCutover {
     $journal = & $ReadJournalAction
     if ($journal) {
         $journal = Assert-ProductionPostgreSqlCutoverJournal -Journal $journal
-        if ([string]$journal.phase -in @('SOAKING','ROLLED_BACK','FORWARD_RECOVERY_REQUIRED')) {
+        if ([string]$journal.phase -in @('SOAKING','FORWARD_RECOVERY_REQUIRED')) {
             return $journal
         }
-        $preflight = & $Actions.Preflight $Config $journal
-        if ([string]$preflight.release -cne [string]$journal.release -or
-            [string]$preflight.lockToken -cne [string]$journal.lockToken -or
-            [string]$preflight.sourceDatabase -cne [string]$journal.sourceDatabase -or
-            [string]$preflight.targetDatabase -cne [string]$journal.targetDatabase -or
-            [string]$preflight.catalogDigest -cne [string]$journal.catalogDigest -or
-            [string]$preflight.targetJdbcDigest -cne [string]$journal.targetJdbcDigest) {
-            throw 'The PostgreSQL cutover resume identity is invalid.'
+        if ([string]$journal.phase -ceq 'ROLLED_BACK') {
+            if (-not $Actions.ContainsKey('RetryPreflight')) { return $journal }
+            $retryPreflight = & $Actions.RetryPreflight $journal
+            if ([string]$retryPreflight.lockToken -ceq [string]$journal.lockToken -or
+                [string]$retryPreflight.release -cnotmatch '^[0-9a-f]{40}$' -or
+                [string]$retryPreflight.sourceDatabase -cne 'christopherbell' -or
+                [string]$retryPreflight.targetDatabase -cne 'christopherbell' -or
+                [string]$retryPreflight.catalogDigest -cnotmatch '^[0-9a-f]{64}$' -or
+                [string]$retryPreflight.targetJdbcDigest -cnotmatch '^[0-9a-f]{64}$') {
+                throw 'The PostgreSQL cutover retry identity is invalid.'
+            }
+            $journal = New-ProductionPostgreSqlCutoverJournal -Preflight $retryPreflight `
+                -Now (& $ClockAction) -MaintenanceBudgetMinutes $MaintenanceBudgetMinutes
+            & $WriteJournalAction $journal
+        } else {
+            $preflight = & $Actions.Preflight $Config $journal
+            if ([string]$preflight.release -cne [string]$journal.release -or
+                [string]$preflight.lockToken -cne [string]$journal.lockToken -or
+                [string]$preflight.sourceDatabase -cne [string]$journal.sourceDatabase -or
+                [string]$preflight.targetDatabase -cne [string]$journal.targetDatabase -or
+                [string]$preflight.catalogDigest -cne [string]$journal.catalogDigest -or
+                [string]$preflight.targetJdbcDigest -cne [string]$journal.targetJdbcDigest) {
+                throw 'The PostgreSQL cutover resume identity is invalid.'
+            }
         }
     } else {
         $preflight = & $Actions.Preflight $Config $null
