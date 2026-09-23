@@ -60,6 +60,24 @@ been reconciled.
 
 ## Durable phases and recovery
 
+Each cutover run is stored under
+`migration\postgresql-cutover-attempts\<lockToken>\`, with its journal and
+evidence sidecars together. The protected `postgresql-cutover-active.json`
+pointer selects the current attempt. Existing flat journal/sidecar files are
+read as the legacy attempt until a guarded retry archives them; that archive is
+copied and SHA-256 verified without changing the originals. Do not edit, move,
+or remove attempt data or the active pointer manually.
+
+The supported cutover command may start a new attempt only when the active
+journal is a valid pre-authority `ROLLED_BACK` record with
+`authorityPublished=false`, no PostgreSQL authority marker exists, MongoDB is
+running and explicitly reports `fsyncLock:false`, and the current Mongo-backed
+website passes local and public endpoint checks. It retains the same explicit
+confirmation requirement and 30-minute maximum. Any ambiguous pointer,
+archive, journal, lock, authority, or source-health state aborts before writers
+are stopped. `SOAKING` and `FORWARD_RECOVERY_REQUIRED` remain terminal to this
+command; authority publication is never reset or retried.
+
 The protected cutover journal permits only this ordered chain:
 
 ```text
