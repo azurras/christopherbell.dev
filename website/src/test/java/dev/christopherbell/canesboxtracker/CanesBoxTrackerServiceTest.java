@@ -3,8 +3,10 @@ package dev.christopherbell.canesboxtracker;
 import dev.christopherbell.canesboxtracker.model.CanesBoxMetroPrice;
 import dev.christopherbell.canesboxtracker.model.CanesBoxPriceSnapshot;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
+import dev.christopherbell.libs.lease.CollectorLeaseGuard;
 import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.libs.lease.ScheduledCollectorRunStatus;
+import java.time.Duration;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -15,12 +17,17 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -47,6 +54,205 @@ class CanesBoxTrackerServiceTest {
     service.collectCurrentWeek();
 
     verifyNoInteractions(repository, client);
+  }
+
+  @Test
+  void startupCollectsCurrentWeekWhenLatestCompleteSnapshotMissesAWeeklyOccurrence() {
+    var repository = mock(CanesBoxPriceSnapshotRepository.class);
+    var coordinator = coordinatorThatRunsWork();
+    var target = target("Dallas-Fort Worth", "101");
+    var properties = properties(target);
+    var lastCompleteWeek = completeSnapshot(
+        "2026-09-07", Instant.parse("2026-09-07T11:00:00Z"), target);
+    when(repository.findTop60ByOrderByWeekStartDateDesc()).thenReturn(List.of(lastCompleteWeek));
+    when(repository.save(any(CanesBoxPriceSnapshot.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    var collectedOn = Instant.parse("2026-09-23T12:00:00Z");
+    var client = (CanesBoxPriceClient) metro -> CanesBoxMetroPrice.success(
+        metro, new BigDecimal("13.49"), collectedOn);
+    var service = service(repository, client, properties, collectedOn, coordinator);
+
+    publishApplicationReady(service);
+
+    var saved = org.mockito.ArgumentCaptor.forClass(CanesBoxPriceSnapshot.class);
+    verify(repository).save(saved.capture());
+    assertEquals("2026-09-21", saved.getValue().getWeekStartDate());
+    assertEquals(1, saved.getValue().getMetroPrices().size());
+    assertEquals(new BigDecimal("13.49"), saved.getValue().getAveragePrice());
+  }
+
+  @Test
+  void startupCollectsTheFirstWeeklySnapshotWhenNoHistoryExists() {
+    var repository = mock(CanesBoxPriceSnapshotRepository.class);
+    when(repository.findTop60ByOrderByWeekStartDateDesc()).thenReturn(List.of());
+    when(repository.save(any(CanesBoxPriceSnapshot.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    var target = target("Dallas-Fort Worth", "101");
+    var collectedOn = Instant.parse("2026-09-23T12:00:00Z");
+    var client = (CanesBoxPriceClient) metro -> CanesBoxMetroPrice.success(
+        metro, new BigDecimal("13.49"), collectedOn);
+    var service = service(
+        repository,
+        client,
+        properties(target),
+        collectedOn,
+        coordinatorThatRunsWork());
+
+    publishApplicationReady(service);
+
+    var saved = org.mockito.ArgumentCaptor.forClass(CanesBoxPriceSnapshot.class);
+    verify(repository).save(saved.capture());
+    assertEquals("2026-09-21", saved.getValue().getWeekStartDate());
+    assertEquals(1, saved.getValue().getMetroPrices().size());
+  }
+
+  @Test
+  void startupDoesNotCollectBeforeTheNextConfiguredWeeklyOccurrence() {
+    var repository = mock(CanesBoxPriceSnapshotRepository.class);
+    var target = target("Dallas-Fort Worth", "101");
+    when(repository.findTop60ByOrderByWeekStartDateDesc()).thenReturn(List.of(completeSnapshot(
+        "2026-09-14", Instant.parse("2026-09-14T11:00:00Z"), target)));
+    var client = mock(CanesBoxPriceClient.class);
+    var service = service(
+        repository,
+        client,
+        properties(target),
+        Instant.parse("2026-09-21T10:59:00Z"),
+        coordinatorThatRunsWork());
+
+    publishApplicationReady(service);
+
+    verify(repository, never()).save(any(CanesBoxPriceSnapshot.class));
+    verifyNoInteractions(client);
+  }
+
+  @Test
+  void startupDoesNotRepeatWhenThisWeeksCompleteSnapshotAlreadyExists() {
+    var repository = mock(CanesBoxPriceSnapshotRepository.class);
+    var target = target("Dallas-Fort Worth", "101");
+    when(repository.findTop60ByOrderByWeekStartDateDesc()).thenReturn(List.of(completeSnapshot(
+        "2026-09-21", Instant.parse("2026-09-21T11:00:00Z"), target)));
+    var client = mock(CanesBoxPriceClient.class);
+    var service = service(
+        repository,
+        client,
+        properties(target),
+        Instant.parse("2026-09-23T12:00:00Z"),
+        coordinatorThatRunsWork());
+
+    publishApplicationReady(service);
+
+    verify(repository, never()).save(any(CanesBoxPriceSnapshot.class));
+    verifyNoInteractions(client);
+  }
+
+  @Test
+  void incompleteManualSnapshotDoesNotHideAnOverdueWeeklyCollection() {
+    var repository = mock(CanesBoxPriceSnapshotRepository.class);
+    var dallas = target("Dallas-Fort Worth", "101");
+    var houston = target("Houston", "202");
+    var properties = properties(dallas, houston);
+    var partialManualWeek = completeSnapshot(
+        "2026-09-21", Instant.parse("2026-09-22T12:00:00Z"), dallas);
+    var lastCompleteWeek = completeSnapshot(
+        "2026-09-07", Instant.parse("2026-09-07T11:00:00Z"), dallas, houston);
+    when(repository.findTop60ByOrderByWeekStartDateDesc())
+        .thenReturn(List.of(partialManualWeek, lastCompleteWeek));
+    when(repository.save(any(CanesBoxPriceSnapshot.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    var collectedOn = Instant.parse("2026-09-23T12:00:00Z");
+    var client = (CanesBoxPriceClient) target -> CanesBoxMetroPrice.success(
+        target, new BigDecimal("13.49"), collectedOn);
+    var service = service(
+        repository, client, properties, collectedOn, coordinatorThatRunsWork());
+
+    publishApplicationReady(service);
+
+    var saved = org.mockito.ArgumentCaptor.forClass(CanesBoxPriceSnapshot.class);
+    verify(repository).save(saved.capture());
+    assertEquals("2026-09-21", saved.getValue().getWeekStartDate());
+    assertEquals(2, saved.getValue().getMetroPrices().size());
+  }
+
+  @Test
+  void duplicateMetroRowsDoNotMakeAWeeklySnapshotComplete() {
+    var repository = mock(CanesBoxPriceSnapshotRepository.class);
+    when(repository.save(any(CanesBoxPriceSnapshot.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    var dallas = target("Dallas-Fort Worth", "101");
+    var houston = target("Houston", "202");
+    var currentWeekWithDuplicate = completeSnapshot(
+        "2026-09-21", Instant.parse("2026-09-21T11:00:00Z"), dallas, dallas);
+    when(repository.findTop60ByOrderByWeekStartDateDesc())
+        .thenReturn(List.of(currentWeekWithDuplicate));
+    var collectedOn = Instant.parse("2026-09-23T12:00:00Z");
+    var client = (CanesBoxPriceClient) metro -> CanesBoxMetroPrice.success(
+        metro, new BigDecimal("13.49"), collectedOn);
+    var service = service(
+        repository,
+        client,
+        properties(dallas, houston),
+        collectedOn,
+        coordinatorThatRunsWork());
+
+    publishApplicationReady(service);
+
+    var saved = org.mockito.ArgumentCaptor.forClass(CanesBoxPriceSnapshot.class);
+    verify(repository).save(saved.capture());
+    assertEquals("2026-09-21", saved.getValue().getWeekStartDate());
+    assertEquals(2, saved.getValue().getMetroPrices().size());
+    assertEquals("Houston", saved.getValue().getMetroPrices().get(1).getMetroName());
+  }
+
+  @Test
+  void startupSkipsCollectionWhenTheFeatureIsDisabled() {
+    var repository = mock(CanesBoxPriceSnapshotRepository.class);
+    var properties = properties(target("Dallas-Fort Worth", "101"));
+    properties.setEnabled(false);
+    var service = service(
+        repository,
+        mock(CanesBoxPriceClient.class),
+        properties,
+        Instant.parse("2026-09-23T12:00:00Z"),
+        coordinatorThatRunsWork());
+
+    publishApplicationReady(service);
+
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void startupSkipsCollectionInDeploySmokeProfile() {
+    var repository = mock(CanesBoxPriceSnapshotRepository.class);
+    var service = service(
+        repository,
+        mock(CanesBoxPriceClient.class),
+        properties(target("Dallas-Fort Worth", "101")),
+        Instant.parse("2026-09-23T12:00:00Z"),
+        coordinatorThatRunsWork());
+
+    publishApplicationReady(service, "deploy-smoke");
+
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void startupCatchUpFailureDoesNotEscapeApplicationReadyEvent() {
+    var repository = mock(CanesBoxPriceSnapshotRepository.class);
+    var target = target("Dallas-Fort Worth", "101");
+    when(repository.findTop60ByOrderByWeekStartDateDesc()).thenReturn(List.of(completeSnapshot(
+        "2026-09-07", Instant.parse("2026-09-07T11:00:00Z"), target)));
+    var coordinator = mock(ScheduledCollectorCoordinator.class);
+    when(coordinator.run(eq(CanesBoxTrackerService.LEASE_NAME), any(), any()))
+        .thenThrow(new IllegalStateException("storage unavailable"));
+    var service = service(
+        repository,
+        mock(CanesBoxPriceClient.class),
+        properties(target),
+        Instant.parse("2026-09-23T12:00:00Z"),
+        coordinator);
+
+    assertDoesNotThrow(() -> publishApplicationReady(service));
   }
 
   @Test
@@ -280,6 +486,60 @@ class CanesBoxTrackerServiceTest {
     properties.setEnabled(true);
     properties.setMetros(new ArrayList<>(List.of(targets)));
     return properties;
+  }
+
+  private ScheduledCollectorCoordinator coordinatorThatRunsWork() {
+    var coordinator = mock(ScheduledCollectorCoordinator.class);
+    when(coordinator.run(eq(CanesBoxTrackerService.LEASE_NAME), any(), any()))
+        .thenAnswer(invocation -> {
+          @SuppressWarnings("unchecked")
+          var work = (ScheduledCollectorCoordinator.Work<CanesBoxPriceSnapshot>)
+              invocation.getArgument(2);
+          var snapshot = work.execute(CollectorLeaseGuard.NONE);
+          return new ScheduledCollectorCoordinator.Outcome<>(
+              ScheduledCollectorRunStatus.SUCCEEDED, snapshot);
+        });
+    return coordinator;
+  }
+
+  private CanesBoxTrackerService service(
+      CanesBoxPriceSnapshotRepository repository,
+      CanesBoxPriceClient client,
+      CanesBoxTrackerProperties properties,
+      Instant now,
+      ScheduledCollectorCoordinator coordinator) {
+    return new CanesBoxTrackerService(
+        repository,
+        client,
+        properties,
+        Clock.fixed(now, ZoneId.of("UTC")),
+        coordinator);
+  }
+
+  private void publishApplicationReady(CanesBoxTrackerService service, String... activeProfiles) {
+    try (var context = new AnnotationConfigApplicationContext()) {
+      if (activeProfiles.length > 0) {
+        context.getEnvironment().setActiveProfiles(activeProfiles);
+      }
+      context.registerBean(CanesBoxTrackerService.class, () -> service);
+      context.refresh();
+      context.publishEvent(new ApplicationReadyEvent(
+          new SpringApplication(), new String[0], context, Duration.ZERO));
+    }
+  }
+
+  private CanesBoxPriceSnapshot completeSnapshot(
+      String weekStart,
+      Instant collectedOn,
+      CanesBoxTrackerProperties.MetroTarget... targets) {
+    var snapshot = new CanesBoxPriceSnapshot();
+    snapshot.setId(weekStart);
+    snapshot.setWeekStartDate(weekStart);
+    snapshot.setCollectedOn(collectedOn);
+    snapshot.setMetroPrices(List.of(targets).stream()
+        .map(target -> CanesBoxMetroPrice.success(target, new BigDecimal("12.99"), collectedOn))
+        .toList());
+    return snapshot;
   }
 
   private CanesBoxTrackerProperties.MetroTarget target(String metroName, String restaurantRef) {

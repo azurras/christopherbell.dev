@@ -22,8 +22,11 @@ import java.util.List;
 import java.util.Locale;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -71,7 +74,7 @@ public class CanesBoxTrackerService {
    * Runs the configured weekly Raising Canes Box Index collection job.
    */
   @Scheduled(
-      cron = "${canes-box-tracker.collection.cron:0 0 6 * * MON}",
+      cron = "${canes-box-tracker.collection.cron}",
       zone = "${canes-box-tracker.collection.zone:America/Chicago}"
   )
   public void collectCurrentWeek() {
@@ -87,6 +90,47 @@ public class CanesBoxTrackerService {
       return;
     }
     collectCurrentWeek(weekStart, CollectorLeaseGuard.NONE);
+  }
+
+  /** Runs one startup catch-up when the last complete metro snapshot predates a due schedule. */
+  @EventListener(
+      value = ApplicationReadyEvent.class,
+      condition = "!@environment.acceptsProfiles('deploy-smoke')")
+  public void collectMissedWeeklyCollection() {
+    if (!properties.isEnabled()) {
+      return;
+    }
+    var latestCompleteSnapshot = repository.findTop60ByOrderByWeekStartDateDesc().stream()
+        .filter(this::hasAllConfiguredMetroPrices)
+        .findFirst()
+        .orElse(null);
+    if (latestCompleteSnapshot == null
+        || isWeeklyCollectionOverdue(latestCompleteSnapshot, Instant.now(clock))) {
+      try {
+        collectCurrentWeek();
+      } catch (RuntimeException failure) {
+        log.warn(
+            "Raising Canes Box Index startup catch-up failed; the next scheduled run will retry.",
+            failure);
+      }
+    }
+  }
+
+  private boolean hasAllConfiguredMetroPrices(CanesBoxPriceSnapshot snapshot) {
+    var prices = snapshot.getMetroPrices();
+    return prices != null && properties.getMetros().stream().allMatch(target ->
+        prices.stream().anyMatch(price -> price != null
+            && target.getMetroName().equals(price.getMetroName())));
+  }
+
+  private boolean isWeeklyCollectionOverdue(CanesBoxPriceSnapshot snapshot, Instant now) {
+    if (snapshot.getCollectedOn() == null) {
+      return true;
+    }
+    var cron = CronExpression.parse(properties.getCollection().getCron());
+    var zone = ZoneId.of(properties.getCollection().getZone());
+    var nextScheduledOn = cron.next(snapshot.getCollectedOn().atZone(zone));
+    return nextScheduledOn != null && !nextScheduledOn.toInstant().isAfter(now);
   }
 
   private CanesBoxPriceSnapshot collectCurrentWeek(

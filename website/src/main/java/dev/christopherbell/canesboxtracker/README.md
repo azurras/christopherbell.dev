@@ -59,6 +59,12 @@ auditing; do not drop those fields when changing the importer.
 The weekly snapshot id is the Monday `weekStartDate`, so rerunning the job for
 the same week replaces that week's stored result.
 
+At application startup, the collector checks whether the next configured
+weekly cron occurrence after the latest complete metro snapshot is overdue. If
+so, it collects the current week through the existing distributed lease. A
+partial manual snapshot does not suppress this catch-up, and mutation-free
+`deploy-smoke` runs keep scheduled external effects disabled.
+
 ## Configuration
 
 Metro targets live in `application.yml` under `canes-box-tracker.metros` so the

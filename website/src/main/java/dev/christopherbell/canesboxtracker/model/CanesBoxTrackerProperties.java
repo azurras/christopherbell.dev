@@ -50,6 +50,7 @@ public class CanesBoxTrackerProperties {
    */
   @Data
   public static class CollectionSchedule {
+    private String cron = "0 0 6 * * MON";
     private String zone = "America/Chicago";
   }
 
