@@ -16,6 +16,49 @@ $script:ProductionSmokePaths = @(
 $script:CandidateDatabasePattern = '^cbell_candidate_[0-9a-f]{12}_[0-9a-f]{24}$'
 $script:FixedProductionRoot = 'C:\ProgramData\christopherbell.dev'
 
+if (-not ('ChristopherBell.Production.BoundedProcessLog' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
+
+namespace ChristopherBell.Production {
+    public sealed class BoundedProcessLog {
+        private const int MaximumBytes = 65536;
+        private readonly string path;
+        private readonly object gate = new object();
+
+        public BoundedProcessLog(string path) { this.path = path; }
+
+        public void Attach(Process process) {
+            process.OutputDataReceived += WriteLine;
+            process.ErrorDataReceived += WriteLine;
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+        }
+
+        private void WriteLine(object sender, DataReceivedEventArgs eventArgs) {
+            if (String.IsNullOrEmpty(eventArgs.Data)) return;
+            try {
+                byte[] bytes = Encoding.UTF8.GetBytes("[" + ((Process)sender).Id + "] " +
+                    eventArgs.Data + Environment.NewLine);
+                lock (gate) {
+                    long currentLength = File.Exists(path) ? new FileInfo(path).Length : 0;
+                    if (currentLength >= MaximumBytes) return;
+                    int count = (int)Math.Min(bytes.Length, MaximumBytes - currentLength);
+                    using (FileStream stream = new FileStream(path, FileMode.Append,
+                        FileAccess.Write, FileShare.Read)) {
+                        stream.Write(bytes, 0, count);
+                    }
+                }
+            } catch { }
+        }
+    }
+}
+'@
+}
+
 function Grant-CoordinatedProductionWriterStart {
     param($Config, [string]$MarkerState, [string]$Release, [string]$Purpose)
     $module = Get-Module Production.WriterStart -ErrorAction Stop
@@ -384,7 +427,11 @@ function Start-ProductionJar {
     $jar = Join-Path $release 'app.jar'
     if (-not (Test-Path -LiteralPath $jar -PathType Leaf)) { throw "Missing release JAR: $jar" }
     $environment = Read-ProductionEnvironment (Join-Path $Config.programDataRoot 'config\app.env')
-    foreach ($entry in $AdditionalEnvironment.GetEnumerator()) { $environment[$entry.Key] = [string]$entry.Value }
+    foreach ($entry in $AdditionalEnvironment.GetEnumerator()) {
+        if ($entry.Key -cne 'CANDIDATE_PROCESS_LOG_PATH') {
+            $environment[$entry.Key] = [string]$entry.Value
+        }
+    }
     $releaseCommit = Split-Path -Leaf $release
     if ($releaseCommit -notmatch '^[0-9a-f]{40}$') {
         throw 'Production release directory must use a full Git SHA.'
@@ -402,8 +449,21 @@ function Start-ProductionJar {
         -FilePath $Config.javaExe `
         -ArgumentList $arguments `
         -WorkingDirectory $release `
-        -Environment $environment
-    return [Diagnostics.Process]::Start($start)
+        -Environment $environment `
+        -RedirectStandardOutput `
+        -RedirectStandardError
+    $candidateLogPath = [string]$AdditionalEnvironment['CANDIDATE_PROCESS_LOG_PATH']
+    if ([string]::IsNullOrWhiteSpace($candidateLogPath)) {
+        throw 'Candidate process log path is required.'
+    }
+    $process = [Diagnostics.Process]::Start($start)
+    $process | Add-Member -MemberType NoteProperty -Name CandidateProcessLogPath `
+        -Value $candidateLogPath
+    $logWriter = [ChristopherBell.Production.BoundedProcessLog]::new($candidateLogPath)
+    $logWriter.Attach($process)
+    $process | Add-Member -MemberType NoteProperty -Name CandidateProcessLogWriter `
+        -Value $logWriter
+    return $process
 }
 
 function Test-ProductionEndpoints {
@@ -494,7 +554,10 @@ function Wait-ProductionCandidateOwnedListener {
     )
     $watch = [Diagnostics.Stopwatch]::StartNew()
     do {
-        $process = Get-Process -Id ([int]$Identity.pid) -ErrorAction Stop
+        $process = Get-Process -Id ([int]$Identity.pid) -ErrorAction SilentlyContinue
+        if (-not $process) {
+            throw "Candidate process $([int]$Identity.pid) exited before binding."
+        }
         if ($process.HasExited -or
             [long]$process.StartTime.ToUniversalTime().Ticks -ne
                 [long]$Identity.startTimeUtcTicks) {
@@ -528,8 +591,19 @@ function Test-CandidateRelease {
         $environment.SPRING_MONGODB_DATABASE = $Database
     }
     Assert-ProductionCandidatePortUnused -Port ([int]$Config.candidatePort)
+    $logsRoot = Join-Path $Config.programDataRoot 'logs'
+    Assert-ProtectedProductionPath -Path $logsRoot | Out-Null
+    $candidateLogPath = Join-Path $logsRoot ("candidate-{0}.out.log" -f [guid]::NewGuid().ToString('N'))
+    $candidateApplicationLogPath = Join-Path $logsRoot ("candidate-{0}.app.log" -f [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType File -Path $candidateLogPath -ErrorAction Stop | Out-Null
+    $environment.LOGGING_FILE_NAME = $candidateApplicationLogPath
+    $environment.LOGGING_LOGBACK_ROLLINGPOLICY_MAX_FILE_SIZE = '64KB'
+    $environment.LOGGING_LOGBACK_ROLLINGPOLICY_MAX_HISTORY = '1'
+    $environment.LOGGING_LOGBACK_ROLLINGPOLICY_TOTAL_SIZE_CAP = '64KB'
+    $environment.CANDIDATE_PROCESS_LOG_PATH = $candidateLogPath
     $process = Start-ProductionJar -Config $Config -Release $Release -Port $Config.candidatePort -Profiles 'prod,deploy-smoke' -AdditionalEnvironment $environment
     $identity = $null
+    $candidateValidated = $false
     try {
         $identity = Get-ProductionCandidateProcessIdentity -Process $process
         $null = Wait-ProductionCandidateOwnedListener `
@@ -537,6 +611,17 @@ function Test-CandidateRelease {
         Test-ProductionEndpoints -Config $Config -Port $Config.candidatePort
         Assert-ProductionCandidateProcessOwnsListener `
             -Port ([int]$Config.candidatePort) -Identity $identity
+        $candidateValidated = $true
+    } catch {
+        $process.Refresh()
+        $exitDetails = if ($process.HasExited) {
+            "candidate process $($process.Id) exited with code $($process.ExitCode)"
+        } else {
+            "candidate process $($process.Id) failed validation"
+        }
+        throw [InvalidOperationException]::new(
+            "Production candidate validation failed: $exitDetails. Candidate output log: $candidateLogPath; application log: $candidateApplicationLogPath",
+            $_.Exception)
     } finally {
         $process.Refresh()
         if (-not $process.HasExited) {
@@ -548,6 +633,13 @@ function Test-CandidateRelease {
             }
         }
         $process.WaitForExit(10000) | Out-Null
+        if ($candidateValidated) {
+            Remove-Item -LiteralPath $candidateLogPath -Force -ErrorAction SilentlyContinue
+            $applicationLogPrefix = [IO.Path]::GetFileName($candidateApplicationLogPath)
+            Get-ChildItem -LiteralPath $logsRoot -File -Filter "$applicationLogPrefix*" `
+                -ErrorAction SilentlyContinue |
+                Remove-Item -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 

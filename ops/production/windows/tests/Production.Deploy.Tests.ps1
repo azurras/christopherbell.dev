@@ -417,8 +417,10 @@ Describe 'native Windows deployment' {
                 $script:capturedEnvironment = $Environment.Clone()
                 $start = [Diagnostics.ProcessStartInfo]::new()
                 $start.FileName = (Get-Process -Id $PID).Path
-                $start.Arguments = '-NoLogo -NoProfile -Command exit'
+                $start.Arguments = '-NoLogo -NoProfile -Command "[Console]::Write((''x'' * 70000))"'
                 $start.UseShellExecute = $false
+                $start.RedirectStandardOutput = $true
+                $start.RedirectStandardError = $true
                 return $start
             }
             $configuration = [pscustomobject]@{
@@ -426,11 +428,19 @@ Describe 'native Windows deployment' {
                 javaExe = (Get-Process -Id $PID).Path
             }
 
+            $candidateProcessLog = Join-Path $TestDrive 'candidate-process.out.log'
             $process = Start-ProductionJar `
-                -Config $configuration -Release $release -Port 8081 -Profiles 'prod'
+                -Config $configuration -Release $release -Port 8081 -Profiles 'prod' `
+                -AdditionalEnvironment @{ CANDIDATE_PROCESS_LOG_PATH=$candidateProcessLog }
             $process.WaitForExit(10000) | Out-Null
+            $process.CandidateProcessLogPath | Should -Be $candidateProcessLog
+            Start-Sleep -Milliseconds 100
+            (Get-Item -LiteralPath $candidateProcessLog).Length |
+                Should -BeLessOrEqual 65536
 
             $script:capturedEnvironment.GIT_COMMIT | Should -Be $sha
+            $script:capturedEnvironment.Contains('CANDIDATE_PROCESS_LOG_PATH') |
+                Should -BeFalse
         }
 
         It 'bounds checked processes that do not exit' {
@@ -1135,7 +1145,10 @@ Describe 'native Windows deployment' {
             }
             Mock Wait-ProductionCandidateOwnedListener { [pscustomobject]@{} }
             Mock Assert-ProductionCandidateProcessOwnsListener { }
-            $config = [pscustomobject]@{ candidatePort=8081 }
+            Mock Assert-ProtectedProductionPath {
+                New-Item -ItemType Directory -Path $Path -Force | Out-Null
+            }
+            $config = [pscustomobject]@{ programDataRoot=$TestDrive; candidatePort=8081 }
             Test-CandidateRelease $config 'C:\data\releases\new' 'christopherbell_restore_check'
             Should -Invoke Start-ProductionJar -ParameterFilter { $AdditionalEnvironment.SPRING_MONGODB_DATABASE -eq 'christopherbell_restore_check' }
         }
@@ -1154,7 +1167,8 @@ Describe 'native Windows deployment' {
             }
             Mock Wait-ProductionCandidateOwnedListener { [pscustomobject]@{} }
             Mock Assert-ProductionCandidateProcessOwnsListener { }
-            $config = [pscustomobject]@{ candidatePort=8081 }
+            Mock Assert-ProtectedProductionPath { }
+            $config = [pscustomobject]@{ programDataRoot=$TestDrive; candidatePort=8081 }
 
             Test-CandidateRelease $config 'C:\data\releases\new' 'restore_check'
 
@@ -1167,7 +1181,8 @@ Describe 'native Windows deployment' {
         It 'rejects an occupied candidate port before starting a process' {
             Mock Assert-ProductionCandidatePortUnused { throw 'candidate port is occupied' }
             Mock Start-ProductionJar { throw 'candidate must not start' }
-            $config = [pscustomobject]@{ candidatePort = 8081 }
+            Mock Assert-ProtectedProductionPath { }
+            $config = [pscustomobject]@{ programDataRoot=$TestDrive; candidatePort = 8081 }
 
             { Test-CandidateRelease $config 'C:\data\releases\new' 'restore_check' } |
                 Should -Throw '*candidate port is occupied*'
@@ -1197,7 +1212,8 @@ Describe 'native Windows deployment' {
                 $process.HasExited = $true
             }
             Mock Stop-Process { $process.HasExited = $true }
-            $config = [pscustomobject]@{ candidatePort = 8081 }
+            Mock Assert-ProtectedProductionPath { }
+            $config = [pscustomobject]@{ programDataRoot=$TestDrive; candidatePort = 8081 }
 
             Test-CandidateRelease $config 'C:\data\releases\new' 'restore_check'
 
@@ -1211,6 +1227,62 @@ Describe 'native Windows deployment' {
 
             { Get-ProductionCandidateProcessIdentity -Process $process } |
                 Should -Throw '*exited*'
+        }
+
+        It 'retains a bounded protected startup log and reports candidate exit code' {
+            $script:candidateLogPath = $null
+            $process = [pscustomobject]@{ Id=1234; HasExited=$true; ExitCode=23 }
+            $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {
+                param($milliseconds) $true
+            }
+            $process | Add-Member -MemberType ScriptMethod -Name Refresh -Value { }
+            Mock Assert-ProtectedProductionPath {
+                New-Item -ItemType Directory -Path $Path -Force | Out-Null
+            }
+            Mock Assert-ProductionCandidatePortUnused { }
+            Mock Start-ProductionJar {
+                $script:candidateLogPath = $AdditionalEnvironment.LOGGING_FILE_NAME
+                $script:candidateProcessLogPath = $AdditionalEnvironment.CANDIDATE_PROCESS_LOG_PATH
+                New-Item -ItemType Directory -Force (Split-Path $script:candidateLogPath) |
+                    Out-Null
+                Set-Content -LiteralPath $script:candidateLogPath -Value @(
+                    'APPLICATION FAILED TO START'
+                    'java.lang.IllegalStateException: startup unavailable'
+                )
+                Set-Content -LiteralPath $script:candidateProcessLogPath -Value @(
+                    'Application run failed'
+                    'java.lang.IllegalStateException: startup unavailable'
+                )
+                $process | Add-Member -MemberType NoteProperty `
+                    -Name CandidateProcessLogPath -Value $script:candidateProcessLogPath
+                $process
+            }
+            Mock Get-ProductionCandidateProcessIdentity {
+                [pscustomobject]@{ pid=1234; startTimeUtcTicks=99 }
+            }
+            Mock Wait-ProductionCandidateOwnedListener {
+                throw 'Cannot find a process with the process identifier 1234.'
+            }
+            $config = [pscustomobject]@{
+                programDataRoot=$TestDrive
+                candidatePort=8081
+            }
+
+            $failure = try {
+                Test-CandidateRelease $config 'C:\data\releases\new' 'private-test-db'
+                $null
+            } catch {
+                $_.Exception
+            }
+
+            $failure.Message | Should -Match 'candidate process 1234 exited with code 23'
+            $failure.Message | Should -Match ([regex]::Escape($script:candidateProcessLogPath))
+            $failure.Message | Should -Match ([regex]::Escape($script:candidateLogPath))
+            $failure.Message | Should -Not -Match 'private-test-db'
+            $script:candidateProcessLogPath | Should -Not -BeNullOrEmpty
+            Test-Path -LiteralPath $script:candidateProcessLogPath | Should -BeTrue
+            (Get-Item -LiteralPath $script:candidateProcessLogPath).Length |
+                Should -BeLessOrEqual 65536
         }
 
         It 'rejects a stale listener owned by a different process' {
