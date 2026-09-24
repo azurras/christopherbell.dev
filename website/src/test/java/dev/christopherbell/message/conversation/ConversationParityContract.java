@@ -12,7 +12,7 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** Shared conversation query/archive behavior for real MongoDB and PostgreSQL. */
+/** Shared conversation query and archive behavior checks for MongoDB. */
 interface ConversationParityContract {
   String RUN = java.util.UUID.randomUUID().toString();
   String OWNER = "conversation-owner-" + RUN;

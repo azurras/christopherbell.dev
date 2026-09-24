@@ -18,9 +18,7 @@ function Read-ProductionConfig {
         throw "Missing deploy config: $Path"
     }
     $config = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    foreach ($name in 'repositoryPath','remote','branch','programDataRoot','javaExe','nodeExe','mongoToolsPath','mongoShellExe','cloudflaredExe','backupRoot','publicUrl','smokeAccountEmail',
-        'postgresqlVersion','postgresqlBinPath','postgresqlDataPath','postgresqlServiceName',
-        'postgresqlBackupRoot','pgAdminExe') {
+    foreach ($name in 'repositoryPath','remote','branch','programDataRoot','javaExe','nodeExe','mongoToolsPath','mongoShellExe','cloudflaredExe','backupRoot','publicUrl','smokeAccountEmail') {
         if (-not ($config.PSObject.Properties.Name -contains $name) -or
             [string]::IsNullOrWhiteSpace([string]$config.$name)) {
             throw "Missing deploy config value: $name"
@@ -88,17 +86,6 @@ function Read-ProductionConfig {
     if ([int]$config.autoDeployPollSeconds -lt 15) { throw 'autoDeployPollSeconds must be at least 15.' }
     if ([int]$config.autoDeployFailureBackoffSeconds -lt [int]$config.autoDeployPollSeconds) {
         throw 'autoDeployFailureBackoffSeconds must not be shorter than the poll interval.'
-    }
-    if ([string]$config.postgresqlVersion -cne '18.4') {
-        throw 'PostgreSQL version must be exactly 18.4.'
-    }
-    if ([string]$config.postgresqlServiceName -cne 'postgresql-x64-18') {
-        throw 'postgresqlServiceName must be exactly postgresql-x64-18.'
-    }
-    foreach ($name in 'postgresqlBinPath','postgresqlDataPath','postgresqlBackupRoot','pgAdminExe') {
-        if (-not (Test-ProductionAbsolutePath -Path ([string]$config.$name))) {
-            throw "$name must be an absolute path."
-        }
     }
     if ([string]$config.smokeAccountEmail -eq 'operator@example.com') {
         throw 'smokeAccountEmail must be configured for a real production account.'
@@ -480,11 +467,9 @@ function Read-ProductionEnvironment {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Missing environment file: $Path" }
-    $required = @('APP_JWT_SECRET')
+    $required = @('APP_JWT_SECRET','SPRING_MONGODB_URI')
     $optional = @('APP_MAIL_ENABLED','RESEND_API_KEY','APP_MAIL_FROM','APP_SHARED_FOLDER_ENABLED',
-        'CLIENT_IP_TRUSTED_PROXIES',
-        'APP_PERSISTENCE_BACKEND','SPRING_MONGODB_URI','SPRING_DATASOURCE_URL',
-        'SPRING_DATASOURCE_USERNAME','SPRING_DATASOURCE_PASSWORD')
+        'CLIENT_IP_TRUSTED_PROXIES')
     $allowed = @($required) + @($optional)
     $values = @{}
     foreach ($line in Get-Content -LiteralPath $Path) {
@@ -498,39 +483,6 @@ function Read-ProductionEnvironment {
         if (-not $values.ContainsKey($requiredKey) -or
             [string]::IsNullOrWhiteSpace($values[$requiredKey])) {
             $violations += "$requiredKey is required"
-        }
-    }
-    $backend = if ($values.ContainsKey('APP_PERSISTENCE_BACKEND')) {
-        [string]$values.APP_PERSISTENCE_BACKEND
-    } else { 'mongodb' }
-    if ($backend -notin @('mongodb','postgresql')) {
-        $violations += 'APP_PERSISTENCE_BACKEND must be mongodb or postgresql'
-    } elseif ($backend -eq 'mongodb') {
-        if (-not $values.ContainsKey('SPRING_MONGODB_URI') -or
-            [string]::IsNullOrWhiteSpace([string]$values.SPRING_MONGODB_URI)) {
-            $violations += 'SPRING_MONGODB_URI is required for the MongoDB backend'
-        }
-    } else {
-        foreach ($requiredKey in 'SPRING_DATASOURCE_URL','SPRING_DATASOURCE_USERNAME',
-            'SPRING_DATASOURCE_PASSWORD') {
-            if (-not $values.ContainsKey($requiredKey) -or
-                [string]::IsNullOrWhiteSpace([string]$values[$requiredKey])) {
-                $violations += "$requiredKey is required for the PostgreSQL backend"
-            }
-        }
-        if ($values.ContainsKey('SPRING_DATASOURCE_URL') -and
-            [string]$values.SPRING_DATASOURCE_URL -cne
-                'jdbc:postgresql://127.0.0.1:5432/christopherbell') {
-            $violations += 'SPRING_DATASOURCE_URL must use the loopback production database'
-        }
-        if ($values.ContainsKey('SPRING_DATASOURCE_USERNAME') -and
-            [string]$values.SPRING_DATASOURCE_USERNAME -cne 'christopherbell_app') {
-            $violations += 'SPRING_DATASOURCE_USERNAME must be christopherbell_app'
-        }
-        if ($values.ContainsKey('SPRING_DATASOURCE_PASSWORD') -and
-            ([string]$values.SPRING_DATASOURCE_PASSWORD -match '(?i)replace|placeholder' -or
-             ([string]$values.SPRING_DATASOURCE_PASSWORD).Length -lt 16)) {
-            $violations += 'SPRING_DATASOURCE_PASSWORD must be a protected non-placeholder secret'
         }
     }
     $mailEnabled = if ($values.ContainsKey('APP_MAIL_ENABLED') -and
@@ -617,9 +569,6 @@ function Show-ProductionHelp {
 Usage: prod.cmd <command> [-WhatIf]
 
 Commands: install, deploy, status, logs, restart, releases, rollback, backup,
-          postgres-prepare, postgres-install, postgres-bootstrap, postgres-status, postgres-backup,
-          postgres-restore-check, postgres-pgadmin, postgres-shadow, postgres-reconcile,
-          postgres-cutover,
           mongo-inventory, mongo-consolidation-preview, mongo-consolidate,
           mongo-consolidation-rollback, verify-startup, uninstall,
           auto-install, auto-deploy, auto-status, auto-remove, sensor-install,
@@ -628,13 +577,6 @@ Commands: install, deploy, status, logs, restart, releases, rollback, backup,
 mongo-consolidation-preview is read-only. mongo-consolidate requires
 -ConfirmDomainCollectionCutover. mongo-consolidation-rollback requires
 -ConfirmDomainCollectionRollback. Automatic deployment never supplies either switch.
-postgres-prepare requires -ConfirmPostgreSqlPreparation. postgres-bootstrap requires
--ConfirmPostgreSqlBootstrap. PostgreSQL preparation, install, bootstrap, backup,
-restore-check, and pgAdmin commands support -WhatIf.
-postgres-shadow stages and reconciles all 52 kinds. postgres-reconcile rechecks the
-same durable run. Neither command authorizes finalization or cutover.
-postgres-cutover requires -ConfirmPostgreSqlCutover and performs the one-way
-production authority transfer. Run it only in an explicitly approved maintenance window.
 '@ | Write-Output
 }
 

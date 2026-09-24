@@ -15,7 +15,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** Shared like and expiration behavior executed against real MongoDB and PostgreSQL. */
+/** Shared like and expiration behavior checks for MongoDB-backed post operations. */
 interface PostInteractionParityContract {
   String ACCOUNT = "interaction-owner";
   String OTHER_ACCOUNT = "interaction-other";

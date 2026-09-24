@@ -4,12 +4,6 @@ server:
 client-ip:
   trusted-proxies: ${CLIENT_IP_TRUSTED_PROXIES:127.0.0.1/32,::1/128}
 spring:
-  datasource:
-    url: ${SPRING_DATASOURCE_URL:}
-    username: ${SPRING_DATASOURCE_USERNAME:}
-    password: ${SPRING_DATASOURCE_PASSWORD:}
-  flyway:
-    enabled: false
   mail:
     host: smtp.resend.com
     port: 587
@@ -22,8 +16,6 @@ spring:
           starttls:
             enable: true
 app:
-  persistence:
-    backend: ${APP_PERSISTENCE_BACKEND:}
   request-size:
     default-max: ${APP_REQUEST_SIZE_DEFAULT_MAX:1MB}
   browser-security:

@@ -405,11 +405,8 @@ function Install-ConfigurationExamples {
     $configSource = Join-Path $PSScriptRoot '..\config'
     $deployTarget = Join-Path $Root 'config\deploy.json'
     $environmentTarget = Join-Path $Root 'config\app.env'
-    $postgresqlEnvironmentTarget = Join-Path $Root 'config\postgresql.env'
     Copy-Item (Join-Path $configSource 'deploy.example.json') (Join-Path $Root 'config\deploy.example.json') -Force
     Copy-Item (Join-Path $configSource 'app.env.example') (Join-Path $Root 'config\app.env.example') -Force
-    Copy-Item (Join-Path $configSource 'postgresql.env.example') `
-        (Join-Path $Root 'config\postgresql.env.example') -Force
     if (-not (Test-Path -LiteralPath $deployTarget)) {
         Copy-Item (Join-Path $configSource 'deploy.example.json') $deployTarget
     } else {
@@ -420,15 +417,19 @@ function Install-ConfigurationExamples {
                 $existing | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
             }
         }
-        foreach ($retired in 'wslDistro','wslWebsiteStopCommand','wslWebsiteStartCommand','wslMongoStopCommand','wslMongoStartCommand') {
+        foreach ($retired in 'wslDistro','wslWebsiteStopCommand','wslWebsiteStartCommand','wslMongoStopCommand','wslMongoStartCommand',
+            'postgresqlVersion','postgresqlBinPath','postgresqlDataPath','postgresqlServiceName',
+            'pgAdminExe','postgresqlBackupRoot','migrationSourceUri','migrationSourceDatabase',
+            'migrationTargetJdbcUrl','migrationTargetDatabase','migrationTargetRole',
+            'migrationTargetUsername','migrationTargetServerVersion','migrationTargetDatabaseOwner',
+            'migrationTargetOwnershipToken','migrationSchemaPrefix','migrationCleanupTarget',
+            'migrationCleanupUsername','migrationCandidateRole','migrationCandidateUsername',
+            'migrationCandidateCleanupPort') {
             $existing.PSObject.Properties.Remove($retired)
         }
         $existing | ConvertTo-Json -Depth 10 | Set-Content $deployTarget -Encoding utf8
     }
     if (-not (Test-Path -LiteralPath $environmentTarget)) { Copy-Item (Join-Path $configSource 'app.env.example') $environmentTarget }
-    if (-not (Test-Path -LiteralPath $postgresqlEnvironmentTarget)) {
-        Copy-Item (Join-Path $configSource 'postgresql.env.example') $postgresqlEnvironmentTarget
-    }
 }
 
 function Protect-ProductionSecrets {

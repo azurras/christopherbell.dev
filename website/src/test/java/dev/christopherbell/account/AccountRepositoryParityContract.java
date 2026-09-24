@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.DuplicateKeyException;
 
-/** Identical account assertions run against both disposable MongoDB and PostgreSQL. */
+/** Account repository assertions for the disposable MongoDB test database. */
 interface AccountRepositoryParityContract {
   String FIXTURE_ID = "account-parity-contract";
 

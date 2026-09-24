@@ -26,13 +26,11 @@ import org.springframework.test.web.servlet.MockMvc;
     classes = DatabaseHealthHttpSecurityIntegrationTest.TestApplication.class,
     properties = {
         "management.endpoints.web.exposure.include=health",
+        "management.health.mongodb.enabled=false",
         "management.endpoint.health.show-details=when-authorized",
         "management.endpoint.health.roles=ADMIN",
         "management.endpoint.health.probes.enabled=true",
         "management.endpoint.health.group.readiness.include=readinessState,database",
-        "spring.autoconfigure.exclude="
-            + "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
-            + "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration"
     })
 @AutoConfigureMockMvc
 class DatabaseHealthHttpSecurityIntegrationTest {
@@ -56,12 +54,12 @@ class DatabaseHealthHttpSecurityIntegrationTest {
   void adminHealthExposesOnlyTheDeclaredDatabaseIdentityDetails() throws Exception {
     mvc.perform(get("/actuator/health").with(user("administrator").roles("ADMIN")))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.components.database.details.backend").value("postgresql"))
+        .andExpect(jsonPath("$.components.database.details.backend").value("mongodb"))
         .andExpect(jsonPath("$.components.database.details.database").value("test"))
-        .andExpect(jsonPath("$.components.database.details.schemaVersion").value("27"))
+        .andExpect(jsonPath("$.components.database.details.schemaVersion").value("legacy"))
         .andExpect(jsonPath("$.components.database.details", not(hasKey("username"))))
         .andExpect(content().string(not(org.hamcrest.Matchers.containsString("password"))))
-        .andExpect(content().string(not(org.hamcrest.Matchers.containsString("jdbc:"))));
+        .andExpect(content().string(not(org.hamcrest.Matchers.containsString("connectionString"))));
   }
 
   @Test
@@ -85,7 +83,7 @@ class DatabaseHealthHttpSecurityIntegrationTest {
 
     @Bean
     PersistenceIdentityProbe persistenceIdentityProbe() {
-      return timeout -> new PersistenceIdentity("postgresql", "test", "27");
+      return timeout -> new PersistenceIdentity("mongodb", "test", "legacy");
     }
 
     @Bean

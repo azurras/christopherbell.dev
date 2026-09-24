@@ -11,7 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.PageRequest;
 
-/** Shared relationship behavior executed against real MongoDB and PostgreSQL adapters. */
+/** Shared relationship behavior checks for MongoDB-backed account operations. */
 interface IdentityRelationshipParityContract {
   String OWNER = "relationship-owner";
   String TARGET = "relationship-target";

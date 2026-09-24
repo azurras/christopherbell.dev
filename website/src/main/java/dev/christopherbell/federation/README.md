@@ -15,12 +15,6 @@ Historical posts are ineligible because a missing `federationOutboundEligible`
 field reads as false. Only posts explicitly marked at creation are scanned. Each
 post/peer Create job is idempotent, claimed with a lease, and stores only bounded
 status metadata—never payloads, response bodies, signatures, or private keys.
-PostgreSQL claims and lease completion use database time so caller clock skew
-cannot acquire or complete an expired lease.
-
-`api.FederationMigrationVerifier` publishes the real cursor, delivery-claim, and idempotent
-enqueue adapter operations used by the guarded MongoDB-to-PostgreSQL cutover.
-
 Signup enrollment is an affirmative choice that defaults off. Enrollment,
 discovery, creation-time eligibility, and delivery all require an active account.
 

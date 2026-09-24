@@ -34,9 +34,7 @@ dependencies {
 
     // Spring Boot dependencies
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-data-mongodb")
-    implementation("org.springframework.boot:spring-boot-starter-flyway")
     implementation("org.springframework.boot:spring-boot-starter-json")
     implementation("org.springframework.boot:spring-boot-starter-logging")
     implementation("org.springframework.boot:spring-boot-starter-security")
@@ -49,8 +47,6 @@ dependencies {
     implementation("io.jsonwebtoken:jjwt-api:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.13.0")
-    runtimeOnly("org.flywaydb:flyway-database-postgresql")
-    runtimeOnly("org.postgresql:postgresql")
 
     // Host metrics; Windows sensor binaries are pinned generated resources below.
     implementation("com.github.oshi:oshi-core:7.4.2")
@@ -86,14 +82,6 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testAnnotationProcessor("org.projectlombok:lombok:1.18.46")
     testCompileOnly("org.projectlombok:lombok:1.18.46")
-}
-
-tasks.register<JavaExec>("postgresqlMigration") {
-    group = "application"
-    description = "Runs the guarded standalone Mongo-to-PostgreSQL migration command."
-    classpath = sourceSets.main.get().runtimeClasspath
-    mainClass.set(
-        "dev.christopherbell.configuration.persistence.migration.PostgresqlMigrationCli")
 }
 
 val forwardedArchitectureTestSystemProperties = listOf(

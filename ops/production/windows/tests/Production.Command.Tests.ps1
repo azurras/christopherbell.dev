@@ -16,49 +16,8 @@ Describe 'native Windows production command surface' {
         ($output -join "`n") | Should -Match 'mongo-consolidation-preview'
         ($output -join "`n") | Should -Match 'mongo-consolidate'
         ($output -join "`n") | Should -Match 'mongo-consolidation-rollback'
-        foreach ($command in 'postgres-prepare','postgres-install','postgres-bootstrap','postgres-status',
-            'postgres-backup','postgres-restore-check','postgres-pgadmin',
-            'postgres-shadow','postgres-reconcile','postgres-cutover') {
-            ($output -join "`n") | Should -Match ([regex]::Escape($command))
-        }
+        ($output -join "`n") | Should -Not -Match 'postgres'
         $LASTEXITCODE | Should -Be 0
-    }
-
-    It 'loads and exports every PostgreSQL operator command' {
-        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
-        $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
-
-        foreach ($functionName in 'Initialize-ProductionPostgreSqlPreparation',
-            'Install-ProductionPostgreSql','Initialize-ProductionPostgreSql',
-            'Get-ProductionPostgreSqlStatus','New-ProductionPostgreSqlBackup',
-            'Test-ProductionPostgreSqlRestore','Install-ProductionPgAdmin',
-            'Invoke-ProductionPostgreSqlShadow','Invoke-ProductionPostgreSqlReconcile') {
-            Get-Command $functionName -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
-        }
-    }
-
-    It 'requires explicit confirmation before protected PostgreSQL preparation' {
-        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
-        $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
-        Mock Initialize-ProductionPostgreSqlPreparation { }
-
-        { Invoke-ProductionCommand -Command 'postgres-prepare' } |
-            Should -Throw '*PostgreSQL preparation requires explicit confirmation*'
-        Invoke-ProductionCommand -Command 'postgres-prepare' -ConfirmPostgreSqlPreparation
-
-        Should -Invoke Initialize-ProductionPostgreSqlPreparation -Times 1 -Exactly
-    }
-
-    It 'requires explicit confirmation before PostgreSQL bootstrap mutation' {
-        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
-        $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
-        Mock Initialize-ProductionPostgreSql { }
-
-        { Invoke-ProductionCommand -Command 'postgres-bootstrap' } |
-            Should -Throw '*PostgreSQL bootstrap requires explicit confirmation*'
-        Invoke-ProductionCommand -Command 'postgres-bootstrap' -ConfirmPostgreSqlBootstrap
-
-        Should -Invoke Initialize-ProductionPostgreSql -Times 1 -Exactly
     }
 
     It 'launches with PowerShell 7 when pwsh is not on PATH' {
@@ -151,13 +110,12 @@ Describe 'native Windows production command surface' {
         $log.pattern | Should -BeNullOrEmpty
     }
 
-    It 'makes PostgreSQL the website service dependency for cutover-ready deployment' {
+    It 'starts the website after its MongoDB service dependency' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         [xml]$service = Get-Content (
             Join-Path $root 'ops\production\windows\service\ChristopherBellDev.xml') -Raw
 
-        @($service.service.depend) | Should -Be @('postgresql-x64-18')
-        @($service.service.depend) | Should -Not -Contain 'MongoDB'
+        @($service.service.depend) | Should -Be @('MongoDB')
     }
 
     It 'writes exactly one JSON document for MongoDB inventory' {

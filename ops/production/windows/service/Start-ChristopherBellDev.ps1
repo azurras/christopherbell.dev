@@ -189,10 +189,7 @@ $allowed = @(
     'RESEND_API_KEY',
     'APP_MAIL_FROM',
     'CLIENT_IP_TRUSTED_PROXIES',
-    'APP_PERSISTENCE_BACKEND',
-    'SPRING_DATASOURCE_URL',
-    'SPRING_DATASOURCE_USERNAME',
-    'SPRING_DATASOURCE_PASSWORD',
+    'SPRING_MONGODB_URI',
     'APP_SHARED_FOLDER_ENABLED'
 )
 $loadedEnvironment = @{}
@@ -206,24 +203,9 @@ foreach ($line in Get-Content -LiteralPath (Join-Path $root 'config\app.env')) {
         [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process')
     }
 }
-if (-not $loadedEnvironment.ContainsKey('APP_PERSISTENCE_BACKEND') -or
-    [string]$loadedEnvironment.APP_PERSISTENCE_BACKEND -cne 'postgresql') {
-    throw 'Production persistence backend must be PostgreSQL.'
-}
-if (-not $loadedEnvironment.ContainsKey('SPRING_DATASOURCE_URL') -or
-    [string]$loadedEnvironment.SPRING_DATASOURCE_URL -cne
-        'jdbc:postgresql://127.0.0.1:5432/christopherbell') {
-    throw 'Production datasource URL must be the loopback PostgreSQL production database.'
-}
-if (-not $loadedEnvironment.ContainsKey('SPRING_DATASOURCE_USERNAME') -or
-    [string]$loadedEnvironment.SPRING_DATASOURCE_USERNAME -cne 'christopherbell_app') {
-    throw 'Production datasource role must be christopherbell_app.'
-}
-if (-not $loadedEnvironment.ContainsKey('SPRING_DATASOURCE_PASSWORD') -or
-    [string]::IsNullOrWhiteSpace([string]$loadedEnvironment.SPRING_DATASOURCE_PASSWORD) -or
-    [string]$loadedEnvironment.SPRING_DATASOURCE_PASSWORD -match '(?i)replace|placeholder' -or
-    ([string]$loadedEnvironment.SPRING_DATASOURCE_PASSWORD).Length -lt 16) {
-    throw 'Production datasource secret is missing or invalid.'
+if (-not $loadedEnvironment.ContainsKey('SPRING_MONGODB_URI') -or
+    [string]::IsNullOrWhiteSpace([string]$loadedEnvironment.SPRING_MONGODB_URI)) {
+    throw 'Production MongoDB URI is missing.'
 }
 & $config.javaExe `
     '-Xrs' `

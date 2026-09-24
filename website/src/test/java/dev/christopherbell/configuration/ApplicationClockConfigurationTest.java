@@ -12,7 +12,7 @@ class ApplicationClockConfigurationTest {
       .withUserConfiguration(ApplicationClockConfiguration.class);
 
   @Test
-  void suppliesOneUtcClockIndependentlyOfThePersistenceBackend() {
+  void suppliesOneUtcClock() {
     contextRunner.run(context -> {
       assertThat(context.getStartupFailure()).isNull();
       assertThat(context).hasSingleBean(Clock.class);

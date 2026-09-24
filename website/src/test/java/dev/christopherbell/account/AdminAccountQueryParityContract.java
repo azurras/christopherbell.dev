@@ -10,7 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Sort;
 
-/** Shared admin account query behavior executed against real MongoDB and PostgreSQL. */
+/** Shared admin account query behavior checks for MongoDB. */
 interface AdminAccountQueryParityContract {
   String RUN = java.util.UUID.randomUUID().toString();
   String FIRST = "admin-query-a-" + RUN;

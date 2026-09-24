@@ -15,7 +15,7 @@ import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** Shared report repository/query behavior executed against real MongoDB and PostgreSQL. */
+/** Shared report repository and query behavior checks for MongoDB. */
 interface ReportParityContract {
   String REPORTED = "report-reported";
   String REPORTER = "report-reporter";
