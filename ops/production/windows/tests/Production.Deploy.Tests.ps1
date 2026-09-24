@@ -30,6 +30,21 @@ Describe 'native Windows deployment' {
         BeforeAll {
             $script:ensureGuardImplementation =
                 (Get-Command Ensure-ProductionWriterStartGuardUnderHeldLock).ScriptBlock
+            function Get-TestExceptionMessages {
+                param([System.Exception]$Exception)
+
+                $messages = @($Exception.Message)
+                if ($Exception -is [System.AggregateException]) {
+                    $messages += @(
+                        $Exception.Flatten().InnerExceptions |
+                            ForEach-Object { $_.Message }
+                    )
+                } elseif ($null -ne $Exception.InnerException) {
+                    $messages += $Exception.InnerException.Message
+                }
+                return $messages
+            }
+
             function New-ServiceStateStub {
                 param(
                     [string]$Status = 'Stopped',
@@ -435,14 +450,43 @@ Describe 'native Windows deployment' {
                 -Config $configuration -Release $release -Port 8081 -Profiles 'prod' `
                 -AdditionalEnvironment @{ CANDIDATE_PROCESS_LOG_PATH=$candidateProcessLog }
             $process.WaitForExit(10000) | Out-Null
+            $process.WaitForExit() | Out-Null
             $process.CandidateProcessLogPath | Should -Be $candidateProcessLog
-            Start-Sleep -Milliseconds 100
             (Get-Item -LiteralPath $candidateProcessLog).Length |
                 Should -BeLessOrEqual 65536
+            $process.CandidateProcessLogWriter.CaptureFailed | Should -BeFalse
+            $process.CandidateProcessLogWriter.OutputTruncated | Should -BeTrue
 
             $script:capturedEnvironment.GIT_COMMIT | Should -Be $sha
             $script:capturedEnvironment.Contains('CANDIDATE_PROCESS_LOG_PATH') |
                 Should -BeFalse
+        }
+
+        It 'records bounded process-log write failures without throwing from output callbacks' {
+            $failedLogPath = Join-Path $TestDrive 'unwritable-process-log'
+            New-Item -ItemType Directory -Path $failedLogPath | Out-Null
+            $start = [Diagnostics.ProcessStartInfo]::new()
+            $start.FileName = (Get-Process -Id $PID).Path
+            $start.Arguments = '-NoLogo -NoProfile -Command "[Console]::Write(''capture failure test'')"'
+            $start.UseShellExecute = $false
+            $start.RedirectStandardOutput = $true
+            $start.RedirectStandardError = $true
+            $process = [Diagnostics.Process]::Start($start)
+            $writer = [ChristopherBell.Production.BoundedProcessLog]::new($failedLogPath)
+
+            try {
+                $writer.Attach($process)
+                $process.WaitForExit(10000) | Out-Null
+                $process.WaitForExit() | Out-Null
+
+                $writer.CaptureFailed | Should -BeTrue
+            } finally {
+                if (-not $process.HasExited) {
+                    $process.Kill()
+                    $process.WaitForExit() | Out-Null
+                }
+                $process.Dispose()
+            }
         }
 
         It 'bounds checked processes that do not exit' {
@@ -876,8 +920,10 @@ Describe 'native Windows deployment' {
                 branch = 'main'
             }
 
-            { New-ReleaseFromOriginMain -Config $config -Sha $sha } |
-                Should -Throw '*already registered*'
+            $failure = { New-ReleaseFromOriginMain -Config $config -Sha $sha } |
+                Should -Throw -PassThru
+            (Get-TestExceptionMessages $failure.Exception) -join [Environment]::NewLine |
+                Should -Match 'already registered'
 
             Test-Path -LiteralPath (Join-Path $worktree 'owned.txt') | Should -BeTrue
             Should -Invoke Invoke-CheckedProcess -Times 0 -Exactly -ParameterFilter {
@@ -958,7 +1004,7 @@ Describe 'native Windows deployment' {
                 }
             } finally {
                 if (Test-Path -LiteralPath $worktrees) {
-                    Remove-Item -LiteralPath $worktrees -Force
+                    [IO.Directory]::Delete($worktrees, $false)
                 }
             }
         }
@@ -992,8 +1038,10 @@ Describe 'native Windows deployment' {
             $failure = { New-ReleaseFromOriginMain -Config $config -Sha $sha } |
                 Should -Throw -PassThru
 
-            $failure.Exception.Message | Should -Match 'simulated add failure after external registration'
-            $failure.Exception.Message | Should -Match 'already registered'
+            $failureMessages = Get-TestExceptionMessages $failure.Exception
+            $failureMessages -join [Environment]::NewLine |
+                Should -Match 'simulated add failure after external registration'
+            $failureMessages -join [Environment]::NewLine | Should -Match 'already registered'
             Test-Path -LiteralPath (Join-Path $worktree 'registered.txt') | Should -BeTrue
             Should -Invoke Invoke-CheckedProcess -Times 0 -Exactly -ParameterFilter {
                 $ArgumentList -contains 'remove'
@@ -1071,8 +1119,9 @@ Describe 'native Windows deployment' {
             $failure = { New-ReleaseFromOriginMain -Config $config -Sha $sha } |
                 Should -Throw -PassThru
 
-            $failure.Exception.Message | Should -Match 'simulated release build failure'
-            $failure.Exception.Message | Should -Match 'simulated owned cleanup failure'
+            $failureMessages = Get-TestExceptionMessages $failure.Exception
+            $failureMessages -join [Environment]::NewLine | Should -Match 'simulated release build failure'
+            $failureMessages -join [Environment]::NewLine | Should -Match 'simulated owned cleanup failure'
         }
 
         It 'stops the old writer before the new release can start against live data' {
@@ -1293,6 +1342,152 @@ Describe 'native Windows deployment' {
             Test-Path -LiteralPath $script:candidateProcessLogPath | Should -BeTrue
             (Get-Item -LiteralPath $script:candidateProcessLogPath).Length |
                 Should -BeLessOrEqual 65536
+        }
+
+        It 'reports candidate output-log capture failure after draining callbacks' {
+            $script:candidateLogWriter = $null
+            $script:candidateCaptureState = $null
+            $script:candidateProcess = $null
+            Mock Assert-ProtectedProductionPath {
+                New-Item -ItemType Directory -Path $Path -Force | Out-Null
+            }
+            Mock Protect-ProductionPath { }
+            Mock Assert-ProductionCandidatePortUnused { }
+            Mock Start-ProductionJar {
+                $script:candidateLogPath = $AdditionalEnvironment.LOGGING_FILE_NAME
+                $script:candidateProcessLogPath = $AdditionalEnvironment.CANDIDATE_PROCESS_LOG_PATH
+                New-Item -ItemType Directory -Force (Split-Path $script:candidateLogPath) |
+                    Out-Null
+                Set-Content -LiteralPath $script:candidateLogPath -Value 'startup failed'
+                Set-Content -LiteralPath $script:candidateProcessLogPath -Value 'partial output'
+                $script:candidateProcess | Add-Member -MemberType NoteProperty `
+                    -Name CandidateProcessLogPath -Value $script:candidateProcessLogPath
+                $script:candidateProcess | Add-Member -MemberType NoteProperty `
+                    -Name CandidateProcessLogWriter -Value $script:candidateLogWriter
+                $script:candidateProcess
+            }
+            Mock Get-ProductionCandidateProcessIdentity {
+                [pscustomobject]@{ pid=1234; startTimeUtcTicks=99 }
+            }
+            Mock Wait-ProductionCandidateOwnedListener {
+                throw [System.InvalidOperationException]::new('simulated candidate listener failure')
+            }
+            $config = [pscustomobject]@{
+                programDataRoot=$TestDrive
+                candidatePort=8081
+            }
+
+            foreach ($scenario in @(
+                [pscustomobject]@{
+                    CaptureFailed=$true
+                    OutputTruncated=$false
+                    Expected='Candidate process output capture failed'
+                }
+                [pscustomobject]@{
+                    CaptureFailed=$false
+                    OutputTruncated=$true
+                    Expected='Candidate process output log reached the 64 KiB limit'
+                }
+            )) {
+                $script:candidateLogWriter = [pscustomobject]@{
+                    CaptureFailed = $false
+                    OutputTruncated = $false
+                }
+                $script:candidateCaptureState = $scenario
+                $script:candidateProcess = [pscustomobject]@{
+                    Id=1234
+                    HasExited=$true
+                    ExitCode=23
+                }
+                $script:candidateProcess | Add-Member -MemberType ScriptMethod `
+                    -Name WaitForExit -Value {
+                        param($milliseconds)
+                        $null = $milliseconds
+                        $script:candidateLogWriter.CaptureFailed =
+                            $script:candidateCaptureState.CaptureFailed
+                        $script:candidateLogWriter.OutputTruncated =
+                            $script:candidateCaptureState.OutputTruncated
+                        $true
+                    }
+                $script:candidateProcess | Add-Member -MemberType ScriptMethod `
+                    -Name Refresh -Value { }
+
+                $failure = try {
+                    Test-CandidateRelease $config 'C:\data\releases\new' 'private-test-db'
+                    $null
+                } catch {
+                    $_.Exception
+                }
+
+                $failure | Should -Not -BeNull
+                $failure.Message | Should -Match 'candidate process 1234 exited with code 23'
+                $failure.Message | Should -Match $scenario.Expected
+                $failure.InnerException.Message | Should -Be 'simulated candidate listener failure'
+                $failure.Message | Should -Not -Match 'private-test-db'
+            }
+
+            Should -Invoke Wait-ProductionCandidateOwnedListener -Times 2 -Exactly
+        }
+
+        It 'fails candidate validation when the process survives forced cleanup' {
+            $processStartTime = [datetime]::Now
+            $process = [pscustomobject]@{ Id=1234; HasExited=$false; ExitCode=$null }
+            $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {
+                param($milliseconds) $false
+            }
+            $process | Add-Member -MemberType ScriptMethod -Name Refresh -Value { }
+            Mock Assert-ProtectedProductionPath {
+                New-Item -ItemType Directory -Path $Path -Force | Out-Null
+            }
+            Mock Protect-ProductionPath { }
+            Mock Assert-ProductionCandidatePortUnused { }
+            Mock Start-ProductionJar {
+                $script:candidateLogPath = $AdditionalEnvironment.LOGGING_FILE_NAME
+                $script:candidateProcessLogPath = $AdditionalEnvironment.CANDIDATE_PROCESS_LOG_PATH
+                New-Item -ItemType Directory -Force (Split-Path $script:candidateLogPath) |
+                    Out-Null
+                Set-Content -LiteralPath $script:candidateLogPath -Value 'startup output'
+                Set-Content -LiteralPath $script:candidateProcessLogPath -Value 'candidate output'
+                $process | Add-Member -MemberType NoteProperty `
+                    -Name CandidateProcessLogPath -Value $script:candidateProcessLogPath
+                $process | Add-Member -MemberType NoteProperty `
+                    -Name CandidateProcessLogWriter -Value ([pscustomobject]@{
+                        CaptureFailed=$false
+                        OutputTruncated=$false
+                    })
+                $process
+            }
+            Mock Get-ProductionCandidateProcessIdentity {
+                [pscustomobject]@{
+                    pid=1234
+                    startTimeUtcTicks=$processStartTime.ToUniversalTime().Ticks
+                }
+            }
+            Mock Wait-ProductionCandidateOwnedListener {
+                [pscustomobject]@{ pid=1234; startTimeUtcTicks=$processStartTime.ToUniversalTime().Ticks }
+            }
+            Mock Test-ProductionEndpoints { }
+            Mock Assert-ProductionCandidateProcessOwnsListener { }
+            Mock Get-Process { [pscustomobject]@{ StartTime=$processStartTime } }
+            Mock Stop-Process { }
+            $config = [pscustomobject]@{
+                programDataRoot=$TestDrive
+                candidatePort=8081
+            }
+
+            $failure = try {
+                Test-CandidateRelease $config 'C:\data\releases\new' 'private-test-db'
+                $null
+            } catch {
+                $_.Exception
+            }
+
+            $failure | Should -Not -BeNull
+            $failure.Message | Should -Match 'candidate process 1234 did not exit'
+            $failure.Message | Should -Not -Match 'private-test-db'
+            Test-Path -LiteralPath $script:candidateLogPath | Should -BeTrue
+            Test-Path -LiteralPath $script:candidateProcessLogPath | Should -BeTrue
+            Should -Invoke Stop-Process -Times 1 -Exactly
         }
 
         It 'rejects a stale listener owned by a different process' {
