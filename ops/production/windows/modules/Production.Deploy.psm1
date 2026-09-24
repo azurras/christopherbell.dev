@@ -1216,7 +1216,7 @@ function Remove-ExpiredReleases {
             [string]$direction.targetRelease,
             [string]$direction.legacyRelease)
     }
-    $releases = @(Get-ChildItem (Join-Path $Config.programDataRoot 'releases') -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending)
+    $releases = @(Get-ChildItem (Join-Path $Config.programDataRoot 'releases') -Directory -ErrorAction Stop | Sort-Object LastWriteTimeUtc -Descending)
     $kept = 0
     foreach ($release in $releases) {
         if ($protected -contains $release.FullName -or

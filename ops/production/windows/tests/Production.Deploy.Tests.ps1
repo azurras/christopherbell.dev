@@ -1967,6 +1967,23 @@ Describe 'native Windows deployment' {
             Test-Path (Join-Path $releases ('3' * 40)) | Should -BeFalse
         }
 
+        It 'surfaces release enumeration failures before reporting cleanup complete' {
+            $config = [pscustomobject]@{
+                programDataRoot = Join-Path $TestDrive 'retention-query-failure'
+                releaseRetention = 0
+            }
+            Mock Get-JunctionTarget { $null }
+            Mock Read-ProductionMusicSchemaDirection { $null }
+            Mock Get-ChildItem { Write-Error 'simulated release enumeration failure' } `
+                -ParameterFilter { $Path -like '*releases' }
+            Mock Remove-Item { }
+
+            { Remove-ExpiredReleases -Config $config } |
+                Should -Throw '*simulated release enumeration failure*'
+
+            Should -Invoke Remove-Item -Times 0 -Exactly
+        }
+
         It 'initializes target direction only after explicit verified cutover under deploy lock' {
             $events = [System.Collections.Generic.List[string]]::new()
             $target = '2222222222222222222222222222222222222222'
