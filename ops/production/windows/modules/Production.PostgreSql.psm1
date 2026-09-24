@@ -611,7 +611,7 @@ function Install-ProductionPostgreSql {
         },
         [scriptblock]$ServiceIdentityAction = {
             param($Name)
-            Get-CimInstance Win32_Service -Filter "Name='$Name'" -ErrorAction SilentlyContinue
+            Get-CimInstance Win32_Service -Filter "Name='$Name'" -ErrorAction Stop
         },
         [scriptblock]$ProtectOptionFileAction = {
             param($Path) Protect-ProductionPath -Path $Path
