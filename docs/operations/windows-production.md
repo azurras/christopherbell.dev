@@ -758,8 +758,11 @@ sidecar.
 ## Failure Recovery
 
 - Candidate failure: production remains on the current release; inspect build,
-  restore, candidate, and exact-cleanup evidence. The candidate never uses the
-  live database.
+  restore, candidate, and exact-cleanup evidence. Candidate validation reports
+  when process-output capture failed, the 64 KiB log was truncated, or capture
+  could not be confirmed during cleanup; inspect the application log as well.
+  If the candidate process does not stop within the bounded wait, validation
+  fails closed and retains its logs. The candidate never uses the live database.
 - Failure before the live migration boundary: production remains on the prior
   compatible release.
 - Failure after the live migration boundary, including port-8080 or public-route

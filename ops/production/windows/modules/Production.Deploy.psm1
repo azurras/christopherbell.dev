@@ -22,14 +22,27 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace ChristopherBell.Production {
     public sealed class BoundedProcessLog {
         private const int MaximumBytes = 65536;
         private readonly string path;
         private readonly object gate = new object();
+        private int captureFailed;
+        private int outputTruncated;
 
         public BoundedProcessLog(string path) { this.path = path; }
+
+        /// <summary>Reports whether an asynchronous process-output write failed.</summary>
+        public bool CaptureFailed {
+            get { return Interlocked.CompareExchange(ref captureFailed, 0, 0) != 0; }
+        }
+
+        /// <summary>Reports whether captured output exceeded the configured byte limit.</summary>
+        public bool OutputTruncated {
+            get { return Interlocked.CompareExchange(ref outputTruncated, 0, 0) != 0; }
+        }
 
         public void Attach(Process process) {
             process.OutputDataReceived += WriteLine;
@@ -45,14 +58,20 @@ namespace ChristopherBell.Production {
                     eventArgs.Data + Environment.NewLine);
                 lock (gate) {
                     long currentLength = File.Exists(path) ? new FileInfo(path).Length : 0;
-                    if (currentLength >= MaximumBytes) return;
+                    if (currentLength >= MaximumBytes) {
+                        Interlocked.Exchange(ref outputTruncated, 1);
+                        return;
+                    }
                     int count = (int)Math.Min(bytes.Length, MaximumBytes - currentLength);
+                    if (count < bytes.Length) Interlocked.Exchange(ref outputTruncated, 1);
                     using (FileStream stream = new FileStream(path, FileMode.Append,
                         FileAccess.Write, FileShare.Read)) {
                         stream.Write(bytes, 0, count);
                     }
                 }
-            } catch { }
+            } catch {
+                Interlocked.Exchange(ref captureFailed, 1);
+            }
         }
     }
 }
@@ -612,6 +631,10 @@ function Test-CandidateRelease {
     $process = Start-ProductionJar -Config $Config -Release $Release -Port $Config.candidatePort -Profiles 'prod,deploy-smoke' -AdditionalEnvironment $environment
     $identity = $null
     $candidateValidated = $false
+    $processOutputDrained = $false
+    $candidateCleanupFailed = $false
+    $candidateFailure = $null
+    $exitDetails = $null
     try {
         $identity = Get-ProductionCandidateProcessIdentity -Process $process
         $null = Wait-ProductionCandidateOwnedListener `
@@ -627,9 +650,7 @@ function Test-CandidateRelease {
         } else {
             "candidate process $($process.Id) failed validation"
         }
-        throw [InvalidOperationException]::new(
-            "Production candidate validation failed: $exitDetails. Candidate output log: $candidateLogPath; application log: $candidateApplicationLogPath",
-            $_.Exception)
+        $candidateFailure = $_.Exception
     } finally {
         $process.Refresh()
         if (-not $process.HasExited) {
@@ -640,14 +661,55 @@ function Test-CandidateRelease {
                 Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             }
         }
-        $process.WaitForExit(10000) | Out-Null
-        if ($candidateValidated) {
+        $processOutputDrained = [bool]$process.WaitForExit(10000)
+        if ($processOutputDrained) {
+            $process.WaitForExit() | Out-Null
+        } else {
+            $process.Refresh()
+            if ($process.HasExited) {
+                $process.WaitForExit() | Out-Null
+                $processOutputDrained = $true
+            }
+        }
+        if (-not $processOutputDrained) {
+            $candidateCleanupFailed = $true
+        }
+        if ($candidateValidated -and $processOutputDrained) {
             Remove-Item -LiteralPath $candidateLogPath -Force -ErrorAction SilentlyContinue
             $applicationLogPrefix = [IO.Path]::GetFileName($candidateApplicationLogPath)
             Get-ChildItem -LiteralPath $candidateLogsRoot -File -Filter "$applicationLogPrefix*" `
                 -ErrorAction SilentlyContinue |
                 Remove-Item -Force -ErrorAction SilentlyContinue
         }
+    }
+    if ($null -ne $candidateFailure -or $candidateCleanupFailed) {
+        $captureDetails = ''
+        $cleanupDetails = if ($candidateCleanupFailed) {
+            " Candidate process $($process.Id) did not exit within the bounded cleanup wait; deployment cannot continue."
+        } else {
+            ''
+        }
+        $failureDetails = if ($null -ne $candidateFailure) {
+            "Production candidate validation failed: $exitDetails."
+        } else {
+            'Production candidate cleanup failed.'
+        }
+        if ($process.PSObject.Properties['CandidateProcessLogWriter']) {
+            try {
+                if ($process.CandidateProcessLogWriter.CaptureFailed) {
+                    $captureDetails = ' Candidate process output capture failed; its log may be incomplete.'
+                } elseif ($process.CandidateProcessLogWriter.OutputTruncated) {
+                    $captureDetails = ' Candidate process output log reached the 64 KiB limit and is incomplete.'
+                } elseif (-not $processOutputDrained) {
+                    $captureDetails = ' Candidate process output capture status could not be confirmed.'
+                }
+            } catch {
+                $captureDetails = ' Candidate process output capture status could not be confirmed.'
+            }
+        }
+        throw [InvalidOperationException]::new(
+            "$failureDetails$cleanupDetails Candidate output log: $candidateLogPath; application log: $candidateApplicationLogPath.$captureDetails",
+            $candidateFailure)
     }
 }
 
