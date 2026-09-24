@@ -830,6 +830,7 @@ function Start-AutoDeployLoop {
                 return
             }
         } catch {
+            $toolRefreshFailure = $_.Exception
             $state.toolRefreshStatus = 'FAILED'
             $state.toolRefreshAt = (Get-Date).ToUniversalTime().ToString('o')
             try {
@@ -837,7 +838,12 @@ function Start-AutoDeployLoop {
                 $storedState.toolRefreshStatus = $state.toolRefreshStatus
                 $storedState.toolRefreshAt = $state.toolRefreshAt
                 Write-AutoDeployState $config $storedState
-            } catch { }
+            } catch {
+                $statePersistenceFailure = $_.Exception
+                throw [AggregateException]::new(
+                    'Automatic deployment tool refresh failure could not be persisted.',
+                    [Exception[]]@($toolRefreshFailure,$statePersistenceFailure))
+            }
         }
         $state = Read-AutoDeployState $config
         $invokeStarted = $true

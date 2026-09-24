@@ -290,8 +290,12 @@ and secrets remain in protected diagnostics.
 After the first `auto-install`, the SYSTEM poller refreshes its deployment tool
 bundle from the exact fetched `origin/main` commit. Each bundle is immutable
 and protected; the scheduled task switches to it only after the complete copy
-is verified. A failed tool refresh remains visible in `toolRefreshStatus` while
-the last trusted bundle continues to check and deploy releases.
+is verified. A failed tool refresh remains visible in `toolRefreshStatus` when
+that state can be saved; the last trusted bundle can continue checking and
+deploying releases. If the poller cannot persist the refresh failure, that
+invocation publishes `CHECK_FAILED` best-effort, records a failed task result,
+and does not continue to a release check. The current trusted bundle remains
+installed, and the next scheduled invocation retries the refresh.
 
 Failed SHAs observe `autoDeployFailureBackoffSeconds`; a newer SHA is eligible
 immediately.
