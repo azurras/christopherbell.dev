@@ -495,6 +495,117 @@ Describe 'native PostgreSQL production operations' {
         }
     }
 
+    It 'does not restart PostgreSQL 16 when PostgreSQL 18 inspection fails during rollback' {
+        InModuleScope Production.PostgreSql {
+            Mock Get-Service {
+                param($ErrorAction)
+                if ($ErrorAction -eq 'Stop') {
+                    Write-Error 'simulated PostgreSQL 18 service inspection failure' `
+                        -ErrorAction Stop
+                }
+                Write-Error 'simulated PostgreSQL 18 service inspection failure' `
+                    -ErrorAction SilentlyContinue
+            }
+            Mock Set-Service { }
+            Mock Start-Service { }
+
+            { Restore-ProductionPostgreSqlLegacyReplacement -State @{
+                Exists=$true; WasRunning=$true; StartMode='Auto'
+            } } | Should -Throw '*simulated PostgreSQL 18 service inspection failure*'
+
+            Should -Invoke Set-Service -Times 0
+            Should -Invoke Start-Service -Times 0
+        }
+    }
+
+    It 'does not restart PostgreSQL 16 when PostgreSQL 18 fails to stop during rollback' {
+        InModuleScope Production.PostgreSql {
+            Mock Get-Service { [pscustomobject]@{ Status='Running' } }
+            Mock Stop-Service {
+                param($ErrorAction)
+                if ($ErrorAction -eq 'Stop') {
+                    Write-Error 'simulated PostgreSQL 18 stop failure' -ErrorAction Stop
+                }
+                Write-Error 'simulated PostgreSQL 18 stop failure' -ErrorAction SilentlyContinue
+            }
+            Mock Set-Service { }
+            Mock Start-Service { }
+
+            { Restore-ProductionPostgreSqlLegacyReplacement -State @{
+                Exists=$true; WasRunning=$true; StartMode='Auto'
+            } } | Should -Throw '*simulated PostgreSQL 18 stop failure*'
+
+            Should -Invoke Set-Service -Times 0
+            Should -Invoke Start-Service -Times 0
+        }
+    }
+
+    It 'waits for PostgreSQL 18 to stop before restoring a running PostgreSQL 16 service' {
+        InModuleScope Production.PostgreSql {
+            $script:restoreEvents = [Collections.Generic.List[string]]::new()
+            $service = [pscustomobject]@{ Status='Running' }
+            $service | Add-Member ScriptMethod WaitForStatus {
+                param($DesiredStatus,$Timeout)
+                $script:restoreEvents.Add("wait:$DesiredStatus")
+            }
+            Mock Get-Service { $service }
+            Mock Stop-Service { $script:restoreEvents.Add("stop:$Name") }
+            Mock Set-Service {
+                $script:restoreEvents.Add("set:$($Name):$StartupType")
+            }
+            Mock Start-Service { $script:restoreEvents.Add("start:$Name") }
+
+            Restore-ProductionPostgreSqlLegacyReplacement -State @{
+                Exists=$true; WasRunning=$true; StartMode='Auto'
+            }
+
+            $script:restoreEvents | Should -Be @(
+                'stop:postgresql-x64-18','wait:Stopped',
+                'set:postgresql-x64-16:Automatic','start:postgresql-x64-16')
+        }
+    }
+
+    It 'preserves genuine PostgreSQL 18 absence during rollback' {
+        InModuleScope Production.PostgreSql {
+            $script:restoreEvents = [Collections.Generic.List[string]]::new()
+            Mock Get-Service {
+                $record = [System.Management.Automation.ErrorRecord]::new(
+                    [InvalidOperationException]::new('service does not exist'),
+                    'NoServiceFoundForGivenName,Microsoft.PowerShell.Commands.GetServiceCommand',
+                    [System.Management.Automation.ErrorCategory]::ObjectNotFound,
+                    'postgresql-x64-18')
+                throw $record
+            }
+            Mock Stop-Service { $script:restoreEvents.Add('stop') }
+            Mock Set-Service { $script:restoreEvents.Add("set:$StartupType") }
+            Mock Start-Service { $script:restoreEvents.Add("start:$Name") }
+
+            Restore-ProductionPostgreSqlLegacyReplacement -State @{
+                Exists=$true; WasRunning=$true; StartMode='Auto'
+            }
+
+            $script:restoreEvents | Should -Be @('set:Automatic','start:postgresql-x64-16')
+        }
+    }
+
+    It 'preserves both the installation and rollback failures' {
+        $failure = $null
+        try {
+            Install-ProductionPostgreSql -Config $config `
+                -ProcessAction { throw 'simulated installer failure' } `
+                -PackageIdentityAction { $packageIdentity } `
+                -ServiceIdentityAction { param($Name) $serviceIdentity } `
+                -PrepareLegacyAction { [pscustomobject]@{ WasRunning=$false } } `
+                -RollbackLegacyAction { throw 'simulated rollback failure' }
+        } catch {
+            $failure = $_.Exception
+        }
+
+        $failure | Should -BeOfType [AggregateException]
+        $failure.InnerExceptions[0].Message | Should -Be 'simulated installer failure'
+        $failure.InnerExceptions[1].Message | Should -Be 'simulated rollback failure'
+    }
+
     It 'propagates legacy service inspection failures before changing service state' {
         InModuleScope Production.PostgreSql {
             Mock Get-Service {

@@ -482,9 +482,21 @@ function Complete-ProductionPostgreSqlLegacyReplacement {
 function Restore-ProductionPostgreSqlLegacyReplacement {
     param($State)
     if (-not $State -or -not $State.Exists) { return }
-    $postgres18 = Get-Service -Name $script:ExpectedServiceName -ErrorAction SilentlyContinue
+    try {
+        $postgres18 = Get-Service -Name $script:ExpectedServiceName -ErrorAction Stop
+    } catch {
+        if ($_.FullyQualifiedErrorId -ceq
+            'NoServiceFoundForGivenName,Microsoft.PowerShell.Commands.GetServiceCommand') {
+            $postgres18 = $null
+        } else {
+            throw
+        }
+    }
     if ($postgres18 -and [string]$postgres18.Status -ceq 'Running') {
-        Stop-Service -Name $script:ExpectedServiceName -Force -ErrorAction SilentlyContinue
+        Stop-Service -Name $script:ExpectedServiceName -Force -ErrorAction Stop
+        $postgres18.WaitForStatus(
+            [ServiceProcess.ServiceControllerStatus]::Stopped,
+            [timespan]::FromSeconds(30))
     }
     $startup = switch ([string]$State.StartMode) {
         'Auto' { 'Automatic' }
@@ -662,8 +674,17 @@ function Install-ProductionPostgreSql {
                 Installed=$true; Version='18.4'; Path=$postgres
             }
         } catch {
-            if ($legacyPrepared) { & $RollbackLegacyAction $legacyState }
-            throw
+            $installationFailure = $_.Exception
+            if ($legacyPrepared) {
+                try {
+                    & $RollbackLegacyAction $legacyState
+                } catch {
+                    throw [AggregateException]::new(
+                        'PostgreSQL installation and legacy rollback both failed.',
+                        [Exception[]]@($installationFailure,$_.Exception))
+                }
+            }
+            throw $installationFailure
         } finally {
             if ($optionPath -and (Test-Path -LiteralPath $optionPath -PathType Leaf)) {
                 Remove-Item -LiteralPath $optionPath -Force
