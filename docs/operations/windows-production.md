@@ -292,6 +292,25 @@ safe scheduler state. `UNKNOWN` means the task could not be queried or returned
 an unrecognized state; `pollerReason` gives only a stable sanitized reason.
 Scheduler query failures do not hide an otherwise valid status record.
 
+The projection also checks the `ChristopherBellDev` service and its local
+readiness endpoint. `status=SERVICE_UNHEALTHY` identifies a stopped service or
+failed readiness probe; `SERVICE_HEALTH_UNKNOWN` means the service state could
+not be verified. In these cases `deploymentStatus` retains the last poller
+result, while `siteHealth`, `siteHealthReason`, and `serviceState` report the
+current probe. These fields contain only stable status codes and do not expose
+protected configuration or exception details.
+
+Before checking remote `main`, the SYSTEM poller checks the active release's
+service and readiness. If the active release is unhealthy, it attempts one
+recovery through the guarded restart procedure, which rechecks the deployment
+lock and requires exact `TARGET_ACTIVE` schema direction. It starts a stopped
+service or restarts a running but unready service, then verifies the full local
+endpoint and login smoke suite. A failed recovery is recorded as
+`CANDIDATE_STARTUP` and retried only after `autoDeployFailureBackoffSeconds`;
+unknown service state fails closed without starting the service. This recovery
+is independent of remote Git access and of a newer release's deployment
+backoff.
+
 If the poller cannot read its protected configuration or validate the fixed
 production root, it best-effort replaces `CHECKING` with `CHECK_FAILED` using
 only the static operator status store. It does not use paths from invalid

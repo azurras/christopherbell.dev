@@ -310,13 +310,21 @@ function Watch-ProductionLogs {
 
 function Restart-ProductionService {
     [CmdletBinding()]
-    param([switch]$Verify)
+    param(
+        [switch]$Verify,
+        [switch]$RequireTargetActive
+    )
     $config = Read-ProductionConfig (
         Join-Path $script:FixedProductionRoot 'config\deploy.json')
     $guard = Enter-OperationsFixedRootDeploymentLock -Config $config
     $lock = $guard.Lock
     try {
         $direction = Read-ProductionMusicSchemaDirection -Config $config
+        if ($RequireTargetActive -and
+            (-not $direction -or [string]$direction.state -cne 'TARGET_ACTIVE')) {
+            throw ('Automatic website recovery requires exact TARGET_ACTIVE schema direction. ' +
+                'Run guarded deployment or recovery before retrying.')
+        }
         if ($direction) {
             $markerVersion = if ($direction.PSObject.Properties['version']) {
                 [int]$direction.version
@@ -349,7 +357,14 @@ function Restart-ProductionService {
                     'manual restart is blocked. Use protected deploy or rollback orchestration.')
             }
         }
-        Restart-Service ChristopherBellDev
+        $service = Get-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+        if ([string]$service.Status -eq 'Running') {
+            Restart-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+        } elseif ([string]$service.Status -eq 'Stopped') {
+            Start-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+        } else {
+            throw 'Website service cannot be recovered from its current state.'
+        }
         if ($Verify) { Test-ProductionEndpoints $config $config.productionPort }
     } finally {
         $lock.Dispose()

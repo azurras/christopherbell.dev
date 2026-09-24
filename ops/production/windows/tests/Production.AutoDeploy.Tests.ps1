@@ -3,11 +3,23 @@ Import-Module (Join-Path $PSScriptRoot '..\modules\Production.WriterStart.psm1')
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.MusicRuntime.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Operations.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.AutoDeploy.psm1') -Force
 
 Describe 'automatic origin main deployment' {
     BeforeEach {
-        $script:config = [pscustomobject]@{ programDataRoot=$TestDrive; repositoryPath=$TestDrive; remote='origin'; branch='main'; autoDeployFailureBackoffSeconds=900 }
+        $script:config = [pscustomobject]@{
+            programDataRoot=$TestDrive
+            repositoryPath=$TestDrive
+            remote='origin'
+            branch='main'
+            productionPort=8080
+            autoDeployFailureBackoffSeconds=900
+        }
+        $statePath = Join-Path $TestDrive 'state\auto-deploy.json'
+        if (Test-Path -LiteralPath $statePath) {
+            Remove-Item -LiteralPath $statePath -Force
+        }
         Mock Assert-ProductionFixedRootBoundary {
             [pscustomobject]@{
                 Root = 'C:\ProgramData\christopherbell.dev'
@@ -27,6 +39,9 @@ Describe 'automatic origin main deployment' {
         Mock Read-ProductionMusicSchemaDirection {
             [pscustomobject]@{ state='TARGET_ACTIVE' }
         } -ModuleName Production.AutoDeploy
+        Mock Get-Service { [pscustomobject]@{ Status='Running' } } `
+            -ModuleName Production.AutoDeploy
+        Mock Wait-HttpStatus { } -ModuleName Production.AutoDeploy
     }
 
     It 'warns once with sanitized details when status publication fails' {
@@ -277,8 +292,148 @@ Describe 'automatic origin main deployment' {
         Mock Get-RemoteMainSha { '0123456789012345678901234567890123456789' } -ModuleName Production.AutoDeploy
         Mock Get-ActiveReleaseSha { '0123456789012345678901234567890123456789' } -ModuleName Production.AutoDeploy
         Mock Invoke-ProductionDeploy {} -ModuleName Production.AutoDeploy
+        Mock Restart-ProductionService { throw 'healthy website must not restart' } `
+            -ModuleName Production.AutoDeploy
         Invoke-AutoDeployOnce $config
         Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
+        Should -Invoke Restart-ProductionService -Times 0 -ModuleName Production.AutoDeploy
+    }
+
+    It 'does not report the active release up to date when the website service is stopped' {
+        $script:publishedOutcome = $null
+        Mock Get-RemoteMainSha { '0123456789012345678901234567890123456789' } `
+            -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha { '0123456789012345678901234567890123456789' } `
+            -ModuleName Production.AutoDeploy
+        Mock Get-Service { [pscustomobject]@{ Status='Stopped' } } `
+            -ModuleName Production.AutoDeploy
+        Mock Restart-ProductionService { } -ModuleName Production.AutoDeploy
+        Mock Test-ProductionEndpoints { } -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatusBestEffort {
+            $script:publishedOutcome = $Outcome
+            $true
+        } -ModuleName Production.AutoDeploy
+
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Restart-ProductionService -Times 1 -ModuleName Production.AutoDeploy `
+            -ParameterFilter { $Verify -and $RequireTargetActive }
+        $script:publishedOutcome | Should -Be 'UP_TO_DATE'
+    }
+
+    It 'recovers an unhealthy active release before applying the failed-revision deployment backoff' {
+        $events = [Collections.Generic.List[string]]::new()
+        Mock Get-RemoteMainSha { 'abcdefabcdefabcdefabcdefabcdefabcdefabcd' } `
+            -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha { '0123456789012345678901234567890123456789' } `
+            -ModuleName Production.AutoDeploy
+        Mock Get-Service { [pscustomobject]@{ Status='Stopped' } } `
+            -ModuleName Production.AutoDeploy
+        Mock Restart-ProductionService { [void]$events.Add('recover') } `
+            -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionDeploy { [void]$events.Add('deploy') } `
+            -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatusBestEffort { $true } `
+            -ModuleName Production.AutoDeploy
+
+        Invoke-AutoDeployOnce $config
+
+        $events | Should -Be @('recover','deploy')
+    }
+
+    It 'recovers the active service even when remote main cannot be queried' {
+        $activeSha = '0123456789012345678901234567890123456789'
+        Mock Get-RemoteMainSha { throw 'remote unavailable' } -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha { $activeSha } -ModuleName Production.AutoDeploy
+        Mock Get-Service { [pscustomobject]@{ Status='Stopped' } } `
+            -ModuleName Production.AutoDeploy
+        Mock Restart-ProductionService { } -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatusBestEffort { $true } `
+            -ModuleName Production.AutoDeploy
+
+        { Invoke-AutoDeployOnce $config } | Should -Throw 'remote unavailable'
+
+        Should -Invoke Restart-ProductionService -Times 1 -ModuleName Production.AutoDeploy `
+            -ParameterFilter { $Verify -and $RequireTargetActive }
+    }
+
+    It 'backs off a repeated failed service recovery without restarting every poll' {
+        $activeSha = '0123456789012345678901234567890123456789'
+        $state = New-AutoDeployState
+        $state.serviceRecoverySha = $activeSha
+        $state.serviceRecoveryAt = [datetime]::UtcNow.ToString('o')
+        Write-AutoDeployState $config $state
+        $script:publishedOutcome = $null
+        Mock Get-RemoteMainSha { $activeSha } -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha { $activeSha } -ModuleName Production.AutoDeploy
+        Mock Get-Service { [pscustomobject]@{ Status='Stopped' } } `
+            -ModuleName Production.AutoDeploy
+        Mock Restart-ProductionService { throw 'recovery must be rate limited' } `
+            -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatusBestEffort {
+            $script:publishedOutcome = $Outcome
+            $true
+        } -ModuleName Production.AutoDeploy
+
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Restart-ProductionService -Times 0 -ModuleName Production.AutoDeploy
+        $script:publishedOutcome | Should -Be 'BACKING_OFF'
+    }
+
+    It 'records a failed service recovery and publishes a sanitized startup failure' {
+        $activeSha = '0123456789012345678901234567890123456789'
+        $script:publishedOutcome = $null
+        Mock Get-RemoteMainSha { $activeSha } -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha { $activeSha } -ModuleName Production.AutoDeploy
+        Mock Get-Service { [pscustomobject]@{ Status='Stopped' } } `
+            -ModuleName Production.AutoDeploy
+        Mock Restart-ProductionService {
+            throw 'private path and secret must not be in public status'
+        } -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatusBestEffort {
+            $script:publishedOutcome = [pscustomobject]@{
+                Outcome = $Outcome
+                FailureCategory = $FailureCategory
+            }
+            $true
+        } -ModuleName Production.AutoDeploy
+
+        { Invoke-AutoDeployOnce $config } | Should -Throw '*private path and secret*'
+
+        $state = Read-AutoDeployState $config
+        $state.serviceRecoverySha | Should -Be $activeSha
+        $recoveryAt = [datetimeoffset]::Parse($state.serviceRecoveryAt)
+        $recoveryAt | Should -BeGreaterThan ([datetimeoffset]::UtcNow.AddMinutes(-1))
+        $script:publishedOutcome.Outcome | Should -Be 'DEPLOYMENT_FAILED'
+        $script:publishedOutcome.FailureCategory | Should -Be 'CANDIDATE_STARTUP'
+    }
+
+    It 'publishes the recovery failure even when protected retry-state persistence fails' {
+        $activeSha = '0123456789012345678901234567890123456789'
+        $script:publishedOutcome = $null
+        Mock Get-RemoteMainSha { $activeSha } -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha { $activeSha } -ModuleName Production.AutoDeploy
+        Mock Get-Service { [pscustomobject]@{ Status='Stopped' } } `
+            -ModuleName Production.AutoDeploy
+        Mock Restart-ProductionService { throw 'service recovery caused the failure' } `
+            -ModuleName Production.AutoDeploy
+        Mock Write-AutoDeployState { throw 'private state path failure' } `
+            -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatusBestEffort {
+            $script:publishedOutcome = [pscustomobject]@{
+                Outcome = $Outcome
+                FailureCategory = $FailureCategory
+            }
+            $true
+        } -ModuleName Production.AutoDeploy
+
+        { Invoke-AutoDeployOnce $config } |
+            Should -Throw '*Website recovery failed and its retry state could not be persisted*'
+
+        $script:publishedOutcome.Outcome | Should -Be 'DEPLOYMENT_FAILED'
+        $script:publishedOutcome.FailureCategory | Should -Be 'CANDIDATE_STARTUP'
+        Should -Invoke Publish-AutoDeployStatusBestEffort -Times 1 -ModuleName Production.AutoDeploy
     }
 
     It 'deploys exactly once when remote main changes' {
@@ -548,6 +703,81 @@ Describe 'automatic origin main deployment' {
             $result.pollerState | Should -Be 'UNKNOWN'
             $result.pollerReason | Should -Be 'ACCESS_DENIED'
             $json | Should -Not -Match 'private task path|account SID'
+        }
+    }
+
+    It 'overrides a fresh up-to-date status when the live website service is stopped' {
+        InModuleScope Production.AutoDeploy {
+            $statusRoot = Join-Path $TestDrive 'stopped-website-status'
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+            Mock Get-AutoDeployTaskSchedulerEntry {
+                [pscustomobject]@{ registered=$true; state=3; reason='NONE' }
+            }
+            Mock Get-Service { [pscustomobject]@{ Status='Stopped' } }
+            Mock Wait-HttpStatus { throw 'private readiness URI detail' }
+            Publish-AutoDeployStatus -Outcome 'UP_TO_DATE' `
+                -State (New-AutoDeployState) -StatusRoot $statusRoot
+
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+            $json = $result | ConvertTo-Json -Depth 10
+
+            $result.deploymentStatus | Should -Be 'UP_TO_DATE'
+            $result.status | Should -Be 'SERVICE_UNHEALTHY'
+            $result.serviceState | Should -Be 'STOPPED'
+            $result.siteHealth | Should -Be 'UNHEALTHY'
+            $result.siteHealthReason | Should -Be 'SERVICE_STOPPED'
+            $result.message | Should -Be 'The website service is stopped.'
+            $json | Should -Not -Match 'private readiness URI detail'
+        }
+    }
+
+    It 'reports readiness failure when the website service is running but not ready' {
+        InModuleScope Production.AutoDeploy {
+            $statusRoot = Join-Path $TestDrive 'readiness-failed-website-status'
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+            Mock Get-AutoDeployTaskSchedulerEntry {
+                [pscustomobject]@{ registered=$true; state=3; reason='NONE' }
+            }
+            Mock Get-Service { [pscustomobject]@{ Status='Running' } }
+            Mock Wait-HttpStatus { throw 'private readiness URL' }
+            Publish-AutoDeployStatus -Outcome 'UP_TO_DATE' `
+                -State (New-AutoDeployState) -StatusRoot $statusRoot
+
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+
+            $result.status | Should -Be 'SERVICE_UNHEALTHY'
+            $result.serviceState | Should -Be 'RUNNING'
+            $result.siteHealthReason | Should -Be 'READINESS_FAILED'
+            $result.message | Should -Be 'The website service is running but readiness failed.'
+        }
+    }
+
+    It 'reports unknown live health when the website service query is denied' {
+        InModuleScope Production.AutoDeploy {
+            $statusRoot = Join-Path $TestDrive 'denied-website-status'
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+            Mock Get-AutoDeployTaskSchedulerEntry {
+                [pscustomobject]@{ registered=$true; state=3; reason='NONE' }
+            }
+            Mock Get-Service {
+                throw [UnauthorizedAccessException]::new('private service query detail')
+            }
+            Publish-AutoDeployStatus -Outcome 'UP_TO_DATE' `
+                -State (New-AutoDeployState) -StatusRoot $statusRoot
+
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+            $json = $result | ConvertTo-Json -Depth 10
+
+            $result.status | Should -Be 'SERVICE_HEALTH_UNKNOWN'
+            $result.deploymentStatus | Should -Be 'UP_TO_DATE'
+            $result.siteHealthReason | Should -Be 'ACCESS_DENIED'
+            $json | Should -Not -Match 'private service query detail'
         }
     }
 

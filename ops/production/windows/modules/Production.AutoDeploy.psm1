@@ -17,6 +17,8 @@ function New-AutoDeployState {
         toolSourceSha=$null
         toolRefreshStatus='UNKNOWN'
         toolRefreshAt=$null
+        serviceRecoverySha=$null
+        serviceRecoveryAt=$null
     }
 }
 
@@ -32,6 +34,8 @@ function Read-AutoDeployState {
             toolSourceSha = $null
             toolRefreshStatus = 'UNKNOWN'
             toolRefreshAt = $null
+            serviceRecoverySha = $null
+            serviceRecoveryAt = $null
         }.GetEnumerator()) {
             if (-not $state.PSObject.Properties[$property.Key]) {
                 $state | Add-Member -NotePropertyName $property.Key -NotePropertyValue $property.Value
@@ -494,6 +498,137 @@ function Add-AutoDeployPollerStatus {
     return $Status
 }
 
+function Get-AutoDeployWebsiteHealth {
+    [CmdletBinding()]
+    param([ValidateRange(1,65535)][int]$Port = 8080)
+
+    try {
+        $services = @(Get-Service -Name 'ChristopherBellDev' -ErrorAction Stop)
+    } catch {
+        $reason = if ($_.Exception -is [UnauthorizedAccessException]) {
+            'ACCESS_DENIED'
+        } else {
+            'SERVICE_QUERY_FAILED'
+        }
+        return [pscustomobject]@{
+            serviceState = 'UNKNOWN'
+            siteHealth = 'UNKNOWN'
+            siteHealthReason = $reason
+        }
+    }
+
+    if ($services.Count -ne 1) {
+        return [pscustomobject]@{
+            serviceState = 'UNKNOWN'
+            siteHealth = 'UNKNOWN'
+            siteHealthReason = 'SERVICE_QUERY_FAILED'
+        }
+    }
+
+    $serviceState = [string]$services[0].Status
+    if ($serviceState -cne 'Running') {
+        $reason = if ($serviceState -ceq 'Stopped') {
+            'SERVICE_STOPPED'
+        } else {
+            'SERVICE_NOT_RUNNING'
+        }
+        return [pscustomobject]@{
+            serviceState = $serviceState.ToUpperInvariant()
+            siteHealth = 'UNHEALTHY'
+            siteHealthReason = $reason
+        }
+    }
+
+    try {
+        Wait-HttpStatus `
+            -Uri "http://127.0.0.1:$Port/actuator/health/readiness" `
+            -ExpectedStatus 200 `
+            -Timeout ([timespan]::FromSeconds(5)) | Out-Null
+    } catch {
+        return [pscustomobject]@{
+            serviceState = 'RUNNING'
+            siteHealth = 'UNHEALTHY'
+            siteHealthReason = 'READINESS_FAILED'
+        }
+    }
+
+    return [pscustomobject]@{
+        serviceState = 'RUNNING'
+        siteHealth = 'HEALTHY'
+        siteHealthReason = 'NONE'
+    }
+}
+
+function Invoke-AutoDeployWebsiteRecovery {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][string]$ActiveSha,
+        [Parameter(Mandatory)][datetime]$Now,
+        [string]$StatusRoot
+    )
+
+    $health = Get-AutoDeployWebsiteHealth -Port ([int]$Config.productionPort)
+    if ($health.siteHealth -eq 'HEALTHY') { return $true }
+    if ($health.siteHealth -eq 'UNKNOWN') {
+        Publish-AutoDeployStatusBestEffort -Outcome 'CHECK_FAILED' `
+            -FailureCategory 'PROTECTED_PRECONDITION' -State $State `
+            -ActiveSha $ActiveSha -StatusRoot $StatusRoot | Out-Null
+        throw "Website health could not be verified: $($health.siteHealthReason)."
+    }
+
+    if ([string]$State.serviceRecoverySha -ceq $ActiveSha -and $State.serviceRecoveryAt) {
+        $recoveryAt = [datetimeoffset]::Parse(
+            [string]$State.serviceRecoveryAt,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind)
+        $retryAt = $recoveryAt.AddSeconds([int]$Config.autoDeployFailureBackoffSeconds)
+        if ($Now -lt $retryAt.UtcDateTime) {
+            Publish-AutoDeployStatusBestEffort -Outcome 'BACKING_OFF' `
+                -FailureCategory 'CANDIDATE_STARTUP' -State $State `
+                -ActiveSha $ActiveSha -RetryAt $retryAt.ToUniversalTime().ToString('o') `
+                -StatusRoot $StatusRoot | Out-Null
+            return $false
+        }
+    }
+
+    $recoveryFailure = $null
+    try { Restart-ProductionService -Verify -RequireTargetActive }
+    catch { $recoveryFailure = $_.Exception }
+
+    if ($recoveryFailure) {
+        $State.serviceRecoverySha = $ActiveSha
+        $State.serviceRecoveryAt = (Get-Date).ToUniversalTime().ToString('o')
+        $State.error = $recoveryFailure.Message
+        $stateWriteFailure = $null
+        try { Write-AutoDeployState $Config $State }
+        catch { $stateWriteFailure = $_.Exception }
+        Publish-AutoDeployStatusBestEffort -Outcome 'DEPLOYMENT_FAILED' `
+            -FailureCategory 'CANDIDATE_STARTUP' -State $State `
+            -ActiveSha $ActiveSha -StatusRoot $StatusRoot | Out-Null
+        if ($stateWriteFailure) {
+            throw [AggregateException]::new(
+                'Website recovery failed and its retry state could not be persisted.',
+                [Exception[]]@($recoveryFailure,$stateWriteFailure))
+        }
+        throw $recoveryFailure
+    }
+
+    $State.serviceRecoverySha = $null
+    $State.serviceRecoveryAt = $null
+    $State.error = $null
+    try {
+        Write-AutoDeployState $Config $State
+    } catch {
+        Publish-AutoDeployStatusBestEffort -Outcome 'CHECK_FAILED' `
+            -FailureCategory 'STATUS_STORE' -State $State `
+            -ActiveSha $ActiveSha -StatusRoot $StatusRoot | Out-Null
+        throw
+    }
+    return $true
+}
+
 function Get-AutoDeployStatus {
     [CmdletBinding()]
     param(
@@ -550,11 +685,37 @@ function Get-AutoDeployStatus {
                 -PollerStatus $pollerStatus
         }
         $freshness = if ($age.TotalSeconds -gt 180) { 'STALE' } else { 'FRESH' }
+        $websiteHealth = Get-AutoDeployWebsiteHealth
+        $reportedStatus = [string]$record.status
+        $reportedReason = 'NONE'
+        if ($websiteHealth.siteHealth -ne 'HEALTHY') {
+            $reportedStatus = if ($websiteHealth.siteHealth -eq 'UNHEALTHY') {
+                'SERVICE_UNHEALTHY'
+            } else {
+                'SERVICE_HEALTH_UNKNOWN'
+            }
+            $reportedReason = [string]$websiteHealth.siteHealthReason
+        }
+        $message = if ($websiteHealth.siteHealth -eq 'HEALTHY') {
+            Get-AutoDeployStatusMessage -Outcome ([string]$record.status)
+        } else {
+            switch ([string]$websiteHealth.siteHealthReason) {
+                'SERVICE_STOPPED' { 'The website service is stopped.' }
+                'SERVICE_NOT_RUNNING' { 'The website service is not running.' }
+                'READINESS_FAILED' { 'The website service is running but readiness failed.' }
+                'ACCESS_DENIED' { 'The website service state cannot be queried with this account.' }
+                default { 'Website health could not be verified.' }
+            }
+        }
         $status = [pscustomobject]@{
             available = $true
             freshness = $freshness
-            status = [string]$record.status
-            reason = 'NONE'
+            status = $reportedStatus
+            deploymentStatus = [string]$record.status
+            reason = $reportedReason
+            serviceState = [string]$websiteHealth.serviceState
+            siteHealth = [string]$websiteHealth.siteHealth
+            siteHealthReason = [string]$websiteHealth.siteHealthReason
             updatedAt = $updatedAt.ToUniversalTime().ToString('o')
             remoteSha = $record.remoteSha
             activeSha = $record.activeSha
@@ -568,7 +729,7 @@ function Get-AutoDeployStatus {
             toolRefreshStatus = $record.toolRefreshStatus
             toolRefreshAt = $record.toolRefreshAt
             failureCategory = [string]$record.failureCategory
-            message = Get-AutoDeployStatusMessage -Outcome ([string]$record.status)
+            message = $message
         }
         return Add-AutoDeployPollerStatus -Status $status -PollerStatus $pollerStatus
     } catch {
@@ -613,16 +774,8 @@ function Invoke-AutoDeployOnce {
         throw ('Automatic deployment is blocked because the first Music schema cutover is incomplete. ' +
             'Complete bounded recovery interactively.')
     }
-    try {
-        $remote = Get-RemoteMainSha $Config
-    } catch {
-        Publish-AutoDeployStatusBestEffort -Outcome 'CHECK_FAILED' -FailureCategory 'REMOTE_CHECK' `
-            -State $state -StatusRoot $StatusRoot | Out-Null
-        throw
-    }
     $now = (Get-Date).ToUniversalTime()
     $state.lastCheckedAt = $now.ToString('o')
-    $state.remoteSha = $remote
     try {
         $active = Get-ActiveReleaseSha $Config
     } catch {
@@ -631,9 +784,25 @@ function Invoke-AutoDeployOnce {
             -StatusRoot $StatusRoot | Out-Null
         throw
     }
+    if ($active) {
+        $continueDeployment = Invoke-AutoDeployWebsiteRecovery `
+            -Config $Config -State $state -ActiveSha $active -Now $now `
+            -StatusRoot $StatusRoot
+        if (-not $continueDeployment) { return }
+    }
+    try {
+        $remote = Get-RemoteMainSha $Config
+    } catch {
+        Publish-AutoDeployStatusBestEffort -Outcome 'CHECK_FAILED' -FailureCategory 'REMOTE_CHECK' `
+            -State $state -StatusRoot $StatusRoot | Out-Null
+        throw
+    }
+    $state.remoteSha = $remote
     if ($remote -eq $active) {
         $state.successfulSha = $remote
         $state.error = $null
+        $state.failedSha = $null
+        $state.failedAt = $null
         Write-AutoDeployState $Config $state
         Publish-AutoDeployStatusBestEffort -Outcome 'UP_TO_DATE' -State $state `
             -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
