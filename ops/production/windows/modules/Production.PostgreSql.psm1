@@ -556,7 +556,7 @@ function Get-ProductionPostgreSqlPackageIdentity {
     $registryPaths = @(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
-    $matches = @(Get-ItemProperty $registryPaths -ErrorAction SilentlyContinue |
+    $matches = @(Get-ItemProperty $registryPaths -ErrorAction Stop |
         Where-Object {
             $displayName = $_.PSObject.Properties['DisplayName']
             $displayName -and ([string]$displayName.Value).Trim() -ceq 'PostgreSQL 18'
