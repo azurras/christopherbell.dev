@@ -24,8 +24,9 @@ function Read-AutoDeployState {
     param($Config)
     $path = Join-Path $Config.programDataRoot 'state\auto-deploy.json'
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return New-AutoDeployState }
+    $json = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
     try {
-        $state = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $state = ConvertFrom-Json -InputObject $json -ErrorAction Stop
         foreach ($property in @{
             toolsSha = $null
             toolSourceSha = $null
