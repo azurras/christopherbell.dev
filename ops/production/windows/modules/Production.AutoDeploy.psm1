@@ -850,7 +850,12 @@ function Start-AutoDeployLoop {
         Invoke-AutoDeployOnce -Config $config -StatusRoot $statusRoot
     }
     catch {
-        if (-not $boundaryValidated) { throw }
+        if (-not $boundaryValidated) {
+            Publish-AutoDeployStatusBestEffort -Outcome 'CHECK_FAILED' `
+                -FailureCategory 'PROTECTED_PRECONDITION' -State $state `
+                -StatusRoot $statusRoot | Out-Null
+            throw
+        }
         $failureRecord = $_
         if (-not $invokeStarted) {
             Publish-AutoDeployStatusBestEffort -Outcome 'CHECK_FAILED' `
