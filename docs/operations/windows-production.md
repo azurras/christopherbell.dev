@@ -307,9 +307,12 @@ lock and requires exact `TARGET_ACTIVE` schema direction. It starts a stopped
 service or restarts a running but unready service, then verifies the full local
 endpoint and login smoke suite. A failed recovery is recorded as
 `CANDIDATE_STARTUP` and retried only after `autoDeployFailureBackoffSeconds`;
-unknown service state fails closed without starting the service. This recovery
-is independent of remote Git access and of a newer release's deployment
-backoff.
+unknown service state fails closed without starting the service. Recovery
+failure or backoff does not prevent checking remote `main`: a newer release can
+still run through the normal guarded deployment and candidate verification
+path, while a same-SHA poll remains visibly unhealthy and rate-limited. This
+allows a later release to repair a broken active release without bypassing its
+startup or migration checks.
 
 If the poller cannot read its protected configuration or validate the fixed
 production root, it best-effort replaces `CHECKING` with `CHECK_FAILED` using

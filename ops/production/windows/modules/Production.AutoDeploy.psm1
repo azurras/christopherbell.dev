@@ -784,11 +784,17 @@ function Invoke-AutoDeployOnce {
             -StatusRoot $StatusRoot | Out-Null
         throw
     }
+    $recoveryFailure = $null
+    $recoveryBackoff = $false
     if ($active) {
-        $continueDeployment = Invoke-AutoDeployWebsiteRecovery `
-            -Config $Config -State $state -ActiveSha $active -Now $now `
-            -StatusRoot $StatusRoot
-        if (-not $continueDeployment) { return }
+        try {
+            $continueDeployment = Invoke-AutoDeployWebsiteRecovery `
+                -Config $Config -State $state -ActiveSha $active -Now $now `
+                -StatusRoot $StatusRoot
+            $recoveryBackoff = -not $continueDeployment
+        } catch {
+            $recoveryFailure = $_
+        }
     }
     try {
         $remote = Get-RemoteMainSha $Config
@@ -799,6 +805,13 @@ function Invoke-AutoDeployOnce {
     }
     $state.remoteSha = $remote
     if ($remote -eq $active) {
+        if ($recoveryFailure) {
+            Publish-AutoDeployStatusBestEffort -Outcome 'DEPLOYMENT_FAILED' `
+                -FailureCategory 'CANDIDATE_STARTUP' -State $state `
+                -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
+            throw $recoveryFailure
+        }
+        if ($recoveryBackoff) { return }
         $state.successfulSha = $remote
         $state.error = $null
         $state.failedSha = $null
@@ -843,6 +856,8 @@ function Invoke-AutoDeployOnce {
         $state.successfulSha = $active
         $state.failedSha = $null
         $state.failedAt = $null
+        $state.serviceRecoverySha = $null
+        $state.serviceRecoveryAt = $null
         $state.error = $null
     } catch {
         $state.failedSha = $remote

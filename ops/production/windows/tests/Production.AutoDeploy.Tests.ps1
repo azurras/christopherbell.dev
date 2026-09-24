@@ -341,6 +341,91 @@ Describe 'automatic origin main deployment' {
         $events | Should -Be @('recover','deploy')
     }
 
+    It 'deploys a newer main release even when active-service recovery fails' {
+        $activeSha = '0123456789012345678901234567890123456789'
+        $remoteSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+        $events = [Collections.Generic.List[string]]::new()
+        $script:activeReleaseReadCount = 0
+        Mock Get-RemoteMainSha { $remoteSha } -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha {
+            if ($script:activeReleaseReadCount++ -eq 0) { $activeSha } else { $remoteSha }
+        } -ModuleName Production.AutoDeploy
+        Mock Get-Service { [pscustomobject]@{ Status='Stopped' } } `
+            -ModuleName Production.AutoDeploy
+        Mock Restart-ProductionService {
+            [void]$events.Add('recover')
+            throw 'active release recovery failed'
+        } -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionDeploy { [void]$events.Add('deploy') } `
+            -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatusBestEffort { $true } `
+            -ModuleName Production.AutoDeploy
+
+        Invoke-AutoDeployOnce $config
+
+        $events | Should -Be @('recover','deploy')
+        Should -Invoke Get-RemoteMainSha -Times 1 -ModuleName Production.AutoDeploy
+        Should -Invoke Invoke-ProductionDeploy -Times 1 -ModuleName Production.AutoDeploy
+        (Read-AutoDeployState $config).successfulSha | Should -Be $remoteSha
+    }
+
+    It 'deploys a newer main release while active-service recovery is rate limited' {
+        $activeSha = '0123456789012345678901234567890123456789'
+        $remoteSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+        $state = New-AutoDeployState
+        $state.serviceRecoverySha = $activeSha
+        $state.serviceRecoveryAt = [datetime]::UtcNow.ToString('o')
+        Write-AutoDeployState $config $state
+        $script:activeReleaseReadCount = 0
+        Mock Get-RemoteMainSha { $remoteSha } -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha {
+            if ($script:activeReleaseReadCount++ -eq 0) { $activeSha } else { $remoteSha }
+        } -ModuleName Production.AutoDeploy
+        Mock Get-Service { [pscustomobject]@{ Status='Stopped' } } `
+            -ModuleName Production.AutoDeploy
+        Mock Restart-ProductionService { throw 'recovery backoff must be honored' } `
+            -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionDeploy {} -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatusBestEffort { $true } `
+            -ModuleName Production.AutoDeploy
+
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Restart-ProductionService -Times 0 -ModuleName Production.AutoDeploy
+        Should -Invoke Invoke-ProductionDeploy -Times 1 -ModuleName Production.AutoDeploy
+        (Read-AutoDeployState $config).successfulSha | Should -Be $remoteSha
+        (Read-AutoDeployState $config).serviceRecoverySha | Should -BeNullOrEmpty
+    }
+
+    It 'reports a remote-check failure after recovery failure without losing protected retry state' {
+        $activeSha = '0123456789012345678901234567890123456789'
+        $script:publishedStatus = $null
+        Mock Get-RemoteMainSha { throw 'remote unavailable' } -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha { $activeSha } -ModuleName Production.AutoDeploy
+        Mock Get-Service { [pscustomobject]@{ Status='Stopped' } } `
+            -ModuleName Production.AutoDeploy
+        Mock Restart-ProductionService { throw 'recovery failed' } `
+            -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionDeploy { throw 'deployment must not run' } `
+            -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatusBestEffort {
+            $script:publishedStatus = [pscustomobject]@{
+                Outcome = $Outcome
+                FailureCategory = $FailureCategory
+            }
+            $true
+        } -ModuleName Production.AutoDeploy
+
+        { Invoke-AutoDeployOnce $config } | Should -Throw 'remote unavailable'
+
+        $state = Read-AutoDeployState $config
+        $state.serviceRecoverySha | Should -Be $activeSha
+        $state.serviceRecoveryAt | Should -Not -BeNullOrEmpty
+        $script:publishedStatus.Outcome | Should -Be 'CHECK_FAILED'
+        $script:publishedStatus.FailureCategory | Should -Be 'REMOTE_CHECK'
+        Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
+    }
+
     It 'recovers the active service even when remote main cannot be queried' {
         $activeSha = '0123456789012345678901234567890123456789'
         Mock Get-RemoteMainSha { throw 'remote unavailable' } -ModuleName Production.AutoDeploy
