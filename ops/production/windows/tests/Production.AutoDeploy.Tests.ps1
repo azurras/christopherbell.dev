@@ -668,9 +668,16 @@ Describe 'automatic origin main deployment' {
                 Mock Initialize-AutoDeployStatusStore { $null }
                 Mock New-Item {}
                 Mock Copy-Item {}
+                Mock Move-ProductionAutoDeployToolsDirectory {}
+                Mock Remove-Item {}
                 $script:existingTaskStopped = $false
                 Mock Stop-ScheduledTask { $script:existingTaskStopped = $true }
-                Mock Get-ScheduledTask { [pscustomobject]@{ State='Ready' } }
+                Mock Get-ScheduledTask {
+                    [pscustomobject]@{ TaskName='ChristopherBellAutoDeploy'; TaskPath='\'; State='Ready' }
+                }
+                Mock Export-ScheduledTask { '<Task>previous task</Task>' }
+                Mock Disable-ScheduledTask {}
+                Mock Enable-ScheduledTask {}
                 Mock Register-ScheduledTask {
                     if (-not $script:existingTaskStopped) { throw 'Existing task must be stopped before registration.' }
                     $script:registeredTask = [pscustomobject]@{
@@ -728,7 +735,7 @@ Describe 'automatic origin main deployment' {
         }
     }
 
-    It 'does not register or restart when the existing task refuses to stop' {
+    It 're-enables the existing task and does not start it when it refuses to stop' {
         InModuleScope Production.AutoDeploy {
             Mock Assert-Administrator {}
             Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive; autoDeployPollSeconds=60 } }
@@ -740,7 +747,12 @@ Describe 'automatic origin main deployment' {
             Mock New-Item {}
             Mock Copy-Item {}
             Mock Stop-ScheduledTask {}
-            Mock Get-ScheduledTask { [pscustomobject]@{ State='Running' } }
+            Mock Get-ScheduledTask {
+                [pscustomobject]@{ TaskName='ChristopherBellAutoDeploy'; TaskPath='\'; State='Running' }
+            }
+            Mock Export-ScheduledTask { '<Task>previous task</Task>' }
+            Mock Disable-ScheduledTask {}
+            Mock Enable-ScheduledTask {}
             Mock Start-Sleep {}
             $script:dateCall = 0
             Mock Get-Date {
@@ -754,7 +766,162 @@ Describe 'automatic origin main deployment' {
             { Install-AutoDeployTask } | Should -Throw '*did not stop*'
 
             Should -Invoke Register-ScheduledTask -Times 0
+            Should -Invoke Enable-ScheduledTask -Times 1
             Should -Invoke Start-ScheduledTask -Times 0
+        }
+    }
+
+    It 'keeps the previous poller bundle when staging copy fails' {
+        InModuleScope Production.AutoDeploy {
+            $programDataRoot = Join-Path $TestDrive 'bootstrap-copy-failure'
+            $tools = Join-Path $programDataRoot 'tools'
+            $config = [pscustomobject]@{
+                programDataRoot=$programDataRoot
+                autoDeployPollSeconds=60
+            }
+            New-Item -ItemType Directory -Path $tools -Force | Out-Null
+            $oldMarker = Join-Path $tools 'known-good.txt'
+            Set-Content -LiteralPath $oldMarker -Value 'previous bundle'
+            Mock Initialize-AutoDeployStatusStore {}
+            Mock Stop-ScheduledTask {}
+            Mock Get-ScheduledTask {
+                [pscustomobject]@{
+                    TaskName='ChristopherBellAutoDeploy'
+                    TaskPath='\'
+                    State='Ready'
+                    Actions=@('previous action')
+                }
+            }
+            Mock Export-ScheduledTask { '<Task>previous task</Task>' }
+            Mock Disable-ScheduledTask {}
+            Mock Enable-ScheduledTask {}
+            Mock Copy-Item { throw 'simulated tools copy failure' } -ModuleName Production.AutoDeploy
+            Mock Register-ScheduledTask {}
+
+            { Update-ProductionAutoDeployToolsUnderHeldLock -Config $config } |
+                Should -Throw '*simulated tools copy failure*'
+
+            Test-Path -LiteralPath $oldMarker | Should -BeTrue
+            (Get-Content -LiteralPath $oldMarker -Raw).TrimEnd() | Should -Be 'previous bundle'
+            Should -Invoke Disable-ScheduledTask -Times 0
+            Should -Invoke Stop-ScheduledTask -Times 0
+            Should -Invoke Register-ScheduledTask -Times 0
+        }
+    }
+
+    It 'restores the old bundle and scheduled task when registration fails after switching' {
+        InModuleScope Production.AutoDeploy {
+            $programDataRoot = Join-Path $TestDrive 'bootstrap-register-failure'
+            $tools = Join-Path $programDataRoot 'tools'
+            $config = [pscustomobject]@{
+                programDataRoot=$programDataRoot
+                autoDeployPollSeconds=60
+            }
+            New-Item -ItemType Directory -Path $tools -Force | Out-Null
+            $oldMarker = Join-Path $tools 'known-good.txt'
+            Set-Content -LiteralPath $oldMarker -Value 'previous bundle'
+            $script:registerCalls = 0
+            $script:restoredTaskXml = $null
+            Mock Initialize-AutoDeployStatusStore {}
+            Mock Get-ScheduledTask {
+                [pscustomobject]@{ TaskName='ChristopherBellAutoDeploy'; TaskPath='\'; State='Ready' }
+            }
+            Mock Export-ScheduledTask { '<Task>previous task</Task>' }
+            Mock Disable-ScheduledTask {}
+            Mock Stop-ScheduledTask {}
+            Mock Enable-ScheduledTask {}
+            Mock Register-ScheduledTask {
+                $script:registerCalls++
+                if ($Xml) {
+                    $script:restoredTaskXml = $Xml
+                    return
+                }
+                throw 'simulated new task registration failure'
+            }
+
+            { Update-ProductionAutoDeployToolsUnderHeldLock -Config $config } |
+                Should -Throw '*simulated new task registration failure*'
+
+            Test-Path -LiteralPath $oldMarker | Should -BeTrue
+            (Get-Content -LiteralPath $oldMarker -Raw).TrimEnd() | Should -Be 'previous bundle'
+            $script:restoredTaskXml | Should -Be '<Task>previous task</Task>'
+            $script:registerCalls | Should -Be 2
+        }
+    }
+
+    It 'stops a partially registered first-install task before restoring the old bundle' {
+        InModuleScope Production.AutoDeploy {
+            $programDataRoot = Join-Path $TestDrive 'bootstrap-first-register-failure'
+            $tools = Join-Path $programDataRoot 'tools'
+            $config = [pscustomobject]@{
+                programDataRoot=$programDataRoot
+                autoDeployPollSeconds=60
+            }
+            New-Item -ItemType Directory -Path $tools -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $tools 'known-good.txt') -Value 'previous bundle'
+            $script:firstInstallTaskRegistered = $false
+            Mock Initialize-AutoDeployStatusStore {}
+            Mock Get-ScheduledTask {
+                if ($script:firstInstallTaskRegistered) {
+                    [pscustomobject]@{
+                        TaskName='ChristopherBellAutoDeploy'
+                        TaskPath='\'
+                        State='Ready'
+                    }
+                }
+            }
+            Mock Register-ScheduledTask {
+                $script:firstInstallTaskRegistered = $true
+                throw 'simulated first-install registration failure'
+            }
+            Mock Disable-ScheduledTask {}
+            Mock Stop-ScheduledTask {}
+            Mock Unregister-ScheduledTask {}
+
+            { Update-ProductionAutoDeployToolsUnderHeldLock -Config $config } |
+                Should -Throw '*simulated first-install registration failure*'
+
+            Test-Path -LiteralPath (Join-Path $tools 'known-good.txt') | Should -BeTrue
+            Should -Invoke Disable-ScheduledTask -Times 1
+            Should -Invoke Stop-ScheduledTask -Times 1
+            Should -Invoke Unregister-ScheduledTask -Times 1
+        }
+    }
+
+    It 'surfaces both registration and task cleanup failures during first-install recovery' {
+        InModuleScope Production.AutoDeploy {
+            $programDataRoot = Join-Path $TestDrive 'bootstrap-first-register-rollback-failure'
+            $config = [pscustomobject]@{
+                programDataRoot=$programDataRoot
+                autoDeployPollSeconds=60
+            }
+            $script:firstInstallTaskRegistered = $false
+            Mock Initialize-AutoDeployStatusStore {}
+            Mock Get-ScheduledTask {
+                if ($script:firstInstallTaskRegistered) {
+                    [pscustomobject]@{
+                        TaskName='ChristopherBellAutoDeploy'
+                        TaskPath='\'
+                        State='Ready'
+                    }
+                }
+            }
+            Mock Register-ScheduledTask {
+                $script:firstInstallTaskRegistered = $true
+                throw 'simulated first-install registration failure'
+            }
+            Mock Disable-ScheduledTask {}
+            Mock Stop-ScheduledTask {}
+            Mock Unregister-ScheduledTask { Write-Error 'simulated task cleanup failure' }
+
+            $caught = $null
+            try { Update-ProductionAutoDeployToolsUnderHeldLock -Config $config }
+            catch { $caught = $_.Exception }
+
+            $caught | Should -BeOfType [AggregateException]
+            $caught.InnerExceptions.Count | Should -Be 2
+            $caught.InnerExceptions[0].Message | Should -Be 'simulated first-install registration failure'
+            $caught.InnerExceptions[1].Message | Should -Be 'simulated task cleanup failure'
         }
     }
 
@@ -772,31 +939,43 @@ Describe 'automatic origin main deployment' {
                 [pscustomobject]@{ Lock=$deploymentLock }
             }
             Mock Initialize-AutoDeployStatusStore { $script:events.Add('initialize-status') }
+            Mock Export-ScheduledTask { '<Task>previous task</Task>' }
+            Mock Disable-ScheduledTask { $script:events.Add('disable') }
             Mock Stop-ScheduledTask { $script:events.Add('stop') }
-            Mock Get-ScheduledTask { [pscustomobject]@{ State='Ready' } }
+            Mock Enable-ScheduledTask { $script:events.Add('enable') }
+            Mock Get-ScheduledTask {
+                [pscustomobject]@{ TaskName='ChristopherBellAutoDeploy'; TaskPath='\'; State='Ready' }
+            }
             Mock Test-Path { $true }
             Mock Assert-ProductionPathNotReparse { $script:events.Add('reject-links') }
             Mock Assert-ProductionTreeNotReparse { $script:events.Add('reject-tree-links') }
-            Mock Remove-Item { $script:events.Add('remove') }
+            Mock Remove-Item { $script:events.Add('remove-backup') }
             Mock New-Item { $script:events.Add('create') }
             Mock Protect-ProductionPath { $script:events.Add('protect-root') }
             Mock Copy-Item { $script:events.Add('copy') }
             Mock Protect-ProductionTree { $script:events.Add('protect-tree') }
             Mock Assert-ProtectedProductionTree { $script:events.Add('verify-tree') }
+            Mock Move-ProductionAutoDeployToolsDirectory {
+                $script:events.Add('move')
+                $script:events.Add("move:$SourcePath`:$DestinationPath")
+            }
             Mock Register-ScheduledTask { $script:events.Add('register') }
             Mock Start-ScheduledTask { $script:events.Add('start') }
 
             Install-AutoDeployTask
 
-            $script:events.IndexOf('protect-root') | Should -BeLessThan $script:events.IndexOf('remove')
-            $script:events.IndexOf('initialize-status') | Should -BeLessThan $script:events.IndexOf('stop')
-            $script:events.IndexOf('stop') | Should -BeLessThan $script:events.IndexOf('remove')
-            $script:events.IndexOf('remove') | Should -BeLessThan $script:events.IndexOf('copy')
+            $script:events.IndexOf('initialize-status') | Should -BeLessThan $script:events.IndexOf('copy')
             $script:events.IndexOf('protect-tree') | Should -BeLessThan $script:events.IndexOf('verify-tree')
-            $script:events.IndexOf('verify-tree') | Should -BeLessThan $script:events.IndexOf('register')
+            $script:events.IndexOf('copy') | Should -BeLessThan $script:events.IndexOf('disable')
+            $script:events.IndexOf('verify-tree') | Should -BeLessThan $script:events.IndexOf('disable')
+            $script:events.IndexOf('disable') | Should -BeLessThan $script:events.IndexOf('stop')
+            $script:events.IndexOf('stop') | Should -BeLessThan $script:events.IndexOf('move')
+            $script:events.IndexOf('move') | Should -BeLessThan $script:events.IndexOf('register')
+            $script:events.IndexOf('register') | Should -BeLessThan $script:events.IndexOf('enable')
+            $script:events.IndexOf('enable') | Should -BeLessThan $script:events.IndexOf('unlock')
             $script:events.IndexOf('register') | Should -BeLessThan $script:events.IndexOf('unlock')
             $script:events.IndexOf('unlock') | Should -BeLessThan $script:events.IndexOf('start')
-            Should -Invoke Remove-Item -Times 1 -ParameterFilter { $LiteralPath -like '*\tools' -and $Recurse }
+            Should -Invoke Move-ProductionAutoDeployToolsDirectory -Times 2
             Should -Invoke Assert-ProtectedProductionTree -Times 1 -ParameterFilter { $Path -like '*\tools' }
         }
     }
