@@ -592,9 +592,17 @@ function Test-CandidateRelease {
     }
     Assert-ProductionCandidatePortUnused -Port ([int]$Config.candidatePort)
     $logsRoot = Join-Path $Config.programDataRoot 'logs'
-    Assert-ProtectedProductionPath -Path $logsRoot | Out-Null
-    $candidateLogPath = Join-Path $logsRoot ("candidate-{0}.out.log" -f [guid]::NewGuid().ToString('N'))
-    $candidateApplicationLogPath = Join-Path $logsRoot ("candidate-{0}.app.log" -f [guid]::NewGuid().ToString('N'))
+    Assert-ProductionPathNotReparse -Path $logsRoot | Out-Null
+    $candidateLogsRoot = Join-Path $logsRoot 'candidate'
+    if (Test-Path -LiteralPath $candidateLogsRoot -PathType Container) {
+        Assert-ProtectedProductionPath -Path $candidateLogsRoot | Out-Null
+    } else {
+        New-Item -ItemType Directory -Path $candidateLogsRoot -ErrorAction Stop | Out-Null
+        Protect-ProductionPath -Path $candidateLogsRoot | Out-Null
+    }
+    Assert-ProtectedProductionPath -Path $candidateLogsRoot | Out-Null
+    $candidateLogPath = Join-Path $candidateLogsRoot ("candidate-{0}.out.log" -f [guid]::NewGuid().ToString('N'))
+    $candidateApplicationLogPath = Join-Path $candidateLogsRoot ("candidate-{0}.app.log" -f [guid]::NewGuid().ToString('N'))
     New-Item -ItemType File -Path $candidateLogPath -ErrorAction Stop | Out-Null
     $environment.LOGGING_FILE_NAME = $candidateApplicationLogPath
     $environment.LOGGING_LOGBACK_ROLLINGPOLICY_MAX_FILE_SIZE = '64KB'
@@ -636,7 +644,7 @@ function Test-CandidateRelease {
         if ($candidateValidated) {
             Remove-Item -LiteralPath $candidateLogPath -Force -ErrorAction SilentlyContinue
             $applicationLogPrefix = [IO.Path]::GetFileName($candidateApplicationLogPath)
-            Get-ChildItem -LiteralPath $logsRoot -File -Filter "$applicationLogPrefix*" `
+            Get-ChildItem -LiteralPath $candidateLogsRoot -File -Filter "$applicationLogPrefix*" `
                 -ErrorAction SilentlyContinue |
                 Remove-Item -Force -ErrorAction SilentlyContinue
         }
