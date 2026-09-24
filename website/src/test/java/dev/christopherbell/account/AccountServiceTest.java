@@ -74,6 +74,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Sort;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -449,6 +450,62 @@ public class AccountServiceTest {
     assertEquals(3, profile.postCount());
     assertEquals(5, profile.replyCount());
     assertEquals(2, profile.followerCount());
+    org.junit.jupiter.api.Assertions.assertFalse(profile.self());
+    org.junit.jupiter.api.Assertions.assertFalse(profile.followedByMe());
+  }
+
+  @Test
+  @DisplayName("Public profile treats a missing viewer account as anonymous")
+  public void testGetPublicProfile_whenViewerAccountIsMissing_usesAnonymousState() throws Exception {
+    var target = Account.builder()
+        .id("target")
+        .username("target")
+        .role(Role.USER)
+        .build();
+    SecurityContextHolder.getContext().setAuthentication(
+        new UsernamePasswordAuthenticationToken("missing-viewer", "token", List.of()));
+
+    try {
+      when(accountRepository.findByUsernameAndStatus(eq("target"), eq(AccountStatus.ACTIVE)))
+          .thenReturn(Optional.of(target));
+
+      var profile = accountService.getPublicProfile("target");
+
+      org.junit.jupiter.api.Assertions.assertFalse(profile.self());
+      org.junit.jupiter.api.Assertions.assertFalse(profile.followedByMe());
+      verify(accountRepository).findById(eq("missing-viewer"));
+    } finally {
+      SecurityContextHolder.clearContext();
+    }
+  }
+
+  @Test
+  @DisplayName("Public profile propagates authenticated viewer storage failures")
+  public void testGetPublicProfile_whenViewerLookupFails_propagatesStorageFailure() {
+    var target = Account.builder()
+        .id("target")
+        .username("target")
+        .role(Role.USER)
+        .build();
+    var failure = new DataAccessResourceFailureException("viewer lookup failed");
+    SecurityContextHolder.getContext().setAuthentication(
+        new UsernamePasswordAuthenticationToken("viewer", "token", List.of()));
+
+    try {
+      when(accountRepository.findByUsernameAndStatus(eq("target"), eq(AccountStatus.ACTIVE)))
+          .thenReturn(Optional.of(target));
+      when(accountRepository.findById(eq("viewer"))).thenThrow(failure);
+
+      var actual = assertThrows(
+          DataAccessResourceFailureException.class,
+          () -> accountService.getPublicProfile("target"));
+
+      assertSame(failure, actual);
+      verify(accountRepository).findByUsernameAndStatus(eq("target"), eq(AccountStatus.ACTIVE));
+      verify(accountRepository).findById(eq("viewer"));
+    } finally {
+      SecurityContextHolder.clearContext();
+    }
   }
 
   @Test
