@@ -451,6 +451,29 @@ Describe 'native PostgreSQL production operations' {
         $script:serviceLookupCount | Should -Be 2
     }
 
+    It 'surfaces PostgreSQL service identity query failures before installer effects' {
+        $events = [Collections.Generic.List[string]]::new()
+        # Model CIM's common ErrorAction behavior for a non-terminating query error.
+        Mock Get-CimInstance {
+            throw 'synthetic PostgreSQL service identity query failure'
+        } -ParameterFilter { $PesterBoundParameters.ErrorAction -eq 'Stop' } `
+            -ModuleName Production.PostgreSql
+        Mock Get-CimInstance {
+            Write-Error 'synthetic PostgreSQL service identity query failure' `
+                -ErrorAction Continue
+        } -ModuleName Production.PostgreSql
+
+        {
+            Install-ProductionPostgreSql -Config $config `
+                -ProcessAction { param($FilePath,$Arguments,$Environment) $events.Add('process') } `
+                -PrepareLegacyAction { $events.Add('legacy-prepare'); 'legacy-state' } `
+                -RollbackLegacyAction { param($state) $events.Add('legacy-restore') }
+        } | Should -Throw '*synthetic PostgreSQL service identity query failure*'
+
+        $events | Should -BeNullOrEmpty
+        Should -Invoke Get-CimInstance -Times 1 -Exactly -ModuleName Production.PostgreSql
+    }
+
     It 'rejects a mismatched registered package and restores the legacy service state' {
         $events = [Collections.Generic.List[string]]::new()
         $wrongPackage = [pscustomobject]@{
