@@ -92,11 +92,31 @@ class ProductionSettingsApplicationContextInitializerTest {
   @Test
   void productionAcceptsMongoWithoutBackendSelector() {
     var context = context("prod", Map.of(
-        "SPRING_MONGODB_URI", "mongodb://127.0.0.1:27017",
+        "SPRING_MONGODB_URI", "mongodb://127.0.0.1:27017/christopherbell",
         "APP_JWT_SECRET", VALID_JWT,
         "APP_MAIL_ENABLED", "false"));
 
     assertThatCode(() -> initializer.initialize(context)).doesNotThrowAnyException();
+  }
+
+  @Test
+  void productionRejectsMongoUriWithoutDatabaseName() {
+    var context = validProductionContext(Map.of(
+        "SPRING_MONGODB_URI", "mongodb://127.0.0.1:27017"));
+
+    assertThatThrownBy(() -> initializer.initialize(context))
+        .hasMessageContaining("SPRING_MONGODB_URI")
+        .hasMessageContaining("database name");
+  }
+
+  @Test
+  void productionRejectsMongoUriWithEmptyDatabaseName() {
+    var context = validProductionContext(Map.of(
+        "SPRING_MONGODB_URI", "mongodb://127.0.0.1:27017/"));
+
+    assertThatThrownBy(() -> initializer.initialize(context))
+        .hasMessageContaining("SPRING_MONGODB_URI")
+        .hasMessageContaining("database name");
   }
 
   @Test
@@ -110,7 +130,7 @@ class ProductionSettingsApplicationContextInitializerTest {
 
   private GenericApplicationContext validProductionContext(Map<String, String> overrides) {
     var values = new LinkedHashMap<String, String>();
-    values.put("SPRING_MONGODB_URI", "mongodb://127.0.0.1:27017");
+    values.put("SPRING_MONGODB_URI", "mongodb://127.0.0.1:27017/christopherbell");
     values.put("APP_JWT_SECRET", VALID_JWT);
     values.put("APP_MAIL_ENABLED", "false");
     values.putAll(overrides);
