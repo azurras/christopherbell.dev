@@ -1397,17 +1397,42 @@ function Install-ProductionRuntime {
         -CloudflareTokenPath $CloudflareTokenPath
 }
 
+function Invoke-ProductionWinSwServiceUninstall {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$BinaryPath)
+
+    & $BinaryPath uninstall | Out-Null
+    return $LASTEXITCODE
+}
+
 function Uninstall-ProductionRuntime {
     [CmdletBinding()]
     param([switch]$WhatIf)
     Assert-Administrator
     $binary = 'C:\ProgramData\christopherbell.dev\service\ChristopherBellDev.exe'
     if ($WhatIf) { Write-Output 'Would remove only the ChristopherBellDev service; data and MongoDB remain.'; return }
-    if (Get-Service ChristopherBellDev -ErrorAction SilentlyContinue) {
-        Stop-Service ChristopherBellDev -ErrorAction SilentlyContinue
-        & $binary uninstall | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'WinSW service removal failed.' }
+
+    $service = Get-ProductionWebsiteServiceOrNull
+    if (-not $service) {
+        Write-Output 'The ChristopherBellDev service is not installed.'
+        return
     }
+    if (-not (Test-Path -LiteralPath $binary -PathType Leaf -ErrorAction Stop)) {
+        throw 'WinSW service executable is unavailable; the website service was not changed.'
+    }
+
+    if ([string]$service.Status -cne 'Stopped') {
+        Stop-ProductionWebsiteServiceWithoutPort
+    }
+
+    $exitCode = Invoke-ProductionWinSwServiceUninstall -BinaryPath $binary
+    if ($exitCode -ne 0) {
+        throw "WinSW service removal failed with exit code $exitCode."
+    }
+    if (Get-ProductionWebsiteServiceOrNull) {
+        throw 'WinSW reported success, but the ChristopherBellDev service remains registered.'
+    }
+    Write-Output 'Removed the ChristopherBellDev service.'
 }
 
 Export-ModuleMember -Function Assert-Administrator,New-ProductionDirectories,Install-ConfigurationExamples,Protect-ProductionSecrets,Assert-CloudflaredExecutable,Get-ServiceExecutablePath,Assert-CloudflaredServiceBinding,Install-CloudflaredService,Install-WinSwBinary,Get-ProductionWinSwSha256,Assert-ProductionWebsiteServiceBoundary,Install-WebsiteService,Install-ProductionRuntime,Uninstall-ProductionRuntime

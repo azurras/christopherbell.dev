@@ -478,6 +478,153 @@ Describe 'native Windows service installer' {
     }
 }
 
+Describe 'safe production runtime uninstall' {
+    It 'returns the exact exit code from the WinSW process' {
+        InModuleScope Production.Install {
+            $binary = Join-Path $TestDrive 'winsw-exit-code.cmd'
+            '@echo off' | Set-Content -LiteralPath $binary -Encoding Ascii
+            '@exit /b 23' | Add-Content -LiteralPath $binary -Encoding Ascii
+
+            Invoke-ProductionWinSwServiceUninstall -BinaryPath $binary | Should -Be 23
+        }
+    }
+
+    It 'surfaces service-query failures instead of treating them as an absent service' {
+        InModuleScope Production.Install {
+            Mock Assert-Administrator {}
+            Mock Get-Service { Write-Error 'simulated service query failure' } `
+                -ParameterFilter { $Name -eq 'ChristopherBellDev' }
+            Mock Stop-Service { throw 'service stop should not be called' }
+
+            { Uninstall-ProductionRuntime } | Should -Throw '*simulated service query failure*'
+            Should -Invoke Stop-Service -Times 0 -Exactly
+        }
+    }
+
+    It 'surfaces service-stop failures before invoking WinSW' {
+        InModuleScope Production.Install {
+            Mock Assert-Administrator {}
+            Mock Get-Service {
+                [pscustomobject]@{ Name='ChristopherBellDev'; Status='Running' }
+            } -ParameterFilter { $Name -eq 'ChristopherBellDev' }
+            Mock Test-Path { $true } -ParameterFilter {
+                $LiteralPath -eq 'C:\ProgramData\christopherbell.dev\service\ChristopherBellDev.exe'
+            }
+            Mock Stop-Service { Write-Error 'simulated service stop failure' } `
+                -ParameterFilter { $Name -eq 'ChristopherBellDev' }
+
+            { Uninstall-ProductionRuntime } | Should -Throw '*simulated service stop failure*'
+        }
+    }
+
+    It 'stops a running service, uninstalls it, and verifies it is absent' {
+        InModuleScope Production.Install {
+            $script:serviceExists = $true
+            $script:service = [pscustomobject]@{ Name='ChristopherBellDev'; Status='Running' }
+            $script:events = [Collections.Generic.List[string]]::new()
+            Mock Assert-Administrator {}
+            Mock Get-ProductionWebsiteServiceOrNull {
+                [void]$script:events.Add('query')
+                if ($script:serviceExists) { return $script:service }
+                return $null
+            }
+            Mock Test-Path {
+                [void]$script:events.Add('binary')
+                $true
+            } -ParameterFilter {
+                $LiteralPath -eq 'C:\ProgramData\christopherbell.dev\service\ChristopherBellDev.exe'
+            }
+            Mock Stop-ProductionWebsiteServiceWithoutPort {
+                [void]$script:events.Add('stop')
+                $script:service.Status = 'Stopped'
+            }
+            Mock Invoke-ProductionWinSwServiceUninstall {
+                [void]$script:events.Add('uninstall')
+                $script:serviceExists = $false
+                0
+            }
+
+            Uninstall-ProductionRuntime
+
+            $script:events.ToArray() | Should -Be @(
+                'query', 'binary', 'stop', 'uninstall', 'query')
+            Should -Invoke Invoke-ProductionWinSwServiceUninstall -Times 1 -Exactly `
+                -ParameterFilter { $BinaryPath -eq 'C:\ProgramData\christopherbell.dev\service\ChristopherBellDev.exe' }
+        }
+    }
+
+    It 'treats an absent service as an idempotent no-op' {
+        InModuleScope Production.Install {
+            Mock Assert-Administrator {}
+            Mock Get-ProductionWebsiteServiceOrNull { $null }
+            Mock Test-Path { throw 'binary should not be checked' }
+            Mock Stop-ProductionWebsiteServiceWithoutPort { throw 'service should not be stopped' }
+            Mock Invoke-ProductionWinSwServiceUninstall { throw 'WinSW should not run' }
+
+            { Uninstall-ProductionRuntime } | Should -Not -Throw
+            Should -Invoke Test-Path -Times 0 -Exactly
+            Should -Invoke Stop-ProductionWebsiteServiceWithoutPort -Times 0 -Exactly
+            Should -Invoke Invoke-ProductionWinSwServiceUninstall -Times 0 -Exactly
+        }
+    }
+
+    It 'does not stop the service when the WinSW binary is unavailable' {
+        InModuleScope Production.Install {
+            Mock Assert-Administrator {}
+            Mock Get-ProductionWebsiteServiceOrNull {
+                [pscustomobject]@{ Name='ChristopherBellDev'; Status='Running' }
+            }
+            Mock Test-Path { $false }
+            Mock Stop-ProductionWebsiteServiceWithoutPort { throw 'service should not be stopped' }
+
+            { Uninstall-ProductionRuntime } | Should -Throw '*executable is unavailable*'
+            Should -Invoke Stop-ProductionWebsiteServiceWithoutPort -Times 0 -Exactly
+        }
+    }
+
+    It 'surfaces a nonzero WinSW exit code without claiming removal' {
+        InModuleScope Production.Install {
+            Mock Assert-Administrator {}
+            Mock Get-ProductionWebsiteServiceOrNull {
+                [pscustomobject]@{ Name='ChristopherBellDev'; Status='Stopped' }
+            }
+            Mock Test-Path { $true }
+            Mock Invoke-ProductionWinSwServiceUninstall { 5 }
+
+            { Uninstall-ProductionRuntime } | Should -Throw '*exit code 5*'
+            Should -Invoke Get-ProductionWebsiteServiceOrNull -Times 1 -Exactly
+        }
+    }
+
+    It 'rejects a zero WinSW exit code when the service remains registered' {
+        InModuleScope Production.Install {
+            Mock Assert-Administrator {}
+            Mock Get-ProductionWebsiteServiceOrNull {
+                [pscustomobject]@{ Name='ChristopherBellDev'; Status='Stopped' }
+            }
+            Mock Test-Path { $true }
+            Mock Invoke-ProductionWinSwServiceUninstall { 0 }
+
+            { Uninstall-ProductionRuntime } | Should -Throw '*service remains registered*'
+            Should -Invoke Get-ProductionWebsiteServiceOrNull -Times 2 -Exactly
+        }
+    }
+
+    It 'keeps WhatIf read-only after the administrator check' {
+        InModuleScope Production.Install {
+            Mock Assert-Administrator {}
+            Mock Get-ProductionWebsiteServiceOrNull { throw 'service lookup should not run' }
+            Mock Invoke-ProductionWinSwServiceUninstall { throw 'WinSW should not run' }
+
+            Uninstall-ProductionRuntime -WhatIf |
+                Should -Be 'Would remove only the ChristopherBellDev service; data and MongoDB remain.'
+            Should -Invoke Assert-Administrator -Times 1 -Exactly
+            Should -Invoke Get-ProductionWebsiteServiceOrNull -Times 0 -Exactly
+            Should -Invoke Invoke-ProductionWinSwServiceUninstall -Times 0 -Exactly
+        }
+    }
+}
+
 Describe 'production install root and lock bootstrap' {
     InModuleScope Production.Install {
         BeforeEach {
