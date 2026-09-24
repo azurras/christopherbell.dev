@@ -285,7 +285,12 @@ published a result in the last three minutes, and `UNAVAILABLE` means no valid
 readable record exists. The status includes the remote and active revisions,
 the last attempt, retry time, failure category, and the installed tool refresh
 result with its source commit and verified tree hash. Detailed exception text
-and secrets remain in protected diagnostics.
+and secrets remain in protected diagnostics. `pollerState` reports Task
+Scheduler registration independently: `NOT_REGISTERED` means the root poller
+task is absent, while `READY`, `RUNNING`, `DISABLED`, or `QUEUED` describe its
+safe scheduler state. `UNKNOWN` means the task could not be queried or returned
+an unrecognized state; `pollerReason` gives only a stable sanitized reason.
+Scheduler query failures do not hide an otherwise valid status record.
 
 If the poller cannot read its protected configuration or validate the fixed
 production root, it best-effort replaces `CHECKING` with `CHECK_FAILED` using
