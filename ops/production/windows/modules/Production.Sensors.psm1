@@ -42,7 +42,7 @@ function Get-PawnIoInstallation {
     foreach ($path in $script:PawnIoRegistryPaths) {
         if (Test-Path -LiteralPath $path) {
             $entry = Get-ItemProperty -LiteralPath $path
-            $driver = Get-CimInstance Win32_SystemDriver -Filter "Name='PawnIO'" -ErrorAction SilentlyContinue
+            $driver = Get-CimInstance Win32_SystemDriver -Filter "Name='PawnIO'" -ErrorAction Stop
             $driverPath = if ($driver) {
                 [Environment]::ExpandEnvironmentVariables([string]$driver.PathName).Trim('"')
             } else { $null }
@@ -203,7 +203,7 @@ function Get-ProductionCpuTemperature {
         ConvertFrom-Json
     $listeners = @(
         Get-NetTCPConnection -LocalPort ([int]$config.productionPort) `
-            -State Listen -ErrorAction SilentlyContinue
+            -State Listen -ErrorAction Stop
     )
     if ($listeners.Count -ne 1) {
         throw "Expected exactly one production listener for CPU sensor ownership; found $($listeners.Count)."
