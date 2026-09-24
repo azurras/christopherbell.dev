@@ -411,6 +411,51 @@ function Publish-AutoDeployStatus {
     }
 }
 
+function Get-AutoDeployPollerStatus {
+    try {
+        $task = Get-ProductionAutoDeployTask
+        if (-not $task) {
+            return [pscustomobject]@{
+                pollerState = 'NOT_REGISTERED'
+                pollerReason = 'TASK_NOT_REGISTERED'
+            }
+        }
+        $state = ([string]$task.State).ToUpperInvariant()
+        if ($state -notin @('READY','RUNNING','DISABLED','QUEUED')) {
+            return [pscustomobject]@{
+                pollerState = 'UNKNOWN'
+                pollerReason = 'UNRECOGNIZED_STATE'
+            }
+        }
+        return [pscustomobject]@{
+            pollerState = $state
+            pollerReason = 'NONE'
+        }
+    } catch {
+        $reason = if ($_.Exception -is [UnauthorizedAccessException]) {
+            'ACCESS_DENIED'
+        } else {
+            'QUERY_FAILED'
+        }
+        return [pscustomobject]@{
+            pollerState = 'UNKNOWN'
+            pollerReason = $reason
+        }
+    }
+}
+
+function Add-AutoDeployPollerStatus {
+    param(
+        [Parameter(Mandatory)]$Status,
+        [Parameter(Mandatory)]$PollerStatus
+    )
+    Add-Member -InputObject $Status -NotePropertyMembers @{
+        pollerState = [string]$PollerStatus.pollerState
+        pollerReason = [string]$PollerStatus.pollerReason
+    } -Force
+    return $Status
+}
+
 function Get-AutoDeployStatus {
     [CmdletBinding()]
     param(
@@ -419,13 +464,18 @@ function Get-AutoDeployStatus {
     )
 
     $path = Join-Path $StatusRoot 'auto-deploy.json'
+    $pollerStatus = Get-AutoDeployPollerStatus
     try {
         if (-not (Test-Path -LiteralPath $StatusRoot -PathType Container -ErrorAction Stop)) {
-            return New-UnavailableAutoDeployStatus -Reason 'STORE_NOT_INITIALIZED'
+            return Add-AutoDeployPollerStatus `
+                -Status (New-UnavailableAutoDeployStatus -Reason 'STORE_NOT_INITIALIZED') `
+                -PollerStatus $pollerStatus
         }
         Assert-AutoDeployStatusDirectory -Path $StatusRoot
         if (-not (Test-Path -LiteralPath $path -PathType Leaf -ErrorAction Stop)) {
-            return New-UnavailableAutoDeployStatus -Reason 'STATUS_NOT_PUBLISHED'
+            return Add-AutoDeployPollerStatus `
+                -Status (New-UnavailableAutoDeployStatus -Reason 'STATUS_NOT_PUBLISHED') `
+                -PollerStatus $pollerStatus
         }
         Assert-AutoDeployStatusFile -Path $path
         $record = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
@@ -457,10 +507,12 @@ function Get-AutoDeployStatus {
         }
         $age = $Now.ToUniversalTime() - $updatedAt.UtcDateTime
         if ($age.TotalSeconds -lt 0) {
-            return New-UnavailableAutoDeployStatus -Reason 'FUTURE_TIMESTAMP'
+            return Add-AutoDeployPollerStatus `
+                -Status (New-UnavailableAutoDeployStatus -Reason 'FUTURE_TIMESTAMP') `
+                -PollerStatus $pollerStatus
         }
         $freshness = if ($age.TotalSeconds -gt 180) { 'STALE' } else { 'FRESH' }
-        return [pscustomobject]@{
+        $status = [pscustomobject]@{
             available = $true
             freshness = $freshness
             status = [string]$record.status
@@ -480,9 +532,12 @@ function Get-AutoDeployStatus {
             failureCategory = [string]$record.failureCategory
             message = Get-AutoDeployStatusMessage -Outcome ([string]$record.status)
         }
+        return Add-AutoDeployPollerStatus -Status $status -PollerStatus $pollerStatus
     } catch {
         $reason = if ($_.Exception -is [UnauthorizedAccessException]) { 'ACCESS_DENIED' } else { 'INVALID' }
-        return New-UnavailableAutoDeployStatus -Reason $reason
+        return Add-AutoDeployPollerStatus `
+            -Status (New-UnavailableAutoDeployStatus -Reason $reason) `
+            -PollerStatus $pollerStatus
     }
 }
 

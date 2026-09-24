@@ -347,6 +347,7 @@ Describe 'automatic origin main deployment' {
     It 'reads operator status without loading protected deployment configuration' {
         Mock Read-ProductionConfig { throw 'protected configuration was accessed' } `
             -ModuleName Production.AutoDeploy
+        Mock Get-ProductionAutoDeployTask { $null } -ModuleName Production.AutoDeploy
 
         { Get-AutoDeployStatus } | Should -Not -Throw
 
@@ -392,6 +393,7 @@ Describe 'automatic origin main deployment' {
     It 'distinguishes a missing status store from a missing status record' {
         $statusRoot = Join-Path $TestDrive 'missing-status-store'
         Mock Assert-AutoDeployStatusDirectory {} -ModuleName Production.AutoDeploy
+        Mock Get-ProductionAutoDeployTask { $null } -ModuleName Production.AutoDeploy
 
         $missingStore = Get-AutoDeployStatus -StatusRoot $statusRoot
         New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
@@ -399,6 +401,86 @@ Describe 'automatic origin main deployment' {
 
         $missingStore.reason | Should -Be 'STORE_NOT_INITIALIZED'
         $missingRecord.reason | Should -Be 'STATUS_NOT_PUBLISHED'
+        $missingStore.pollerState | Should -Be 'NOT_REGISTERED'
+        $missingRecord.pollerState | Should -Be 'NOT_REGISTERED'
+    }
+
+    It 'reports a missing poller independently of a fresh backing-off status record' {
+        InModuleScope Production.AutoDeploy {
+            $statusRoot = Join-Path $TestDrive 'backing-off-without-poller'
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            $state = New-AutoDeployState
+            $state.remoteSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+            $state.failedSha = $state.remoteSha
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+            Mock Get-ProductionAutoDeployTask { $null }
+            Publish-AutoDeployStatus -Outcome 'BACKING_OFF' -State $state `
+                -StatusRoot $statusRoot -RetryAt ([datetime]::UtcNow.AddMinutes(10).ToString('o'))
+
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+
+            $result.available | Should -BeTrue
+            $result.freshness | Should -Be 'FRESH'
+            $result.status | Should -Be 'BACKING_OFF'
+            $result.remoteSha | Should -Be $state.remoteSha
+            $result.pollerState | Should -Be 'NOT_REGISTERED'
+            $result.pollerReason | Should -Be 'TASK_NOT_REGISTERED'
+        }
+    }
+
+    It 'reports safe registered scheduler states without exposing the task action' -TestCases @(
+        @{ SchedulerState='Ready'; ExpectedState='READY' },
+        @{ SchedulerState='Running'; ExpectedState='RUNNING' },
+        @{ SchedulerState='Disabled'; ExpectedState='DISABLED' }
+    ) {
+        param($SchedulerState,$ExpectedState)
+        InModuleScope Production.AutoDeploy -Parameters @{ SchedulerState=$SchedulerState; ExpectedState=$ExpectedState } {
+            $statusRoot = Join-Path $TestDrive ('registered-' + $SchedulerState)
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+            Mock Get-ProductionAutoDeployTask {
+                [pscustomobject]@{
+                    State = $SchedulerState
+                    Actions = @([pscustomobject]@{ Execute='C:\private\pwsh.exe'; Arguments='-File secret.ps1' })
+                }
+            }
+            Publish-AutoDeployStatus -Outcome 'UP_TO_DATE' -State (New-AutoDeployState) `
+                -StatusRoot $statusRoot
+
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+            $json = $result | ConvertTo-Json -Depth 10
+
+            $result.available | Should -BeTrue
+            $result.pollerState | Should -Be $ExpectedState
+            $result.pollerReason | Should -Be 'NONE'
+            $json | Should -Not -Match 'private|secret|Arguments|Actions|pwsh.exe'
+        }
+    }
+
+    It 'keeps valid status available and sanitizes scheduler query failures' {
+        InModuleScope Production.AutoDeploy {
+            $statusRoot = Join-Path $TestDrive 'scheduler-query-failure'
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+            Mock Get-ProductionAutoDeployTask {
+                throw [UnauthorizedAccessException]::new('private task path and account SID')
+            }
+            Publish-AutoDeployStatus -Outcome 'UP_TO_DATE' -State (New-AutoDeployState) `
+                -StatusRoot $statusRoot
+
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+            $json = $result | ConvertTo-Json -Depth 10
+
+            $result.available | Should -BeTrue
+            $result.status | Should -Be 'UP_TO_DATE'
+            $result.freshness | Should -Be 'FRESH'
+            $result.pollerState | Should -Be 'UNKNOWN'
+            $result.pollerReason | Should -Be 'ACCESS_DENIED'
+            $json | Should -Not -Match 'private task path|account SID'
+        }
     }
 
     It 'keeps the production CLI free of unapproved-verb discovery warnings' {
