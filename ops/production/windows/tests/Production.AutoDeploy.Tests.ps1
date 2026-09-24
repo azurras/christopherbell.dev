@@ -79,6 +79,81 @@ Describe 'automatic origin main deployment' {
         }
     }
 
+    It 'publishes a terminal status when protected configuration cannot be read' {
+        InModuleScope Production.AutoDeploy {
+            $script:publishedOutcomes = [Collections.Generic.List[object]]::new()
+            Mock Initialize-AutoDeployStatusStore { Join-Path $TestDrive 'status' }
+            Mock Publish-AutoDeployStatusBestEffort {
+                $script:publishedOutcomes.Add([pscustomobject]@{
+                    Outcome=$Outcome
+                    FailureCategory=$FailureCategory
+                })
+                return $true
+            }
+            Mock Read-ProductionConfig { throw 'simulated protected config read failure' }
+            Mock Get-RemoteMainSha { throw 'remote must not be read' }
+            Mock Invoke-AutoDeployOnce { throw 'deployment must not run' }
+
+            $caught = $null
+            try { Start-AutoDeployLoop }
+            catch { $caught = $_.Exception }
+
+            $caught.Message | Should -Be 'simulated protected config read failure'
+            $script:publishedOutcomes[-1].Outcome | Should -Be 'CHECK_FAILED'
+            $script:publishedOutcomes[-1].FailureCategory | Should -Be 'PROTECTED_PRECONDITION'
+            Should -Invoke Get-RemoteMainSha -Times 0 -ModuleName Production.AutoDeploy
+            Should -Invoke Invoke-AutoDeployOnce -Times 0 -ModuleName Production.AutoDeploy
+        }
+    }
+
+    It 'publishes a terminal status when the fixed root boundary is rejected' {
+        InModuleScope Production.AutoDeploy {
+            $script:publishedOutcomes = [Collections.Generic.List[object]]::new()
+            $config = [pscustomobject]@{ programDataRoot=$TestDrive }
+            Mock Initialize-AutoDeployStatusStore { Join-Path $TestDrive 'status' }
+            Mock Publish-AutoDeployStatusBestEffort {
+                $script:publishedOutcomes.Add([pscustomobject]@{
+                    Outcome=$Outcome
+                    FailureCategory=$FailureCategory
+                })
+                return $true
+            }
+            Mock Read-ProductionConfig { $config }
+            Mock Assert-ProductionFixedRootBoundary { throw 'simulated fixed root boundary failure' }
+            Mock Get-RemoteMainSha { throw 'remote must not be read' }
+            Mock Invoke-AutoDeployOnce { throw 'deployment must not run' }
+
+            $caught = $null
+            try { Start-AutoDeployLoop }
+            catch { $caught = $_.Exception }
+
+            $caught.Message | Should -Be 'simulated fixed root boundary failure'
+            $script:publishedOutcomes[-1].Outcome | Should -Be 'CHECK_FAILED'
+            $script:publishedOutcomes[-1].FailureCategory | Should -Be 'PROTECTED_PRECONDITION'
+            Should -Invoke Get-RemoteMainSha -Times 0 -ModuleName Production.AutoDeploy
+            Should -Invoke Invoke-AutoDeployOnce -Times 0 -ModuleName Production.AutoDeploy
+        }
+    }
+
+    It 'preserves the configuration failure when terminal status publication fails' {
+        InModuleScope Production.AutoDeploy {
+            $script:statusPublicationAttempts = [Collections.Generic.List[string]]::new()
+            Mock Initialize-AutoDeployStatusStore { Join-Path $TestDrive 'status' }
+            Mock Publish-AutoDeployStatus {
+                $script:statusPublicationAttempts.Add($Outcome)
+                throw 'simulated status store write failure'
+            }
+            Mock Read-ProductionConfig { throw 'simulated protected config read failure' }
+
+            $caught = $null
+            try { Start-AutoDeployLoop }
+            catch { $caught = $_.Exception }
+
+            $caught.Message | Should -Be 'simulated protected config read failure'
+            $script:statusPublicationAttempts | Should -Contain 'CHECK_FAILED'
+        }
+    }
+
     It 'refuses automatic deploy before remote access while legacy reconciliation is required' {
         $script:publishedOutcome = $null
         Mock Read-ProductionMusicSchemaDirection {

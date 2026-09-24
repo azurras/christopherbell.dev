@@ -287,6 +287,11 @@ the last attempt, retry time, failure category, and the installed tool refresh
 result with its source commit and verified tree hash. Detailed exception text
 and secrets remain in protected diagnostics.
 
+If the poller cannot read its protected configuration or validate the fixed
+production root, it best-effort replaces `CHECKING` with `CHECK_FAILED` using
+only the static operator status store. It does not use paths from invalid
+configuration or write protected error logs until the root boundary is valid.
+
 After the first `auto-install`, the SYSTEM poller refreshes its deployment tool
 bundle from the exact fetched `origin/main` commit. Each bundle is immutable
 and protected; the scheduled task switches to it only after the complete copy
