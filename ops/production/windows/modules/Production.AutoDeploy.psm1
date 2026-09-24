@@ -1,6 +1,9 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:FixedProductionRoot = 'C:\ProgramData\christopherbell.dev'
+
+$script:autoDeployStatusWarningEmitted = $false
+
 function New-AutoDeployState {
     [pscustomobject][ordered]@{
         lastCheckedAt=$null
@@ -331,6 +334,21 @@ function Publish-AutoDeployStatusBestEffort {
         Publish-AutoDeployStatus @arguments
         return $true
     } catch {
+        if (-not $script:autoDeployStatusWarningEmitted) {
+            $script:autoDeployStatusWarningEmitted = $true
+            $category = if ($_.Exception -is [UnauthorizedAccessException]) {
+                'ACCESS_DENIED'
+            } else {
+                'WRITE_FAILED'
+            }
+            try {
+                $warningMessage = 'Automatic deployment status could not be published ({0}); ' -f $category
+                $warningMessage += 'operator-visible status may be stale.'
+                Write-Warning $warningMessage
+            } catch {
+                # Warning preferences must not replace the deployment result.
+            }
+        }
         return $false
     }
 }
@@ -787,6 +805,7 @@ function Update-AutoDeployToolsFromOriginMain {
 }
 
 function Start-AutoDeployLoop {
+    $script:autoDeployStatusWarningEmitted = $false
     $statusRoot = $null
     $state = New-AutoDeployState
     try {
