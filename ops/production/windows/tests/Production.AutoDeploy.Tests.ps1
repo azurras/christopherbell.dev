@@ -996,6 +996,8 @@ Describe 'automatic deployment task removal' {
     It 'treats an absent task as an idempotent no-op' {
         InModuleScope Production.AutoDeploy {
             Mock Assert-Administrator {}
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' } }
+            Mock Enter-ProductionFixedRootDeploymentLock { [pscustomobject]@{ Lock=[IO.MemoryStream]::new() } }
             Mock Get-ProductionAutoDeployTask { $null }
             Mock Disable-ScheduledTask { throw 'disable should not be called' }
             Mock Stop-ProductionAutoDeployTask { throw 'stop should not be called' }
@@ -1013,7 +1015,16 @@ Describe 'automatic deployment task removal' {
             $script:task = [pscustomobject]@{ State='Running' }
             $script:events = [Collections.Generic.List[string]]::new()
             Mock Assert-Administrator {}
-            Mock Get-ProductionAutoDeployTask { $script:task }
+            $script:lock = [IO.MemoryStream]::new()
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' } }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                $script:events.Add('lock')
+                [pscustomobject]@{ Lock=$script:lock }
+            }
+            Mock Get-ProductionAutoDeployTask {
+                $script:events.Add('lookup')
+                $script:task
+            }
             Mock Disable-ScheduledTask {
                 $script:events.Add('disable')
                 $script:task.State = 'Disabled'
@@ -1026,7 +1037,9 @@ Describe 'automatic deployment task removal' {
 
             Remove-AutoDeployTask
 
-            $script:events.ToArray() | Should -Be @('disable', 'stop', 'unregister')
+            $script:events.ToArray() | Should -Be @(
+                'lock', 'lookup', 'disable', 'lookup', 'stop', 'unregister', 'lookup')
+            $script:lock.CanRead | Should -BeFalse
             Should -Invoke Get-ProductionAutoDeployTask -Times 3 -Exactly
         }
     }
@@ -1035,6 +1048,8 @@ Describe 'automatic deployment task removal' {
         InModuleScope Production.AutoDeploy {
             $script:task = [pscustomobject]@{ State='Disabled' }
             Mock Assert-Administrator {}
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' } }
+            Mock Enter-ProductionFixedRootDeploymentLock { [pscustomobject]@{ Lock=[IO.MemoryStream]::new() } }
             Mock Get-ProductionAutoDeployTask {
                 $currentTask = $script:task
                 $script:task = $null
@@ -1056,6 +1071,9 @@ Describe 'automatic deployment task removal' {
         InModuleScope Production.AutoDeploy {
             $script:task = [pscustomobject]@{ State='Running' }
             Mock Assert-Administrator {}
+            $script:lock = [IO.MemoryStream]::new()
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' } }
+            Mock Enter-ProductionFixedRootDeploymentLock { [pscustomobject]@{ Lock=$script:lock } }
             Mock Get-ProductionAutoDeployTask { $script:task }
             Mock Disable-ScheduledTask { $script:task.State = 'Disabled' }
             Mock Stop-ProductionAutoDeployTask { throw 'simulated stop failure' }
@@ -1064,6 +1082,7 @@ Describe 'automatic deployment task removal' {
 
             { Remove-AutoDeployTask } | Should -Throw '*simulated stop failure*'
             $script:task.State | Should -Be 'Ready'
+            $script:lock.CanRead | Should -BeFalse
             Should -Invoke Enable-ScheduledTask -Times 1 -Exactly
             Should -Invoke Unregister-ScheduledTask -Times 0 -Exactly
         }
@@ -1073,6 +1092,8 @@ Describe 'automatic deployment task removal' {
         InModuleScope Production.AutoDeploy {
             $script:task = [pscustomobject]@{ State='Ready' }
             Mock Assert-Administrator {}
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' } }
+            Mock Enter-ProductionFixedRootDeploymentLock { [pscustomobject]@{ Lock=[IO.MemoryStream]::new() } }
             Mock Get-ProductionAutoDeployTask { $script:task }
             Mock Disable-ScheduledTask {}
             Mock Enable-ScheduledTask {}
@@ -1088,6 +1109,8 @@ Describe 'automatic deployment task removal' {
         InModuleScope Production.AutoDeploy {
             $script:task = [pscustomobject]@{ State='Ready' }
             Mock Assert-Administrator {}
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' } }
+            Mock Enter-ProductionFixedRootDeploymentLock { [pscustomobject]@{ Lock=[IO.MemoryStream]::new() } }
             Mock Get-ProductionAutoDeployTask { $script:task }
             Mock Disable-ScheduledTask { $script:task.State = 'Disabled' }
             Mock Unregister-ScheduledTask { throw 'simulated unregister failure' }
@@ -1103,6 +1126,8 @@ Describe 'automatic deployment task removal' {
         InModuleScope Production.AutoDeploy {
             $script:task = [pscustomobject]@{ State='Ready' }
             Mock Assert-Administrator {}
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' } }
+            Mock Enter-ProductionFixedRootDeploymentLock { [pscustomobject]@{ Lock=[IO.MemoryStream]::new() } }
             Mock Get-ProductionAutoDeployTask { $script:task }
             Mock Disable-ScheduledTask { $script:task.State = 'Disabled' }
             Mock Unregister-ScheduledTask {}
@@ -1123,6 +1148,8 @@ Describe 'automatic deployment task removal' {
         InModuleScope Production.AutoDeploy {
             $script:task = [pscustomobject]@{ State='Ready' }
             Mock Assert-Administrator {}
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' } }
+            Mock Enter-ProductionFixedRootDeploymentLock { [pscustomobject]@{ Lock=[IO.MemoryStream]::new() } }
             Mock Get-ProductionAutoDeployTask { $script:task }
             Mock Disable-ScheduledTask { $script:task.State = 'Disabled' }
             Mock Unregister-ScheduledTask {}
@@ -1135,6 +1162,24 @@ Describe 'automatic deployment task removal' {
             $caught | Should -BeOfType [System.AggregateException]
             $caught.InnerExceptions.Count | Should -Be 2
             $caught.InnerExceptions[1].Message | Should -Match 'prior enabled state was not restored'
+        }
+    }
+
+    It 'does not inspect or change the task when deployment-lock acquisition fails' {
+        InModuleScope Production.AutoDeploy {
+            Mock Assert-Administrator {}
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' } }
+            Mock Enter-ProductionFixedRootDeploymentLock { throw 'simulated deployment lock failure' }
+            Mock Get-ProductionAutoDeployTask { throw 'task lookup should not be called' }
+            Mock Disable-ScheduledTask { throw 'disable should not be called' }
+            Mock Stop-ProductionAutoDeployTask { throw 'stop should not be called' }
+            Mock Unregister-ScheduledTask { throw 'unregister should not be called' }
+
+            { Remove-AutoDeployTask } | Should -Throw '*simulated deployment lock failure*'
+            Should -Invoke Get-ProductionAutoDeployTask -Times 0 -Exactly
+            Should -Invoke Disable-ScheduledTask -Times 0 -Exactly
+            Should -Invoke Stop-ProductionAutoDeployTask -Times 0 -Exactly
+            Should -Invoke Unregister-ScheduledTask -Times 0 -Exactly
         }
     }
 }

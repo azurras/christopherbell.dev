@@ -1085,12 +1085,7 @@ function Install-AutoDeployTask {
     Start-ScheduledTask -TaskName 'ChristopherBellAutoDeploy'
 }
 
-function Remove-AutoDeployTask {
-    [CmdletBinding()]
-    param([switch]$WhatIf)
-    Assert-Administrator
-    if ($WhatIf) { Write-Output 'Would remove the ChristopherBellAutoDeploy task.'; return }
-
+function Remove-AutoDeployTaskUnderHeldLock {
     $taskName = 'ChristopherBellAutoDeploy'
     $task = Get-ProductionAutoDeployTask
     if (-not $task) {
@@ -1160,6 +1155,28 @@ function Remove-AutoDeployTask {
         }
 
         $PSCmdlet.ThrowTerminatingError($primaryError)
+    }
+}
+
+function Remove-AutoDeployTask {
+    [CmdletBinding()]
+    param([switch]$WhatIf)
+    Assert-Administrator
+    if ($WhatIf) { Write-Output 'Would remove the ChristopherBellAutoDeploy task.'; return }
+
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-ProductionFixedRootDeploymentLock `
+        -Config $config `
+        -FixedRoot $script:FixedProductionRoot `
+        -EnterLockAction {
+            param($LockPath)
+            Enter-DeploymentLock -LockPath $LockPath
+        }
+    try {
+        Remove-AutoDeployTaskUnderHeldLock
+    } finally {
+        $guard.Lock.Dispose()
     }
 }
 
