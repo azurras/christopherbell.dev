@@ -80,16 +80,38 @@ Describe 'automatic origin main deployment' {
     }
 
     It 'refuses automatic deploy before remote access while legacy reconciliation is required' {
+        $script:publishedOutcome = $null
         Mock Read-ProductionMusicSchemaDirection {
             [pscustomobject]@{ state='LEGACY_ACTIVE_RECONCILIATION_REQUIRED' }
+        } -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatusBestEffort {
+            $script:publishedOutcome = $Outcome
+            $true
         } -ModuleName Production.AutoDeploy
         Mock Get-RemoteMainSha { throw 'remote must not be read' } -ModuleName Production.AutoDeploy
         Mock Invoke-ProductionDeploy { throw 'deploy must not run' } -ModuleName Production.AutoDeploy
 
         { Invoke-AutoDeployOnce $config } | Should -Throw '*blocked*legacy*reconciliation*'
 
+        $script:publishedOutcome | Should -Be 'BLOCKED'
         Should -Invoke Get-RemoteMainSha -Times 0 -ModuleName Production.AutoDeploy
         Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
+    }
+
+    It 'reports a protected marker read failure as a failed check, not a migration block' {
+        $script:publishedOutcome = $null
+        Mock Read-ProductionMusicSchemaDirection { throw 'protected marker could not be read' } `
+            -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatusBestEffort {
+            $script:publishedOutcome = $Outcome
+            $true
+        } -ModuleName Production.AutoDeploy
+        Mock Get-RemoteMainSha { throw 'remote must not be read' } -ModuleName Production.AutoDeploy
+
+        { Invoke-AutoDeployOnce $config } | Should -Throw '*protected marker could not be read*'
+
+        $script:publishedOutcome | Should -Be 'CHECK_FAILED'
+        Should -Invoke Get-RemoteMainSha -Times 0 -ModuleName Production.AutoDeploy
     }
 
     It 'refuses automatic deploy before remote access when schema direction is absent' {
@@ -134,16 +156,293 @@ Describe 'automatic origin main deployment' {
         Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
     }
 
+    It 'surfaces an automatic deployment failure after persisting its failed SHA' {
+        $remoteSha = 'fedcbafedcbafedcbafedcbafedcbafedcbafedc'
+        Mock Get-RemoteMainSha { $remoteSha } -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha { '0123456789012345678901234567890123456789' } `
+            -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionDeploy { throw 'candidate process exited before binding' } `
+            -ModuleName Production.AutoDeploy
+
+        $caughtMessage = $null
+        try { Invoke-AutoDeployOnce $config }
+        catch { $caughtMessage = $_.Exception.Message }
+
+        $caughtMessage | Should -Be 'candidate process exited before binding'
+
+        $state = Read-AutoDeployState $config
+        $state.failedSha | Should -Be $remoteSha
+        $state.error | Should -Be 'candidate process exited before binding'
+    }
+
+    It 'reads operator status without loading protected deployment configuration' {
+        Mock Read-ProductionConfig { throw 'protected configuration was accessed' } `
+            -ModuleName Production.AutoDeploy
+
+        { Get-AutoDeployStatus } | Should -Not -Throw
+
+        Should -Invoke Read-ProductionConfig -Times 0 -Exactly `
+            -ModuleName Production.AutoDeploy
+    }
+
+    It 'creates a standard-user-readable status store with no untrusted write rights' {
+        InModuleScope Production.AutoDeploy {
+            $parent = Join-Path $TestDrive 'status-parent'
+            $statusRoot = Join-Path $parent 'christopherbell.dev-status'
+            New-Item -ItemType Directory -Path $parent | Out-Null
+
+            Initialize-AutoDeployStatusStore -StatusRoot $statusRoot
+
+            $acl = Get-Acl -LiteralPath $statusRoot
+            $acl.AreAccessRulesProtected | Should -BeTrue
+            $users = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+            $rules = @($acl.GetAccessRules($true,$false,[Security.Principal.SecurityIdentifier]))
+            $userRules = @($rules | Where-Object { $_.IdentityReference -eq $users })
+            $userRules.Count | Should -BeGreaterThan 0
+            foreach ($rule in $userRules) {
+                $rule.AccessControlType | Should -Be ([Security.AccessControl.AccessControlType]::Allow)
+                $rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write |
+                    Should -Be 0
+                $rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete |
+                    Should -Be 0
+                $rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ChangePermissions |
+                    Should -Be 0
+                $rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::TakeOwnership |
+                    Should -Be 0
+            }
+            { Assert-AutoDeployStatusDirectory -Path $statusRoot } | Should -Not -Throw
+        }
+    }
+
+    It 'publishes only sanitized status and marks old status stale without protected configuration' {
+        InModuleScope Production.AutoDeploy {
+            $parent = Join-Path $TestDrive 'status-publication-parent'
+            $statusRoot = Join-Path $parent 'christopherbell.dev-status'
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            $state = New-AutoDeployState
+            $state.remoteSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+            $state.attemptedSha = $state.remoteSha
+            $state.failedSha = $state.remoteSha
+            $state.error = 'SPRING_DATASOURCE_PASSWORD=never-export-this'
+            Mock Assert-AutoDeployStatusDirectory {} -ModuleName Production.AutoDeploy
+            Mock Assert-AutoDeployStatusFile {} -ModuleName Production.AutoDeploy
+
+            Publish-AutoDeployStatus -Outcome 'DEPLOYMENT_FAILED' -FailureCategory 'CANDIDATE_STARTUP' `
+                -State $state -StatusRoot $statusRoot `
+                -UpdatedAt ([datetime]'2026-09-23T00:00:00Z')
+
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+            $result.status | Should -Be 'DEPLOYMENT_FAILED'
+            $result.failureCategory | Should -Be 'CANDIDATE_STARTUP'
+            $result.freshness | Should -Be 'STALE'
+            $result.message | Should -Not -Match 'never-export-this|SPRING_DATASOURCE_PASSWORD'
+            (Get-Content -LiteralPath (Join-Path $statusRoot 'auto-deploy.json') -Raw) |
+                Should -Not -Match 'never-export-this|SPRING_DATASOURCE_PASSWORD'
+
+            Publish-AutoDeployStatus -Outcome 'CHECKING' -State $state -StatusRoot $statusRoot
+            (Get-AutoDeployStatus -StatusRoot $statusRoot).status | Should -Be 'CHECKING'
+        }
+    }
+
+    It 'reports malformed status as unavailable without returning record contents' {
+        InModuleScope Production.AutoDeploy {
+            $statusRoot = Join-Path $TestDrive 'malformed-status'
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $statusRoot 'auto-deploy.json') `
+                -Value '{"password":"do-not-return"}'
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+
+            $result.available | Should -BeFalse
+            $result.freshness | Should -Be 'UNAVAILABLE'
+            $result.message | Should -Not -Match 'do-not-return|password'
+        }
+    }
+
+    It 'rejects a versioned tool bundle whose file hash changed after staging' {
+        InModuleScope Production.AutoDeploy {
+            $root = Join-Path $TestDrive 'tool-integrity'
+            New-Item -ItemType Directory -Path (Join-Path $root 'modules') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $root 'prod.ps1') -Value '# trusted'
+            Set-Content -LiteralPath (Join-Path $root 'modules\Production.AutoDeploy.psm1') `
+                -Value '# trusted module'
+            $files = @(Get-AutoDeployToolManifestEntries -Root $root)
+            [ordered]@{
+                schemaVersion=1
+                sourceCommitSha='fedcbafedcbafedcbafedcbafedcbafedcbafedc'
+                treeSha='abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+                files=$files
+            } |
+                ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'auto-deploy-tools.json')
+            Mock Assert-ProtectedProductionTree {}
+            Mock Assert-ProductionTreeNotReparse {}
+
+            Assert-AutoDeployToolVersion -Root $root -TreeSha 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+            Set-Content -LiteralPath (Join-Path $root 'prod.ps1') -Value '# altered'
+
+            { Assert-AutoDeployToolVersion -Root $root -TreeSha 'abcdefabcdefabcdefabcdefabcdefabcdefabcd' } |
+                Should -Throw '*integrity check*'
+        }
+    }
+
+    It 'stages trusted versioned tools before switching the poller action' {
+        InModuleScope Production.AutoDeploy {
+            $programDataRoot = Join-Path $TestDrive ('tool-stage-' + [guid]::NewGuid().ToString('N'))
+            $config = [pscustomobject]@{
+                programDataRoot=$programDataRoot
+                repositoryPath=(Join-Path $TestDrive 'repository')
+                remote='origin'
+                branch='main'
+            }
+            $sha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+            $treeSha = '0123012301230123012301230123012301230123'
+            $script:toolRefreshEvents = [Collections.Generic.List[string]]::new()
+            Mock Assert-ProductionFixedRootBoundary {}
+            Mock Get-RemoteMainSha { $sha }
+            Mock Resolve-OriginMainRelease { $sha }
+            Mock Assert-ProductionPathNotReparse {}
+            Mock Protect-ProductionPath {}
+            Mock Assert-ProductionTreeNotReparse { $script:toolRefreshEvents.Add('verify-no-reparse') }
+            Mock Protect-ProductionTree { $script:toolRefreshEvents.Add('protect') }
+            Mock Assert-ProtectedProductionTree { $script:toolRefreshEvents.Add('verify') }
+            Mock Get-ScheduledTask { [pscustomobject]@{ Actions=@() } }
+            Mock Resolve-PowerShell7Executable { 'C:\PowerShell\pwsh.exe' }
+            Mock Stop-ScheduledTask {}
+            Mock Start-ScheduledTask {}
+            Mock Set-ScheduledTask {
+                $script:toolRefreshEvents.Add('switch')
+                $script:toolRefreshAction = $Action
+            }
+            Mock Invoke-CheckedProcess {
+                if ($ArgumentList -contains 'add') {
+                    $worktree = $ArgumentList[-2]
+                    $source = Join-Path $worktree 'ops\production\windows'
+                    New-Item -ItemType Directory -Path (Join-Path $source 'modules') -Force | Out-Null
+                    Set-Content -LiteralPath (Join-Path $source 'prod.ps1') -Value '# test source'
+                    Set-Content -LiteralPath (Join-Path $source 'modules\Production.AutoDeploy.psm1') `
+                        -Value '# test module'
+                    $script:toolRefreshWorktree = $worktree
+                    return ''
+                }
+                if ($ArgumentList -contains 'rev-parse') {
+                    if ($ArgumentList[-1] -like '*:ops/production/windows') { return $treeSha }
+                    return $sha
+                }
+                if ($ArgumentList -contains 'remove') {
+                    Remove-Item -LiteralPath $script:toolRefreshWorktree -Recurse -Force
+                    $script:toolRefreshEvents.Add('remove-worktree')
+                    return ''
+                }
+                throw 'Unexpected Git operation.'
+            }
+
+            $result = Update-AutoDeployToolsFromOriginMain -Config $config
+
+            $result.Sha | Should -Be $treeSha
+            $result.SourceSha | Should -Be $sha
+            $result.Switched | Should -BeTrue
+            $script:toolRefreshEvents.IndexOf('remove-worktree') |
+                Should -BeLessThan $script:toolRefreshEvents.IndexOf('switch')
+            $script:toolRefreshEvents.IndexOf('verify') |
+                Should -BeLessThan $script:toolRefreshEvents.IndexOf('switch')
+            $script:toolRefreshEvents.IndexOf('verify-no-reparse') |
+                Should -BeLessThan $script:toolRefreshEvents.IndexOf('switch')
+            $script:toolRefreshAction.Arguments | Should -Match ([regex]::Escape("$programDataRoot\tools\versions\$treeSha\prod.ps1"))
+            $script:toolRefreshAction.Arguments | Should -Match 'auto-deploy$'
+            Test-Path -LiteralPath (Join-Path $programDataRoot "tools\versions\$treeSha\auto-deploy-tools.json") |
+                Should -BeTrue
+            Should -Invoke Stop-ScheduledTask -Times 0
+            Should -Invoke Start-ScheduledTask -Times 0
+        }
+    }
+
+    It 'cleans a partial tools stage and preserves the task action when copying fails' {
+        InModuleScope Production.AutoDeploy {
+            $programDataRoot = Join-Path $TestDrive ('tool-stage-failure-' + [guid]::NewGuid().ToString('N'))
+            $config = [pscustomobject]@{
+                programDataRoot=$programDataRoot
+                repositoryPath=(Join-Path $TestDrive 'repository')
+                remote='origin'
+                branch='main'
+            }
+            $sha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+            $treeSha = '0123012301230123012301230123012301230123'
+            Mock Assert-ProductionFixedRootBoundary {}
+            Mock Get-RemoteMainSha { $sha }
+            Mock Resolve-OriginMainRelease { $sha }
+            Mock Assert-ProductionPathNotReparse {}
+            Mock Protect-ProductionPath {}
+            Mock Assert-ProductionTreeNotReparse {}
+            Mock Protect-ProductionTree {}
+            Mock Assert-ProtectedProductionTree {}
+            Mock Get-ScheduledTask { [pscustomobject]@{ Actions=@() } }
+            Mock Resolve-PowerShell7Executable { 'C:\PowerShell\pwsh.exe' }
+            Mock Set-ScheduledTask { throw 'task action must not change after a partial stage.' }
+            Mock Get-ChildItem { throw 'simulated copy failure' } -ModuleName Production.AutoDeploy
+            Mock Invoke-CheckedProcess {
+                if ($ArgumentList -contains 'add') {
+                    $worktree = $ArgumentList[-2]
+                    $source = Join-Path $worktree 'ops\production\windows'
+                    New-Item -ItemType Directory -Path (Join-Path $source 'modules') -Force | Out-Null
+                    Set-Content -LiteralPath (Join-Path $source 'prod.ps1') -Value '# test source'
+                    Set-Content -LiteralPath (Join-Path $source 'modules\Production.AutoDeploy.psm1') `
+                        -Value '# test module'
+                    $script:failedStageWorktree = $worktree
+                    return ''
+                }
+                if ($ArgumentList -contains 'rev-parse') {
+                    if ($ArgumentList[-1] -like '*:ops/production/windows') { return $treeSha }
+                    return $sha
+                }
+                if ($ArgumentList -contains 'remove') {
+                    Remove-Item -LiteralPath $script:failedStageWorktree -Recurse -Force
+                    return ''
+                }
+                throw 'Unexpected Git operation.'
+            }
+
+            { Update-AutoDeployToolsFromOriginMain -Config $config } |
+                Should -Throw '*simulated copy failure*'
+
+            Test-Path -LiteralPath (Join-Path $programDataRoot "tools\versions\$treeSha") |
+                Should -BeFalse
+            [IO.Directory]::GetDirectories((Join-Path $programDataRoot 'tools\versions')).Count |
+                Should -Be 0
+            Test-Path -LiteralPath $script:failedStageWorktree | Should -BeFalse
+            Should -Invoke Set-ScheduledTask -Times 0
+        }
+    }
+
     It 'checks once and exits without keeping a console process alive' {
         InModuleScope Production.AutoDeploy {
             $config = [pscustomobject]@{ programDataRoot=$TestDrive }
+            $script:loopEvents = [Collections.Generic.List[string]]::new()
+            $deploymentLock = [pscustomobject]@{}
+            $deploymentLock | Add-Member -MemberType ScriptMethod -Name Dispose -Value {
+                $script:loopEvents.Add('unlock-tools')
+            }
             Mock Read-ProductionConfig { $config }
-            Mock Invoke-AutoDeployOnce {}
+            Mock Initialize-AutoDeployStatusStore { $null }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{ Lock=$deploymentLock }
+            }
+            Mock Update-AutoDeployToolsFromOriginMain {
+                $script:loopEvents.Add('refresh-tools')
+                [pscustomobject]@{ Sha='abcdefabcdefabcdefabcdefabcdefabcdefabcd'; Switched=$false }
+            }
+            Mock Invoke-AutoDeployOnce {
+                if ($script:loopEvents.IndexOf('unlock-tools') -lt 0) {
+                    throw 'Automatic release check started before tool refresh released the lock.'
+                }
+            }
             Mock Start-Sleep { throw 'A one-shot scheduled task must not sleep.' }
 
             { Start-AutoDeployLoop } | Should -Not -Throw
 
             Should -Invoke Invoke-AutoDeployOnce -Times 1 -Exactly -ParameterFilter { $Config -eq $config }
+            $script:loopEvents.IndexOf('refresh-tools') | Should -BeLessThan $script:loopEvents.IndexOf('unlock-tools')
             Should -Invoke Start-Sleep -Times 0
         }
     }
@@ -159,6 +458,7 @@ Describe 'automatic origin main deployment' {
                 Mock Enter-ProductionFixedRootDeploymentLock {
                     [pscustomobject]@{ Lock=[IO.MemoryStream]::new() }
                 }
+                Mock Initialize-AutoDeployStatusStore { $null }
                 Mock New-Item {}
                 Mock Copy-Item {}
                 $script:existingTaskStopped = $false
@@ -229,6 +529,7 @@ Describe 'automatic origin main deployment' {
             Mock Enter-ProductionFixedRootDeploymentLock {
                 [pscustomobject]@{ Lock=[IO.MemoryStream]::new() }
             }
+            Mock Initialize-AutoDeployStatusStore { $null }
             Mock New-Item {}
             Mock Copy-Item {}
             Mock Stop-ScheduledTask {}
@@ -263,6 +564,7 @@ Describe 'automatic origin main deployment' {
             Mock Enter-ProductionFixedRootDeploymentLock {
                 [pscustomobject]@{ Lock=$deploymentLock }
             }
+            Mock Initialize-AutoDeployStatusStore { $script:events.Add('initialize-status') }
             Mock Stop-ScheduledTask { $script:events.Add('stop') }
             Mock Get-ScheduledTask { [pscustomobject]@{ State='Ready' } }
             Mock Test-Path { $true }
@@ -280,6 +582,7 @@ Describe 'automatic origin main deployment' {
             Install-AutoDeployTask
 
             $script:events.IndexOf('protect-root') | Should -BeLessThan $script:events.IndexOf('remove')
+            $script:events.IndexOf('initialize-status') | Should -BeLessThan $script:events.IndexOf('stop')
             $script:events.IndexOf('stop') | Should -BeLessThan $script:events.IndexOf('remove')
             $script:events.IndexOf('remove') | Should -BeLessThan $script:events.IndexOf('copy')
             $script:events.IndexOf('protect-tree') | Should -BeLessThan $script:events.IndexOf('verify-tree')
