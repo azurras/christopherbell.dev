@@ -888,11 +888,37 @@ function Resolve-PowerShell7Executable {
     return $executable
 }
 
+function Get-ProductionAutoDeployTask {
+    $tasks = @(Get-ScheduledTask -ErrorAction Stop | Where-Object {
+        $_.TaskName -eq 'ChristopherBellAutoDeploy' -and $_.TaskPath -eq '\'
+    })
+    if ($tasks.Count -gt 1) {
+        throw 'Multiple root automatic deployment tasks were found.'
+    }
+    if ($tasks.Count -eq 0) { return $null }
+    return $tasks[0]
+}
+
+function Stop-ProductionAutoDeployTask {
+    Stop-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction SilentlyContinue
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        $task = Get-ProductionAutoDeployTask
+        if (-not $task -or [string]$task.State -ne 'Running') { return }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+    throw 'ChristopherBellAutoDeploy did not stop before tool replacement.'
+}
+
 function Update-ProductionAutoDeployToolsUnderHeldLock {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Config)
 
     $tools = Join-Path $Config.programDataRoot 'tools'
+    $parent = Split-Path -Parent $tools
+    $stage = Join-Path $parent ('.tools-stage-{0}' -f [guid]::NewGuid().ToString('N'))
+    $backup = Join-Path $parent ('.tools-backup-{0}' -f [guid]::NewGuid().ToString('N'))
+    $taskName = 'ChristopherBellAutoDeploy'
     Assert-ProductionFixedRootBoundary `
         -Config $Config -FixedRoot $script:FixedProductionRoot | Out-Null
     Assert-ProductionPathNotReparse -Path $Config.programDataRoot | Out-Null
@@ -901,51 +927,137 @@ function Update-ProductionAutoDeployToolsUnderHeldLock {
     if (Test-Path -LiteralPath $tools) {
         Assert-ProductionTreeNotReparse -Path $tools
     }
-    Stop-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction SilentlyContinue
-    $deadline = (Get-Date).AddSeconds(30)
-    do {
-        $existingTask = Get-ScheduledTask `
-            -TaskName 'ChristopherBellAutoDeploy' -ErrorAction SilentlyContinue
-        if (-not $existingTask -or [string]$existingTask.State -ne 'Running') { break }
-        Start-Sleep -Milliseconds 500
-    } while ((Get-Date) -lt $deadline)
-    if ($existingTask -and [string]$existingTask.State -eq 'Running') {
-        throw 'ChristopherBellAutoDeploy did not stop before task registration.'
+
+    $existingTask = Get-ProductionAutoDeployTask
+    $previousTaskEnabled = $existingTask -and [string]$existingTask.State -ne 'Disabled'
+    $previousTaskXml = if ($existingTask) {
+        Export-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    } else {
+        $null
     }
-    if (Test-Path -LiteralPath $tools) {
-        Remove-Item -LiteralPath $tools -Recurse -Force
+    $oldToolsMoved = $false
+    $newToolsPublished = $false
+    $taskSwitchStarted = $false
+    $filesystemSwitchStarted = $false
+    $taskRegistrationAttempted = $false
+    try {
+        New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
+        Protect-ProductionPath -Path $stage
+        Copy-Item (Join-Path $PSScriptRoot '..\*') $stage -Recurse -Force -ErrorAction Stop
+        Protect-ProductionTree -Path $stage
+        Assert-ProtectedProductionTree -Path $stage
+        Assert-ProductionTreeNotReparse -Path $stage
+
+        if ($existingTask) {
+            $taskSwitchStarted = $true
+            Disable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
+            Stop-ProductionAutoDeployTask
+        }
+
+        $filesystemSwitchStarted = $true
+        if (Test-Path -LiteralPath $tools) {
+            Move-ProductionAutoDeployToolsDirectory -SourcePath $tools -DestinationPath $backup
+            $oldToolsMoved = $true
+        }
+        Move-ProductionAutoDeployToolsDirectory -SourcePath $stage -DestinationPath $tools
+        $newToolsPublished = $true
+        Assert-ProductionTreeNotReparse -Path $tools
+        Assert-ProtectedProductionTree -Path $tools
+
+        $actionArguments = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden ' +
+            "-ExecutionPolicy Bypass -File `"$tools\prod.ps1`" auto-deploy"
+        $action = New-ScheduledTaskAction `
+            -Execute (Resolve-PowerShell7Executable) -Argument $actionArguments
+        $startupTrigger = New-ScheduledTaskTrigger -AtStartup
+        $repeatingTrigger = New-ScheduledTaskTrigger `
+            -Once -At (Get-Date).AddMinutes(1) `
+            -RepetitionInterval (New-TimeSpan -Seconds ([int]$Config.autoDeployPollSeconds))
+        $settings = New-ScheduledTaskSettingsSet `
+            -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
+            -RestartCount 3 `
+            -RestartInterval (New-TimeSpan -Minutes 1) `
+            -MultipleInstances IgnoreNew `
+            -Hidden `
+            -StartWhenAvailable `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries
+        $principal = New-ScheduledTaskPrincipal `
+            -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $taskRegistrationAttempted = $true
+        Register-ScheduledTask `
+            -TaskName $taskName `
+            -Action $action `
+            -Trigger @($startupTrigger, $repeatingTrigger) `
+            -Settings $settings `
+            -Principal $principal `
+            -Force -ErrorAction Stop | Out-Null
+        Enable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
+    } catch {
+        $failureRecord = $_
+        $recoveryFailure = $null
+        try {
+            if ($filesystemSwitchStarted -and
+                ($taskSwitchStarted -or $taskRegistrationAttempted)) {
+                $taskToStop = Get-ProductionAutoDeployTask
+                if ($taskToStop) {
+                    Disable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
+                    Stop-ProductionAutoDeployTask
+                }
+            }
+            if ($newToolsPublished -and (Test-Path -LiteralPath $tools)) {
+                Move-ProductionAutoDeployToolsDirectory -SourcePath $tools -DestinationPath $stage
+                $newToolsPublished = $false
+            }
+            if ($oldToolsMoved -and (Test-Path -LiteralPath $backup)) {
+                Move-ProductionAutoDeployToolsDirectory -SourcePath $backup -DestinationPath $tools
+                $oldToolsMoved = $false
+            }
+            if ($taskRegistrationAttempted -and $previousTaskXml) {
+                Register-ScheduledTask -TaskName $taskName -Xml $previousTaskXml `
+                    -Force -ErrorAction Stop | Out-Null
+            } elseif ($taskRegistrationAttempted -and -not $previousTaskXml) {
+                $partiallyRegisteredTask = Get-ProductionAutoDeployTask
+                if ($partiallyRegisteredTask) {
+                    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false `
+                        -ErrorAction Stop | Out-Null
+                }
+            }
+            if ($taskSwitchStarted -and -not $taskRegistrationAttempted -and $existingTask) {
+                if ($previousTaskEnabled) {
+                    Enable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
+                } else {
+                    Disable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
+                }
+            }
+        } catch {
+            $recoveryFailure = $_
+        }
+        if ($recoveryFailure) {
+            throw [AggregateException]::new(
+                'Automatic deployment tool replacement failed and recovery did not complete.',
+                [Exception[]]@($failureRecord.Exception,$recoveryFailure.Exception))
+        }
+        throw $failureRecord
+    } finally {
+        if (Test-Path -LiteralPath $stage -PathType Container) {
+            try { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop }
+            catch { Write-Warning "Automatic deployment staging directory was retained at $stage." }
+        }
     }
-    New-Item -ItemType Directory -Path $tools | Out-Null
-    Protect-ProductionPath -Path $tools
-    Copy-Item (Join-Path $PSScriptRoot '..\*') $tools -Recurse -Force
-    Protect-ProductionTree -Path $tools
-    Assert-ProtectedProductionTree -Path $tools
-    $actionArguments = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden ' +
-        "-ExecutionPolicy Bypass -File `"$tools\prod.ps1`" auto-deploy"
-    $action = New-ScheduledTaskAction `
-        -Execute (Resolve-PowerShell7Executable) -Argument $actionArguments
-    $startupTrigger = New-ScheduledTaskTrigger -AtStartup
-    $repeatingTrigger = New-ScheduledTaskTrigger `
-        -Once -At (Get-Date).AddMinutes(1) `
-        -RepetitionInterval (New-TimeSpan -Seconds ([int]$Config.autoDeployPollSeconds))
-    $settings = New-ScheduledTaskSettingsSet `
-        -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
-        -RestartCount 3 `
-        -RestartInterval (New-TimeSpan -Minutes 1) `
-        -MultipleInstances IgnoreNew `
-        -Hidden `
-        -StartWhenAvailable `
-        -AllowStartIfOnBatteries `
-        -DontStopIfGoingOnBatteries
-    $principal = New-ScheduledTaskPrincipal `
-        -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-    Register-ScheduledTask `
-        -TaskName 'ChristopherBellAutoDeploy' `
-        -Action $action `
-        -Trigger @($startupTrigger, $repeatingTrigger) `
-        -Settings $settings `
-        -Principal $principal `
-        -Force | Out-Null
+
+    if ($oldToolsMoved -and (Test-Path -LiteralPath $backup -PathType Container)) {
+        try { Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction Stop }
+        catch { Write-Warning "Previous automatic deployment tools were retained at $backup." }
+    }
+}
+
+function Move-ProductionAutoDeployToolsDirectory {
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath
+    )
+
+    [IO.Directory]::Move($SourcePath,$DestinationPath)
 }
 
 function Install-AutoDeployTask {
