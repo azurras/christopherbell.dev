@@ -696,10 +696,13 @@ Describe 'native PostgreSQL production operations' {
             param($FilePath,$Arguments,$Environment)
             return '{"database":"christopherbell","role":"christopherbell_app","serverVersion":"18.4","listenAddresses":"localhost","passwordEncryption":"scram-sha-256","canCreateSchema":false,"viewerReadOnly":true}'
         }
+        Mock Get-Service { [pscustomobject]@{ Status='Running' } } `
+            -ModuleName Production.PostgreSql
 
         $status = Get-ProductionPostgreSqlStatus -Config $config `
             -AppPassword 'app-secret-value' -ProcessAction $probe
 
+        $status.Service | Should -Be 'Running'
         $status.Database | Should -Be 'christopherbell'
         $status.ServerVersion | Should -Be '18.4'
         $status.ListenAddresses | Should -Be 'localhost'
@@ -707,6 +710,41 @@ Describe 'native PostgreSQL production operations' {
         $status.AppCanCreateSchema | Should -BeFalse
         $status.ViewerReadOnly | Should -BeTrue
         ($status | ConvertTo-Json -Compress) | Should -Not -Match 'secret-value'
+    }
+
+    It 'surfaces PostgreSQL service query failures instead of reporting the service absent' {
+        $probe = {
+            param($FilePath,$Arguments,$Environment)
+            return '{"database":"christopherbell","role":"christopherbell_app","serverVersion":"18.4","listenAddresses":"localhost","passwordEncryption":"scram-sha-256","canCreateSchema":false,"viewerReadOnly":true}'
+        }
+        Mock Get-Service { throw [InvalidOperationException]::new(
+            'synthetic PostgreSQL service query failure') } `
+            -ModuleName Production.PostgreSql
+
+        { Get-ProductionPostgreSqlStatus -Config $config `
+            -AppPassword 'app-secret-value' -ProcessAction $probe } |
+            Should -Throw '*synthetic PostgreSQL service query failure*'
+    }
+
+    It 'reports NotInstalled only for the native missing PostgreSQL service result' {
+        $probe = {
+            param($FilePath,$Arguments,$Environment)
+            return '{"database":"christopherbell","role":"christopherbell_app","serverVersion":"18.4","listenAddresses":"localhost","passwordEncryption":"scram-sha-256","canCreateSchema":false,"viewerReadOnly":true}'
+        }
+        Mock Get-Service {
+            $exception = [InvalidOperationException]::new('The specified service does not exist.')
+            $record = [Management.Automation.ErrorRecord]::new(
+                $exception,
+                'NoServiceFoundForGivenName,Microsoft.PowerShell.Commands.GetServiceCommand',
+                [Management.Automation.ErrorCategory]::ObjectNotFound,
+                $Name)
+            throw $record
+        } -ModuleName Production.PostgreSql
+
+        $status = Get-ProductionPostgreSqlStatus -Config $config `
+            -AppPassword 'app-secret-value' -ProcessAction $probe
+
+        $status.Service | Should -Be 'NotInstalled'
     }
 
     It 'rejects string-shaped capability observations instead of coercing false to true' {

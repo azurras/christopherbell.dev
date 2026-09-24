@@ -1006,7 +1006,16 @@ select json_build_object(
         [bool]$observed.canCreateSchema -or -not [bool]$observed.viewerReadOnly) {
         throw 'PostgreSQL status probe observed an unsafe production identity or capability.'
     }
-    $service = Get-Service -Name $Config.postgresqlServiceName -ErrorAction SilentlyContinue
+    try {
+        $service = Get-Service -Name $Config.postgresqlServiceName -ErrorAction Stop
+    } catch {
+        if ($_.FullyQualifiedErrorId -eq
+            'NoServiceFoundForGivenName,Microsoft.PowerShell.Commands.GetServiceCommand') {
+            $service = $null
+        } else {
+            throw
+        }
+    }
     return [pscustomobject][ordered]@{
         Service = if ($service) { [string]$service.Status } else { 'NotInstalled' }
         Database = [string]$observed.database
