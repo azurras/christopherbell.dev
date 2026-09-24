@@ -1075,7 +1075,7 @@ function Install-AutoDeployTask {
         -FixedRoot $script:FixedProductionRoot `
         -EnterLockAction {
             param($LockPath)
-            Enter-DeploymentLock -LockPath $LockPath
+            Enter-DeploymentLock -LockPath $LockPath -WaitTimeoutSeconds 120
         }
     try {
         Update-ProductionAutoDeployToolsUnderHeldLock -Config $config

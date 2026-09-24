@@ -735,6 +735,26 @@ Describe 'automatic origin main deployment' {
         }
     }
 
+    It 'waits for transient lock contention before refreshing the automatic-deploy task' {
+        InModuleScope Production.AutoDeploy {
+            Mock Assert-Administrator {}
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive; autoDeployPollSeconds=60 } }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                $lock = & $EnterLockAction (Join-Path $TestDrive 'locks\deploy.lock')
+                [pscustomobject]@{ Lock=$lock }
+            }
+            Mock Update-ProductionAutoDeployToolsUnderHeldLock {}
+            Mock Start-ScheduledTask {}
+
+            Install-AutoDeployTask
+
+            Should -Invoke Enter-DeploymentLock -Times 1 -ParameterFilter {
+                $WaitTimeoutSeconds -eq 120
+            }
+        }
+    }
+
     It 're-enables the existing task and does not start it when it refuses to stop' {
         InModuleScope Production.AutoDeploy {
             Mock Assert-Administrator {}

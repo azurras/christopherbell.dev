@@ -246,7 +246,11 @@ function New-ProductionBackup {
 
 function Enter-DeploymentLock {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$LockPath)
+    param(
+        [Parameter(Mandatory)][string]$LockPath,
+        [ValidateRange(0,300)][int]$WaitTimeoutSeconds = 0,
+        [ValidateRange(10,5000)][int]$RetryIntervalMilliseconds = 250
+    )
     $lockDirectory = Split-Path -Parent $LockPath
     if (-not (Test-Path -LiteralPath $lockDirectory -PathType Container)) {
         throw "Missing deployment lock directory: $lockDirectory"
@@ -255,8 +259,25 @@ function Enter-DeploymentLock {
     if (Test-Path -LiteralPath $LockPath) {
         Assert-ProductionPathNotReparse -Path $LockPath | Out-Null
     }
-    try { return [IO.File]::Open($LockPath, 'OpenOrCreate', 'ReadWrite', 'None') }
-    catch [IO.IOException] { throw 'Another production operation is already running.' }
+    $waitTimer = [Diagnostics.Stopwatch]::StartNew()
+    $timeoutMilliseconds = [long]$WaitTimeoutSeconds * 1000
+    while ($true) {
+        try { return [IO.File]::Open($LockPath, 'OpenOrCreate', 'ReadWrite', 'None') }
+        catch [IO.IOException] {
+            $win32Error = [int]$_.Exception.HResult -band 0xffff
+            if ($win32Error -notin 32,33) { throw }
+            if ($WaitTimeoutSeconds -eq 0) {
+                throw 'Another production operation is already running.'
+            }
+            $remainingMilliseconds = $timeoutMilliseconds - $waitTimer.ElapsedMilliseconds
+            if ($remainingMilliseconds -le 0) {
+                throw "Another production operation is still running after waiting $WaitTimeoutSeconds seconds. Retry when it finishes."
+            }
+            $sleepMilliseconds = [int][Math]::Min(
+                $RetryIntervalMilliseconds, $remainingMilliseconds)
+            Start-Sleep -Milliseconds $sleepMilliseconds
+        }
+    }
 }
 
 function New-ProtectedProductionAcl {

@@ -89,10 +89,55 @@ Describe 'production common operations' {
 
     It 'rejects concurrent deployment locks' {
         $path = Join-Path $TestDrive 'locks\deploy.lock'
-        New-Item -ItemType Directory -Path (Split-Path -Parent $path) | Out-Null
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
         $first = Enter-DeploymentLock -LockPath $path
         try { { Enter-DeploymentLock -LockPath $path } | Should -Throw '*already running*' }
         finally { $first.Dispose() }
+    }
+
+    It 'waits for a held deployment lock until the current operation releases it' {
+        $path = Join-Path $TestDrive 'locks\deploy-wait.lock'
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+        $script:lockHolder = Enter-DeploymentLock -LockPath $path
+        Mock Start-Sleep { $script:lockHolder.Dispose() } -ModuleName Production.Common
+        $acquired = $null
+        try {
+            $acquired = Enter-DeploymentLock -LockPath $path `
+                -WaitTimeoutSeconds 2 -RetryIntervalMilliseconds 10
+            $acquired | Should -Not -BeNullOrEmpty
+            Should -Invoke Start-Sleep -Times 1 -Exactly -ModuleName Production.Common
+        } finally {
+            if ($acquired) { $acquired.Dispose() }
+            $script:lockHolder.Dispose()
+            Remove-Variable lockHolder -Scope Script -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'fails with an actionable busy error when the configured lock wait expires' {
+        $path = Join-Path $TestDrive 'locks\deploy-timeout.lock'
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+        $holder = Enter-DeploymentLock -LockPath $path
+
+        try {
+            { Enter-DeploymentLock -LockPath $path `
+                -WaitTimeoutSeconds 1 -RetryIntervalMilliseconds 100 } |
+                Should -Throw '*still running after waiting*'
+        } finally {
+            $holder.Dispose()
+        }
+    }
+
+    It 'does not retry a deployment-lock path error as lock contention' {
+        $path = Join-Path $TestDrive 'locks\deploy-directory.lock'
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+        New-Item -ItemType Directory -Path $path | Out-Null
+        Mock Start-Sleep { throw 'A non-contention lock error must not retry.' } `
+            -ModuleName Production.Common
+
+        { Enter-DeploymentLock -LockPath $path `
+            -WaitTimeoutSeconds 1 -RetryIntervalMilliseconds 10 } | Should -Throw
+
+        Should -Invoke Start-Sleep -Times 0 -ModuleName Production.Common
     }
 
     It 'does not create an unchecked deployment-lock parent' {
