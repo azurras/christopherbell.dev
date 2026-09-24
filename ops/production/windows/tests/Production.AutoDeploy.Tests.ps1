@@ -29,6 +29,81 @@ Describe 'automatic origin main deployment' {
         } -ModuleName Production.AutoDeploy
     }
 
+    It 'warns once with sanitized details when status publication fails' {
+        InModuleScope Production.AutoDeploy {
+            $script:autoDeployStatusWarningEmitted = $false
+            Mock Publish-AutoDeployStatus {
+                throw 'private status path and credential should not be surfaced'
+            }
+            $state = New-AutoDeployState
+            $warnings = @()
+
+            $first = Publish-AutoDeployStatusBestEffort `
+                -Outcome 'CHECKING' -State $state -WarningVariable +warnings
+            $second = Publish-AutoDeployStatusBestEffort `
+                -Outcome 'CHECK_FAILED' -State $state -WarningVariable +warnings
+
+            $first | Should -BeFalse
+            $second | Should -BeFalse
+            $warnings | Should -HaveCount 1
+            $warnings[0] | Should -Match 'status.*could not be published|status.*may be stale'
+            $warnings[0] | Should -Not -Match 'private status path|credential'
+        }
+    }
+
+    It 'classifies access-denied status writes without exposing exception details' {
+        InModuleScope Production.AutoDeploy {
+            $script:autoDeployStatusWarningEmitted = $false
+            Mock Publish-AutoDeployStatus {
+                throw [UnauthorizedAccessException]::new('private status path detail')
+            }
+            $warnings = @()
+
+            $result = Publish-AutoDeployStatusBestEffort `
+                -Outcome 'CHECKING' -State (New-AutoDeployState) `
+                -WarningVariable +warnings
+
+            $result | Should -BeFalse
+            $warnings | Should -HaveCount 1
+            $warnings[0] | Should -Match 'ACCESS_DENIED'
+            $warnings[0] | Should -Not -Match 'private status path detail'
+        }
+    }
+    It 'does not warn when automatic-deploy status publication succeeds' {
+        InModuleScope Production.AutoDeploy {
+            $script:autoDeployStatusWarningEmitted = $false
+            $script:warningCount = 0
+            Mock Publish-AutoDeployStatus { }
+            Mock Write-Warning { $script:warningCount++ }
+
+            $result = Publish-AutoDeployStatusBestEffort `
+                -Outcome 'CHECKING' -State (New-AutoDeployState)
+
+            $result | Should -BeTrue
+            $script:warningCount | Should -Be 0
+            $script:autoDeployStatusWarningEmitted | Should -BeFalse
+        }
+    }
+
+    It 'resets status-warning suppression at the start of each automatic-deploy invocation' {
+        InModuleScope Production.AutoDeploy {
+            $script:autoDeployStatusWarningEmitted = $true
+            $script:warningCount = 0
+            Mock Initialize-AutoDeployStatusStore { Join-Path $TestDrive 'status' }
+            Mock Publish-AutoDeployStatus { throw 'private status failure detail' }
+            Mock Write-Warning { $script:warningCount++ }
+            Mock Read-ProductionConfig { throw 'simulated configuration failure' }
+            $caught = $null
+
+            try { Start-AutoDeployLoop }
+            catch { $caught = $_.Exception }
+
+            $caught.Message | Should -Be 'simulated configuration failure'
+            $script:warningCount | Should -Be 1
+            Should -Invoke Write-Warning -Times 1 -Exactly
+        }
+    }
+
     It 'rejects an alternate root before auto state, marker, remote, or deploy effects' {
         $alternateConfig = [pscustomobject]@{
             programDataRoot = 'C:\attacker-controlled'
