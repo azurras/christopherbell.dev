@@ -30,7 +30,9 @@ subfeature services own the larger account workflows.
   application origin rather than request or forwarded host headers.
 - `profile` owns self-account detail reads and public username-only profiles,
   including safe activity and network stats for post count, reply count,
-  followers, and following.
+  followers, and following. Anonymous requests and stale viewer references use
+  anonymous viewer state; unexpected storage failures resolving an authenticated
+  viewer fail the request instead of returning false self/follow state.
 - `follow` owns follow/unfollow graph updates.
 - `moderation` owns account status changes and role updates. `AccountStatus` is
   the single lifecycle authority; signup creates active accounts and there is no

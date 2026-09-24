@@ -81,7 +81,7 @@ public class AccountProfileService {
   private Optional<Account> getOptionalSelfAccount() {
     try {
       return Optional.of(getSelfEntity());
-    } catch (Exception ignored) {
+    } catch (IllegalStateException | ResourceNotFoundException missingViewer) {
       return Optional.empty();
     }
   }
