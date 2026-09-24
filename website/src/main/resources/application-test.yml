@@ -2,3 +2,9 @@ app:
   shared-folder:
     root: build/shared-folder/test/shared
     system-root: build/shared-folder/test/system
+canes-box-tracker:
+  enabled: false
+wfl:
+  restaurant-import:
+    monthly:
+      enabled: false

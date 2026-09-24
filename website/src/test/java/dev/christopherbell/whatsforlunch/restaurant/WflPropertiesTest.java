@@ -83,6 +83,20 @@ class WflPropertiesTest {
         .isEqualTo(defaults.getRestaurantImport().getOsm().getMetros());
   }
 
+  @Test
+  void testProfileDisablesMonthlyRestaurantImport() throws Exception {
+    var loader = new YamlPropertySourceLoader();
+    var environment = new StandardEnvironment();
+    loader.load("application", new ClassPathResource("application.yml"))
+        .forEach(environment.getPropertySources()::addLast);
+    loader.load("application-test", new ClassPathResource("application-test.yml"))
+        .forEach(environment.getPropertySources()::addFirst);
+    var configured = Binder.get(environment).bind("wfl", WflProperties.class)
+        .orElseThrow(() -> new AssertionError("wfl configuration was not bound"));
+
+    assertThat(configured.getRestaurantImport().getMonthly().isEnabled()).isFalse();
+  }
+
   private List<String> violations(WflProperties properties) {
     try (var factory = Validation.buildDefaultValidatorFactory()) {
       return factory.getValidator().validate(properties).stream()

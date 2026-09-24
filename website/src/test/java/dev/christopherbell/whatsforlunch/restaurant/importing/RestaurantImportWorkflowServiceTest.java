@@ -229,6 +229,26 @@ class RestaurantImportWorkflowServiceTest {
     verify(restaurantService, never()).prepareConfiguredMetroImport();
   }
 
+  @Test
+  void startupDoesNothingWhenMonthlyImportIsDisabled() throws Exception {
+    var disabledProperties = new WflProperties();
+    disabledProperties.getRestaurantImport().getMonthly().setEnabled(false);
+    var disabledWorkflow = new RestaurantImportWorkflowService(
+        Clock.fixed(NOW, ZoneOffset.UTC),
+        leases,
+        permissionService,
+        previews,
+        states,
+        restaurantService,
+        disabledProperties);
+
+    disabledWorkflow.runMissedMonthlyOpenStreetMapImport();
+
+    verify(states, never()).findById(any());
+    verify(leases, never()).tryAcquire(any(), any(), any(), any());
+    verify(restaurantService, never()).prepareConfiguredMetroImport();
+  }
+
   private RestaurantImportSnapshot snapshot(String checksum) {
     var counts = new RestaurantImportPreviewCounts(2, 1, 0, 0, 1, 0);
     return new RestaurantImportSnapshot(checksum, List.of(), counts, List.of("New Cafe"));
