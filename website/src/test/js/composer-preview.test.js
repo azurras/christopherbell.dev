@@ -50,15 +50,21 @@ test('composerPreviewMarkup renders a quiet empty state', () => {
 
 test('composerPreviewMarkup escapes malicious draft text before innerHTML injection', () => {
   const markup = composerPreviewMarkup(
-    composerPreviewModel('<script>alert(1)</script> <img src=x onerror=alert(1)> @<bad'),
+    composerPreviewModel([
+      '<script>alert(0)</script>',
+      '<img src=x onerror=alert(0)>',
+      '<SCRIPT>alert(1)</SCRIPT>',
+      '<IMG src=x onerror=alert(1)> @<bad',
+    ].join(' ')),
     sanitize
   );
 
-  assert.doesNotMatch(markup, /<script>/);
-  assert.doesNotMatch(markup, /<img/);
+  assert.doesNotMatch(markup, /<(?:script|img)\b/i);
   assert.doesNotMatch(markup, /href="\/u\/&lt;bad"/);
-  assert.match(markup, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
-  assert.match(markup, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(markup, /&lt;script&gt;alert\(0\)&lt;\/script&gt;/);
+  assert.match(markup, /&lt;img src=x onerror=alert\(0\)&gt;/);
+  assert.match(markup, /&lt;SCRIPT&gt;alert\(1\)&lt;\/SCRIPT&gt;/);
+  assert.match(markup, /&lt;IMG src=x onerror=alert\(1\)&gt;/);
 });
 
 test('composerPreviewMarkup escapes URL attribute breakout attempts', () => {
