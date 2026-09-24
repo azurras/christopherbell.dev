@@ -980,3 +980,161 @@ Describe 'automatic origin main deployment' {
         }
     }
 }
+
+Describe 'automatic deployment task removal' {
+    It 'keeps WhatIf read-only after the administrator check' {
+        InModuleScope Production.AutoDeploy {
+            Mock Assert-Administrator {}
+            Mock Get-ProductionAutoDeployTask { throw 'task lookup should not be called' }
+
+            Remove-AutoDeployTask -WhatIf | Should -Be 'Would remove the ChristopherBellAutoDeploy task.'
+            Should -Invoke Assert-Administrator -Times 1 -Exactly
+            Should -Invoke Get-ProductionAutoDeployTask -Times 0 -Exactly
+        }
+    }
+
+    It 'treats an absent task as an idempotent no-op' {
+        InModuleScope Production.AutoDeploy {
+            Mock Assert-Administrator {}
+            Mock Get-ProductionAutoDeployTask { $null }
+            Mock Disable-ScheduledTask { throw 'disable should not be called' }
+            Mock Stop-ProductionAutoDeployTask { throw 'stop should not be called' }
+            Mock Unregister-ScheduledTask { throw 'unregister should not be called' }
+
+            { Remove-AutoDeployTask } | Should -Not -Throw
+            Should -Invoke Disable-ScheduledTask -Times 0 -Exactly
+            Should -Invoke Stop-ProductionAutoDeployTask -Times 0 -Exactly
+            Should -Invoke Unregister-ScheduledTask -Times 0 -Exactly
+        }
+    }
+
+    It 'disables, stops, unregisters, and verifies a running task in order' {
+        InModuleScope Production.AutoDeploy {
+            $script:task = [pscustomobject]@{ State='Running' }
+            $script:events = [Collections.Generic.List[string]]::new()
+            Mock Assert-Administrator {}
+            Mock Get-ProductionAutoDeployTask { $script:task }
+            Mock Disable-ScheduledTask {
+                $script:events.Add('disable')
+                $script:task.State = 'Disabled'
+            }
+            Mock Stop-ProductionAutoDeployTask { $script:events.Add('stop') }
+            Mock Unregister-ScheduledTask {
+                $script:events.Add('unregister')
+                $script:task = $null
+            }
+
+            Remove-AutoDeployTask
+
+            $script:events.ToArray() | Should -Be @('disable', 'stop', 'unregister')
+            Should -Invoke Get-ProductionAutoDeployTask -Times 3 -Exactly
+        }
+    }
+
+    It 'removes a disabled task without changing its state or issuing a stop' {
+        InModuleScope Production.AutoDeploy {
+            $script:task = [pscustomobject]@{ State='Disabled' }
+            Mock Assert-Administrator {}
+            Mock Get-ProductionAutoDeployTask {
+                $currentTask = $script:task
+                $script:task = $null
+                $currentTask
+            }
+            Mock Disable-ScheduledTask { throw 'disable should not be called' }
+            Mock Stop-ProductionAutoDeployTask { throw 'stop should not be called' }
+            Mock Unregister-ScheduledTask {}
+
+            Remove-AutoDeployTask
+
+            Should -Invoke Disable-ScheduledTask -Times 0 -Exactly
+            Should -Invoke Stop-ProductionAutoDeployTask -Times 0 -Exactly
+            Should -Invoke Unregister-ScheduledTask -Times 1 -Exactly
+        }
+    }
+
+    It 'surfaces a stop failure and restores the prior enabled state' {
+        InModuleScope Production.AutoDeploy {
+            $script:task = [pscustomobject]@{ State='Running' }
+            Mock Assert-Administrator {}
+            Mock Get-ProductionAutoDeployTask { $script:task }
+            Mock Disable-ScheduledTask { $script:task.State = 'Disabled' }
+            Mock Stop-ProductionAutoDeployTask { throw 'simulated stop failure' }
+            Mock Unregister-ScheduledTask {}
+            Mock Enable-ScheduledTask { $script:task.State = 'Ready' }
+
+            { Remove-AutoDeployTask } | Should -Throw '*simulated stop failure*'
+            $script:task.State | Should -Be 'Ready'
+            Should -Invoke Enable-ScheduledTask -Times 1 -Exactly
+            Should -Invoke Unregister-ScheduledTask -Times 0 -Exactly
+        }
+    }
+
+    It 'does not unregister when the scheduler fails to disable the task' {
+        InModuleScope Production.AutoDeploy {
+            $script:task = [pscustomobject]@{ State='Ready' }
+            Mock Assert-Administrator {}
+            Mock Get-ProductionAutoDeployTask { $script:task }
+            Mock Disable-ScheduledTask {}
+            Mock Enable-ScheduledTask {}
+            Mock Unregister-ScheduledTask {}
+
+            { Remove-AutoDeployTask } | Should -Throw '*task could not be disabled*'
+            Should -Invoke Unregister-ScheduledTask -Times 0 -Exactly
+            Should -Invoke Enable-ScheduledTask -Times 0 -Exactly
+        }
+    }
+
+    It 'surfaces an unregister failure and restores the prior enabled state' {
+        InModuleScope Production.AutoDeploy {
+            $script:task = [pscustomobject]@{ State='Ready' }
+            Mock Assert-Administrator {}
+            Mock Get-ProductionAutoDeployTask { $script:task }
+            Mock Disable-ScheduledTask { $script:task.State = 'Disabled' }
+            Mock Unregister-ScheduledTask { throw 'simulated unregister failure' }
+            Mock Enable-ScheduledTask { $script:task.State = 'Ready' }
+
+            { Remove-AutoDeployTask } | Should -Throw '*simulated unregister failure*'
+            $script:task.State | Should -Be 'Ready'
+            Should -Invoke Enable-ScheduledTask -Times 1 -Exactly
+        }
+    }
+
+    It 'rejects a scheduler no-op and reports when enabled-state recovery also fails' {
+        InModuleScope Production.AutoDeploy {
+            $script:task = [pscustomobject]@{ State='Ready' }
+            Mock Assert-Administrator {}
+            Mock Get-ProductionAutoDeployTask { $script:task }
+            Mock Disable-ScheduledTask { $script:task.State = 'Disabled' }
+            Mock Unregister-ScheduledTask {}
+            Mock Enable-ScheduledTask { throw 'simulated state recovery failure' }
+
+            $caught = $null
+            try { Remove-AutoDeployTask }
+            catch { $caught = $_.Exception }
+
+            $caught | Should -BeOfType [System.AggregateException]
+            $caught.InnerExceptions.Count | Should -Be 2
+            $caught.InnerExceptions[0].Message | Should -Match 'task remains registered'
+            $caught.InnerExceptions[1].Message | Should -Match 'simulated state recovery failure'
+        }
+    }
+
+    It 'verifies the task was re-enabled after a scheduler no-op' {
+        InModuleScope Production.AutoDeploy {
+            $script:task = [pscustomobject]@{ State='Ready' }
+            Mock Assert-Administrator {}
+            Mock Get-ProductionAutoDeployTask { $script:task }
+            Mock Disable-ScheduledTask { $script:task.State = 'Disabled' }
+            Mock Unregister-ScheduledTask {}
+            Mock Enable-ScheduledTask {}
+
+            $caught = $null
+            try { Remove-AutoDeployTask }
+            catch { $caught = $_.Exception }
+
+            $caught | Should -BeOfType [System.AggregateException]
+            $caught.InnerExceptions.Count | Should -Be 2
+            $caught.InnerExceptions[1].Message | Should -Match 'prior enabled state was not restored'
+        }
+    }
+}
