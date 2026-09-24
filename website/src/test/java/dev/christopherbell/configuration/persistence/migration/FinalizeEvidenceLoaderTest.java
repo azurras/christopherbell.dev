@@ -24,6 +24,12 @@ class FinalizeEvidenceLoaderTest {
   private static final String KEY = "independent-test-authority-key-00000001";
 
   @Test
+  void qualifiesWindowsSystemPrincipalName() {
+    assertThat(windowsPrincipalName("SYSTEM")).isEqualTo("NT AUTHORITY\\SYSTEM");
+    assertThat(windowsPrincipalName("administrator")).isEqualTo("administrator");
+  }
+
+  @Test
   void rejectsAnAuthenticWriterLeaseThatIsNotFrozenOrHasExpired(@TempDir Path directory)
       throws Exception {
     protect(directory);
@@ -104,7 +110,7 @@ class FinalizeEvidenceLoaderTest {
     if (System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win")) {
       // Elevated Windows runners otherwise create Administrators-owned files.
       Files.setOwner(selfMinted, selfMinted.getFileSystem().getUserPrincipalLookupService()
-          .lookupPrincipalByName(System.getProperty("user.name")));
+          .lookupPrincipalByName(windowsPrincipalName(System.getProperty("user.name"))));
     }
     protect(selfMinted);
 
@@ -115,6 +121,10 @@ class FinalizeEvidenceLoaderTest {
     assertThatThrownBy(() ->
         FinalizeEvidenceLoader.requireTrustedProductionNodeForTest(selfMinted, false))
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  private static String windowsPrincipalName(String userName) {
+    return "SYSTEM".equalsIgnoreCase(userName) ? "NT AUTHORITY\\SYSTEM" : userName;
   }
 
   @Test
