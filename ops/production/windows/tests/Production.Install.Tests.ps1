@@ -1756,10 +1756,34 @@ Describe 'native cloudflared service installer' {
         }
 
         It 'requires a token path only when cloudflared is not installed' {
-            Mock Get-Service { $null } -ParameterFilter { $Name -eq 'cloudflared' }
+            Mock Get-Service {
+                Write-Error -Message "Cannot find any service with service name 'cloudflared'." `
+                    -ErrorId 'NoServiceFoundForGivenName,Microsoft.PowerShell.Commands.GetServiceCommand' `
+                    -Category ObjectNotFound
+            } -ParameterFilter { $Name -eq 'cloudflared' }
             Mock Test-Path { $true } -ParameterFilter { $LiteralPath -eq 'C:\cloudflared.exe' }
             { Install-CloudflaredService -Executable 'C:\cloudflared.exe' -TokenPath $null } |
                 Should -Throw '*CloudflareTokenPath*'
+        }
+
+        It 'propagates an unexpected service query failure before installing cloudflared' {
+            $tokenPath = Join-Path $TestDrive 'tunnel-token.txt'
+            ('a' * 240) | Set-Content $tokenPath -NoNewline
+            Mock Get-Service {
+                Write-Error -Message 'Service query access was denied.' `
+                    -ErrorId 'ServiceQueryDenied' -Category PermissionDenied
+            } -ParameterFilter { $Name -eq 'cloudflared' }
+            Mock Test-Path { $true }
+            Mock Invoke-CheckedProcess {}
+            Mock Set-Service {}
+            Mock Start-Service {}
+
+            { Install-CloudflaredService -Executable 'C:\cloudflared.exe' -TokenPath $tokenPath } |
+                Should -Throw '*Service query access was denied*'
+
+            Should -Invoke Invoke-CheckedProcess -Times 0
+            Should -Invoke Set-Service -Times 0
+            Should -Invoke Start-Service -Times 0
         }
 
         It 'installs cloudflared without writing the token to output' {

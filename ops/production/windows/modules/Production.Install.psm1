@@ -487,7 +487,15 @@ function Install-CloudflaredService {
         [switch]$WhatIf
     )
     Assert-CloudflaredExecutable -Executable $Executable
-    $existing = Get-Service cloudflared -ErrorAction SilentlyContinue
+    try {
+        $existing = Get-Service cloudflared -ErrorAction Stop
+    } catch {
+        if ($_.FullyQualifiedErrorId -ne
+            'NoServiceFoundForGivenName,Microsoft.PowerShell.Commands.GetServiceCommand') {
+            throw
+        }
+        $existing = $null
+    }
     $tokenProvided = -not [string]::IsNullOrWhiteSpace($TokenPath)
     if (-not $existing -and -not $tokenProvided) {
         throw 'CloudflareTokenPath must reference a protected file when installing cloudflared.'
