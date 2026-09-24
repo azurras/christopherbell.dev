@@ -900,6 +900,47 @@ Describe 'native PostgreSQL production operations' {
         ($calls[2].Arguments -join ' ') | Should -Match 'DROP DATABASE IF EXISTS'
     }
 
+    It 'preserves backup evidence inventory failures before reading secrets or starting restore' {
+        $events = [Collections.Generic.List[string]]::new()
+        InModuleScope Production.PostgreSql -Parameters @{
+            Config = $config
+            Events = $events
+        } {
+            param($Config,$Events)
+            function Get-ChildItem {
+                [CmdletBinding()]
+                param([string]$LiteralPath,[string]$Filter,[switch]$File)
+                $Events.Add('evidence-inventory')
+                Write-Error 'synthetic backup evidence inventory failure'
+            }
+            function Read-ProductionPostgreSqlSecrets {
+                $Events.Add('secret-read')
+                throw 'secret read must not occur before evidence validation'
+            }
+            try {
+                { Test-ProductionPostgreSqlRestore -Config $Config `
+                    -ProcessAction { $Events.Add('database-process') } } |
+                    Should -Throw '*synthetic backup evidence inventory failure*'
+
+                $Events | Should -Be @('evidence-inventory')
+            } finally {
+                Remove-Item Function:\Get-ChildItem -ErrorAction SilentlyContinue
+                Remove-Item Function:\Read-ProductionPostgreSqlSecrets `
+                    -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    It 'retains the no-evidence diagnostic for a successful empty backup inventory' {
+        InModuleScope Production.PostgreSql -Parameters @{ Config = $config } {
+            param($Config)
+            Mock Get-ChildItem { @() }
+
+            { Test-ProductionPostgreSqlRestore -Config $Config } |
+                Should -Throw '*No PostgreSQL backup evidence is available for restore check*'
+        }
+    }
+
     It 'rejects a restore archive outside the configured backup root before process I/O' {
         $archive = Join-Path $TestDrive 'outside.dump'
         'custom-format-backup' | Set-Content -LiteralPath $archive

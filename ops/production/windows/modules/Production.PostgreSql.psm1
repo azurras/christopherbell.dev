@@ -887,7 +887,7 @@ function Test-ProductionPostgreSqlRestore {
     if ([string]::IsNullOrWhiteSpace($Archive) -or
         [string]::IsNullOrWhiteSpace($ExpectedDigest)) {
         $evidenceFile = Get-ChildItem -LiteralPath $Config.postgresqlBackupRoot `
-            -Filter 'christopherbell-*.dump.sha256.json' -File -ErrorAction SilentlyContinue |
+            -Filter 'christopherbell-*.dump.sha256.json' -File -ErrorAction Stop |
             Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
         if (-not $evidenceFile) { throw 'No PostgreSQL backup evidence is available for restore check.' }
         try { $evidence = Get-Content -LiteralPath $evidenceFile.FullName -Raw | ConvertFrom-Json }
