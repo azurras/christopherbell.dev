@@ -287,13 +287,15 @@ function Get-AutoDeployStatusMessage {
 function New-UnavailableAutoDeployStatus {
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('STORE_NOT_INITIALIZED','STATUS_NOT_PUBLISHED','ACCESS_DENIED','INVALID')]
+        [ValidateSet('STORE_NOT_INITIALIZED','STATUS_NOT_PUBLISHED','ACCESS_DENIED',
+            'FUTURE_TIMESTAMP','INVALID')]
         [string]$Reason
     )
     $message = switch ($Reason) {
         'STORE_NOT_INITIALIZED' { 'The automatic deployment status store has not been initialized.' }
         'STATUS_NOT_PUBLISHED' { 'The automatic deployment poller has not published its first result.' }
         'ACCESS_DENIED' { 'The automatic deployment status cannot be read with this account.' }
+        'FUTURE_TIMESTAMP' { 'The automatic deployment status timestamp is later than the local clock.' }
         'INVALID' { 'The automatic deployment status is invalid.' }
     }
     return [pscustomobject]@{
@@ -417,9 +419,17 @@ function Get-AutoDeployStatus {
                 'DEPLOYMENT','CANDIDATE_STARTUP','STATUS_STORE')) {
             throw 'Automatic deployment status record is invalid.'
         }
-        $updatedAt = [datetimeoffset]::Parse(
-            [string]$record.updatedAt,[Globalization.CultureInfo]::InvariantCulture,
-            [Globalization.DateTimeStyles]::RoundtripKind)
+        $updatedAtValue = $record.updatedAt
+        if ($updatedAtValue -is [datetime]) {
+            if ($updatedAtValue.Kind -eq [DateTimeKind]::Unspecified) {
+                throw 'Automatic deployment status timestamp has no time zone.'
+            }
+            $updatedAt = [datetimeoffset]::new($updatedAtValue)
+        } else {
+            $updatedAt = [datetimeoffset]::Parse(
+                [string]$updatedAtValue,[Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::RoundtripKind)
+        }
         foreach ($name in @('remoteSha','activeSha','attemptedSha','successfulSha','failedSha','toolsSha','toolSourceSha')) {
             $value = [string]$record.$name
             if ($value -and $value -notmatch '^[0-9a-f]{40}$') {
@@ -427,6 +437,9 @@ function Get-AutoDeployStatus {
             }
         }
         $age = $Now.ToUniversalTime() - $updatedAt.UtcDateTime
+        if ($age.TotalSeconds -lt 0) {
+            return New-UnavailableAutoDeployStatus -Reason 'FUTURE_TIMESTAMP'
+        }
         $freshness = if ($age.TotalSeconds -gt 180) { 'STALE' } else { 'FRESH' }
         return [pscustomobject]@{
             available = $true
@@ -515,8 +528,21 @@ function Invoke-AutoDeployOnce {
         return
     }
     if ($state.failedSha -eq $remote -and $state.failedAt) {
-        $retryAt = ([datetime]$state.failedAt).AddSeconds([int]$Config.autoDeployFailureBackoffSeconds)
-        if ($now -lt $retryAt) {
+        $failedAtValue = $state.failedAt
+        if ($failedAtValue -is [datetimeoffset]) {
+            $failedAt = $failedAtValue
+        } elseif ($failedAtValue -is [datetime]) {
+            if ($failedAtValue.Kind -eq [DateTimeKind]::Unspecified) {
+                throw 'Automatic deployment failure timestamp has no time zone.'
+            }
+            $failedAt = [datetimeoffset]::new($failedAtValue)
+        } else {
+            $failedAt = [datetimeoffset]::Parse(
+                [string]$failedAtValue,[Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::RoundtripKind)
+        }
+        $retryAt = $failedAt.AddSeconds([int]$Config.autoDeployFailureBackoffSeconds)
+        if ($now -lt $retryAt.UtcDateTime) {
             Write-AutoDeployState $Config $state
             Publish-AutoDeployStatusBestEffort -Outcome 'BACKING_OFF' -State $state `
                 -ActiveSha $active -RetryAt $retryAt.ToUniversalTime().ToString('o') `

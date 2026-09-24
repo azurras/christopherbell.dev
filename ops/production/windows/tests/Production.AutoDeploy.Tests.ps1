@@ -156,6 +156,25 @@ Describe 'automatic origin main deployment' {
         Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
     }
 
+    It 'retries the same failed SHA after the backoff expires' {
+        $remoteSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+        $state = New-AutoDeployState
+        $state.failedSha = $remoteSha
+        $state.failedAt = ([datetime]::UtcNow.AddMinutes(-16)).ToString('o')
+        Write-AutoDeployState $config $state
+        Mock Get-RemoteMainSha { $remoteSha } -ModuleName Production.AutoDeploy
+        $script:activeCalls = 0
+        Mock Get-ActiveReleaseSha {
+            if ($script:activeCalls++ -eq 0) { '0123456789012345678901234567890123456789' }
+            else { $remoteSha }
+        } -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionDeploy {} -ModuleName Production.AutoDeploy
+
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Invoke-ProductionDeploy -Times 1 -ModuleName Production.AutoDeploy
+    }
+
     It 'surfaces an automatic deployment failure after persisting its failed SHA' {
         $remoteSha = 'fedcbafedcbafedcbafedcbafedcbafedcbafedc'
         Mock Get-RemoteMainSha { $remoteSha } -ModuleName Production.AutoDeploy
@@ -228,6 +247,7 @@ Describe 'automatic origin main deployment' {
             $parent = Join-Path $TestDrive 'status-publication-parent'
             $statusRoot = Join-Path $parent 'christopherbell.dev-status'
             New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            $now = [datetime]::UtcNow
             $state = New-AutoDeployState
             $state.remoteSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
             $state.attemptedSha = $state.remoteSha
@@ -238,9 +258,9 @@ Describe 'automatic origin main deployment' {
 
             Publish-AutoDeployStatus -Outcome 'DEPLOYMENT_FAILED' -FailureCategory 'CANDIDATE_STARTUP' `
                 -State $state -StatusRoot $statusRoot `
-                -UpdatedAt ([datetime]'2026-09-23T00:00:00Z')
+                -UpdatedAt $now.AddMinutes(-10)
 
-            $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot -Now $now
             $result.status | Should -Be 'DEPLOYMENT_FAILED'
             $result.failureCategory | Should -Be 'CANDIDATE_STARTUP'
             $result.freshness | Should -Be 'STALE'
@@ -248,8 +268,31 @@ Describe 'automatic origin main deployment' {
             (Get-Content -LiteralPath (Join-Path $statusRoot 'auto-deploy.json') -Raw) |
                 Should -Not -Match 'never-export-this|SPRING_DATASOURCE_PASSWORD'
 
-            Publish-AutoDeployStatus -Outcome 'CHECKING' -State $state -StatusRoot $statusRoot
-            (Get-AutoDeployStatus -StatusRoot $statusRoot).status | Should -Be 'CHECKING'
+            Publish-AutoDeployStatus -Outcome 'CHECKING' -State $state `
+                -StatusRoot $statusRoot -UpdatedAt $now.AddSeconds(-1)
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot -Now $now
+            $result.status | Should -Be 'CHECKING'
+            $result.freshness | Should -Be 'FRESH'
+            $reportedUpdatedAt = [datetimeoffset]::Parse($result.updatedAt)
+            $reportedUpdatedAt.UtcDateTime | Should -Be $now.AddSeconds(-1)
+        }
+    }
+
+    It 'reports a future-dated status as unavailable instead of fresh' {
+        InModuleScope Production.AutoDeploy {
+            $statusRoot = Join-Path $TestDrive 'future-status'
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+            Publish-AutoDeployStatus -Outcome 'CHECKING' -State (New-AutoDeployState) `
+                -StatusRoot $statusRoot -UpdatedAt ([datetime]'2026-09-24T12:00:00Z')
+
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot `
+                -Now ([datetime]'2026-09-24T11:59:59Z')
+
+            $result.available | Should -BeFalse
+            $result.freshness | Should -Be 'UNAVAILABLE'
+            $result.reason | Should -Be 'FUTURE_TIMESTAMP'
         }
     }
 
