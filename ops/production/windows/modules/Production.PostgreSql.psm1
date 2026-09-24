@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'Production.Common.psm1') -Global -Force
-Import-Module (Join-Path $PSScriptRoot 'Production.Deploy.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot 'Production.Deploy.psm1') -DisableNameChecking -Global -Force
 
 $script:ExpectedVersion = '18.4'
 $script:ExpectedServiceName = 'postgresql-x64-18'

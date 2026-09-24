@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'Production.Common.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot 'Production.PostgreSql.psm1')
-Import-Module (Join-Path $PSScriptRoot 'Production.Deploy.psm1')
+Import-Module (Join-Path $PSScriptRoot 'Production.Deploy.psm1') -DisableNameChecking
 Import-Module (Join-Path $PSScriptRoot 'Production.WriterStart.psm1')
 
 $script:OwnedSchemas = @('identity','social','communication','federation','music',
