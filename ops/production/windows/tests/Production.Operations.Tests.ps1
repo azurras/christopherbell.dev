@@ -745,7 +745,48 @@ Describe 'native Windows production operations' {
             Mock Get-Service { [pscustomobject]@{ Status='Running'; StartType='Automatic' } }
             Mock Get-JunctionTarget { $null }
             Mock Get-NetTCPConnection { [pscustomobject]@{ OwningProcess=42 } }
-            (Get-ProductionStatus).CloudflaredService | Should -Be 'Running'
+            $status = Get-ProductionStatus
+            $status.CloudflaredService | Should -Be 'Running'
+            $status.ProductionPortPid | Should -Be 42
+        }
+
+        It 'surfaces service-query failures instead of reporting the service absent' {
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
+            Mock Get-Service { Write-Error 'simulated service query failure' } `
+                -ParameterFilter { $Name -eq 'ChristopherBellDev' }
+            Mock Get-JunctionTarget { $null }
+            Mock Get-NetTCPConnection { [pscustomobject]@{ OwningProcess=42 } }
+
+            { Get-ProductionStatus } | Should -Throw '*simulated service query failure*'
+        }
+
+        It 'treats the native missing-service error as an absent service' {
+            Get-ProductionStatusServiceOrNull -Name 'CodexDefinitelyMissingServiceForStatusTest' |
+                Should -BeNullOrEmpty
+        }
+
+        It 'surfaces listener-query failures instead of reporting an empty listener' {
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
+            Mock Get-Service { [pscustomobject]@{ Status='Running'; StartType='Automatic' } }
+            Mock Get-JunctionTarget { $null }
+            Mock Get-NetTCPConnection { Write-Error 'simulated listener query failure' }
+
+            { Get-ProductionStatus } | Should -Throw '*simulated listener query failure*'
+        }
+
+        It 'retains NotInstalled and null PID for successful queries with absent services and no listener' {
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
+            Mock Get-Service {
+                if ($Name -eq 'MongoDB') { return $null }
+                [pscustomobject]@{ Status='Running'; StartType='Automatic' }
+            }
+            Mock Get-JunctionTarget { $null }
+            Mock Get-NetTCPConnection { $null }
+
+            $status = Get-ProductionStatus
+
+            $status.MongoService | Should -Be 'NotInstalled'
+            $status.ProductionPortPid | Should -BeNullOrEmpty
         }
 
         It 'rejects startup when a required service is not automatic' {
