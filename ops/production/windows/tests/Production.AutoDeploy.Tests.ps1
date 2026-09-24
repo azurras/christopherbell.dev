@@ -499,6 +499,86 @@ Describe 'automatic origin main deployment' {
         }
     }
 
+    It 'surfaces tool refresh failure when its protected state cannot be persisted' {
+        InModuleScope Production.AutoDeploy {
+            $config = [pscustomobject]@{ programDataRoot=$TestDrive }
+            $script:publishedOutcomes = [Collections.Generic.List[object]]::new()
+            $script:failedToolRefreshErrors = [Collections.Generic.List[string]]::new()
+            Mock Read-ProductionConfig { $config }
+            Mock Initialize-AutoDeployStatusStore { Join-Path $TestDrive 'status' }
+            Mock Assert-ProductionFixedRootBoundary {}
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{ Lock=[IO.MemoryStream]::new() }
+            }
+            Mock Update-AutoDeployToolsFromOriginMain {
+                throw 'simulated tool refresh failure'
+            }
+            Mock Read-AutoDeployState {
+                $state = New-AutoDeployState
+                $state.toolRefreshStatus = 'SUCCEEDED'
+                return $state
+            }
+            Mock Write-AutoDeployState {
+                throw 'simulated state persistence failure'
+            }
+            Mock Publish-AutoDeployStatusBestEffort {
+                $script:publishedOutcomes.Add([pscustomobject]@{
+                    Outcome=$Outcome
+                    FailureCategory=$FailureCategory
+                    State=$State
+                })
+                return $true
+            }
+            Mock Invoke-AutoDeployOnce { throw 'stale bundle must not deploy' }
+            Mock Add-Content {}
+
+            $caught = $null
+            try { Start-AutoDeployLoop }
+            catch { $caught = $_.Exception }
+
+            $caught | Should -Not -BeNullOrEmpty
+            $caught | Should -BeOfType [AggregateException]
+            $script:failedToolRefreshErrors.AddRange(
+                [string[]]@($caught.InnerExceptions | ForEach-Object Message))
+            $script:failedToolRefreshErrors | Should -Contain 'simulated tool refresh failure'
+            $script:failedToolRefreshErrors | Should -Contain 'simulated state persistence failure'
+            $script:publishedOutcomes[-1].Outcome | Should -Be 'CHECK_FAILED'
+            $script:publishedOutcomes[-1].FailureCategory | Should -Be 'PROTECTED_PRECONDITION'
+            $script:publishedOutcomes[-1].State.toolRefreshStatus | Should -Be 'FAILED'
+            Should -Invoke Invoke-AutoDeployOnce -Times 0 -ModuleName Production.AutoDeploy
+        }
+    }
+
+    It 'continues with the trusted bundle when a refresh failure is persisted' {
+        InModuleScope Production.AutoDeploy {
+            $config = [pscustomobject]@{ programDataRoot=$TestDrive }
+            $script:storedAutoDeployState = New-AutoDeployState
+            $script:storedAutoDeployState.toolRefreshStatus = 'SUCCEEDED'
+            $script:releaseCheckStarted = $false
+            Mock Read-ProductionConfig { $config }
+            Mock Initialize-AutoDeployStatusStore { Join-Path $TestDrive 'status' }
+            Mock Assert-ProductionFixedRootBoundary {}
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{ Lock=[IO.MemoryStream]::new() }
+            }
+            Mock Update-AutoDeployToolsFromOriginMain {
+                throw 'simulated tool refresh failure'
+            }
+            Mock Read-AutoDeployState { return $script:storedAutoDeployState }
+            Mock Write-AutoDeployState {
+                $script:storedAutoDeployState = $State
+            }
+            Mock Publish-AutoDeployStatusBestEffort { return $true }
+            Mock Invoke-AutoDeployOnce { $script:releaseCheckStarted = $true }
+
+            { Start-AutoDeployLoop } | Should -Not -Throw
+
+            $script:storedAutoDeployState.toolRefreshStatus | Should -Be 'FAILED'
+            $script:releaseCheckStarted | Should -BeTrue
+            Should -Invoke Invoke-AutoDeployOnce -Times 1 -ModuleName Production.AutoDeploy
+        }
+    }
+
     It 'registers the startup task with an absolute PowerShell 7 executable when PATH is empty' {
         InModuleScope Production.AutoDeploy {
             $originalPath = $env:PATH
