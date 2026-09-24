@@ -393,7 +393,9 @@ Describe 'automatic origin main deployment' {
     It 'distinguishes a missing status store from a missing status record' {
         $statusRoot = Join-Path $TestDrive 'missing-status-store'
         Mock Assert-AutoDeployStatusDirectory {} -ModuleName Production.AutoDeploy
-        Mock Get-ProductionAutoDeployTask { $null } -ModuleName Production.AutoDeploy
+        Mock Get-AutoDeployTaskSchedulerEntry {
+            [pscustomobject]@{ registered=$false; state=$null; reason='TASK_NOT_REGISTERED' }
+        } -ModuleName Production.AutoDeploy
 
         $missingStore = Get-AutoDeployStatus -StatusRoot $statusRoot
         New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
@@ -414,7 +416,9 @@ Describe 'automatic origin main deployment' {
             $state.failedSha = $state.remoteSha
             Mock Assert-AutoDeployStatusDirectory {}
             Mock Assert-AutoDeployStatusFile {}
-            Mock Get-ProductionAutoDeployTask { $null }
+            Mock Get-AutoDeployTaskSchedulerEntry {
+                [pscustomobject]@{ registered=$false; state=$null; reason='TASK_NOT_REGISTERED' }
+            }
             Publish-AutoDeployStatus -Outcome 'BACKING_OFF' -State $state `
                 -StatusRoot $statusRoot -RetryAt ([datetime]::UtcNow.AddMinutes(10).ToString('o'))
 
@@ -429,6 +433,62 @@ Describe 'automatic origin main deployment' {
         }
     }
 
+    It 'distinguishes a denied scheduler query from a confirmed missing task' {
+        InModuleScope Production.AutoDeploy {
+            $scheduler = [pscustomobject]@{
+                Folder = [pscustomobject]@{
+                    TaskState = 3
+                    Failure = [UnauthorizedAccessException]::new('Access is denied.')
+                }
+            }
+            Add-Member -InputObject $scheduler.Folder -MemberType ScriptMethod `
+                -Name GetTask -Value {
+                    param($TaskName)
+                    if ($this.Failure) { throw $this.Failure }
+                    return [pscustomobject]@{ State=$this.TaskState }
+                }
+            Add-Member -InputObject $scheduler -MemberType ScriptMethod `
+                -Name Connect -Value { }
+            Add-Member -InputObject $scheduler -MemberType ScriptMethod `
+                -Name GetFolder -Value {
+                    param($Path)
+                    if ($Path -cne '\') { throw 'Unexpected Task Scheduler folder.' }
+                    return $this.Folder
+                }
+
+            $denied = Get-AutoDeployTaskSchedulerEntry -SchedulerService $scheduler
+            $denied.registered | Should -BeFalse
+            $denied.reason | Should -Be 'ACCESS_DENIED'
+
+            $scheduler.Folder.Failure = [IO.FileNotFoundException]::new(
+                'The system cannot find the file specified.')
+            $missing = Get-AutoDeployTaskSchedulerEntry -SchedulerService $scheduler
+            $missing.registered | Should -BeFalse
+            $missing.reason | Should -Be 'TASK_NOT_REGISTERED'
+        }
+    }
+
+    It 'keeps the status record visible when the scheduler query is access denied' {
+        InModuleScope Production.AutoDeploy {
+            $statusRoot = Join-Path $TestDrive 'scheduler-access-denied'
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+            Mock Get-AutoDeployTaskSchedulerEntry {
+                [pscustomobject]@{ registered=$false; state=$null; reason='ACCESS_DENIED' }
+            }
+            Publish-AutoDeployStatus -Outcome 'UP_TO_DATE' -State (New-AutoDeployState) `
+                -StatusRoot $statusRoot
+
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+
+            $result.available | Should -BeTrue
+            $result.status | Should -Be 'UP_TO_DATE'
+            $result.pollerState | Should -Be 'UNKNOWN'
+            $result.pollerReason | Should -Be 'ACCESS_DENIED'
+        }
+    }
+
     It 'reports safe registered scheduler states without exposing the task action' -TestCases @(
         @{ SchedulerState='Ready'; ExpectedState='READY' },
         @{ SchedulerState='Running'; ExpectedState='RUNNING' },
@@ -440,10 +500,18 @@ Describe 'automatic origin main deployment' {
             New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
             Mock Assert-AutoDeployStatusDirectory {}
             Mock Assert-AutoDeployStatusFile {}
-            Mock Get-ProductionAutoDeployTask {
+            $schedulerStateCode = switch ($SchedulerState) {
+                'Ready' { 3 }
+                'Running' { 4 }
+                'Disabled' { 1 }
+            }
+            Mock Get-AutoDeployTaskSchedulerEntry {
                 [pscustomobject]@{
-                    State = $SchedulerState
-                    Actions = @([pscustomobject]@{ Execute='C:\private\pwsh.exe'; Arguments='-File secret.ps1' })
+                    registered=$true
+                    state=$schedulerStateCode
+                    reason='NONE'
+                    Actions=@([pscustomobject]@{ Execute='C:\private\pwsh.exe'; Arguments='-File secret.ps1' })
+                    Principal=[pscustomobject]@{ UserId='private-account' }
                 }
             }
             Publish-AutoDeployStatus -Outcome 'UP_TO_DATE' -State (New-AutoDeployState) `
@@ -465,8 +533,8 @@ Describe 'automatic origin main deployment' {
             New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
             Mock Assert-AutoDeployStatusDirectory {}
             Mock Assert-AutoDeployStatusFile {}
-            Mock Get-ProductionAutoDeployTask {
-                throw [UnauthorizedAccessException]::new('private task path and account SID')
+            Mock Get-AutoDeployTaskSchedulerEntry {
+                [pscustomobject]@{ registered=$false; state=$null; reason='ACCESS_DENIED' }
             }
             Publish-AutoDeployStatus -Outcome 'UP_TO_DATE' -State (New-AutoDeployState) `
                 -StatusRoot $statusRoot

@@ -411,29 +411,50 @@ function Publish-AutoDeployStatus {
     }
 }
 
-function Get-AutoDeployPollerStatus {
+function Get-AutoDeployTaskSchedulerEntry {
+    [CmdletBinding()]
+    param([object]$SchedulerService)
+
     try {
-        $task = Get-ProductionAutoDeployTask
-        if (-not $task) {
+        if (-not $SchedulerService) {
+            $SchedulerService = New-Object -ComObject Schedule.Service
+        }
+        $SchedulerService.Connect()
+        $task = $SchedulerService.GetFolder('\').GetTask('ChristopherBellAutoDeploy')
+        return [pscustomobject]@{
+            registered = $true
+            state = [int]$task.State
+            reason = 'NONE'
+        }
+    } catch {
+        $queryException = $_.Exception
+        while ($queryException.InnerException) {
+            $queryException = $queryException.InnerException
+        }
+        $reason = switch ([int]$queryException.HResult) {
+            -2147024891 { 'ACCESS_DENIED' }
+            -2147024894 { 'TASK_NOT_REGISTERED' }
+            default { 'QUERY_FAILED' }
+        }
+        return [pscustomobject]@{
+            registered = $false
+            state = $null
+            reason = $reason
+        }
+    }
+}
+
+function Get-AutoDeployPollerStatus {
+    $entry = Get-AutoDeployTaskSchedulerEntry
+    if (-not $entry.registered) {
+        if ($entry.reason -eq 'TASK_NOT_REGISTERED') {
             return [pscustomobject]@{
                 pollerState = 'NOT_REGISTERED'
                 pollerReason = 'TASK_NOT_REGISTERED'
             }
         }
-        $state = ([string]$task.State).ToUpperInvariant()
-        if ($state -notin @('READY','RUNNING','DISABLED','QUEUED')) {
-            return [pscustomobject]@{
-                pollerState = 'UNKNOWN'
-                pollerReason = 'UNRECOGNIZED_STATE'
-            }
-        }
-        return [pscustomobject]@{
-            pollerState = $state
-            pollerReason = 'NONE'
-        }
-    } catch {
-        $reason = if ($_.Exception -is [UnauthorizedAccessException]) {
-            'ACCESS_DENIED'
+        $reason = if ($entry.reason -in @('ACCESS_DENIED','QUERY_FAILED')) {
+            [string]$entry.reason
         } else {
             'QUERY_FAILED'
         }
@@ -441,6 +462,23 @@ function Get-AutoDeployPollerStatus {
             pollerState = 'UNKNOWN'
             pollerReason = $reason
         }
+    }
+    $state = switch ([int]$entry.state) {
+        1 { 'DISABLED' }
+        2 { 'QUEUED' }
+        3 { 'READY' }
+        4 { 'RUNNING' }
+        default { $null }
+    }
+    if (-not $state) {
+        return [pscustomobject]@{
+            pollerState = 'UNKNOWN'
+            pollerReason = 'UNRECOGNIZED_STATE'
+        }
+    }
+    return [pscustomobject]@{
+        pollerState = $state
+        pollerReason = 'NONE'
     }
 }
 
