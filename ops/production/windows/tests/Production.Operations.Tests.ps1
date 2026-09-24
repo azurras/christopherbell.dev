@@ -460,6 +460,54 @@ Describe 'native Windows production operations' {
             Should -Invoke Restart-Service -Times 0
         }
 
+        It 'starts a stopped website service under the lock only with exact target release direction' {
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+            $events = [Collections.Generic.List[string]]::new()
+            $lock = [pscustomobject]@{}
+            $lock | Add-Member ScriptMethod Dispose { [void]$events.Add('unlock') }
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-DeploymentLock { [void]$events.Add('lock'); $lock }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$sha }
+            }
+            Mock Get-JunctionTarget { "C:\data\releases\$sha" }
+            Mock Get-Service {
+                [void]$events.Add('service-query')
+                [pscustomobject]@{ Status='Stopped' }
+            }
+            Mock Restart-Service { throw 'stopped service must use Start-Service' }
+            Mock Start-Service { [void]$events.Add('start') }
+            Mock Test-ProductionEndpoints { [void]$events.Add('health') }
+
+            Restart-ProductionService -Verify -RequireTargetActive
+
+            $events | Should -Be @('lock','service-query','start','health','unlock')
+            Should -Invoke Start-Service -Times 1 -Exactly
+            Should -Invoke Restart-Service -Times 0 -Exactly
+        }
+
+        It 'refuses automatic service recovery unless target schema direction is active' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_CUTOVER_IN_PROGRESS' }
+            }
+            Mock Get-Service { throw 'service query must not run' }
+            Mock Start-Service { throw 'service start must not run' }
+            Mock Restart-Service { throw 'service restart must not run' }
+
+            { Restart-ProductionService -RequireTargetActive } |
+                Should -Throw '*requires exact TARGET_ACTIVE schema direction*'
+
+            Should -Invoke Get-Service -Times 0 -Exactly
+            Should -Invoke Start-Service -Times 0 -Exactly
+            Should -Invoke Restart-Service -Times 0 -Exactly
+        }
+
         It 'categorically blocks manual restart during domain rollback even on the legacy release' {
             $direction = [pscustomobject]@{
                 version=2
