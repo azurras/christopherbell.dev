@@ -185,6 +185,15 @@ Describe 'automatic origin main deployment' {
             -ModuleName Production.AutoDeploy
     }
 
+    It 'keeps the production CLI free of unapproved-verb discovery warnings' {
+        $commandPath = Join-Path $PSScriptRoot '..\prod.ps1'
+        $warningRecords = @()
+
+        $null = & $commandPath help -WarningVariable warningRecords
+
+        $warningRecords | Should -BeNullOrEmpty
+    }
+
     It 'creates a standard-user-readable status store with no untrusted write rights' {
         InModuleScope Production.AutoDeploy {
             $parent = Join-Path $TestDrive 'status-parent'

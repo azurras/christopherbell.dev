@@ -26,7 +26,7 @@ Import-Module (Join-Path $moduleRoot 'Production.WriterStart.psm1') -Global -For
 foreach ($module in 'Production.MusicRuntime','Production.Deploy','Production.SharedFolder',
     'Production.Install','Production.Sensors','Production.Operations','Production.AutoDeploy',
     'Production.DomainCollections','Production.PostgreSql','Production.PostgreSqlMigration') {
-    Import-Module (Join-Path $moduleRoot "$module.psm1") -Force
+    Import-Module (Join-Path $moduleRoot "$module.psm1") -DisableNameChecking -Force
 }
 
 function Invoke-ProductionCommand {
