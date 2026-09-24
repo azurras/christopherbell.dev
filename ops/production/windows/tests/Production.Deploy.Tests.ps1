@@ -7,6 +7,8 @@ Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -For
 Describe 'native Windows deployment' {
     InModuleScope Production.Deploy {
         BeforeEach {
+            New-Item -ItemType Directory -Path (Join-Path $TestDrive 'logs') `
+                -Force | Out-Null
             Mock Assert-ProductionFixedRootBoundary {
                 [pscustomobject]@{ Root='C:\ProgramData\christopherbell.dev' }
             }
@@ -1148,6 +1150,7 @@ Describe 'native Windows deployment' {
             Mock Assert-ProtectedProductionPath {
                 New-Item -ItemType Directory -Path $Path -Force | Out-Null
             }
+            Mock Protect-ProductionPath { }
             $config = [pscustomobject]@{ programDataRoot=$TestDrive; candidatePort=8081 }
             Test-CandidateRelease $config 'C:\data\releases\new' 'christopherbell_restore_check'
             Should -Invoke Start-ProductionJar -ParameterFilter { $AdditionalEnvironment.SPRING_MONGODB_DATABASE -eq 'christopherbell_restore_check' }
@@ -1168,6 +1171,7 @@ Describe 'native Windows deployment' {
             Mock Wait-ProductionCandidateOwnedListener { [pscustomobject]@{} }
             Mock Assert-ProductionCandidateProcessOwnsListener { }
             Mock Assert-ProtectedProductionPath { }
+            Mock Protect-ProductionPath { }
             $config = [pscustomobject]@{ programDataRoot=$TestDrive; candidatePort=8081 }
 
             Test-CandidateRelease $config 'C:\data\releases\new' 'restore_check'
@@ -1182,6 +1186,7 @@ Describe 'native Windows deployment' {
             Mock Assert-ProductionCandidatePortUnused { throw 'candidate port is occupied' }
             Mock Start-ProductionJar { throw 'candidate must not start' }
             Mock Assert-ProtectedProductionPath { }
+            Mock Protect-ProductionPath { }
             $config = [pscustomobject]@{ programDataRoot=$TestDrive; candidatePort = 8081 }
 
             { Test-CandidateRelease $config 'C:\data\releases\new' 'restore_check' } |
@@ -1213,6 +1218,7 @@ Describe 'native Windows deployment' {
             }
             Mock Stop-Process { $process.HasExited = $true }
             Mock Assert-ProtectedProductionPath { }
+            Mock Protect-ProductionPath { }
             $config = [pscustomobject]@{ programDataRoot=$TestDrive; candidatePort = 8081 }
 
             Test-CandidateRelease $config 'C:\data\releases\new' 'restore_check'
@@ -1231,14 +1237,17 @@ Describe 'native Windows deployment' {
 
         It 'retains a bounded protected startup log and reports candidate exit code' {
             $script:candidateLogPath = $null
+            $script:verifiedCandidateLogRoot = $null
             $process = [pscustomobject]@{ Id=1234; HasExited=$true; ExitCode=23 }
             $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {
                 param($milliseconds) $true
             }
             $process | Add-Member -MemberType ScriptMethod -Name Refresh -Value { }
             Mock Assert-ProtectedProductionPath {
+                $script:verifiedCandidateLogRoot = $Path
                 New-Item -ItemType Directory -Path $Path -Force | Out-Null
             }
+            Mock Protect-ProductionPath { }
             Mock Assert-ProductionCandidatePortUnused { }
             Mock Start-ProductionJar {
                 $script:candidateLogPath = $AdditionalEnvironment.LOGGING_FILE_NAME
@@ -1278,6 +1287,7 @@ Describe 'native Windows deployment' {
             $failure.Message | Should -Match 'candidate process 1234 exited with code 23'
             $failure.Message | Should -Match ([regex]::Escape($script:candidateProcessLogPath))
             $failure.Message | Should -Match ([regex]::Escape($script:candidateLogPath))
+            $script:verifiedCandidateLogRoot | Should -Be (Join-Path (Join-Path $TestDrive 'logs') 'candidate')
             $failure.Message | Should -Not -Match 'private-test-db'
             $script:candidateProcessLogPath | Should -Not -BeNullOrEmpty
             Test-Path -LiteralPath $script:candidateProcessLogPath | Should -BeTrue
