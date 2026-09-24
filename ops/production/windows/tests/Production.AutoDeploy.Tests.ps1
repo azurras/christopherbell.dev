@@ -279,6 +279,53 @@ Describe 'automatic origin main deployment' {
             -ModuleName Production.AutoDeploy
     }
 
+    It 'reports access denied when the status-store directory query fails' {
+        Mock Test-Path {
+            throw [UnauthorizedAccessException]::new('synthetic status directory access denied')
+        } -ParameterFilter { $PesterBoundParameters.ErrorAction -eq 'Stop' } `
+            -ModuleName Production.AutoDeploy
+        Mock Test-Path {
+            Write-Error 'synthetic status directory access denied' -ErrorAction Continue
+            return $false
+        } -ModuleName Production.AutoDeploy
+
+        $result = Get-AutoDeployStatus -StatusRoot (Join-Path $TestDrive 'inaccessible-status')
+
+        $result.available | Should -BeFalse
+        $result.reason | Should -Be 'ACCESS_DENIED'
+    }
+
+    It 'reports invalid status when the status-file query fails' {
+        $statusRoot = Join-Path $TestDrive 'status-file-query-failure'
+        New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+        Mock Assert-AutoDeployStatusDirectory {} -ModuleName Production.AutoDeploy
+        Mock Test-Path {
+            if ($PesterBoundParameters.ErrorAction -eq 'Stop') {
+                throw 'synthetic status-file query failure'
+            }
+            Write-Error 'synthetic status-file query failure' -ErrorAction Continue
+            return $false
+        } -ParameterFilter { $PesterBoundParameters.LiteralPath -like '*auto-deploy.json' } `
+            -ModuleName Production.AutoDeploy
+
+        $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+
+        $result.available | Should -BeFalse
+        $result.reason | Should -Be 'INVALID'
+    }
+
+    It 'distinguishes a missing status store from a missing status record' {
+        $statusRoot = Join-Path $TestDrive 'missing-status-store'
+        Mock Assert-AutoDeployStatusDirectory {} -ModuleName Production.AutoDeploy
+
+        $missingStore = Get-AutoDeployStatus -StatusRoot $statusRoot
+        New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+        $missingRecord = Get-AutoDeployStatus -StatusRoot $statusRoot
+
+        $missingStore.reason | Should -Be 'STORE_NOT_INITIALIZED'
+        $missingRecord.reason | Should -Be 'STATUS_NOT_PUBLISHED'
+    }
+
     It 'keeps the production CLI free of unapproved-verb discovery warnings' {
         $commandPath = Join-Path $PSScriptRoot '..\prod.ps1'
         $warningRecords = @()
