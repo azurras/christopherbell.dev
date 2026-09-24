@@ -256,8 +256,12 @@ Describe 'automatic origin main deployment' {
             Mock Assert-Administrator {}
             Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive; autoDeployPollSeconds=60 } }
             Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            $deploymentLock = [pscustomobject]@{}
+            $deploymentLock | Add-Member -MemberType ScriptMethod -Name Dispose -Value {
+                $script:events.Add('unlock')
+            }
             Mock Enter-ProductionFixedRootDeploymentLock {
-                [pscustomobject]@{ Lock=[IO.MemoryStream]::new() }
+                [pscustomobject]@{ Lock=$deploymentLock }
             }
             Mock Stop-ScheduledTask { $script:events.Add('stop') }
             Mock Get-ScheduledTask { [pscustomobject]@{ State='Ready' } }
@@ -280,6 +284,8 @@ Describe 'automatic origin main deployment' {
             $script:events.IndexOf('remove') | Should -BeLessThan $script:events.IndexOf('copy')
             $script:events.IndexOf('protect-tree') | Should -BeLessThan $script:events.IndexOf('verify-tree')
             $script:events.IndexOf('verify-tree') | Should -BeLessThan $script:events.IndexOf('register')
+            $script:events.IndexOf('register') | Should -BeLessThan $script:events.IndexOf('unlock')
+            $script:events.IndexOf('unlock') | Should -BeLessThan $script:events.IndexOf('start')
             Should -Invoke Remove-Item -Times 1 -ParameterFilter { $LiteralPath -like '*\tools' -and $Recurse }
             Should -Invoke Assert-ProtectedProductionTree -Times 1 -ParameterFilter { $Path -like '*\tools' }
         }

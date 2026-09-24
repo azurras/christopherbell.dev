@@ -171,7 +171,6 @@ function Update-ProductionAutoDeployToolsUnderHeldLock {
         -Settings $settings `
         -Principal $principal `
         -Force | Out-Null
-    Start-ScheduledTask -TaskName 'ChristopherBellAutoDeploy'
 }
 
 function Install-AutoDeployTask {
@@ -196,6 +195,7 @@ function Install-AutoDeployTask {
     } finally {
         $guard.Lock.Dispose()
     }
+    Start-ScheduledTask -TaskName 'ChristopherBellAutoDeploy'
 }
 
 function Remove-AutoDeployTask {
