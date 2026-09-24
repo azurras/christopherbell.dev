@@ -341,7 +341,7 @@ Describe 'automatic origin main deployment' {
 
     It 'stages trusted versioned tools before switching the poller action' {
         InModuleScope Production.AutoDeploy {
-            $programDataRoot = Join-Path $TestDrive ('tool-stage-' + [guid]::NewGuid().ToString('N'))
+            $programDataRoot = Join-Path $TestDrive 'stage'
             $config = [pscustomobject]@{
                 programDataRoot=$programDataRoot
                 repositoryPath=(Join-Path $TestDrive 'repository')
@@ -412,7 +412,7 @@ Describe 'automatic origin main deployment' {
 
     It 'cleans a partial tools stage and preserves the task action when copying fails' {
         InModuleScope Production.AutoDeploy {
-            $programDataRoot = Join-Path $TestDrive ('tool-stage-failure-' + [guid]::NewGuid().ToString('N'))
+            $programDataRoot = Join-Path $TestDrive 'stage-failure'
             $config = [pscustomobject]@{
                 programDataRoot=$programDataRoot
                 repositoryPath=(Join-Path $TestDrive 'repository')
