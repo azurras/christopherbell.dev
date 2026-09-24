@@ -573,7 +573,14 @@ function Wait-ProductionCandidateOwnedListener {
     )
     $watch = [Diagnostics.Stopwatch]::StartNew()
     do {
-        $process = Get-Process -Id ([int]$Identity.pid) -ErrorAction SilentlyContinue
+        try {
+            $process = Get-Process -Id ([int]$Identity.pid) -ErrorAction Stop
+        } catch {
+            if ($_.FullyQualifiedErrorId -like 'NoProcessFoundForGivenId,*') {
+                throw "Candidate process $([int]$Identity.pid) exited before binding."
+            }
+            throw
+        }
         if (-not $process) {
             throw "Candidate process $([int]$Identity.pid) exited before binding."
         }

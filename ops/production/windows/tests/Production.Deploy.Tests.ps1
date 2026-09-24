@@ -1244,6 +1244,64 @@ Describe 'native Windows deployment' {
             Should -Invoke Start-ProductionJar -Times 0
         }
 
+        It 'surfaces candidate process inspection failures before querying listeners' {
+            Mock Get-Process {
+                Write-Error -Message 'simulated process inspection failure' `
+                    -ErrorId 'ProcessInspectionDenied' `
+                    -Category PermissionDenied `
+                    -TargetObject 1234
+            }
+            Mock Get-NetTCPConnection {
+                throw 'Listener inspection must not run after process query failure.'
+            }
+
+            {
+                Wait-ProductionCandidateOwnedListener `
+                    -Port 8081 `
+                    -Identity ([pscustomobject]@{ pid=1234; startTimeUtcTicks=99 }) `
+                    -TimeoutSeconds 1
+            } | Should -Throw '*simulated process inspection failure*'
+
+            Should -Invoke Get-NetTCPConnection -Times 0 -Exactly
+        }
+
+        It 'maps the native missing-process query result to the exited-before-binding message' {
+            Mock Get-Process {
+                Write-Error -Message 'Cannot find a process with the process identifier 1234.' `
+                    -ErrorId 'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.GetProcessCommand' `
+                    -Category ObjectNotFound `
+                    -TargetObject 1234
+            }
+            Mock Get-NetTCPConnection {
+                throw 'Listener inspection must not run after the candidate exits.'
+            }
+
+            {
+                Wait-ProductionCandidateOwnedListener `
+                    -Port 8081 `
+                    -Identity ([pscustomobject]@{ pid=1234; startTimeUtcTicks=99 }) `
+                    -TimeoutSeconds 1
+            } | Should -Throw '*Candidate process 1234 exited before binding*'
+
+            Should -Invoke Get-NetTCPConnection -Times 0 -Exactly
+        }
+
+        It 'preserves the exited-before-binding result when the candidate process is absent' {
+            Mock Get-Process { $null }
+            Mock Get-NetTCPConnection {
+                throw 'Listener inspection must not run after the candidate exits.'
+            }
+
+            {
+                Wait-ProductionCandidateOwnedListener `
+                    -Port 8081 `
+                    -Identity ([pscustomobject]@{ pid=1234; startTimeUtcTicks=99 }) `
+                    -TimeoutSeconds 1
+            } | Should -Throw '*Candidate process 1234 exited before binding*'
+
+            Should -Invoke Get-NetTCPConnection -Times 0 -Exactly
+        }
+
         It 'binds endpoint checks to the spawned candidate PID and start time throughout' {
             $events = [Collections.Generic.List[string]]::new()
             $process = [pscustomobject]@{ Id=1234; HasExited=$false }
