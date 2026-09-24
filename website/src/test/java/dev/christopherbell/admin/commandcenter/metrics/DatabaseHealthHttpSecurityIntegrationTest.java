@@ -26,7 +26,7 @@ import org.springframework.test.web.servlet.MockMvc;
     classes = DatabaseHealthHttpSecurityIntegrationTest.TestApplication.class,
     properties = {
         "management.endpoints.web.exposure.include=health",
-        "management.health.mongo.enabled=false",
+        "management.health.mongodb.enabled=false",
         "management.endpoint.health.show-details=when-authorized",
         "management.endpoint.health.roles=ADMIN",
         "management.endpoint.health.probes.enabled=true",
