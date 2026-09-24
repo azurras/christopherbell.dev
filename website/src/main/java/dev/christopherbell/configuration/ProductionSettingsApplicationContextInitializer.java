@@ -46,7 +46,10 @@ public final class ProductionSettingsApplicationContextInitializer
       return;
     }
     try {
-      new ConnectionString(value);
+      var connectionString = new ConnectionString(value);
+      if (connectionString.getDatabase() == null || connectionString.getDatabase().isBlank()) {
+        violations.add("SPRING_MONGODB_URI must specify a database name.");
+      }
     } catch (RuntimeException ignored) {
       violations.add("SPRING_MONGODB_URI must be a valid MongoDB connection string.");
     }
