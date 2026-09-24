@@ -24,12 +24,6 @@ class FinalizeEvidenceLoaderTest {
   private static final String KEY = "independent-test-authority-key-00000001";
 
   @Test
-  void qualifiesWindowsSystemPrincipalName() {
-    assertThat(windowsPrincipalName("SYSTEM")).isEqualTo("NT AUTHORITY\\SYSTEM");
-    assertThat(windowsPrincipalName("administrator")).isEqualTo("administrator");
-  }
-
-  @Test
   void rejectsAnAuthenticWriterLeaseThatIsNotFrozenOrHasExpired(@TempDir Path directory)
       throws Exception {
     protect(directory);
@@ -102,17 +96,26 @@ class FinalizeEvidenceLoaderTest {
   }
 
   @Test
-  void productionAuthorityRootIsFixedAndSelfMintedOwnerOnlyFilesAreRejected(
+  void productionAuthorityRootIsFixedAndSelfMintedFilesWithUntrustedWritersAreRejected(
       @TempDir Path directory) throws Exception {
     protect(directory);
     var selfMinted = directory.resolve("finalize.properties");
     Files.writeString(selfMinted, "self-minted", StandardCharsets.UTF_8);
-    if (System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win")) {
-      // Elevated Windows runners otherwise create Administrators-owned files.
-      Files.setOwner(selfMinted, selfMinted.getFileSystem().getUserPrincipalLookupService()
-          .lookupPrincipalByName(windowsPrincipalName(System.getProperty("user.name"))));
-    }
     protect(selfMinted);
+    if (System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win")) {
+      var lookup = selfMinted.getFileSystem().getUserPrincipalLookupService();
+      var everyone = lookup.lookupPrincipalByName("Everyone");
+      var acl = Files.getFileAttributeView(selfMinted,
+          java.nio.file.attribute.AclFileAttributeView.class);
+      var entries = new java.util.ArrayList<>(acl.getAcl());
+      entries.add(java.nio.file.attribute.AclEntry.newBuilder()
+          .setType(java.nio.file.attribute.AclEntryType.ALLOW)
+          .setPrincipal(everyone)
+          .setPermissions(java.util.EnumSet.of(
+              java.nio.file.attribute.AclEntryPermission.WRITE_DATA))
+          .build());
+      acl.setAcl(entries);
+    }
 
     assertThat(FinalizeEvidenceLoader.productionRoot().toString())
         .endsWith(System.getProperty("os.name").toLowerCase().contains("win")
@@ -121,10 +124,6 @@ class FinalizeEvidenceLoaderTest {
     assertThatThrownBy(() ->
         FinalizeEvidenceLoader.requireTrustedProductionNodeForTest(selfMinted, false))
         .isInstanceOf(IllegalArgumentException.class);
-  }
-
-  private static String windowsPrincipalName(String userName) {
-    return "SYSTEM".equalsIgnoreCase(userName) ? "NT AUTHORITY\\SYSTEM" : userName;
   }
 
   @Test
