@@ -1325,3 +1325,34 @@ Describe 'automatic deployment task removal' {
         }
     }
 }
+
+Describe 'automatic deployment state reads' {
+    BeforeEach {
+        $script:config = [pscustomobject]@{
+            programDataRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        }
+        $script:statePath = Join-Path $config.programDataRoot 'state\auto-deploy.json'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $statePath) -Force | Out-Null
+    }
+
+    It 'keeps malformed automatic-deploy state JSON diagnostics sanitized' {
+        Set-Content -LiteralPath $statePath -Value '{invalid json'
+
+        { Read-AutoDeployState $config } |
+            Should -Throw 'Automatic deployment state is invalid JSON.'
+    }
+
+    It 'preserves automatic-deploy state file read failures' {
+        Set-Content -LiteralPath $statePath -Value '{}'
+        Mock Get-Content {
+            throw [UnauthorizedAccessException]::new('simulated state read denial')
+        } -ParameterFilter { $LiteralPath -eq $statePath } -ModuleName Production.AutoDeploy
+
+        $caught = $null
+        try { Read-AutoDeployState $config }
+        catch { $caught = $_.Exception }
+
+        $caught | Should -BeOfType [UnauthorizedAccessException]
+        $caught.Message | Should -Be 'simulated state read denial'
+    }
+}
