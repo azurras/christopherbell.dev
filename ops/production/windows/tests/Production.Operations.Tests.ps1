@@ -789,6 +789,73 @@ Describe 'native Windows production operations' {
             $status.ProductionPortPid | Should -BeNullOrEmpty
         }
 
+        It 'surfaces log enumeration failures instead of reporting no log file' {
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data' } }
+            Mock Get-ChildItem { Write-Error 'simulated log enumeration failure' } `
+                -ParameterFilter { $Path -like '*logs' }
+
+            { Watch-ProductionLogs } | Should -Throw '*simulated log enumeration failure*'
+        }
+
+        It 'surfaces release enumeration failures instead of returning an empty release list' {
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data' } }
+            Mock Get-JunctionTarget { $null }
+            Mock Get-ChildItem { Write-Error 'simulated release enumeration failure' } `
+                -ParameterFilter { $Path -like '*releases' }
+
+            { Get-ProductionReleases } | Should -Throw '*simulated release enumeration failure*'
+        }
+
+        It 'preserves the no-log result for a successfully empty log directory' {
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data' } }
+            Mock Get-ChildItem { $null } -ParameterFilter { $Path -like '*logs' }
+
+            { Watch-ProductionLogs } | Should -Throw '*No production log file exists*'
+        }
+
+        It 'returns an empty release list for a successfully empty release directory' {
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data' } }
+            Mock Get-JunctionTarget { $null }
+            Mock Get-ChildItem { $null } -ParameterFilter { $Path -like '*releases' }
+
+            Get-ProductionReleases | Should -BeNullOrEmpty
+        }
+
+        It 'preserves release ordering and current and previous flags' {
+            $programDataRoot = Join-Path $TestDrive 'release-list'
+            $releasesRoot = Join-Path $programDataRoot 'releases'
+            $older = Join-Path $releasesRoot ('1' * 40)
+            $previous = Join-Path $releasesRoot ('2' * 40)
+            $current = Join-Path $releasesRoot ('3' * 40)
+            foreach ($path in @($older, $previous, $current)) {
+                New-Item -ItemType Directory -Path $path -Force | Out-Null
+            }
+            [IO.Directory]::SetLastWriteTimeUtc($older, [DateTime]::UtcNow.AddDays(-3))
+            [IO.Directory]::SetLastWriteTimeUtc($previous, [DateTime]::UtcNow.AddDays(-2))
+            [IO.Directory]::SetLastWriteTimeUtc($current, [DateTime]::UtcNow.AddDays(-1))
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot=$programDataRoot }
+            }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*current') { $current }
+                elseif ($Path -like '*previous') { $previous }
+                else { $null }
+            }
+
+            $releases = @(Get-ProductionReleases)
+
+            $expectedShas = @(
+                ('3' * 40)
+                ('2' * 40)
+                ('1' * 40)
+            )
+            $releases.Sha | Should -Be $expectedShas
+            $releases[0].Current | Should -BeTrue
+            $releases[1].Previous | Should -BeTrue
+            $releases[2].Current | Should -BeFalse
+            $releases[2].Previous | Should -BeFalse
+        }
+
         It 'rejects startup when a required service is not automatic' {
             Mock Read-ProductionConfig { [pscustomobject]@{ publicUrl='https://www.christopherbell.dev/'; productionPort=8080 } }
             Mock Get-Service { [pscustomobject]@{ Status='Running'; StartType='Manual' } }

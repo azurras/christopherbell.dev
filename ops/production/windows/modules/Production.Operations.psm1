@@ -303,7 +303,7 @@ function Invoke-ProductionRollback {
 
 function Watch-ProductionLogs {
     $config = Read-ProductionConfig
-    $log = Get-ChildItem (Join-Path $config.programDataRoot 'logs') -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+    $log = Get-ChildItem (Join-Path $config.programDataRoot 'logs') -File -ErrorAction Stop | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
     if (-not $log) { throw 'No production log file exists.' }
     Get-Content -LiteralPath $log.FullName -Tail 100 -Wait
 }
@@ -455,7 +455,7 @@ function Get-ProductionReleases {
     $config = Read-ProductionConfig
     $current = Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
     $previous = Get-JunctionTarget (Join-Path $config.programDataRoot 'previous')
-    Get-ChildItem (Join-Path $config.programDataRoot 'releases') -Directory -ErrorAction SilentlyContinue |
+    Get-ChildItem (Join-Path $config.programDataRoot 'releases') -Directory -ErrorAction Stop |
         Sort-Object LastWriteTimeUtc -Descending | ForEach-Object {
             [pscustomobject]@{ Sha=$_.Name; Path=$_.FullName; Current=($_.FullName -eq $current); Previous=($_.FullName -eq $previous); BuiltAt=$_.LastWriteTimeUtc }
         }
