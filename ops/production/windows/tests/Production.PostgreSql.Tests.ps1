@@ -495,6 +495,75 @@ Describe 'native PostgreSQL production operations' {
         }
     }
 
+    It 'propagates legacy service inspection failures before changing service state' {
+        InModuleScope Production.PostgreSql {
+            Mock Get-Service {
+                param($ErrorAction)
+                if ($ErrorAction -eq 'Stop') {
+                    Write-Error 'simulated legacy service inspection failure' -ErrorAction Stop
+                }
+                Write-Error 'simulated legacy service inspection failure' -ErrorAction SilentlyContinue
+            }
+            Mock Set-Service { }
+            Mock Stop-Service { }
+
+            { Enter-ProductionPostgreSqlLegacyReplacement } |
+                Should -Throw '*simulated legacy service inspection failure*'
+
+            Should -Invoke Set-Service -Times 0
+            Should -Invoke Stop-Service -Times 0
+        }
+    }
+
+    It 'treats only the native missing-service result as an absent legacy service' {
+        InModuleScope Production.PostgreSql {
+            Mock Get-Service {
+                $record = [System.Management.Automation.ErrorRecord]::new(
+                    [InvalidOperationException]::new('service does not exist'),
+                    'NoServiceFoundForGivenName,Microsoft.PowerShell.Commands.GetServiceCommand',
+                    [System.Management.Automation.ErrorCategory]::ObjectNotFound,
+                    'postgresql-x64-16')
+                throw $record
+            }
+            Mock Get-CimInstance { }
+
+            $state = Enter-ProductionPostgreSqlLegacyReplacement
+
+            $state.Exists | Should -BeFalse
+            $state.WasRunning | Should -BeFalse
+            Should -Invoke Get-Service -Times 1 -Exactly
+            Should -Invoke Get-CimInstance -Times 0
+        }
+    }
+
+    It 'propagates connection inspection failures before stopping PostgreSQL 16' {
+        InModuleScope Production.PostgreSql {
+            Mock Get-Service {
+                $service = [pscustomobject]@{ Status='Running' }
+                $service | Add-Member ScriptMethod WaitForStatus { }
+                return $service
+            }
+            Mock Get-CimInstance { [pscustomobject]@{ StartMode='Auto' } }
+            Mock Get-NetTCPConnection {
+                param($ErrorAction)
+                if ($ErrorAction -eq 'Stop') {
+                    Write-Error 'simulated PostgreSQL connection inspection failure' `
+                        -ErrorAction Stop
+                }
+                Write-Error 'simulated PostgreSQL connection inspection failure' `
+                    -ErrorAction SilentlyContinue
+            }
+            Mock Set-Service { }
+            Mock Stop-Service { }
+
+            { Enter-ProductionPostgreSqlLegacyReplacement } |
+                Should -Throw '*simulated PostgreSQL connection inspection failure*'
+
+            Should -Invoke Set-Service -Times 0
+            Should -Invoke Stop-Service -Times 0
+        }
+    }
+
     It 'builds least-privilege bootstrap SQL without embedding role secrets' {
         $secrets = [ordered]@{
             Test = 'test-secret-value'; Migrator = 'migrator-secret-value'

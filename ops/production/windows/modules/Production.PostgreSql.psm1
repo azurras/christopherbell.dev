@@ -421,11 +421,16 @@ function Initialize-ProductionPostgreSqlPreparation {
 
 function Enter-ProductionPostgreSqlLegacyReplacement {
     $serviceName = 'postgresql-x64-16'
-    $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-    if (-not $service) {
-        return [pscustomobject][ordered]@{
-            Exists=$false; WasRunning=$false; StartMode=$null
+    try {
+        $service = Get-Service -Name $serviceName -ErrorAction Stop
+    } catch {
+        if ($_.FullyQualifiedErrorId -ceq
+            'NoServiceFoundForGivenName,Microsoft.PowerShell.Commands.GetServiceCommand') {
+            return [pscustomobject][ordered]@{
+                Exists=$false; WasRunning=$false; StartMode=$null
+            }
         }
+        throw
     }
     $native = Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction Stop
     $state = [pscustomobject][ordered]@{
@@ -435,7 +440,7 @@ function Enter-ProductionPostgreSqlLegacyReplacement {
     }
     if ($state.WasRunning) {
         $connections = @(Get-NetTCPConnection -LocalPort 5432 -State Established `
-            -ErrorAction SilentlyContinue)
+            -ErrorAction Stop)
         if ($connections.Count -ne 0) {
             throw 'PostgreSQL 16 has active client connections and cannot be replaced.'
         }
