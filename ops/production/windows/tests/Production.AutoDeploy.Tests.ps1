@@ -449,7 +449,7 @@ Describe 'automatic origin main deployment' {
             $state.remoteSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
             $state.attemptedSha = $state.remoteSha
             $state.failedSha = $state.remoteSha
-            $state.error = 'SPRING_DATASOURCE_PASSWORD=never-export-this'
+            $state.error = 'SPRING_MONGODB_URI=mongodb://never-export-this'
             Mock Assert-AutoDeployStatusDirectory {} -ModuleName Production.AutoDeploy
             Mock Assert-AutoDeployStatusFile {} -ModuleName Production.AutoDeploy
 
@@ -461,9 +461,9 @@ Describe 'automatic origin main deployment' {
             $result.status | Should -Be 'DEPLOYMENT_FAILED'
             $result.failureCategory | Should -Be 'CANDIDATE_STARTUP'
             $result.freshness | Should -Be 'STALE'
-            $result.message | Should -Not -Match 'never-export-this|SPRING_DATASOURCE_PASSWORD'
+            $result.message | Should -Not -Match 'never-export-this|SPRING_MONGODB_URI'
             (Get-Content -LiteralPath (Join-Path $statusRoot 'auto-deploy.json') -Raw) |
-                Should -Not -Match 'never-export-this|SPRING_DATASOURCE_PASSWORD'
+                Should -Not -Match 'never-export-this|SPRING_MONGODB_URI'
 
             Publish-AutoDeployStatus -Outcome 'CHECKING' -State $state `
                 -StatusRoot $statusRoot -UpdatedAt $now.AddSeconds(-1)

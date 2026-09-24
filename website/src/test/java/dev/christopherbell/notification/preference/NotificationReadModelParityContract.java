@@ -13,7 +13,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** Shared notification query/preference behavior for real MongoDB and PostgreSQL. */
+/** Shared notification query and preference behavior checks for MongoDB. */
 interface NotificationReadModelParityContract {
   String OWNER = "notification-query-owner";
   String OTHER = "notification-query-other";

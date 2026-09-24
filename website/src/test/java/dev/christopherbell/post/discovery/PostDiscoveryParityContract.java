@@ -14,7 +14,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** Shared discovery behavior executed against real MongoDB and PostgreSQL. */
+/** Shared discovery behavior checks for MongoDB-backed post queries. */
 interface PostDiscoveryParityContract {
   String RUN = java.util.UUID.randomUUID().toString();
   String OWNER = "discovery-owner-" + RUN;
@@ -40,7 +40,7 @@ interface PostDiscoveryParityContract {
     posts().deleteById(FIRST);
     posts().deleteById(SECOND);
     posts().save(post(FIRST, OWNER, NOW, "java"));
-    posts().save(post(SECOND, OTHER, NOW.plusSeconds(1), "postgres"));
+    posts().save(post(SECOND, OTHER, NOW.plusSeconds(1), "spring"));
   }
 
   @Test
@@ -52,7 +52,7 @@ interface PostDiscoveryParityContract {
     assertThat(discovery().topic("java", Optional.empty(), 10, NOW.minusSeconds(1)).items())
         .extracting(Post::getId).containsExactly(FIRST);
     assertThat(discovery().topics(Optional.empty(), 10, NOW.minusSeconds(1)).items())
-        .extracting(VoidTopicSummary::canonical).containsExactly("postgres", "java");
+        .extracting(VoidTopicSummary::canonical).containsExactly("spring", "java");
   }
 
   @Test

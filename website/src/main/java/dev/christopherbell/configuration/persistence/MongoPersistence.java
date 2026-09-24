@@ -4,12 +4,10 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
 
-/** Marks a transition-only MongoDB persistence adapter. */
+/** Marks a MongoDB repository discovered by component scanning. */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Repository
-@ConditionalOnProperty(prefix = "app.persistence", name = "backend", havingValue = "mongodb")
 public @interface MongoPersistence {}

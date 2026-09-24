@@ -11,7 +11,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** Shared stable-cursor and TTL outbox behavior for real MongoDB and PostgreSQL. */
+/** Shared stable-cursor and TTL outbox behavior checks for MongoDB. */
 interface FederationOutboxParityContract {
   String RUN = java.util.UUID.randomUUID().toString();
   String ACCOUNT_ID = "outbox-parity-account-" + RUN;

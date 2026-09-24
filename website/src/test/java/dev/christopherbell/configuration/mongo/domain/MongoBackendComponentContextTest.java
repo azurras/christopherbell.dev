@@ -22,8 +22,8 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 class MongoBackendComponentContextTest {
 
   @Test
-  void mongodbBackendKeepsInfrastructureUnproxiedAndRepositoryAdaptersTranslated() {
-    try (var context = contextFor("mongodb")) {
+  void mongoInfrastructureIsUnproxiedAndRepositoryAdaptersAreTranslated() {
+    try (var context = context()) {
       var factory = context.getBean(
           "domainMongoOperationsFactory", DomainMongoOperationsFactory.class);
       var leaseStore = context.getBean(SharedFolderMaintenanceLeaseStore.class);
@@ -38,34 +38,22 @@ class MongoBackendComponentContextTest {
     }
   }
 
-  @Test
-  void postgresqlBackendExcludesMongoInfrastructureAndAdapters() {
-    try (var context = contextFor("postgresql")) {
-      assertThat(context.containsBean("domainMongoOperationsFactory")).isFalse();
-      assertThat(context.getBeansOfType(SharedFolderMaintenanceLeaseStore.class)).isEmpty();
-      assertThat(context.getBeansOfType(MusicRuntimeStateMigrationSupport.class)).isEmpty();
-      assertThat(context.getBeansOfType(MongoLeaseService.class)).isEmpty();
-    }
-  }
-
-  private static AnnotationConfigApplicationContext contextFor(String backend) {
+  private static AnnotationConfigApplicationContext context() {
     var context = new AnnotationConfigApplicationContext();
-    TestPropertyValues.of("app.persistence.backend=" + backend).applyTo(context);
+    TestPropertyValues.of("spring.main.lazy-initialization=true").applyTo(context);
     context.registerBean(MongoTemplate.class, () -> {
       var mongo = mock(MongoTemplate.class);
       org.mockito.Mockito.when(mongo.getConverter()).thenReturn(mock(MongoConverter.class));
       return mongo;
     });
     context.registerBean(MongoLeaseStore.class, () -> mock(MongoLeaseStore.class));
-    if (backend.equals("mongodb")) {
-      var adapterFactory = mock(DomainMongoOperationsFactory.class);
-      doReturn(mock(KindScopedMongoOperations.class)).when(adapterFactory).forType(any());
-      context.registerBean(
-          "adapterFactory",
-          DomainMongoOperationsFactory.class,
-          () -> adapterFactory,
-          definition -> definition.setPrimary(true));
-    }
+    var adapterFactory = mock(DomainMongoOperationsFactory.class);
+    doReturn(mock(KindScopedMongoOperations.class)).when(adapterFactory).forType(any());
+    context.registerBean(
+        "adapterFactory",
+        DomainMongoOperationsFactory.class,
+        () -> adapterFactory,
+        definition -> definition.setPrimary(true));
     context.registerBean(PersistenceExceptionTranslationPostProcessor.class, () -> {
       var processor = new PersistenceExceptionTranslationPostProcessor();
       processor.setProxyTargetClass(true);

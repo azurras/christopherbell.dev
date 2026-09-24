@@ -10,7 +10,7 @@ import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** Shared conditional-login behavior executed against real MongoDB and PostgreSQL. */
+/** Shared conditional-login behavior checks for MongoDB-backed accounts. */
 interface AccountLoginParityContract {
   String RUN = java.util.UUID.randomUUID().toString();
   String ACCOUNT_ID = "login-parity-" + RUN;

@@ -22,7 +22,7 @@ class DatabaseHealthConfigurationTest {
       var health = context.getBean("databaseHealthIndicator", HealthIndicator.class).health();
       assertThat(health.getStatus()).isEqualTo(Status.UP);
       assertThat(health.getDetails()).containsExactlyInAnyOrderEntriesOf(java.util.Map.of(
-          "backend", "postgresql", "database", "christopherbell", "schemaVersion", "27"));
+          "backend", "mongodb", "database", "christopherbell", "schemaVersion", "legacy"));
     });
   }
 
@@ -42,7 +42,7 @@ class DatabaseHealthConfigurationTest {
     PersistenceIdentityProbe persistenceIdentityProbe() {
       return timeout -> {
         assertThat(timeout).isEqualTo(Duration.ofSeconds(2));
-        return new PersistenceIdentity("postgresql", "christopherbell", "27");
+        return new PersistenceIdentity("mongodb", "christopherbell", "legacy");
       };
     }
   }

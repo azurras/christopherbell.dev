@@ -5,8 +5,6 @@ command-center:
     mode: SIMULATED
     power-actions-enabled: true
 app:
-  persistence:
-    backend: postgresql
   request-size:
     default-max: ${APP_REQUEST_SIZE_DEFAULT_MAX:2MB}
   shared-folder:
@@ -19,12 +17,3 @@ app:
       root: build/shared-folder/local/system/shared-folder-media-tools
     metadata:
       private-root: build/shared-folder/local/system/music-metadata
-spring:
-  datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5432/test}
-    username: ${SPRING_DATASOURCE_USERNAME:christopherbell_test}
-    password: ${SPRING_DATASOURCE_PASSWORD:}
-  flyway:
-    enabled: true
-    default-schema: ${APP_TEST_SCHEMA:public}
-    schemas: ${APP_TEST_SCHEMA:public}

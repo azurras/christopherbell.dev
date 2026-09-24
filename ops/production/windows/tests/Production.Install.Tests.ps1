@@ -111,14 +111,9 @@ Describe 'native Windows service installer' {
         New-ProductionDirectories $root
         Install-ConfigurationExamples $root
         Get-Content (Join-Path $root 'config\app.env') -Raw | Should -Match 'replace-with'
-        Get-Content (Join-Path $root 'config\postgresql.env') -Raw |
-            Should -Match 'POSTGRES_ADMIN_PASSWORD=replace-with'
-        Get-Content (Join-Path $root 'config\postgresql.env') -Raw |
-            Should -Match 'CB_TEST_PASSWORD=replace-with'
-        Get-Content (Join-Path $root 'config\postgresql.env') -Raw |
-            Should -Not -Match 'CB_OWNER_PASSWORD='
-        Get-Content (Join-Path $root 'config\postgresql.env') -Raw |
-            Should -Match 'CB_BACKUP_PASSWORD=replace-with'
+        Get-Content (Join-Path $root 'config\app.env') -Raw |
+            Should -Match '(?m)^SPRING_MONGODB_URI=mongodb://'
+        Test-Path (Join-Path $root 'config\postgresql.env') | Should -BeFalse
     }
 
     It 'adds new native defaults without replacing existing deploy values' {
@@ -132,10 +127,8 @@ Describe 'native Windows service installer' {
         $updated.repositoryPath | Should -Be 'A:\custom-repository'
         $updated.smokeAccountEmail | Should -Be 'admin@christopherbell.dev'
         $updated.cloudflaredExe | Should -Match 'cloudflared\.exe$'
-        $updated.postgresqlVersion | Should -Be '18.4'
-        $updated.postgresqlServiceName | Should -Be 'postgresql-x64-18'
-        $updated.postgresqlDataPath | Should -Match 'PostgreSQL\\18\\data$'
-        $updated.postgresqlBackupRoot | Should -Match 'christopherbell\.dev-postgresql-backups$'
+        $updated.PSObject.Properties.Name | Should -Not -Contain 'postgresqlVersion'
+        $updated.PSObject.Properties.Name | Should -Not -Contain 'migrationTargetJdbcUrl'
         $updated.publicUrl | Should -Be 'https://www.christopherbell.dev/'
         $updated.PSObject.Properties.Name | Should -Not -Contain 'wslDistro'
         $updated.PSObject.Properties.Name | Should -Not -Contain 'wslWebsiteStartCommand'
@@ -163,13 +156,8 @@ Describe 'native Windows service installer' {
         $startup | Should -Match '--enable-native-access=ALL-UNNAMED'
         $startup | Should -Match 'APP_SHARED_FOLDER_ENABLED'
         $startup | Should -Match 'APP_MAIL_ENABLED'
-        $startup | Should -Match 'APP_PERSISTENCE_BACKEND'
-        $startup | Should -Match 'SPRING_DATASOURCE_URL'
-        $startup | Should -Match 'SPRING_DATASOURCE_USERNAME'
-        $startup | Should -Match 'SPRING_DATASOURCE_PASSWORD'
-        $startup | Should -Match 'jdbc:postgresql://127\.0\.0\.1:5432/christopherbell'
-        $startup | Should -Match 'christopherbell_app'
-        $startup | Should -Not -Match "'SPRING_MONGODB_URI'"
+        $startup | Should -Match "'SPRING_MONGODB_URI'"
+        $startup | Should -Match 'Production MongoDB URI is missing'
         $startup | Should -Match "SetEnvironmentVariable\(\s*'APP_SHARED_FOLDER_ENABLED',\s*'false',\s*'Process'\s*\)"
         $startup | Should -Not -Match "SetEnvironmentVariable\('COMMAND_CENTER_SENSOR_LIBRARIES_ENABLED',\s*'true'"
     }
@@ -179,10 +167,8 @@ Describe 'native Windows service installer' {
 
         $environment | Should -Contain 'APP_SHARED_FOLDER_ENABLED=false'
         $environment | Should -Contain 'APP_MAIL_ENABLED=true'
-        $environment | Should -Contain 'APP_PERSISTENCE_BACKEND=postgresql'
-        $environment | Should -Contain 'SPRING_DATASOURCE_URL=jdbc:postgresql://127.0.0.1:5432/christopherbell'
-        $environment | Should -Contain 'SPRING_DATASOURCE_USERNAME=christopherbell_app'
-        $environment | Should -Not -Match '^SPRING_MONGODB_URI='
+        ($environment -join "`n") | Should -Match '(?m)^SPRING_MONGODB_URI=mongodb://127\.0\.0\.1:27017/'
+        ($environment -join "`n") | Should -Not -Match 'postgres|datasource'
     }
 
     It 'preserves website service setup while delegating the shared-folder runtime install' {

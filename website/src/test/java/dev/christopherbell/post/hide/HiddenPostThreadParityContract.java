@@ -8,7 +8,7 @@ import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** Shared hidden-thread behavior executed against real MongoDB and PostgreSQL. */
+/** Shared hidden-thread behavior checks for MongoDB-backed post operations. */
 interface HiddenPostThreadParityContract {
   String ACCOUNT = "hidden-owner";
   String ROOT = "hidden-root";

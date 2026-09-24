@@ -13,7 +13,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** Shared feed/engagement behavior executed against real MongoDB and PostgreSQL. */
+/** Shared feed and engagement behavior checks for MongoDB-backed post queries. */
 interface PostReadModelParityContract {
   String OWNER = "feed-owner";
   String OTHER = "feed-other";

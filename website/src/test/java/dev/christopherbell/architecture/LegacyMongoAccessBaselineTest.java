@@ -53,14 +53,6 @@ class LegacyMongoAccessBaselineTest {
       "dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes",
       "dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState",
       "dev.christopherbell.configuration.mongo.migration.V015RequireDomainCollectionSchema");
-  private static final Set<String> POSTGRESQL_MIGRATION_INFRASTRUCTURE = Set.of(
-      "dev.christopherbell.configuration.persistence.migration.DirectMigrationIdentityProbe",
-      "dev.christopherbell.configuration.persistence.migration.MongoFinalizationFreezeGuard",
-      "dev.christopherbell.configuration.persistence.migration.MongoMigrationSourceReader",
-      "dev.christopherbell.configuration.persistence.migration.PostgresqlMigrationCli",
-      "dev.christopherbell.configuration.persistence.migration.PostgresqlMigrationSourceSnapshotCli",
-      "dev.christopherbell.configuration.persistence.migration.ProductionFinalizationFreezeGuard");
-
   @Test
   void runtimeDomainModelsDoNotOwnPhysicalMongoCollections() throws IOException {
     assertThat(ownerTypesMatching(DOCUMENT_USAGE)).isEmpty();
@@ -112,7 +104,6 @@ class LegacyMongoAccessBaselineTest {
         .importPackages("dev.christopherbell");
 
     var approved = new java.util.HashSet<>(APPROVED_DIRECT_MONGO_INFRASTRUCTURE);
-    approved.addAll(POSTGRESQL_MIGRATION_INFRASTRUCTURE);
     new MongoPersistenceBoundaryRules(
         "dev.christopherbell", approved)
         .zeroBypassRule()
