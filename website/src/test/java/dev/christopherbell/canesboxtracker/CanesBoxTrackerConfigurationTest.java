@@ -22,15 +22,27 @@ class CanesBoxTrackerConfigurationTest {
     assertEquals(50, new HashSet<>(metroNames).size());
   }
 
+  @Test
+  void testProfileDisablesExternalCollector() {
+    var properties = configuredProperties("application.yml");
+    properties.putAll(configuredProperties("application-test.yml"));
+
+    assertEquals("false", properties.getProperty("canes-box-tracker.enabled"));
+  }
+
   private List<String> configuredMetroNames() {
-    var factory = new YamlPropertiesFactoryBean();
-    factory.setResources(new ClassPathResource("application.yml"));
-    Properties properties = factory.getObject();
+    Properties properties = configuredProperties("application.yml");
 
     return properties.stringPropertyNames().stream()
         .filter(key -> METRO_NAME_KEY.matcher(key).matches())
         .map(properties::getProperty)
         .sorted()
         .toList();
+  }
+
+  private Properties configuredProperties(String resource) {
+    var factory = new YamlPropertiesFactoryBean();
+    factory.setResources(new ClassPathResource(resource));
+    return factory.getObject();
   }
 }
