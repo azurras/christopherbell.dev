@@ -276,8 +276,22 @@ Monitor automatic deployment:
 
 ```powershell
 .\prod.cmd auto-status
-Get-Content C:\ProgramData\christopherbell.dev\state\auto-deploy.json -Raw
 ```
+
+`auto-status` reads a sanitized status record that standard users can access; it
+does not read the protected deployment configuration or task definition. Check
+`freshness` as well as `status`: `STALE` means the SYSTEM poller has not
+published a result in the last three minutes, and `UNAVAILABLE` means no valid
+readable record exists. The status includes the remote and active revisions,
+the last attempt, retry time, failure category, and the installed tool refresh
+result with its source commit and verified tree hash. Detailed exception text
+and secrets remain in protected diagnostics.
+
+After the first `auto-install`, the SYSTEM poller refreshes its deployment tool
+bundle from the exact fetched `origin/main` commit. Each bundle is immutable
+and protected; the scheduled task switches to it only after the complete copy
+is verified. A failed tool refresh remains visible in `toolRefreshStatus` while
+the last trusted bundle continues to check and deploy releases.
 
 Failed SHAs observe `autoDeployFailureBackoffSeconds`; a newer SHA is eligible
 immediately.
