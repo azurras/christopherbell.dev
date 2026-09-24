@@ -25,18 +25,18 @@ test('shared-folder audit markup escapes untrusted values and shows bounded even
   const markup = sharedAuditMarkup([{
     accountId: '<img src=x onerror=alert(1)>',
     action: 'RECYCLE',
-    relativePath: 'docs/<script>.txt',
+    relativePath: 'docs/<SCRIPT>alert(3)</SCRIPT>.txt',
     outcome: 'accepted',
     failureCategory: '<b>access_denied</b>',
-    clientIp: '<img src=x onerror=alert(2)>',
+    clientIp: '<IMG src=x onerror=alert(2)>',
     occurredAt: '2026-07-18T12:00:00Z',
   }]);
 
   assert.match(markup, /RECYCLE/);
-  assert.match(markup, /docs\/&lt;script&gt;\.txt/);
+  assert.match(markup, /docs\/&lt;SCRIPT&gt;alert\(3\)&lt;\/SCRIPT&gt;\.txt/);
   assert.match(markup, /&lt;b&gt;access_denied&lt;\/b&gt;/);
-  assert.match(markup, /&lt;img src=x onerror=alert\(2\)&gt;/);
-  assert.doesNotMatch(markup, /<script>|<img|<b>/);
+  assert.match(markup, /&lt;IMG src=x onerror=alert\(2\)&gt;/);
+  assert.doesNotMatch(markup, /<(?:script|img|b)\b/i);
 });
 
 test('recycle markup exposes restore, explicit replace, and purge controls without HTML injection', () => {
