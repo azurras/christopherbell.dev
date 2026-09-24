@@ -400,12 +400,12 @@ function Get-AutoDeployStatus {
     )
 
     $path = Join-Path $StatusRoot 'auto-deploy.json'
-    if (-not (Test-Path -LiteralPath $StatusRoot -PathType Container -ErrorAction SilentlyContinue)) {
-        return New-UnavailableAutoDeployStatus -Reason 'STORE_NOT_INITIALIZED'
-    }
     try {
+        if (-not (Test-Path -LiteralPath $StatusRoot -PathType Container -ErrorAction Stop)) {
+            return New-UnavailableAutoDeployStatus -Reason 'STORE_NOT_INITIALIZED'
+        }
         Assert-AutoDeployStatusDirectory -Path $StatusRoot
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf -ErrorAction Stop)) {
             return New-UnavailableAutoDeployStatus -Reason 'STATUS_NOT_PUBLISHED'
         }
         Assert-AutoDeployStatusFile -Path $path
