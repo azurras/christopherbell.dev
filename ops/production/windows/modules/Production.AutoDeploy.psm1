@@ -900,7 +900,7 @@ function Get-ProductionAutoDeployTask {
 }
 
 function Stop-ProductionAutoDeployTask {
-    Stop-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction SilentlyContinue
+    Stop-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction Stop
     $deadline = (Get-Date).AddSeconds(30)
     do {
         $task = Get-ProductionAutoDeployTask
@@ -1085,13 +1085,99 @@ function Install-AutoDeployTask {
     Start-ScheduledTask -TaskName 'ChristopherBellAutoDeploy'
 }
 
+function Remove-AutoDeployTaskUnderHeldLock {
+    $taskName = 'ChristopherBellAutoDeploy'
+    $task = Get-ProductionAutoDeployTask
+    if (-not $task) {
+        Write-Output 'The ChristopherBellAutoDeploy task is not installed.'
+        return
+    }
+
+    $wasEnabled = [string]$task.State -ne 'Disabled'
+    $wasRunning = [string]$task.State -eq 'Running'
+    $taskStateChangeAttempted = $false
+    try {
+        if ($wasEnabled) {
+            $taskStateChangeAttempted = $true
+            Disable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
+            $task = Get-ProductionAutoDeployTask
+            if (-not $task) {
+                Write-Output 'Removed the ChristopherBellAutoDeploy task.'
+                return
+            }
+            if ([string]$task.State -ne 'Disabled') {
+                throw 'Automatic deployment task removal failed: task could not be disabled.'
+            }
+        }
+        if ($wasRunning) {
+            Stop-ProductionAutoDeployTask
+        }
+
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false `
+            -ErrorAction Stop | Out-Null
+        if (Get-ProductionAutoDeployTask) {
+            throw 'Automatic deployment task removal failed: task remains registered.'
+        }
+        Write-Output 'Removed the ChristopherBellAutoDeploy task.'
+    }
+    catch {
+        $primaryError = $_
+        $recoveryErrors = [Collections.Generic.List[Exception]]::new()
+
+        if ($taskStateChangeAttempted) {
+            try {
+                $remainingTask = Get-ProductionAutoDeployTask
+                if ($remainingTask -and $wasEnabled -and
+                    [string]$remainingTask.State -eq 'Disabled') {
+                    Enable-ScheduledTask -TaskName $taskName `
+                        -ErrorAction Stop | Out-Null
+                    $restoredTask = Get-ProductionAutoDeployTask
+                    if ($restoredTask -and
+                        [string]$restoredTask.State -eq 'Disabled') {
+                        throw 'Automatic deployment task removal failed: prior enabled state was not restored.'
+                    }
+                }
+            }
+            catch {
+                $recoveryErrors.Add($_.Exception)
+            }
+        }
+
+        if ($recoveryErrors.Count -gt 0) {
+            $allErrors = [Collections.Generic.List[Exception]]::new()
+            $allErrors.Add($primaryError.Exception)
+            foreach ($recoveryError in $recoveryErrors) {
+                $allErrors.Add($recoveryError)
+            }
+            throw [AggregateException]::new(
+                'Automatic deployment task removal failed and its prior state could not be restored.',
+                $allErrors.ToArray())
+        }
+
+        $PSCmdlet.ThrowTerminatingError($primaryError)
+    }
+}
+
 function Remove-AutoDeployTask {
     [CmdletBinding()]
     param([switch]$WhatIf)
     Assert-Administrator
     if ($WhatIf) { Write-Output 'Would remove the ChristopherBellAutoDeploy task.'; return }
-    Stop-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction SilentlyContinue
-    Unregister-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -Confirm:$false -ErrorAction SilentlyContinue
+
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-ProductionFixedRootDeploymentLock `
+        -Config $config `
+        -FixedRoot $script:FixedProductionRoot `
+        -EnterLockAction {
+            param($LockPath)
+            Enter-DeploymentLock -LockPath $LockPath
+        }
+    try {
+        Remove-AutoDeployTaskUnderHeldLock
+    } finally {
+        $guard.Lock.Dispose()
+    }
 }
 
 Export-ModuleMember -Function New-AutoDeployState,Read-AutoDeployState,`
