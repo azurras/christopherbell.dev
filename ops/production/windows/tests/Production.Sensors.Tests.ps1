@@ -248,6 +248,74 @@ Describe 'PawnIO sensor provider operations' {
             $status.ActiveThreats | Should -Be 0
         }
 
+        It 'propagates PawnIO driver inventory failures instead of reporting a missing driver' {
+            Mock Test-Path { $true }
+            Mock Get-ItemProperty {
+                [pscustomobject]@{
+                    DisplayVersion='2.2.0.0'
+                    UninstallString='C:\Program Files\PawnIO\uninstall.exe'
+                }
+            }
+            Mock Get-CimInstance {
+                param($ClassName,$Filter,$ErrorAction)
+                if ($ErrorAction -eq 'Stop') {
+                    Write-Error 'simulated PawnIO driver inventory failure' -ErrorAction Stop
+                }
+                Write-Error 'simulated PawnIO driver inventory failure' `
+                    -ErrorAction SilentlyContinue
+            }
+
+            { Get-PawnIoInstallation } |
+                Should -Throw '*simulated PawnIO driver inventory failure*'
+        }
+
+        It 'preserves a missing driver when successful inventory returns no rows' {
+            Mock Test-Path { $true }
+            Mock Get-ItemProperty {
+                [pscustomobject]@{
+                    DisplayVersion='2.2.0.0'
+                    UninstallString='C:\Program Files\PawnIO\uninstall.exe'
+                }
+            }
+            Mock Get-CimInstance { @() }
+
+            $installation = Get-PawnIoInstallation
+
+            $installation.Driver | Should -Be 'Missing'
+            $installation.Version | Should -Be '2.2.0.0'
+        }
+
+        It 'propagates CPU temperature listener inspection failures' {
+            $root = Join-Path $TestDrive 'sensor-root'
+            $configDirectory = Join-Path $root 'config'
+            New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
+            @{ productionPort=8080 } |
+                ConvertTo-Json | Set-Content (Join-Path $configDirectory 'deploy.json')
+            Mock Get-NetTCPConnection {
+                param($LocalPort,$State,$ErrorAction)
+                if ($ErrorAction -eq 'Stop') {
+                    Write-Error 'simulated sensor listener inspection failure' -ErrorAction Stop
+                }
+                Write-Error 'simulated sensor listener inspection failure' `
+                    -ErrorAction SilentlyContinue
+            }
+
+            { Get-ProductionCpuTemperature -Root $root } |
+                Should -Throw '*simulated sensor listener inspection failure*'
+        }
+
+        It 'preserves listener-count validation when the query succeeds empty' {
+            $root = Join-Path $TestDrive 'sensor-empty-listener-root'
+            $configDirectory = Join-Path $root 'config'
+            New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
+            @{ productionPort=8080 } |
+                ConvertTo-Json | Set-Content (Join-Path $configDirectory 'deploy.json')
+            Mock Get-NetTCPConnection { @() }
+
+            { Get-ProductionCpuTemperature -Root $root } |
+                Should -Throw '*Expected exactly one production listener*found 0*'
+        }
+
         It 'rejects an installed driver without a valid Windows signature' {
             Mock Get-PawnIoInstallation {
                 [pscustomobject]@{ Version='2.2.0.0'; Driver='Running'; DriverSignature='NotSigned' }
