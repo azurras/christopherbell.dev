@@ -395,6 +395,48 @@ Describe 'native PostgreSQL production operations' {
         }
     }
 
+    It 'keeps a successful empty package inventory distinct from a query failure' {
+        InModuleScope Production.PostgreSql {
+            Mock Get-ItemProperty { @() }
+
+            { Get-ProductionPostgreSqlPackageIdentity } |
+                Should -Throw '*Exactly one registered PostgreSQL 18 package is required*'
+        }
+    }
+
+    It 'restores the legacy service when PostgreSQL package inventory is incomplete' {
+        $events = [Collections.Generic.List[string]]::new()
+        InModuleScope Production.PostgreSql -Parameters @{
+            Config = $config
+            ServiceIdentity = $serviceIdentity
+            RegisteredPackage = $packageIdentity
+            Events = $events
+        } {
+            param($Config,$ServiceIdentity,$RegisteredPackage,$Events)
+            function Get-ItemProperty {
+                [CmdletBinding()]
+                param([string[]]$Path)
+                $RegisteredPackage
+                Write-Error 'simulated registry inventory failure'
+            }
+            try {
+                { Install-ProductionPostgreSql -Config $Config `
+                    -ProcessAction { param($FilePath,$Arguments,$Environment)
+                        $Events.Add("process:$([IO.Path]::GetFileName($FilePath))")
+                        return 'postgres (PostgreSQL) 18.4' } `
+                    -ServiceIdentityAction { param($Name) $ServiceIdentity } `
+                    -PrepareLegacyAction { $Events.Add('legacy-stop'); 'legacy-state' } `
+                    -CommitLegacyAction { param($state) $Events.Add("legacy-commit:$state") } `
+                    -RollbackLegacyAction { param($state) $Events.Add("legacy-restore:$state") } } |
+                    Should -Throw '*simulated registry inventory failure*'
+
+                $Events | Should -Be @('legacy-stop','legacy-restore:legacy-state')
+            } finally {
+                Remove-Item Function:\Get-ItemProperty -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
     It 'accepts the exact registered EDB package when the PostgreSQL runtime is unsigned' {
         $events = [Collections.Generic.List[string]]::new()
         $package = {
