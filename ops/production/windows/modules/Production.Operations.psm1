@@ -52,18 +52,40 @@ function Restore-CoordinatedProductionWebsiteRecoveryPolicy {
     $module = Get-Module Production.Deploy -ErrorAction Stop
     & $module { Set-ProductionWebsiteRecoveryPolicy -Policy Normal }
 }
+
+function Get-ProductionStatusServiceOrNull {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+
+    try {
+        return Get-Service -Name $Name -ErrorAction Stop
+    } catch {
+        $missingServiceErrorId =
+            'NoServiceFoundForGivenName,Microsoft.PowerShell.Commands.GetServiceCommand'
+        if ($_.FullyQualifiedErrorId -eq $missingServiceErrorId) { return $null }
+        throw
+    }
+}
+
 function Get-ProductionStatus {
     $config = Read-ProductionConfig
-    $website = Get-Service ChristopherBellDev -ErrorAction SilentlyContinue
-    $mongo = Get-Service MongoDB -ErrorAction SilentlyContinue
-    $cloudflared = Get-Service cloudflared -ErrorAction SilentlyContinue
+    $website = Get-ProductionStatusServiceOrNull -Name 'ChristopherBellDev'
+    $mongo = Get-ProductionStatusServiceOrNull -Name 'MongoDB'
+    $cloudflared = Get-ProductionStatusServiceOrNull -Name 'cloudflared'
+    $listenerConnections = Get-NetTCPConnection `
+        -LocalPort $config.productionPort -State Listen -ErrorAction Stop
+    $listenerPid = if ($listenerConnections) {
+        $listenerConnections.OwningProcess
+    } else {
+        $null
+    }
     [pscustomobject]@{
         WebsiteService = if ($website) { $website.Status } else { 'NotInstalled' }
         MongoService = if ($mongo) { $mongo.Status } else { 'NotInstalled' }
         CloudflaredService = if ($cloudflared) { $cloudflared.Status } else { 'NotInstalled' }
         CurrentRelease = Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
         PreviousRelease = Get-JunctionTarget (Join-Path $config.programDataRoot 'previous')
-        ProductionPortPid = (Get-NetTCPConnection -LocalPort $config.productionPort -State Listen -ErrorAction SilentlyContinue).OwningProcess
+        ProductionPortPid = $listenerPid
     }
 }
 
