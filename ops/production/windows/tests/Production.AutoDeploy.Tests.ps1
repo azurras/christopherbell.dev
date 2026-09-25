@@ -981,6 +981,27 @@ Describe 'automatic origin main deployment' {
         }
     }
 
+    It 'identifies only approved smoke routes in safe failure details' {
+        InModuleScope Production.AutoDeploy {
+            $local = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from http://127.0.0.1:8080/actuator/health/readiness.'
+            $local | Should -Be 'Timed out waiting for HTTP 200 from [local smoke route: readiness].'
+
+            $public = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://user:private@www.christopherbell.dev/wfl?token=private#secret.'
+            $public | Should -Be 'Timed out waiting for HTTP 200 from [public smoke route: wfl].'
+
+            $private = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://www.christopherbell.dev/api/accounts/2024-12-15/login.'
+            $private | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+
+            $unknown = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://internal.example.test/wfl.'
+            $unknown | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+            ($local + $public + $private + $unknown) | Should -Not -Match 'private|secret|token=|2024-12-15|internal.example'
+        }
+    }
+
     It 'reports a future-dated status as unavailable instead of fresh' {
         InModuleScope Production.AutoDeploy {
             $statusRoot = Join-Path $TestDrive 'future-status'
