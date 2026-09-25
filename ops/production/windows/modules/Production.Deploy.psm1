@@ -1300,6 +1300,7 @@ function Restore-ProductionTargetReleaseAfterFailure {
     if ([string]$OriginalMusicDirection.state -cne 'TARGET_ACTIVE') {
         throw 'Target-compatible release restoration requires TARGET_ACTIVE Music direction.'
     }
+    Write-Verbose 'Target-release restoration: validating the current and previous release identities.'
     $priorSha = if ($OriginalMusicDirection.PSObject.Properties['version'] -and
         [int]$OriginalMusicDirection.version -eq 2) {
         [string]$OriginalMusicDirection.currentRelease
@@ -1356,34 +1357,47 @@ function Restore-ProductionTargetReleaseAfterFailure {
             throw 'Target-compatible release restoration requires matching release schemas.'
         }
     }
+    Write-Verbose 'Target-release restoration: both releases have verified compatible schemas.'
 
+    Write-Verbose 'Target-release restoration: suspending service recovery and stopping the writer.'
     Stop-ProductionWebsiteService -ProductionPort $Config.productionPort `
         -KeepRecoverySuspended
+    Write-Verbose 'Target-release restoration: service is stopped with recovery suspended.'
     if ($OriginalMusicDirection.PSObject.Properties['version'] -and
         [int]$OriginalMusicDirection.version -eq 2) {
-        Write-ProductionDomainSchemaDirection `
-            -Config $Config `
-            -State TARGET_ACTIVE `
-            -TargetRelease ([string]$OriginalMusicDirection.targetRelease) `
-            -CurrentRelease $priorSha `
-            -LegacyRelease ([string]$OriginalMusicDirection.legacyRelease) `
-            -EvidenceDigest ([string]$OriginalMusicDirection.evidenceDigest) `
-            -BackupIdentity ([string]$OriginalMusicDirection.backupIdentity) `
-            -LegacyDropped ([bool]$OriginalMusicDirection.legacyDropped) | Out-Null
+        if ([string]$freshMusicDirection.currentRelease -cne $priorSha) {
+            $marker = @{
+                Config = $Config
+                State = 'TARGET_ACTIVE'
+                TargetRelease = [string]$OriginalMusicDirection.targetRelease
+                CurrentRelease = $priorSha
+                LegacyRelease = [string]$OriginalMusicDirection.legacyRelease
+                EvidenceDigest = [string]$OriginalMusicDirection.evidenceDigest
+                BackupIdentity = [string]$OriginalMusicDirection.backupIdentity
+                LegacyDropped = [bool]$OriginalMusicDirection.legacyDropped
+            }
+            Write-ProductionDomainSchemaDirection @marker | Out-Null
+        }
     } else {
-        Write-ProductionMusicSchemaDirection `
-            -Config $Config `
-            -State TARGET_ACTIVE `
-            -TargetRelease $priorSha `
-            -LegacyRelease ([string]$OriginalMusicDirection.legacyRelease) | Out-Null
+        if ([string]$freshMusicDirection.targetRelease -cne $priorSha) {
+            Write-ProductionMusicSchemaDirection `
+                -Config $Config `
+                -State TARGET_ACTIVE `
+                -TargetRelease $priorSha `
+                -LegacyRelease ([string]$OriginalMusicDirection.legacyRelease) | Out-Null
+        }
     }
+    Write-Verbose 'Target-release restoration: schema marker matches the prior release.'
+    Write-Verbose 'Target-release restoration: switching to and verifying the prior release.'
     Switch-ProductionRelease $Config $previous `
         -AuthorizationMarkerState TARGET_ACTIVE `
         -AuthorizationPurpose TARGET_DEPLOY `
         -AuthorizationRelease $priorSha `
         -KeepRecoverySuspended `
         -WriterAlreadyStopped
+    Write-Verbose 'Target-release restoration: local and public endpoint checks passed.'
     Set-ProductionWebsiteRecoveryPolicy -Policy Normal
+    Write-Verbose 'Target-release restoration: normal service recovery is restored.'
 }
 
 function Invoke-ProductionDeploy {
