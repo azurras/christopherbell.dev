@@ -318,7 +318,16 @@ function Get-AutoDeploySafeSmokeRouteLabel {
     param([string]$UriText)
 
     $uri = $null
-    $candidate = $UriText.TrimEnd([char[]]@('.', ',', ';'))
+    $candidate = $UriText
+    if ($candidate.EndsWith('.')) {
+        $candidate = $candidate.Substring(0, $candidate.Length - 1)
+    }
+    $parts = [regex]::Match(
+        $candidate,
+        '^[a-z][a-z0-9+.-]*://[^/?#]+(?<path>/[^?#]*)?(?:\?[^#]*)?(?:#.*)?$',
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (-not $parts.Success) { return $null }
+
     if (-not [uri]::TryCreate($candidate, [UriKind]::Absolute, [ref]$uri)) {
         return $null
     }
@@ -335,7 +344,9 @@ function Get-AutoDeploySafeSmokeRouteLabel {
     }
     if (-not $scope) { return $null }
 
-    $route = switch ($uri.AbsolutePath) {
+    $rawPath = $parts.Groups['path'].Value
+    if (-not $rawPath) { $rawPath = '/' }
+    $route = switch ($rawPath) {
         '/' { 'home'; break }
         '/blog' { 'blog'; break }
         '/wfl' { 'wfl'; break }

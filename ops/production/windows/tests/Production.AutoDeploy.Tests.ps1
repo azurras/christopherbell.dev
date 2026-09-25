@@ -1002,7 +1002,24 @@ Describe 'automatic origin main deployment' {
             $wrongScheme = Get-AutoDeploySafeFailureDetail `
                 -Message 'Timed out waiting for HTTP 200 from https://127.0.0.1:8080/wfl.'
             $wrongScheme | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
-            ($local + $public + $private + $unknown + $wrongScheme) |
+
+            $publicHttp = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from http://www.christopherbell.dev/wfl.'
+            $publicHttp | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+
+            $publicPort = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://www.christopherbell.dev:8443/wfl.'
+            $publicPort | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+
+            $trailingDotPath = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://www.christopherbell.dev/wfl..'
+            $trailingDotPath | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+
+            $dotSegments = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://www.christopherbell.dev/other/../wfl.'
+            $dotSegments | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+            ($local + $public + $private + $unknown + $wrongScheme +
+                $publicHttp + $publicPort + $trailingDotPath + $dotSegments) |
                 Should -Not -Match 'private|secret|token=|2024-12-15|internal.example'
         }
     }
