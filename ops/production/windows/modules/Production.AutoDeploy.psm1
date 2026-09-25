@@ -717,11 +717,14 @@ function Get-AutoDeployStatus {
                 'DEPLOYMENT','CANDIDATE_STARTUP','STATUS_STORE')) {
             throw 'Automatic deployment status record is invalid.'
         }
-        if (($record.PSObject.Properties['failureDetail'] -and
-                $record.failureDetail -isnot [string] -and $null -ne $record.failureDetail) -or
-            ([string]$record.failureDetail).Length -gt 240 -or
-            [string]$record.failureDetail -match '[\r\n]') {
-            throw 'Automatic deployment status failure detail is invalid.'
+        $failureDetailProperty = $record.PSObject.Properties['failureDetail']
+        if ($failureDetailProperty) {
+            $failureDetail = $failureDetailProperty.Value
+            if (($null -ne $failureDetail -and $failureDetail -isnot [string]) -or
+                ([string]$failureDetail).Length -gt 240 -or
+                [string]$failureDetail -match '[\r\n]') {
+                throw 'Automatic deployment status failure detail is invalid.'
+            }
         }
         $updatedAtValue = $record.updatedAt
         if ($updatedAtValue -is [datetime]) {

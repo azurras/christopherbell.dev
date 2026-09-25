@@ -732,6 +732,40 @@ Describe 'automatic origin main deployment' {
         }
     }
 
+    It 'reads version-one status records without the optional failure detail field' {
+        InModuleScope Production.AutoDeploy {
+            $statusRoot = Join-Path $TestDrive 'legacy-status-without-failure-detail'
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+            Mock Get-AutoDeployTaskSchedulerEntry {
+                [pscustomobject]@{ registered=$false; state=$null; reason='ACCESS_DENIED' }
+            }
+            Mock Get-AutoDeployWebsiteHealth {
+                [pscustomobject]@{
+                    serviceState='RUNNING'
+                    siteHealth='HEALTHY'
+                    siteHealthReason='NONE'
+                }
+            }
+            Publish-AutoDeployStatus -Outcome 'DEPLOYMENT_FAILED' `
+                -FailureCategory 'DEPLOYMENT' -State (New-AutoDeployState) `
+                -StatusRoot $statusRoot
+            $statusPath = Join-Path $statusRoot 'auto-deploy.json'
+            $record = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+            $record.PSObject.Properties.Remove('failureDetail') | Out-Null
+            $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $statusPath -Encoding utf8
+
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+
+            $result.available | Should -BeTrue
+            $result.status | Should -Be 'DEPLOYMENT_FAILED'
+            $result.failureDetail | Should -BeNullOrEmpty
+            $result.pollerState | Should -Be 'UNKNOWN'
+            $result.pollerReason | Should -Be 'ACCESS_DENIED'
+        }
+    }
+
     It 'reports safe registered scheduler states without exposing the task action' -TestCases @(
         @{ SchedulerState='Ready'; ExpectedState='READY' },
         @{ SchedulerState='Running'; ExpectedState='RUNNING' },
