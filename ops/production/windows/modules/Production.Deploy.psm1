@@ -1400,6 +1400,75 @@ function Restore-ProductionTargetReleaseAfterFailure {
     Write-Verbose 'Target-release restoration: normal service recovery is restored.'
 }
 
+function Invoke-ProductionTargetReleaseDeployment {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Release,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Sha,
+        [Parameter(Mandatory)]$Direction,
+        $DomainDirection
+    )
+
+    try {
+        Ensure-ProductionWriterStartGuardUnderHeldLock -Config $Config | Out-Null
+        Switch-ProductionRelease $Config $Release `
+            -AuthorizationMarkerState TARGET_ACTIVE `
+            -AuthorizationPurpose TARGET_DEPLOY `
+            -AuthorizationRelease $Sha `
+            -KeepRecoverySuspended `
+            -WriterAlreadyStopped
+        if ($Direction.PSObject.Properties['version'] -and
+            [int]$Direction.version -eq 2) {
+            Write-ProductionDomainSchemaDirection `
+                -Config $Config `
+                -State TARGET_ACTIVE `
+                -TargetRelease ([string]$Direction.targetRelease) `
+                -CurrentRelease $Sha `
+                -LegacyRelease ([string]$Direction.legacyRelease) `
+                -EvidenceDigest ([string]$Direction.evidenceDigest) `
+                -BackupIdentity ([string]$Direction.backupIdentity) `
+                -LegacyDropped ([bool]$Direction.legacyDropped) | Out-Null
+        } else {
+            Write-ProductionMusicSchemaDirection `
+                -Config $Config `
+                -State TARGET_ACTIVE `
+                -TargetRelease $Sha `
+                -LegacyRelease ([string]$Direction.legacyRelease)
+        }
+        Set-ProductionWebsiteRecoveryPolicy -Policy Normal
+    } catch {
+        $failure = $_.Exception
+        $rollbackFailure = $null
+        try {
+            Restore-ProductionTargetReleaseAfterFailure `
+                -Config $Config `
+                -CandidateSha $Sha `
+                -OriginalMusicDirection $Direction `
+                -OriginalDomainDirection $DomainDirection
+        } catch {
+            $rollbackFailure = $_.Exception
+        }
+        if ($rollbackFailure) {
+            try {
+                Stop-ProductionWebsiteService -ProductionPort $Config.productionPort `
+                    -KeepRecoverySuspended
+            } catch {
+                throw [System.AggregateException]::new(
+                    'Target deployment and prior-release restoration failed, and the writer stop postcondition also failed.',
+                    [System.Exception[]]@($failure, $rollbackFailure, $_.Exception))
+            }
+            throw [System.InvalidOperationException]::new(
+                'Target deployment and prior-release restoration failed; the writer remains stopped.',
+                [System.AggregateException]::new(
+                    'Candidate deployment and guarded prior-release restoration both failed.',
+                    [System.Exception[]]@($failure, $rollbackFailure)))
+        }
+        throw [System.InvalidOperationException]::new(
+            'Target deployment failed; the prior target-compatible release was restored.',
+            $failure)
+    }
+}
+
 function Invoke-ProductionDeploy {
     [CmdletBinding()]
     param(
@@ -1556,64 +1625,12 @@ function Invoke-ProductionDeploy {
                         $cutoverFailure)
                 }
             } elseif ($direction -and [string]$direction.state -eq 'TARGET_ACTIVE') {
-                try {
-                    Ensure-ProductionWriterStartGuardUnderHeldLock -Config $config | Out-Null
-                    Switch-ProductionRelease $config $release `
-                        -AuthorizationMarkerState TARGET_ACTIVE `
-                        -AuthorizationPurpose TARGET_DEPLOY `
-                        -AuthorizationRelease $sha `
-                        -KeepRecoverySuspended `
-                        -WriterAlreadyStopped
-                    if ($direction.PSObject.Properties['version'] -and
-                        [int]$direction.version -eq 2) {
-                        Write-ProductionDomainSchemaDirection `
-                            -Config $config `
-                            -State TARGET_ACTIVE `
-                            -TargetRelease ([string]$direction.targetRelease) `
-                            -CurrentRelease $sha `
-                            -LegacyRelease ([string]$direction.legacyRelease) `
-                            -EvidenceDigest ([string]$direction.evidenceDigest) `
-                            -BackupIdentity ([string]$direction.backupIdentity) `
-                            -LegacyDropped ([bool]$direction.legacyDropped) | Out-Null
-                    } else {
-                        Write-ProductionMusicSchemaDirection `
-                            -Config $config `
-                            -State TARGET_ACTIVE `
-                            -TargetRelease $sha `
-                            -LegacyRelease ([string]$direction.legacyRelease)
-                    }
-                    Set-ProductionWebsiteRecoveryPolicy -Policy Normal
-                } catch {
-                    $failure = $_.Exception
-                    $rollbackFailure = $null
-                    try {
-                        Restore-ProductionTargetReleaseAfterFailure `
-                            -Config $config `
-                            -CandidateSha $sha `
-                            -OriginalMusicDirection $direction `
-                            -OriginalDomainDirection $domainDirection
-                    } catch {
-                        $rollbackFailure = $_.Exception
-                    }
-                    if ($rollbackFailure) {
-                        try {
-                            Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
-                                -KeepRecoverySuspended
-                        } catch {
-                            throw [System.AggregateException]::new(
-                                'Target deployment and prior-release restoration failed, and the writer stop postcondition also failed.',
-                                [System.Exception[]]@($failure, $rollbackFailure, $_.Exception))
-                        }
-                        throw [System.InvalidOperationException]::new(
-                            'Target deployment and prior-release restoration failed; the writer remains stopped.',
-                            [System.AggregateException]::new(
-                                'Candidate deployment and guarded prior-release restoration both failed.',
-                                [System.Exception[]]@($failure, $rollbackFailure)))
-                    }
-                    throw [System.InvalidOperationException]::new(
-                        'Target deployment failed; the prior target-compatible release was restored.',
-                        $failure)
-                }
+                Invoke-ProductionTargetReleaseDeployment `
+                    -Config $config `
+                    -Release $release `
+                    -Sha $sha `
+                    -Direction $direction `
+                    -DomainDirection $domainDirection
             } else {
                 Switch-ProductionRelease $config $release
             }

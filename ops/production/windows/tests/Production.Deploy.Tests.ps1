@@ -1870,7 +1870,11 @@ Describe 'native Windows deployment' {
             Should -Invoke Write-ProductionMusicSchemaDirection -Times 0
         }
 
-        It 'restores the prior target release after candidate readiness fails' {
+        It 'restores the prior target release after readiness or marker publication fails' `
+                -ForEach @(
+                    @{ Failure = 'readiness' }
+                    @{ Failure = 'marker' }
+                ) {
             $prior = '1' * 40
             $candidate = '2' * 40
             $legacy = '3' * 40
@@ -1916,13 +1920,19 @@ Describe 'native Windows deployment' {
                 if ($Release -eq "C:\data\releases\$candidate") {
                     $script:deploymentReleaseState.current = $Release
                     $script:deploymentReleaseState.previous = "C:\data\releases\$prior"
-                    throw 'candidate readiness returned HTTP 503'
+                    if ($Failure -eq 'readiness') {
+                        throw 'candidate readiness returned HTTP 503'
+                    }
+                    return
                 }
                 $script:deploymentReleaseState.current = $Release
                 $script:deploymentReleaseState.previous = "C:\data\releases\$candidate"
                 [void]$script:deploymentReleaseState.events.Add('restore-and-verify-prior')
             }
             Mock Write-ProductionDomainSchemaDirection {
+                if ($Failure -eq 'marker' -and $CurrentRelease -eq $candidate) {
+                    throw 'candidate marker publication failed'
+                }
                 $direction.currentRelease = $CurrentRelease
                 [void]$script:deploymentReleaseState.events.Add("marker:$CurrentRelease")
             }
