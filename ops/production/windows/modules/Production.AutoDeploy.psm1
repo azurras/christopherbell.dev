@@ -346,7 +346,7 @@ function Get-AutoDeploySafeSmokeRouteLabel {
 
     $rawPath = $parts.Groups['path'].Value
     if (-not $rawPath) { $rawPath = '/' }
-    $route = switch ($rawPath) {
+    $route = switch -CaseSensitive ($rawPath) {
         '/' { 'home'; break }
         '/blog' { 'blog'; break }
         '/wfl' { 'wfl'; break }

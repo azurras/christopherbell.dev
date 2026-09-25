@@ -1018,8 +1018,12 @@ Describe 'automatic origin main deployment' {
             $dotSegments = Get-AutoDeploySafeFailureDetail `
                 -Message 'Timed out waiting for HTTP 200 from https://www.christopherbell.dev/other/../wfl.'
             $dotSegments | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+
+            $caseVariant = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://www.christopherbell.dev/WFL.'
+            $caseVariant | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
             ($local + $public + $private + $unknown + $wrongScheme +
-                $publicHttp + $publicPort + $trailingDotPath + $dotSegments) |
+                $publicHttp + $publicPort + $trailingDotPath + $dotSegments + $caseVariant) |
                 Should -Not -Match 'private|secret|token=|2024-12-15|internal.example'
         }
     }
