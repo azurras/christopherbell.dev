@@ -292,6 +292,58 @@ function Get-AutoDeployStatusMessage {
     }
 }
 
+function Get-AutoDeployFailureMessage {
+    param([Parameter(Mandatory)][System.Exception]$Exception)
+
+    $pending = [Collections.Generic.Stack[System.Exception]]::new()
+    $messages = [Collections.Generic.List[string]]::new()
+    $pending.Push($Exception)
+    while ($pending.Count -gt 0 -and $messages.Count -lt 3) {
+        $cause = $pending.Pop()
+        if ($cause -is [System.AggregateException]) {
+            $innerExceptions = @($cause.Flatten().InnerExceptions)
+            for ($index = $innerExceptions.Count - 1; $index -ge 0; $index--) {
+                $pending.Push($innerExceptions[$index])
+            }
+        } elseif ($cause.InnerException) {
+            $pending.Push($cause.InnerException)
+        } elseif (-not [string]::IsNullOrWhiteSpace($cause.Message)) {
+            $messages.Add([string]$cause.Message)
+        }
+    }
+    return [string]::Join(' | ', $messages.ToArray())
+}
+
+function Get-AutoDeploySafeFailureDetail {
+    param([string]$Message)
+
+    if ([string]::IsNullOrWhiteSpace($Message)) { return $null }
+    $detail = $Message -replace '[\r\n\t]+', ' '
+    $detail = [regex]::Replace(
+        $detail,
+        "(?i)\b[a-z][a-z0-9+.-]*://[^\s<>""']+",
+        '[redacted]')
+    $detail = [regex]::Replace(
+        $detail,
+        '(?i)\b(password|passwd|pwd|secret|token|api[_-]?key)\s*[:=]\s*[^\s,;]+',
+        '$1=[redacted]')
+    $detail = [regex]::Replace(
+        $detail,
+        '(?i)([''"])(?:[a-z]:\\|\\\\[^\\\s]+\\)[^''"]*\1',
+        '[redacted]')
+    $detail = [regex]::Replace(
+        $detail,
+        '(?i)(?<![\w])(?:[a-z]:\\|\\\\[^\\\s]+\\)[^\s,"''<>;]+',
+        '[redacted]')
+    $detail = [regex]::Replace(
+        $detail,
+        '(?<![\w:])/(?:[^/\s:]+/)+[^/\s:]+',
+        '[redacted]')
+    $detail = [regex]::Replace($detail, '\s+', ' ').Trim()
+    if ($detail.Length -gt 240) { $detail = $detail.Substring(0, 240).TrimEnd() }
+    return $detail
+}
+
 function New-UnavailableAutoDeployStatus {
     param(
         [Parameter(Mandatory)]
@@ -394,6 +446,10 @@ function Publish-AutoDeployStatus {
         toolRefreshStatus = $State.toolRefreshStatus
         toolRefreshAt = $State.toolRefreshAt
         failureCategory = $FailureCategory
+        failureDetail = if ($Outcome -in @('BACKING_OFF','DEPLOYMENT_FAILED',
+                'CHECK_FAILED','BLOCKED')) {
+            Get-AutoDeploySafeFailureDetail -Message ([string]$State.error)
+        } else { $null }
     }
     foreach ($name in @('remoteSha','activeSha','attemptedSha','successfulSha','failedSha','toolsSha','toolSourceSha')) {
         $value = [string]$record[$name]
@@ -600,7 +656,7 @@ function Invoke-AutoDeployWebsiteRecovery {
     if ($recoveryFailure) {
         $State.serviceRecoverySha = $ActiveSha
         $State.serviceRecoveryAt = (Get-Date).ToUniversalTime().ToString('o')
-        $State.error = $recoveryFailure.Message
+        $State.error = Get-AutoDeployFailureMessage -Exception $recoveryFailure
         $stateWriteFailure = $null
         try { Write-AutoDeployState $Config $State }
         catch { $stateWriteFailure = $_.Exception }
@@ -660,6 +716,12 @@ function Get-AutoDeployStatus {
             $record.failureCategory -notin @('NONE','REMOTE_CHECK','PROTECTED_PRECONDITION',
                 'DEPLOYMENT','CANDIDATE_STARTUP','STATUS_STORE')) {
             throw 'Automatic deployment status record is invalid.'
+        }
+        if (($record.PSObject.Properties['failureDetail'] -and
+                $record.failureDetail -isnot [string] -and $null -ne $record.failureDetail) -or
+            ([string]$record.failureDetail).Length -gt 240 -or
+            [string]$record.failureDetail -match '[\r\n]') {
+            throw 'Automatic deployment status failure detail is invalid.'
         }
         $updatedAtValue = $record.updatedAt
         if ($updatedAtValue -is [datetime]) {
@@ -729,6 +791,9 @@ function Get-AutoDeployStatus {
             toolRefreshStatus = $record.toolRefreshStatus
             toolRefreshAt = $record.toolRefreshAt
             failureCategory = [string]$record.failureCategory
+            failureDetail = if ($record.PSObject.Properties['failureDetail']) {
+                [string]$record.failureDetail
+            } else { $null }
             message = $message
         }
         return Add-AutoDeployPollerStatus -Status $status -PollerStatus $pollerStatus
@@ -862,7 +927,7 @@ function Invoke-AutoDeployOnce {
     } catch {
         $state.failedSha = $remote
         $state.failedAt = (Get-Date).ToUniversalTime().ToString('o')
-        $state.error = $_.Exception.Message
+        $state.error = Get-AutoDeployFailureMessage -Exception $_.Exception
         Publish-AutoDeployStatusBestEffort -Outcome 'DEPLOYMENT_FAILED' `
             -FailureCategory 'DEPLOYMENT' -State $state -ActiveSha $active `
             -StatusRoot $StatusRoot | Out-Null

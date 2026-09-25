@@ -474,7 +474,9 @@ Describe 'automatic origin main deployment' {
         Mock Get-Service { [pscustomobject]@{ Status='Stopped' } } `
             -ModuleName Production.AutoDeploy
         Mock Restart-ProductionService {
-            throw 'private path and secret must not be in public status'
+            throw [System.InvalidOperationException]::new(
+                'private path and secret wrapper',
+                [System.TimeoutException]::new('Readiness check returned HTTP 503'))
         } -ModuleName Production.AutoDeploy
         Mock Publish-AutoDeployStatusBestEffort {
             $script:publishedOutcome = [pscustomobject]@{
@@ -487,6 +489,7 @@ Describe 'automatic origin main deployment' {
         { Invoke-AutoDeployOnce $config } | Should -Throw '*private path and secret*'
 
         $state = Read-AutoDeployState $config
+        $state.error | Should -Be 'Readiness check returned HTTP 503'
         $state.serviceRecoverySha | Should -Be $activeSha
         $recoveryAt = [datetimeoffset]::Parse($state.serviceRecoveryAt)
         $recoveryAt | Should -BeGreaterThan ([datetimeoffset]::UtcNow.AddMinutes(-1))
@@ -914,7 +917,7 @@ Describe 'automatic origin main deployment' {
             $state.remoteSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
             $state.attemptedSha = $state.remoteSha
             $state.failedSha = $state.remoteSha
-            $state.error = 'SPRING_MONGODB_URI=mongodb://never-export-this'
+            $state.error = 'Readiness check returned HTTP 503 for mongodb://user:never-export-this@127.0.0.1:27017/christopherbell at "C:\Program Files\Christopher\app.env"'
             Mock Assert-AutoDeployStatusDirectory {} -ModuleName Production.AutoDeploy
             Mock Assert-AutoDeployStatusFile {} -ModuleName Production.AutoDeploy
 
@@ -925,10 +928,14 @@ Describe 'automatic origin main deployment' {
             $result = Get-AutoDeployStatus -StatusRoot $statusRoot -Now $now
             $result.status | Should -Be 'DEPLOYMENT_FAILED'
             $result.failureCategory | Should -Be 'CANDIDATE_STARTUP'
+            $result.failureDetail | Should -Be 'Readiness check returned HTTP 503 for [redacted] at [redacted]'
             $result.freshness | Should -Be 'STALE'
             $result.message | Should -Not -Match 'never-export-this|SPRING_MONGODB_URI'
+            $publicStatus = $result | ConvertTo-Json -Depth 5
+            $publicStatus | Should -Match 'Readiness check returned HTTP 503'
+            $publicStatus | Should -Not -Match 'never-export-this|mongodb://|C:\\ProgramData'
             (Get-Content -LiteralPath (Join-Path $statusRoot 'auto-deploy.json') -Raw) |
-                Should -Not -Match 'never-export-this|SPRING_MONGODB_URI'
+                Should -Not -Match 'never-export-this|mongodb://|C:\\ProgramData'
 
             Publish-AutoDeployStatus -Outcome 'CHECKING' -State $state `
                 -StatusRoot $statusRoot -UpdatedAt $now.AddSeconds(-1)
