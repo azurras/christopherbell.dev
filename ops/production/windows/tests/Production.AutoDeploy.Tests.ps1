@@ -998,7 +998,12 @@ Describe 'automatic origin main deployment' {
             $unknown = Get-AutoDeploySafeFailureDetail `
                 -Message 'Timed out waiting for HTTP 200 from https://internal.example.test/wfl.'
             $unknown | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
-            ($local + $public + $private + $unknown) | Should -Not -Match 'private|secret|token=|2024-12-15|internal.example'
+
+            $wrongScheme = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://127.0.0.1:8080/wfl.'
+            $wrongScheme | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+            ($local + $public + $private + $unknown + $wrongScheme) |
+                Should -Not -Match 'private|secret|token=|2024-12-15|internal.example'
         }
     }
 

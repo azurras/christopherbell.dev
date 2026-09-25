@@ -325,7 +325,7 @@ function Get-AutoDeploySafeSmokeRouteLabel {
 
     $scope = switch ($uri.Host.ToLowerInvariant()) {
         { $_ -in @('127.0.0.1','localhost') } {
-            if ($uri.Port -in @(8080,8081)) { 'local' }
+            if ($uri.Scheme -eq 'http' -and $uri.Port -in @(8080,8081)) { 'local' }
             break
         }
         { $_ -in @('christopherbell.dev','www.christopherbell.dev') } {
