@@ -981,6 +981,53 @@ Describe 'automatic origin main deployment' {
         }
     }
 
+    It 'identifies only approved smoke routes in safe failure details' {
+        InModuleScope Production.AutoDeploy {
+            $local = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from http://127.0.0.1:8080/actuator/health/readiness.'
+            $local | Should -Be 'Timed out waiting for HTTP 200 from [local smoke route: readiness].'
+
+            $public = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://user:private@www.christopherbell.dev/wfl?token=private#secret.'
+            $public | Should -Be 'Timed out waiting for HTTP 200 from [public smoke route: wfl].'
+
+            $private = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://www.christopherbell.dev/api/accounts/2024-12-15/login.'
+            $private | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+
+            $unknown = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://internal.example.test/wfl.'
+            $unknown | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+
+            $wrongScheme = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://127.0.0.1:8080/wfl.'
+            $wrongScheme | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+
+            $publicHttp = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from http://www.christopherbell.dev/wfl.'
+            $publicHttp | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+
+            $publicPort = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://www.christopherbell.dev:8443/wfl.'
+            $publicPort | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+
+            $trailingDotPath = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://www.christopherbell.dev/wfl..'
+            $trailingDotPath | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+
+            $dotSegments = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://www.christopherbell.dev/other/../wfl.'
+            $dotSegments | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+
+            $caseVariant = Get-AutoDeploySafeFailureDetail `
+                -Message 'Timed out waiting for HTTP 200 from https://www.christopherbell.dev/WFL.'
+            $caseVariant | Should -Be 'Timed out waiting for HTTP 200 from [redacted].'
+            ($local + $public + $private + $unknown + $wrongScheme +
+                $publicHttp + $publicPort + $trailingDotPath + $dotSegments + $caseVariant) |
+                Should -Not -Match 'private|secret|token=|2024-12-15|internal.example'
+        }
+    }
+
     It 'reports a future-dated status as unavailable instead of fresh' {
         InModuleScope Production.AutoDeploy {
             $statusRoot = Join-Path $TestDrive 'future-status'

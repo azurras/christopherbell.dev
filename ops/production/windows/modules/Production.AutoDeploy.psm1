@@ -314,6 +314,55 @@ function Get-AutoDeployFailureMessage {
     return [string]::Join(' | ', $messages.ToArray())
 }
 
+function Get-AutoDeploySafeSmokeRouteLabel {
+    param([string]$UriText)
+
+    $uri = $null
+    $candidate = $UriText
+    if ($candidate.EndsWith('.')) {
+        $candidate = $candidate.Substring(0, $candidate.Length - 1)
+    }
+    $parts = [regex]::Match(
+        $candidate,
+        '^[a-z][a-z0-9+.-]*://[^/?#]+(?<path>/[^?#]*)?(?:\?[^#]*)?(?:#.*)?$',
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (-not $parts.Success) { return $null }
+
+    if (-not [uri]::TryCreate($candidate, [UriKind]::Absolute, [ref]$uri)) {
+        return $null
+    }
+
+    $scope = switch ($uri.Host.ToLowerInvariant()) {
+        { $_ -in @('127.0.0.1','localhost') } {
+            if ($uri.Scheme -eq 'http' -and $uri.Port -in @(8080,8081)) { 'local' }
+            break
+        }
+        { $_ -in @('christopherbell.dev','www.christopherbell.dev') } {
+            if ($uri.Scheme -eq 'https' -and $uri.Port -eq 443) { 'public' }
+            break
+        }
+    }
+    if (-not $scope) { return $null }
+
+    $rawPath = $parts.Groups['path'].Value
+    if (-not $rawPath) { $rawPath = '/' }
+    $route = switch -CaseSensitive ($rawPath) {
+        '/' { 'home'; break }
+        '/blog' { 'blog'; break }
+        '/wfl' { 'wfl'; break }
+        '/canes-box-tracker' { 'canes-box-tracker'; break }
+        '/robots.txt' { 'robots'; break }
+        '/sitemap.xml' { 'sitemap'; break }
+        '/favicon.ico' { 'favicon'; break }
+        '/actuator/health/liveness' { 'liveness'; break }
+        '/actuator/health/readiness' { 'readiness'; break }
+        '/.well-known/nodeinfo' { 'well-known-nodeinfo'; break }
+        '/nodeinfo/2.1' { 'nodeinfo'; break }
+    }
+    if (-not $route) { return $null }
+    return "$scope smoke route: $route"
+}
+
 function Get-AutoDeploySafeFailureDetail {
     param([string]$Message)
 
@@ -322,7 +371,13 @@ function Get-AutoDeploySafeFailureDetail {
     $detail = [regex]::Replace(
         $detail,
         "(?i)\b[a-z][a-z0-9+.-]*://[^\s<>""']+",
-        '[redacted]')
+        [System.Text.RegularExpressions.MatchEvaluator]{
+            param($match)
+            $punctuation = if ($match.Value.EndsWith('.')) { '.' } else { '' }
+            $route = Get-AutoDeploySafeSmokeRouteLabel -UriText $match.Value
+            if ($route) { return "[$route]$punctuation" }
+            return "[redacted]$punctuation"
+        })
     $detail = [regex]::Replace(
         $detail,
         '(?i)\b(password|passwd|pwd|secret|token|api[_-]?key)\s*[:=]\s*[^\s,;]+',
