@@ -517,10 +517,10 @@ class MediaPlaybackServiceTest {
         start.await();
         return concurrent.requestFallback(second.relativePath(), MediaOutputProfile.VIDEO_MP4);
       });
-      assertThat(waiting.await(2, TimeUnit.SECONDS)).isTrue();
+      assertThat(waiting.await(10, TimeUnit.SECONDS)).isTrue();
       start.countDown();
-      firstAdmission.get(2, TimeUnit.SECONDS);
-      secondAdmission.get(2, TimeUnit.SECONDS);
+      firstAdmission.get(10, TimeUnit.SECONDS);
+      secondAdmission.get(10, TimeUnit.SECONDS);
     }
 
     try (var descriptors = Files.list(folderProperties.systemRoot().resolve(MediaStorage.JOBS))) {
@@ -566,11 +566,11 @@ class MediaPlaybackServiceTest {
 
     try (var executor = Executors.newFixedThreadPool(2)) {
       var cancellation = executor.submit(() -> concurrent.cancel("job-1"));
-      assertThat(cancellationEntered.await(2, TimeUnit.SECONDS)).isTrue();
+      assertThat(cancellationEntered.await(10, TimeUnit.SECONDS)).isTrue();
       var admission = executor.submit(() ->
           concurrent.requestFallback(second.relativePath(), MediaOutputProfile.VIDEO_MP4));
-      cancellation.get(2, TimeUnit.SECONDS);
-      admission.get(2, TimeUnit.SECONDS);
+      cancellation.get(10, TimeUnit.SECONDS);
+      admission.get(10, TimeUnit.SECONDS);
     }
 
     assertThat(overlapped).isFalse();

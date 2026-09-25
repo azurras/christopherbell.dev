@@ -1074,6 +1074,9 @@ Describe 'native Windows deployment' {
                     return ''
                 }
                 if ([IO.Path]::GetFileName($FilePath) -ceq 'gradlew.bat') {
+                    $Environment['JAVA_TOOL_OPTIONS'] | Should -Match `
+                        "-Djdk\.net\.unixdomain\.tmpdir=$([regex]::Escape(($env:SystemRoot + '/Temp').Replace('\','/')))$"
+                    $Environment['JAVA_TOOL_OPTIONS'] | Should -Match '-Ddeployer\.test\.option=preserved'
                     Set-Content -LiteralPath `
                         (Join-Path $worktree 'website\build\libs\website.jar') -Value 'jar'
                     return ''
@@ -1088,7 +1091,19 @@ Describe 'native Windows deployment' {
                 nodeExe = 'C:\node.exe'
             }
 
-            $result = New-ReleaseFromOriginMain -Config $config -Sha $sha
+            $previousJavaToolOptions = $env:JAVA_TOOL_OPTIONS
+            $env:JAVA_TOOL_OPTIONS = '-Ddeployer.test.option=preserved'
+            try {
+                $result = New-ReleaseFromOriginMain -Config $config -Sha $sha
+            }
+            finally {
+                if ($null -eq $previousJavaToolOptions) {
+                    Remove-Item Env:JAVA_TOOL_OPTIONS -ErrorAction SilentlyContinue
+                }
+                else {
+                    $env:JAVA_TOOL_OPTIONS = $previousJavaToolOptions
+                }
+            }
 
             $result | Should -Be $release
             Test-Path -LiteralPath (Join-Path $release 'app.jar') | Should -BeTrue

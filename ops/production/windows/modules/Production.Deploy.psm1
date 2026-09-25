@@ -366,10 +366,16 @@ function New-ReleaseFromOriginMain {
         $addArguments = Get-TrustedGitArguments $Config.repositoryPath @('worktree','add','--detach',$worktree,$Sha)
         Invoke-CheckedProcess 'git.exe' $addArguments $Config.repositoryPath | Out-Null
         $addSucceeded = $true
+        $socketTempDirectory = (Join-Path $env:SystemRoot 'Temp').Replace('\','/')
+        $javaToolOptions = @(
+            $env:JAVA_TOOL_OPTIONS
+            "-Djdk.net.unixdomain.tmpdir=$socketTempDirectory"
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         $environment = @{
             GRADLE_USER_HOME = Join-Path $Config.programDataRoot 'gradle-home'
             NODE_EXE = $Config.nodeExe
             CHRISTOPHERBELL_PRODUCTION_DEPLOYMENT = '1'
+            JAVA_TOOL_OPTIONS = $javaToolOptions -join ' '
         }
         Invoke-CheckedProcess (Join-Path $worktree 'gradlew.bat') @('--no-daemon',':website:build') $worktree $environment | Out-Null
         $jars = @(Get-ChildItem (Join-Path $worktree 'website\build\libs') -Filter '*.jar' | Where-Object Name -NotLike '*-plain.jar')
