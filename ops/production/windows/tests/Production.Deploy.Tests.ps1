@@ -1870,6 +1870,83 @@ Describe 'native Windows deployment' {
             Should -Invoke Write-ProductionMusicSchemaDirection -Times 0
         }
 
+        It 'restores the prior target release after candidate readiness fails' {
+            $prior = '1' * 40
+            $candidate = '2' * 40
+            $legacy = '3' * 40
+            $direction = [pscustomobject]@{
+                version = 2
+                state = 'TARGET_ACTIVE'
+                targetRelease = '4' * 40
+                currentRelease = $prior
+                legacyRelease = $legacy
+                manifestDigest = '5' * 64
+                evidenceDigest = '6' * 64
+                backupIdentity = '7' * 64
+                legacyDropped = $true
+            }
+            $script:deploymentReleaseState = @{
+                current = "C:\data\releases\$prior"
+                previous = "C:\data\releases\$legacy"
+                switches = 0
+                events = [Collections.Generic.List[string]]::new()
+            }
+            $config = [pscustomobject]@{
+                programDataRoot='C:\data'; productionPort=8080; remote='origin'; branch='main'
+            }
+            Mock Read-ProductionConfig { $config }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionDomainSchemaDirection { $direction }
+            Mock Read-ProductionMusicSchemaDirection { $direction }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\previous') { $script:deploymentReleaseState.previous }
+                else { $script:deploymentReleaseState.current }
+            }
+            Mock Resolve-OriginMainRelease { $candidate }
+            Mock New-ReleaseFromOriginMain { "C:\data\releases\$candidate" }
+            Mock Read-ProductionReleaseMusicSchema { 'TARGET' }
+            Mock Read-ProductionReleaseDomainSchema { 'TARGET' }
+            Mock Invoke-CandidateReleaseValidation { }
+            Mock Ensure-ProductionWriterStartGuardUnderHeldLock { }
+            Mock Stop-ProductionWebsiteService {
+                [void]$script:deploymentReleaseState.events.Add('stop-suspended')
+            }
+            Mock Switch-ProductionRelease {
+                $script:deploymentReleaseState.switches++
+                if ($Release -eq "C:\data\releases\$candidate") {
+                    $script:deploymentReleaseState.current = $Release
+                    $script:deploymentReleaseState.previous = "C:\data\releases\$prior"
+                    throw 'candidate readiness returned HTTP 503'
+                }
+                $script:deploymentReleaseState.current = $Release
+                $script:deploymentReleaseState.previous = "C:\data\releases\$candidate"
+                [void]$script:deploymentReleaseState.events.Add('restore-and-verify-prior')
+            }
+            Mock Write-ProductionDomainSchemaDirection {
+                $direction.currentRelease = $CurrentRelease
+                [void]$script:deploymentReleaseState.events.Add("marker:$CurrentRelease")
+            }
+            Mock Set-ProductionWebsiteRecoveryPolicy {
+                [void]$script:deploymentReleaseState.events.Add("recovery:$Policy")
+            }
+            Mock Remove-ExpiredReleases { }
+
+            { Invoke-ProductionDeploy } | Should -Throw '*prior target-compatible release was restored*'
+
+            $script:deploymentReleaseState.current | Should -Be "C:\data\releases\$prior"
+            $direction.currentRelease | Should -Be $prior
+            $script:deploymentReleaseState.events | Should -Contain 'restore-and-verify-prior'
+            $script:deploymentReleaseState.events | Should -Contain "recovery:Normal"
+            Should -Invoke Switch-ProductionRelease -Times 1 -Exactly -ParameterFilter {
+                $Release -eq "C:\data\releases\$prior" -and
+                $AuthorizationMarkerState -eq 'TARGET_ACTIVE' -and
+                $AuthorizationPurpose -eq 'TARGET_DEPLOY' -and
+                $AuthorizationRelease -eq $prior -and
+                $KeepRecoverySuspended -and
+                $WriterAlreadyStopped
+            }
+        }
+
         It 'keeps recovery suspended for a caller-owned schema transition' {
             $policies = [Collections.Generic.List[string]]::new()
             Mock Set-ProductionWebsiteRecoveryPolicy { [void]$policies.Add($Policy) }
