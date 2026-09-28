@@ -57,6 +57,9 @@ auditing; do not drop those fields when changing the importer.
 Failed-source diagnostics preserve a nonblank exception message when available;
 when an upstream exception has no message, the sample records its exception
 type instead of an opaque `null` value.
+History responses replace any legacy whole-word `null` placeholders with
+`details unavailable` in a detached metro copy, preserving useful surrounding
+diagnostics without writing to stored snapshots.
 
 The weekly snapshot id is the Monday `weekStartDate`, so rerunning the job for
 the same week replaces that week's stored result.

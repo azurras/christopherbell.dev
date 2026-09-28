@@ -35,6 +35,33 @@ public class CanesBoxMetroPrice {
   private Instant reviewedOn;
 
   /**
+   * Creates a detached copy with a response-safe failure reason.
+   */
+  public CanesBoxMetroPrice copyWithFailureReason(String failureReason) {
+    return new CanesBoxMetroPrice(
+        metroName,
+        city,
+        state,
+        restaurantRef,
+        restaurantName,
+        address,
+        sourceUrl,
+        price,
+        currency,
+        status,
+        sourceName,
+        qualityStatus,
+        confidenceLevel,
+        rawResponseHash,
+        matchedItemName,
+        failureReason,
+        reviewNote,
+        collectedOn,
+        sourceFetchedOn,
+        reviewedOn);
+  }
+
+  /**
    * Creates a successful metro price result from a configured target.
    */
   public static CanesBoxMetroPrice success(

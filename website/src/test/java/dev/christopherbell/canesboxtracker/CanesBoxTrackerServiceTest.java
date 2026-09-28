@@ -23,6 +23,7 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -401,6 +402,50 @@ class CanesBoxTrackerServiceTest {
     assertEquals("2026-06-01", history.weeks().get(0).weekStartDate());
     assertEquals(new BigDecimal("12.95"), history.weeks().get(0).averagePrice());
     assertEquals("2026-06-08", history.latest().weekStartDate());
+  }
+
+  @Test
+  void historySanitizesLegacyNullFailureDetailsWithoutChangingStoredSamples() {
+    var repository = mock(CanesBoxPriceSnapshotRepository.class);
+    var target = target("Dallas-Fort Worth", "101");
+    var legacyFailure = CanesBoxMetroPrice.failure(
+        target,
+        "Official Cane's GraphQL API failed: null; null; public menu fallback is disabled.");
+    var officialFailure = CanesBoxMetroPrice.failure(
+        target("Houston", "202"),
+        "Official Cane's GraphQL API failed: HTTP 403; public menu fallback is disabled.");
+    var snapshot = new CanesBoxPriceSnapshot();
+    snapshot.setId("2026-09-28");
+    snapshot.setWeekStartDate("2026-09-28");
+    snapshot.setTotalMetroCount(2);
+    snapshot.setMetroPrices(List.of(legacyFailure, officialFailure));
+    when(repository.findTop60ByOrderByWeekStartDateDesc()).thenReturn(List.of(snapshot));
+    var service = new CanesBoxTrackerService(
+        repository,
+        candidate -> CanesBoxMetroPrice.failure(candidate, "unused"),
+        properties(target, target("Houston", "202")),
+        Clock.fixed(Instant.parse("2026-09-28T12:00:00Z"), ZoneId.of("America/Chicago")));
+
+    var history = service.getHistory();
+
+    var publicLegacyFailure = history.latest().metroPrices().get(0);
+    assertEquals(
+        "Official Cane's GraphQL API failed: details unavailable; details unavailable; public menu fallback is disabled.",
+        publicLegacyFailure.getFailureReason());
+    assertEquals(
+        "Official Cane's GraphQL API failed: HTTP 403; public menu fallback is disabled.",
+        history.latest().metroPrices().get(1).getFailureReason());
+    assertNotSame(legacyFailure, publicLegacyFailure);
+    assertEquals("Official Cane's GraphQL API failed: null; null; public menu fallback is disabled.",
+        legacyFailure.getFailureReason());
+    assertEquals("FAILED", publicLegacyFailure.getStatus());
+    assertEquals("EXCLUDED", publicLegacyFailure.getQualityStatus());
+    assertNull(publicLegacyFailure.getPrice());
+    assertEquals(0, history.latest().verifiedMetroCount());
+    assertEquals(2, history.latest().totalMetroCount());
+    assertEquals(2, history.latest().excludedMetroCount());
+    assertNull(history.latest().averagePrice());
+    verify(repository, never()).save(any());
   }
 
   @Test
