@@ -76,6 +76,18 @@ test('canesBoxPeriodTrend calculates month over month from closest priced week',
   });
 });
 
+test('formatPeriodTrendContext identifies the latest priced and comparison weeks', async () => {
+  const { formatPeriodTrendContext } = await import('../../main/resources/static/js/canes-box-tracker.js');
+
+  assert.equal(
+    formatPeriodTrendContext({
+      latestWeekStartDate: '2026-09-21',
+      comparisonWeekStartDate: '2026-08-24',
+    }),
+    'Latest priced week: 2026-09-21. Compared with week of 2026-08-24.',
+  );
+});
+
 test('canesBoxPeriodTrends calculates month over month and year over year', () => {
   const trends = canesBoxPeriodTrends([
     { weekStartDate: '2025-06-09', averagePrice: 9.5 },
