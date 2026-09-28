@@ -117,12 +117,13 @@ The public page is `/canes-box-tracker`, served by
 `templates/canes-box-tracker.html`.
 
 The page script is `static/js/canes-box-tracker.js`. It loads the latest 60
-weekly snapshots through `static/js/lib/api.js`, renders the latest average,
-renders month-over-month and year-over-year percent indexes by comparing the
-latest priced week to the closest priced week near one month and one year prior,
-draws a small inline SVG chart, lists the latest metro sample source and last
-collection date in America/Chicago, and lets visitors select one metro to see
-that metro's verified week-by-week trend. Selecting a metro also exposes a
+weekly snapshots through `static/js/lib/api.js`, renders the latest average and
+month-over-month and year-over-year percent indexes by comparing the latest
+priced week to the closest priced week near one month and one year prior, labels
+each index with both the latest priced week and its comparison week, draws a
+small inline SVG chart, lists the latest metro sample source and last collection
+date in America/Chicago, and lets visitors select one metro to see that metro's
+verified week-by-week trend. Selecting a metro also exposes a
 copyable `curl` command against Cane's official GraphQL menu API for that
 tracked store so readers can independently inspect the source menu payload. The
 public average, percentage indexes, and metro-specific trend charts use verified

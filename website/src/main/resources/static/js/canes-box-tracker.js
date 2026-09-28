@@ -226,8 +226,13 @@ function renderIndexMetric(numberElement, contextElement, trend, emptyLabel, emp
       ? 'canes-box-index-lower'
       : 'canes-box-index-neutral');
   contextElement.textContent = trend
-    ? `Compared with week of ${trend.comparisonWeekStartDate}.`
+    ? formatPeriodTrendContext(trend)
     : emptyContext;
+}
+
+export function formatPeriodTrendContext(trend) {
+  if (!trend) return '';
+  return `Latest priced week: ${trend.latestWeekStartDate}. Compared with week of ${trend.comparisonWeekStartDate}.`;
 }
 
 function normalizeMetroName(value) {
