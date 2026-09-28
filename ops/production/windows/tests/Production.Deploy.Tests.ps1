@@ -374,7 +374,7 @@ Describe 'native Windows deployment' {
             } | Should -Throw '*Suspended recovery policy verification failed*'
         }
 
-        It 'allows three minutes while checking every local public-delivery route' {
+        It 'allows three minutes for readiness while checking every local public-delivery route' {
             Mock Wait-HttpStatus { 200 }
             Mock Invoke-ProductionWebRequest {
                 [pscustomobject]@{ StatusCode = 401; Content = '{"code":"UNAUTHORIZED"}' }
@@ -395,8 +395,13 @@ Describe 'native Windows deployment' {
             Should -Invoke Wait-HttpStatus -Times 1 -Exactly -ParameterFilter {
                 ([uri]$Uri).AbsolutePath -eq '/' -and $Timeout.TotalSeconds -eq 180
             }
-            Should -Invoke Wait-HttpStatus -Times ($expectedPaths.Count - 1) -Exactly -ParameterFilter {
-                ([uri]$Uri).AbsolutePath -ne '/' -and $Timeout.TotalSeconds -eq 30
+            Should -Invoke Wait-HttpStatus -Times 1 -Exactly -ParameterFilter {
+                ([uri]$Uri).AbsolutePath -eq '/actuator/health/readiness' -and
+                    $Timeout.TotalSeconds -eq 180
+            }
+            Should -Invoke Wait-HttpStatus -Times ($expectedPaths.Count - 2) -Exactly -ParameterFilter {
+                ([uri]$Uri).AbsolutePath -notin @('/', '/actuator/health/readiness') -and
+                    $Timeout.TotalSeconds -eq 30
             }
         }
 
