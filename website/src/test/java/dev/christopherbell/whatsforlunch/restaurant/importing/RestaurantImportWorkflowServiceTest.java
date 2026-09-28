@@ -6,6 +6,7 @@ import dev.christopherbell.whatsforlunch.restaurant.RestaurantImportStateReposit
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantService;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportResult;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -161,7 +162,7 @@ class RestaurantImportWorkflowServiceTest {
   @Test
   void publicFreshnessExcludesOperatorDetailsAndReportsConfiguredCoverage() {
     when(states.findById(eq(RestaurantImportWorkflowService.STATE_ID)))
-        .thenReturn(Optional.of(dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState.builder()
+        .thenReturn(Optional.of(RestaurantImportState.builder()
             .id(RestaurantImportWorkflowService.STATE_ID)
             .lastCompletedOn(NOW.minusSeconds(60))
             .actorAccountId("private-operator")
@@ -178,7 +179,7 @@ class RestaurantImportWorkflowServiceTest {
   @Test
   void startupRetriesWhenTheLatestMonthlyOccurrenceIsNewerThanTheLastSuccess() throws Exception {
     var now = Instant.parse("2026-09-16T12:00:00Z");
-    var lastSuccess = dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState.builder()
+    var lastSuccess = RestaurantImportState.builder()
         .id(RestaurantImportWorkflowService.STATE_ID)
         .lastCompletedOn(Instant.parse("2026-08-02T22:44:50Z"))
         .lastCompletedMonth("2026-08")
@@ -208,7 +209,7 @@ class RestaurantImportWorkflowServiceTest {
 
   @Test
   void startupDoesNotRepeatWhenTheLatestMonthlyOccurrenceAlreadyCompleted() throws Exception {
-    var lastSuccess = dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState.builder()
+    var lastSuccess = RestaurantImportState.builder()
         .id(RestaurantImportWorkflowService.STATE_ID)
         .lastCompletedOn(Instant.parse("2026-08-16T12:00:00Z"))
         .lastCompletedMonth("2026-08")
@@ -249,6 +250,112 @@ class RestaurantImportWorkflowServiceTest {
     verify(restaurantService, never()).prepareConfiguredMetroImport();
   }
 
+  @Test
+  void dailyRetryRunsAfterAnOverdueFailureOnTheNextCentralDay() throws Exception {
+    var now = Instant.parse("2026-09-16T09:00:00Z");
+    var failedState = importState(
+        Instant.parse("2026-08-02T22:44:50Z"),
+        Instant.parse("2026-09-15T08:01:00Z"));
+    when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.of(failedState));
+    when(leases.tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(now), any()))
+        .thenReturn(false);
+    var dailyWorkflow = workflowAt(now, new WflProperties());
+
+    dailyWorkflow.retryFailedMonthlyOpenStreetMapImport();
+
+    verify(leases).tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(now), any());
+    verify(restaurantService, never()).prepareConfiguredMetroImport();
+  }
+
+  @Test
+  void dailyRetryWaitsUntilTheMonthlyOccurrenceIsOverdue() {
+    var now = Instant.parse("2026-09-15T07:59:00Z");
+    var failedState = importState(
+        Instant.parse("2026-08-16T12:00:00Z"),
+        Instant.parse("2026-09-14T12:00:00Z"));
+    when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.of(failedState));
+
+    workflowAt(now, new WflProperties()).retryFailedMonthlyOpenStreetMapImport();
+
+    verify(leases, never()).tryAcquire(any(), any(), any(), any());
+  }
+
+  @Test
+  void dailyRetryDoesNotRunTwiceOnTheSameCentralCalendarDate() {
+    var now = Instant.parse("2026-09-16T09:00:00Z");
+    var failedState = importState(
+        Instant.parse("2026-08-02T22:44:50Z"),
+        Instant.parse("2026-09-16T08:30:00Z"));
+    when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.of(failedState));
+
+    workflowAt(now, new WflProperties()).retryFailedMonthlyOpenStreetMapImport();
+
+    verify(leases, never()).tryAcquire(any(), any(), any(), any());
+  }
+
+  @Test
+  void dailyRetryStopsAfterASuccessfulImport() {
+    var now = Instant.parse("2026-09-16T09:00:00Z");
+    var succeededState = importState(
+        Instant.parse("2026-09-15T08:00:00Z"),
+        Instant.parse("2026-09-14T12:00:00Z"));
+    when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.of(succeededState));
+
+    workflowAt(now, new WflProperties()).retryFailedMonthlyOpenStreetMapImport();
+
+    verify(leases, never()).tryAcquire(any(), any(), any(), any());
+  }
+
+  @Test
+  void dailyRetryUsesTheNextCronOccurrenceForLegacyMonthOnlyState() {
+    var now = Instant.parse("2026-09-16T09:00:00Z");
+    var failedState = RestaurantImportState.builder()
+        .id(RestaurantImportWorkflowService.STATE_ID)
+        .lastCompletedMonth("2026-08")
+        .lastFailedOn(Instant.parse("2026-09-15T08:01:00Z"))
+        .build();
+    when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.of(failedState));
+    when(leases.tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(now), any()))
+        .thenReturn(false);
+
+    workflowAt(now, new WflProperties()).retryFailedMonthlyOpenStreetMapImport();
+
+    verify(leases).tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(now), any());
+  }
+
+  @Test
+  void dailyRetryRespectsTheMonthlyImportEnabledFlag() {
+    var disabledProperties = new WflProperties();
+    disabledProperties.getRestaurantImport().getMonthly().setEnabled(false);
+
+    workflowAt(NOW, disabledProperties).retryFailedMonthlyOpenStreetMapImport();
+
+    verify(states, never()).findById(any());
+    verify(leases, never()).tryAcquire(any(), any(), any(), any());
+  }
+
+  private RestaurantImportWorkflowService workflowAt(Instant now, WflProperties properties) {
+    return new RestaurantImportWorkflowService(
+        Clock.fixed(now, ZoneOffset.UTC),
+        leases,
+        permissionService,
+        previews,
+        states,
+        restaurantService,
+        properties);
+  }
+
+  private RestaurantImportState importState(
+      Instant lastCompletedOn,
+      Instant lastFailedOn
+  ) {
+    return RestaurantImportState.builder()
+        .id(RestaurantImportWorkflowService.STATE_ID)
+        .lastCompletedOn(lastCompletedOn)
+        .lastCompletedMonth("2026-08")
+        .lastFailedOn(lastFailedOn)
+        .build();
+  }
   private RestaurantImportSnapshot snapshot(String checksum) {
     var counts = new RestaurantImportPreviewCounts(2, 1, 0, 0, 1, 0);
     return new RestaurantImportSnapshot(checksum, List.of(), counts, List.of("New Cafe"));

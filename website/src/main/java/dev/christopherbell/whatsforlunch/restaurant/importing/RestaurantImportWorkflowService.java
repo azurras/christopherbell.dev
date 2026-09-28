@@ -10,6 +10,7 @@ import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportResult
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.Optional;
@@ -107,6 +108,36 @@ public class RestaurantImportWorkflowService {
     }
   }
 
+  /** Retries an overdue failed monthly import no more than once per Central calendar day. */
+  @Scheduled(
+      cron = "0 0 4 * * *",
+      zone = "${wfl.restaurant-import.monthly.zone:America/Chicago}"
+  )
+  public void retryFailedMonthlyOpenStreetMapImport() {
+    if (!properties.getRestaurantImport().getMonthly().isEnabled()) {
+      return;
+    }
+    var now = Instant.now(clock);
+    var state = states.findById(STATE_ID).orElse(null);
+    if (state == null || !isFailedMonthlyRetryDue(state, now)) {
+      return;
+    }
+    runScheduled("scheduled-daily-retry");
+  }
+
+  private boolean isFailedMonthlyRetryDue(RestaurantImportState state, Instant now) {
+    var lastFailedOn = state.getLastFailedOn();
+    var lastCompletedOn = state.getLastCompletedOn();
+    if (lastFailedOn == null
+        || (lastCompletedOn != null && !lastFailedOn.isAfter(lastCompletedOn))) {
+      return false;
+    }
+
+    var zone = ZoneId.of(properties.getRestaurantImport().getMonthly().getZone());
+    return isMonthlyCatchUpDue(state, now)
+        && !lastFailedOn.atZone(zone).toLocalDate().equals(now.atZone(zone).toLocalDate());
+  }
+
   @EventListener(
       value = ApplicationReadyEvent.class,
       condition = "!@environment.acceptsProfiles('deploy-smoke')")
@@ -130,7 +161,16 @@ public class RestaurantImportWorkflowService {
     }
 
     var completedMonth = parseYearMonth(state.getLastCompletedMonth()).orElse(null);
-    return completedMonth == null || completedMonth.isBefore(currentMonth().minusMonths(1));
+    if (completedMonth == null) {
+      return true;
+    }
+
+    var cron = CronExpression.parse(properties.getRestaurantImport().getMonthly().getCron());
+    var lastInstantOfCompletedMonth = completedMonth.atEndOfMonth()
+        .atTime(LocalTime.MAX)
+        .atZone(zone);
+    var nextScheduledOn = cron.next(lastInstantOfCompletedMonth);
+    return nextScheduledOn != null && !nextScheduledOn.toInstant().isAfter(now);
   }
 
   private void runScheduled(String trigger) {

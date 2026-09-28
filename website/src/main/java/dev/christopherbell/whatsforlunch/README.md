@@ -35,8 +35,10 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
   Francisco Bay Area, New Orleans, and Dallas enabled by default.
 - OpenStreetMap import responses are bounded at 16 MiB before JSON parsing, and
   the request deadline remains effective until the complete response body arrives.
-- One leased import workflow shared by scheduled and manual runs. Manual runs
-  require a short-lived operator-bound preview token, re-fetch the source, and
+- One leased import workflow shared by scheduled and manual runs. An overdue
+  failed monthly import retries once daily at 04:00 America/Chicago until success;
+  same-day repeats are suppressed. Manual runs require a short-lived operator-bound
+  preview token, re-fetch the source, and
   reject changed checksums before writing. Durable admin status records bounded
   error categories and public pages receive only source freshness and coverage.
 - Restaurant inventory and duplicate-name previews use bounded indexed pages.
