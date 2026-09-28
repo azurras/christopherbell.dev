@@ -376,7 +376,16 @@ public class CanesBoxTrackerService {
         snapshot.getVerifiedMetroCount(),
         snapshot.getProvisionalMetroCount(),
         snapshot.getExcludedMetroCount(),
-        snapshot.getMetroPrices());
+        snapshot.getMetroPrices().stream()
+            .map(price -> price.copyWithFailureReason(publicFailureReason(price.getFailureReason())))
+            .toList());
+  }
+
+  private String publicFailureReason(String failureReason) {
+    if (failureReason == null || failureReason.isBlank()) {
+      return failureReason;
+    }
+    return failureReason.replaceAll("(?i)\\bnull\\b", "details unavailable");
   }
 
   private ZoneId collectionZone() {
