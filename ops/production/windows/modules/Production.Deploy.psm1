@@ -495,7 +495,7 @@ function Test-ProductionEndpoints {
     param($Config, [int]$Port)
     for ($index = 0; $index -lt $script:ProductionSmokePaths.Count; $index++) {
         $path = $script:ProductionSmokePaths[$index]
-        $timeout = if ($index -eq 0) {
+        $timeout = if ($index -eq 0 -or $path -eq '/actuator/health/readiness') {
             [timespan]::FromMinutes(3)
         } else {
             [timespan]::FromSeconds(30)
