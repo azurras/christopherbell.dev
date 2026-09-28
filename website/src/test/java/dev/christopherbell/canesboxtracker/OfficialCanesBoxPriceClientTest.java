@@ -24,6 +24,19 @@ class OfficialCanesBoxPriceClientTest {
   private static final int MAXIMUM_FALLBACK_RESPONSE_BYTES = 8 * 1024 * 1024;
 
   @Test
+  void failureDescriptionUsesExceptionTypeWhenMessageIsMissing() {
+    assertEquals(
+        "IOException",
+        OfficialCanesBoxPriceClient.describeFailure(new IOException()));
+    assertEquals(
+        "IOException",
+        OfficialCanesBoxPriceClient.describeFailure(new IOException("  ")));
+    assertEquals(
+        "connection timed out",
+        OfficialCanesBoxPriceClient.describeFailure(new IOException("connection timed out")));
+  }
+
+  @Test
   void findBoxComboPriceFindsNestedOfficialMenuPrice() throws Exception {
     var properties = new CanesBoxTrackerProperties();
     properties.setItemName("The Box Combo");

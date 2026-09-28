@@ -66,7 +66,7 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
       Thread.currentThread().interrupt();
       return CanesBoxMetroPrice.failure(target, "Official Cane's GraphQL API request was interrupted.");
     } catch (Exception e) {
-      officialFailures.add("Official Cane's GraphQL API failed: " + e.getMessage());
+      officialFailures.add("Official Cane's GraphQL API failed: " + describeFailure(e));
     }
 
     try {
@@ -75,9 +75,16 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
       Thread.currentThread().interrupt();
       return CanesBoxMetroPrice.failure(target, "Official Cane's API request was interrupted.");
     } catch (Exception e) {
-      officialFailures.add(e.getMessage());
+      officialFailures.add(describeFailure(e));
       return fetchFallbackPrice(target, String.join("; ", officialFailures));
     }
+  }
+
+  static String describeFailure(Exception failure) {
+    var message = failure.getMessage();
+    return message == null || message.isBlank()
+        ? failure.getClass().getSimpleName()
+        : message;
   }
 
   private Optional<CanesBoxMetroPrice> fetchGraphQlMenuPrice(
