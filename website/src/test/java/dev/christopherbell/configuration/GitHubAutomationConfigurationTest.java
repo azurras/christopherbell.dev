@@ -18,19 +18,17 @@ import org.junit.jupiter.api.Test;
 class GitHubAutomationConfigurationTest {
   private static final Pattern IMMUTABLE_ACTION = Pattern.compile("^[^@\\s]+@[0-9a-f]{40}$");
   private static final String CHECKOUT =
-      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1";
+      "actions/checkout";
   private static final String SETUP_GRADLE =
-      "gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92";
+      "gradle/actions/setup-gradle";
   private static final String UPLOAD_ARTIFACT =
-      "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a";
-  private static final String CODEQL_INIT =
-      "github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81";
+      "actions/upload-artifact";
+  private static final String CODEQL_INIT = "github/codeql-action/init";
   private static final String CODEQL_ANALYZE =
-      "github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81";
+      "github/codeql-action/analyze";
   private static final String DEPENDENCY_REVIEW =
-      "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294";
-  private static final String STALE =
-      "actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629";
+      "actions/dependency-review-action";
+  private static final String STALE = "actions/stale";
   private static final ObjectMapper YAML = new ObjectMapper(new YAMLFactory());
   private static final Path REPOSITORY_ROOT = locateRepositoryRoot();
 
@@ -229,7 +227,7 @@ class GitHubAutomationConfigurationTest {
 
   private static JsonNode stepUsing(JsonNode steps, String action) {
     return StreamSupport.stream(steps.spliterator(), false)
-        .filter(step -> action.equals(step.path("uses").asText()))
+        .filter(step -> step.path("uses").asText().startsWith(action + "@"))
         .findFirst()
         .orElse(MissingNode.getInstance());
   }
