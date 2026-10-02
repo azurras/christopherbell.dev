@@ -67,6 +67,10 @@ form?.addEventListener('submit', async (event) => {
     showAlert('Enter a VIN to decode.');
     return;
   }
+  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
+    showAlert('VIN must be exactly 17 valid characters.');
+    return;
+  }
 
   try {
     if (button) button.disabled = true;
