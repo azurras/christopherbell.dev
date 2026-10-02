@@ -244,6 +244,61 @@ test('infinite scroller reports a scroll failure and retries the same cursor', a
   }
 });
 
+test('infinite scroller retries a malformed scroll cursor from the previous valid cursor', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  let scrollHandler = null;
+  globalThis.window = {
+    innerHeight: 100,
+    scrollY: 0,
+    addEventListener(name, handler) {
+      if (name === 'scroll') scrollHandler = handler;
+    },
+    removeEventListener() {},
+  };
+  globalThis.document = { body: { offsetHeight: 50 } };
+
+  try {
+    const errors = [];
+    const pages = [];
+    const requests = [];
+    const scroller = createInfiniteScroller({
+      limit: 1,
+      async fetchPage(args) {
+        requests.push(args);
+        if (requests.length === 1) {
+          return { items: [{ createdOn: 'first' }], nextCursor: 'next' };
+        }
+        if (requests.length === 2) {
+          return { items: [], nextCursor: { value: 'malformed' } };
+        }
+        return { items: [{ createdOn: 'second' }], nextCursor: null };
+      },
+      onPage: items => pages.push(...items),
+      onError: error => errors.push(error.message),
+    });
+    scroller.attach();
+
+    await scroller.loadInitial();
+    await scrollHandler();
+
+    assert.deepEqual(errors, ['Feed page cursor must be a non-empty string or null.']);
+    assert.deepEqual(pages.map(page => page.createdOn), ['first']);
+    assert.deepEqual(requests.map(request => request.cursor), [null, 'next']);
+
+    await scrollHandler();
+
+    assert.deepEqual(requests.map(request => request.cursor), [null, 'next', 'next']);
+    assert.deepEqual(requests.map(request => request.before), [null, 'first', 'first']);
+    assert.deepEqual(pages.map(page => page.createdOn), ['first', 'second']);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+});
+
 test('a new initial load ignores stale results and keeps its loading lock', async () => {
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
