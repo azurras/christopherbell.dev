@@ -231,6 +231,36 @@ class RestaurantImportWorkflowServiceTest {
   }
 
   @Test
+  void startupDoesNotRetryAnOverdueFailureAgainOnTheSameCentralCalendarDate() throws Exception {
+    var now = Instant.parse("2026-09-16T03:30:00Z");
+    var failedState = importState(
+        Instant.parse("2026-08-02T22:44:50Z"),
+        Instant.parse("2026-09-15T08:01:00Z"));
+    when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.of(failedState));
+
+    workflowAt(now, new WflProperties()).runMissedMonthlyOpenStreetMapImport();
+
+    verify(leases, never()).tryAcquire(any(), any(), any(), any());
+    verify(restaurantService, never()).prepareConfiguredMetroImport();
+  }
+
+  @Test
+  void startupRetriesAnOverdueFailureOnTheNextCentralCalendarDate() throws Exception {
+    var now = Instant.parse("2026-09-16T12:00:00Z");
+    var failedState = importState(
+        Instant.parse("2026-08-02T22:44:50Z"),
+        Instant.parse("2026-09-15T08:01:00Z"));
+    when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.of(failedState));
+    when(leases.tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(now), any()))
+        .thenReturn(false);
+
+    workflowAt(now, new WflProperties()).runMissedMonthlyOpenStreetMapImport();
+
+    verify(leases).tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(now), any());
+    verify(restaurantService, never()).prepareConfiguredMetroImport();
+  }
+
+  @Test
   void startupDoesNothingWhenMonthlyImportIsDisabled() throws Exception {
     var disabledProperties = new WflProperties();
     disabledProperties.getRestaurantImport().getMonthly().setEnabled(false);
