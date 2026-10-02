@@ -52,6 +52,52 @@ test('infinite scroller reports malformed page data and permits a retry', async 
   assert.equal(attempts, 2);
 });
 
+test('infinite scroller reports an empty cursor instead of treating the feed as complete', async () => {
+  const errors = [];
+  const rendered = [];
+  let attempts = 0;
+  const scroller = createInfiniteScroller({
+    async fetchPage() {
+      attempts += 1;
+      if (attempts === 1) return { items: [], nextCursor: '' };
+      return { items: [{ createdOn: 'recovered' }], nextCursor: null };
+    },
+    onPage: items => rendered.push(...items),
+    onError: error => errors.push(error.message),
+  });
+
+  await scroller.loadInitial();
+  assert.deepEqual(errors, ['Feed page cursor must be a non-empty string or null.']);
+  assert.equal(attempts, 1);
+
+  await scroller.loadInitial();
+  assert.deepEqual(rendered.map(item => item.createdOn), ['recovered']);
+  assert.equal(attempts, 2);
+});
+
+test('infinite scroller reports a non-string cursor before requesting another page', async () => {
+  const errors = [];
+  const rendered = [];
+  let attempts = 0;
+  const scroller = createInfiniteScroller({
+    async fetchPage() {
+      attempts += 1;
+      if (attempts === 1) return { items: [], nextCursor: { value: 'malformed' } };
+      return { items: [{ createdOn: 'recovered' }], nextCursor: null };
+    },
+    onPage: items => rendered.push(...items),
+    onError: error => errors.push(error.message),
+  });
+
+  await scroller.loadInitial();
+  assert.deepEqual(errors, ['Feed page cursor must be a non-empty string or null.']);
+  assert.equal(attempts, 1);
+
+  await scroller.loadInitial();
+  assert.deepEqual(rendered.map(item => item.createdOn), ['recovered']);
+  assert.equal(attempts, 2);
+});
+
 test('infinite scroller follows advancing cursors across empty pages', async () => {
   const errors = [];
   const cursors = [];
