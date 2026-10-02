@@ -92,7 +92,8 @@ Owns browser-side behavior for server-rendered pages.
   source/Central-time collection date, clickable metro trend selection, a
   copyable official GraphQL API `curl` for the selected tracked store, and
   lightweight inline SVG trend charts for both the overall index and selected
-  metros.
+  metros. Copy failures, including unavailable Clipboard API access, appear in
+  the page alert region.
 - `post.js` renders the `/p/{id}` Spectral Thread page. It loads the selected
   post and thread data, fills root/parent context echoes, applies selected-post
   detail styling through the shared feed renderer, renders the nested Signal

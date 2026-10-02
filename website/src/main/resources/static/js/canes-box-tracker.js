@@ -189,6 +189,37 @@ function showAlert(message) {
   renderAlert(alertBox, message);
 }
 
+/** Bind official curl copying and report Clipboard API failures in the page alert region. */
+export function bindCanesBoxCurlCopyControl({
+  panel,
+  clipboard = globalThis.navigator?.clipboard,
+  showAlertFn = showAlert,
+  setTimeoutFn = setTimeout,
+}) {
+  if (!panel || typeof showAlertFn !== 'function' || typeof setTimeoutFn !== 'function') return false;
+  panel.addEventListener('click', async event => {
+    const button = event.target.closest?.('.canes-box-copy-curl');
+    if (!button) return;
+    const code = panel.querySelector('.canes-box-official-curl code')?.textContent;
+    if (!code) return;
+    if (typeof clipboard?.writeText !== 'function') {
+      showAlertFn('Could not copy the official API curl request.');
+      return;
+    }
+    const originalText = button.textContent;
+    try {
+      await clipboard.writeText(code);
+      button.textContent = 'Copied';
+      setTimeoutFn(() => {
+        button.textContent = originalText;
+      }, 1600);
+    } catch (_) {
+      showAlertFn('Could not copy the official API curl request.');
+    }
+  });
+  return true;
+}
+
 function renderLatest(latest) {
   if (latestPrice) latestPrice.textContent = formatUsd(latest?.averagePrice);
   if (latestWeek) latestWeek.textContent = latest?.weekStartDate || '-';
@@ -419,20 +450,5 @@ if (hasDocument) {
     renderMetroTrend();
     renderMetroRows(currentHistory.latest);
   });
-  metroTrendPanel?.addEventListener('click', async event => {
-    const button = event.target.closest?.('.canes-box-copy-curl');
-    if (!button) return;
-    const code = metroTrendPanel.querySelector('.canes-box-official-curl code')?.textContent;
-    if (!code || typeof navigator === 'undefined' || !navigator.clipboard) return;
-    const originalText = button.textContent;
-    try {
-      await navigator.clipboard.writeText(code);
-      button.textContent = 'Copied';
-      setTimeout(() => {
-        button.textContent = originalText;
-      }, 1600);
-    } catch (err) {
-      showAlert('Could not copy the official API curl request.');
-    }
-  });
+  bindCanesBoxCurlCopyControl({ panel: metroTrendPanel });
 }
