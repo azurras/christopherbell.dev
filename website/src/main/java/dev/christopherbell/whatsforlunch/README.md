@@ -19,7 +19,9 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
 - Logged-in shared sessions where up to 20 members see the same three restaurants,
   receive atomic session updates, and vote. The creator alone can reset picks.
   Sessions are active for 24 hours, remain as a read-only archive for 30 more
-  days, and carry a TTL deletion deadline.
+  days, and carry a TTL deletion deadline. The active or archived session panel
+  exposes a read-only share link; clipboard failures show instructions to copy
+  it manually.
 - Logged-in restaurant thumb votes with public approval percentages and vote totals.
 - Restaurant websites are persisted and rendered only as absolute HTTP(S) URLs; unsafe legacy values are omitted.
 - Public restaurant profile routes server-render indexable profile content,
