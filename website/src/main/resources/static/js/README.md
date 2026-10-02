@@ -82,6 +82,8 @@ Owns browser-side behavior for server-rendered pages.
 - `zip-coordinates.js` renders the Tools ZIP coordinate lookup page around
   `GET /api/location/zip/{zipCode}`, including ZIP normalization, inline errors,
   result fields, and copyable API/curl output.
+- `vin-decoder.js` validates VIN length and allowed characters in the browser
+  before sending a decode request, then renders summary, JSON, and curl output.
 - `canes-box-tracker.js` renders the Tools Raising Canes Box Index page around
   the public history API, including month-over-month and year-over-year percent
   indexes, verified latest average price, data-quality counts, metro sample
