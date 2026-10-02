@@ -11,6 +11,7 @@ import {
   canesBoxMetroRowsMarkup,
   canesBoxMetroTrendMarkup,
   canesBoxOfficialApiCurl,
+  bindCanesBoxCurlCopyControl,
   formatCollectedDate,
   formatQualityStatus,
   formatIndexTrend,
@@ -142,6 +143,66 @@ test('canesBoxOfficialApiCurl renders a reproducible official menu request for a
   assert.match(curl, /"slug":"raising-canes-140"/);
 });
 
+test('Cane’s curl copy reports when the clipboard API is unavailable', async () => {
+  const button = { textContent: 'Copy curl' };
+  const panel = fakeCurlCopyPanel(button);
+  const alerts = [];
+
+  bindCanesBoxCurlCopyControl({
+    panel,
+    clipboard: null,
+    showAlertFn: message => alerts.push(message),
+  });
+
+  await panel.click();
+
+  assert.deepEqual(alerts, ['Could not copy the official API curl request.']);
+  assert.equal(button.textContent, 'Copy curl');
+});
+
+test('Cane’s curl copy reports rejected clipboard writes', async () => {
+  const button = { textContent: 'Copy curl' };
+  const panel = fakeCurlCopyPanel(button);
+  const alerts = [];
+
+  bindCanesBoxCurlCopyControl({
+    panel,
+    clipboard: { writeText: async () => { throw new Error('Permission denied'); } },
+    showAlertFn: message => alerts.push(message),
+  });
+
+  await panel.click();
+
+  assert.deepEqual(alerts, ['Could not copy the official API curl request.']);
+  assert.equal(button.textContent, 'Copy curl');
+});
+
+test('Cane’s curl copy confirms success and restores the original button label', async () => {
+  const button = { textContent: 'Copy curl' };
+  const panel = fakeCurlCopyPanel(button);
+  let copiedText = null;
+  let resetButton = null;
+  let resetDelay = null;
+
+  bindCanesBoxCurlCopyControl({
+    panel,
+    clipboard: { writeText: async text => { copiedText = text; } },
+    showAlertFn: () => assert.fail('Successful copy must not show an alert.'),
+    setTimeoutFn: (callback, delay) => {
+      resetButton = callback;
+      resetDelay = delay;
+    },
+  });
+
+  await panel.click();
+
+  assert.equal(copiedText, 'curl --get https://gateway.raisingcanes.com/v2/api/v1');
+  assert.equal(button.textContent, 'Copied');
+  assert.equal(resetDelay, 1600);
+  resetButton();
+  assert.equal(button.textContent, 'Copy curl');
+});
+
 test('canesBoxMetroRowsMarkup renders source and last collection date without quality or status columns', () => {
   const markup = canesBoxMetroRowsMarkup({
     metroPrices: [
@@ -239,3 +300,26 @@ test('canesBoxMetroTrendMarkup renders metro-only trend content', () => {
   assert.match(markup, /Verify with official API/);
   assert.match(markup, /raising-canes-140/);
 });
+
+function fakeCurlCopyPanel(button) {
+  let clickHandler = null;
+  return {
+    addEventListener(name, handler) {
+      if (name === 'click') clickHandler = handler;
+    },
+    querySelector(selector) {
+      assert.equal(selector, '.canes-box-official-curl code');
+      return { textContent: 'curl --get https://gateway.raisingcanes.com/v2/api/v1' };
+    },
+    click() {
+      return clickHandler?.({
+        target: {
+          closest(selector) {
+            assert.equal(selector, '.canes-box-copy-curl');
+            return button;
+          },
+        },
+      });
+    },
+  };
+}
