@@ -252,6 +252,7 @@ function sessionMarkup() {
           <input class="form-control form-control-sm lunch-session-link" value="${sanitize(shareUrl)}" readonly aria-label="Session link">
         </div>
         <button type="button" class="btn btn-outline-primary btn-sm lunch-session-copy">Copy link</button>
+        <p class="lunch-session-status" aria-live="polite"></p>
       </section>
     `;
   }
@@ -919,8 +920,19 @@ mount?.addEventListener('click', async (event) => {
     : null;
   if (copySessionButton) {
     const link = mount.querySelector('.lunch-session-link')?.value || window.location.href;
-    await navigator.clipboard?.writeText(link);
-    copySessionButton.textContent = 'Copied';
+    const status = mount.querySelector('.lunch-session-status');
+    copySessionButton.textContent = 'Copy link';
+    try {
+      const clipboard = navigator.clipboard;
+      if (typeof clipboard?.writeText !== 'function') {
+        throw new Error('Clipboard API is unavailable.');
+      }
+      await clipboard.writeText(link);
+      copySessionButton.textContent = 'Copied';
+      if (status) status.textContent = 'Link copied.';
+    } catch (_) {
+      if (status) status.textContent = 'Unable to copy link. Select and copy it manually.';
+    }
     return;
   }
 
