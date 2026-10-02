@@ -141,7 +141,8 @@ Owns browser-side behavior for server-rendered pages.
   request generation—tears down and hides the console before redirecting.
 - `shared-folder.js` owns the Shared Folder shell: it redirects visitors without a browser session marker,
   checks the current account's effective shared read capability, renders relative-path breadcrumbs
-  and accessible button controls, copies same-origin `/shared?path=` links, starts native
+  and accessible button controls, copies same-origin `/shared?path=` links with actionable
+  live-status feedback when the Clipboard API is unavailable or rejects the write, starts native
   attachment downloads and hands audio/video selections to the site-wide player without Blob buffering,
   and inserts text previews only
   with `textContent`. Before assigning a protected native URL it waits for the root-scoped
