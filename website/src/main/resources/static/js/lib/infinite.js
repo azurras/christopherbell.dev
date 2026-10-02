@@ -5,38 +5,61 @@
  *   const scroller = createInfiniteScroller({
  *     fetchPage: async ({ before, limit }) => [...items],
  *     onPage: (items) => { * append to DOM * },
+ *     onError: (error) => { * report page-load failure * },
+ *     onSuccess: () => { * clear recovered page-load feedback * },
  *     getCursor: (item) => item.createdOn || item.lastUpdatedOn,
  *     thresholdPx: 200,
  *     limit: 20,
  *   });
  *   scroller.loadInitial();
  */
-export function createInfiniteScroller({ fetchPage, onPage, getCursor, thresholdPx = 200, limit = 20, onEmpty }) {
+export function createInfiniteScroller({
+  fetchPage,
+  onPage,
+  onError = error => console.error('Infinite feed load failed.', error),
+  onSuccess = () => {},
+  getCursor,
+  thresholdPx = 200,
+  limit = 20,
+  onEmpty,
+}) {
   let before = null;
   let cursor = null;
   let loading = false;
   let done = false;
+  let loadGeneration = 0;
+  let seenCursors = new Set();
 
   const cursorFn = getCursor || ((it) => it.createdOn || it.lastUpdatedOn);
 
   async function load(renew = false) {
     if (loading || done) return;
     loading = true;
+    const generation = loadGeneration;
     try {
       let firstRequest = renew;
       while (!done) {
+        const requestCursor = firstRequest ? null : cursor;
         const page = await fetchPage({
           before: firstRequest ? null : before,
-          cursor: firstRequest ? null : cursor,
+          cursor: requestCursor,
           limit
         });
+        if (generation !== loadGeneration) return;
         const items = Array.isArray(page) ? page : page?.items;
         if (!Array.isArray(items)) {
-          done = true;
-          return;
+          throw new TypeError('Feed page response must contain an items array.');
         }
+        const nextCursor = Array.isArray(page) ? cursor : page.nextCursor || null;
+        if (!Array.isArray(page) && nextCursor) {
+          if (nextCursor === requestCursor || seenCursors.has(nextCursor)) {
+            throw new Error('Feed page cursor did not advance.');
+          }
+          seenCursors.add(nextCursor);
+        }
+        onSuccess();
         if (!Array.isArray(page)) {
-          cursor = page.nextCursor || null;
+          cursor = nextCursor;
         }
         if (items.length > 0) {
           onPage(items);
@@ -51,22 +74,26 @@ export function createInfiniteScroller({ fetchPage, onPage, getCursor, threshold
         }
         firstRequest = false;
       }
+    } catch (error) {
+      if (generation === loadGeneration) onError(error);
     } finally {
-      loading = false;
+      if (generation === loadGeneration) loading = false;
     }
   }
 
   function onScroll() {
     const nearBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - thresholdPx;
-    if (nearBottom) load(false);
+    if (nearBottom) return load(false);
   }
 
   function loadInitial() {
+    loadGeneration += 1;
     before = null;
     cursor = null;
     loading = false;
     done = false;
-    load(true);
+    seenCursors = new Set();
+    return load(true);
   }
 
   function attach() {

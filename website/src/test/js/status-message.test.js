@@ -34,6 +34,26 @@ test('alert rendering is a no-op without a host and defaults invalid severity to
   assert.deepEqual(host.classes(), ['alert', 'alert-danger']);
 });
 
+test('alert clearing hides only the message that still belongs to the caller', () => {
+  assert.ifError(statusMessage.loadFailure);
+  const host = fakeHost(['alert', 'alert-danger']);
+  host.textContent = 'Feed unavailable';
+
+  assert.equal(statusMessage.clearAlertIfMessage(host, 'Feed unavailable'), true);
+  assert.equal(host.textContent, '');
+  assert.deepEqual(host.classes(), ['alert', 'alert-danger', 'd-none']);
+});
+
+test('alert clearing preserves a newer message owned by another action', () => {
+  assert.ifError(statusMessage.loadFailure);
+  const host = fakeHost(['alert', 'alert-danger']);
+  host.textContent = 'Composer submission failed';
+
+  assert.equal(statusMessage.clearAlertIfMessage(host, 'Feed unavailable'), false);
+  assert.equal(host.textContent, 'Composer submission failed');
+  assert.deepEqual(host.classes(), ['alert', 'alert-danger']);
+});
+
 function fakeHost(initialClasses) {
   const values = new Set(initialClasses);
   return {

@@ -52,6 +52,10 @@ Owns browser-side behavior for server-rendered pages.
   canonical post URL through the native share sheet or clipboard fallback.
 - `home-feed.js` wires the signed-in Void composer preview mount. The preview is
   rendered client-side from draft text and does not store preview-only data.
+  Infinite-feed load failures appear in the page alert, clear an empty feed's
+  loading skeleton, and remain retryable.
+- `user-feed.js` reports infinite-feed request failures in its accessible alert;
+  later scroll or reload attempts can retry the failed page.
 - API calls go through `lib/api.js` so auth headers, response parsing, and
   endpoint paths stay consistent.
 - `lib/util.js` owns shared `@username` mention and HTTP/HTTPS URL linking;
