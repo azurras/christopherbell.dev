@@ -126,16 +126,24 @@ public class RestaurantImportWorkflowService {
   }
 
   private boolean isFailedMonthlyRetryDue(RestaurantImportState state, Instant now) {
+    return isMonthlyCatchUpDue(state, now)
+        && hasUnresolvedMonthlyFailure(state)
+        && !hasUnresolvedMonthlyFailureToday(state, now);
+  }
+
+  private boolean hasUnresolvedMonthlyFailure(RestaurantImportState state) {
     var lastFailedOn = state.getLastFailedOn();
     var lastCompletedOn = state.getLastCompletedOn();
-    if (lastFailedOn == null
-        || (lastCompletedOn != null && !lastFailedOn.isAfter(lastCompletedOn))) {
+    return lastFailedOn != null
+        && (lastCompletedOn == null || lastFailedOn.isAfter(lastCompletedOn));
+  }
+
+  private boolean hasUnresolvedMonthlyFailureToday(RestaurantImportState state, Instant now) {
+    if (!hasUnresolvedMonthlyFailure(state)) {
       return false;
     }
-
     var zone = ZoneId.of(properties.getRestaurantImport().getMonthly().getZone());
-    return isMonthlyCatchUpDue(state, now)
-        && !lastFailedOn.atZone(zone).toLocalDate().equals(now.atZone(zone).toLocalDate());
+    return state.getLastFailedOn().atZone(zone).toLocalDate().equals(now.atZone(zone).toLocalDate());
   }
 
   @EventListener(
@@ -146,7 +154,10 @@ public class RestaurantImportWorkflowService {
       return;
     }
     var state = states.findById(STATE_ID).orElse(null);
-    if (state == null || isMonthlyCatchUpDue(state, Instant.now(clock))) {
+    var now = Instant.now(clock);
+    if (state == null
+        || (isMonthlyCatchUpDue(state, now)
+            && !hasUnresolvedMonthlyFailureToday(state, now))) {
       runScheduled("startup-catch-up");
     }
   }
