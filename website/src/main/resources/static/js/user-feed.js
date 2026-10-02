@@ -4,7 +4,7 @@ import { createFeedItem } from './lib/feed-render.js';
 import { initPostImageLightbox } from './lib/image-lightbox.js';
 import { initLazyMedia } from './lib/lazy-media.js';
 import { profileActivityStats } from './lib/profile-stats.js';
-import { renderAlert } from './lib/status-message.js';
+import { clearAlertIfMessage, renderAlert } from './lib/status-message.js';
 /**
  * User feed page script.
  * - Resolves username from URL and loads their posts
@@ -29,6 +29,7 @@ let ME = { id: null, role: null, username: null };
 let SCROLLER = null;
 let RENDER_CTX = null;
 let PROFILE = null;
+let feedLoadErrorMessage = null;
 
 function setText(id, value) {
   const el = document.getElementById(id);
@@ -115,6 +116,18 @@ function showAlert(message) {
   renderAlert(document.getElementById('userAlert'), message);
 }
 
+function showFeedLoadError(error) {
+  const message = error?.message || 'Could not load this feed.';
+  const rendered = renderAlert(document.getElementById('userAlert'), message);
+  feedLoadErrorMessage = rendered ? message : null;
+}
+
+function clearFeedLoadError() {
+  const message = feedLoadErrorMessage;
+  feedLoadErrorMessage = null;
+  return clearAlertIfMessage(document.getElementById('userAlert'), message);
+}
+
 async function toggleFollow() {
   if (!PROFILE) return;
   if (!isLoggedIn()) {
@@ -198,6 +211,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (cursor) params.set('cursor', cursor);
         return await fetchJson(`${API.posts.userFeedPage(username)}?${params.toString()}`, { headers: authHeaders() });
       },
+      onError: showFeedLoadError,
+      onSuccess: clearFeedLoadError,
       onPage: (items) => {
         if (!items || items.length === 0) return;
         for (const p of items) list.appendChild(createFeedItem(p, RENDER_CTX));

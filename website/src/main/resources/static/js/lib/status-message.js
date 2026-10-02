@@ -12,3 +12,11 @@ export function renderAlert(host, message, type = null) {
   }
   return true;
 }
+
+/** Clear an alert only when it still displays the caller's message. */
+export function clearAlertIfMessage(host, expectedMessage) {
+  if (!host || !expectedMessage || host.textContent !== expectedMessage) return false;
+  host.textContent = '';
+  host.classList.add('d-none');
+  return true;
+}

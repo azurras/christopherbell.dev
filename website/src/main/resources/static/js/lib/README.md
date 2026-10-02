@@ -42,7 +42,10 @@ Owns reusable browser-side modules that are not tied to one page.
   reply composers.
 - `image-lightbox.js` owns the shared post-image preview dialog and broken-image
   fallback markup used by feed-rendering pages.
-- `infinite.js` owns reusable cursor-based infinite scrolling.
+- `infinite.js` owns reusable cursor-based infinite scrolling, reports failed
+  page requests through its error callback, leaves failed pages retryable, and
+  notifies consumers after each valid successful page response. Malformed page
+  data and repeated cursors are reported as retryable failures.
 - `lazy-media.js` owns deferred iframe markup and viewport-based activation for
   rich media embeds.
 - `notifications.js` owns notification display text, notification routing, recent

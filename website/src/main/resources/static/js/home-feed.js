@@ -7,6 +7,7 @@ import { createInfiniteScroller } from './lib/infinite.js';
 import { initComposer } from './lib/composer.js';
 import { initPostImageLightbox } from './lib/image-lightbox.js';
 import { initLazyMedia } from './lib/lazy-media.js';
+import { clearAlertIfMessage, renderAlert } from './lib/status-message.js';
 /**
  * Home feed page script.
  * - Renders global feed with infinite scroll and 15s polling
@@ -21,6 +22,7 @@ let RENDER_CTX = null;
 let FEED_ITEMS = [];
 let ACTIVE_FILTER = 'all';
 let ACTIVE_SORT = 'newest';
+let feedLoadErrorMessage = null;
 
 function feedList() {
   return document.getElementById('feedList');
@@ -39,6 +41,24 @@ function showSkeleton() {
       </div>
     </div>
   `).join('');
+}
+
+export function renderFeedLoadError(error, {
+  list = feedList(),
+  alert = document.getElementById('homeAlert'),
+  hasRenderedItems = FEED_ITEMS.length > 0,
+} = {}) {
+  if (!hasRenderedItems) list?.replaceChildren();
+  const message = error?.message || 'Could not load the feed.';
+  const rendered = renderAlert(alert, message);
+  feedLoadErrorMessage = rendered ? message : null;
+  return rendered;
+}
+
+export function clearFeedLoadError() {
+  const message = feedLoadErrorMessage;
+  feedLoadErrorMessage = null;
+  return clearAlertIfMessage(document.getElementById('homeAlert'), message);
 }
 
 function renderEmpty(message = 'Nothing in the Void yet.') {
@@ -197,6 +217,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             : API.posts.feedPage;
       return await fetchJson(`${endpoint}?${params.toString()}`, { headers: authHeaders() });
     },
+    onError: error => renderFeedLoadError(error),
+    onSuccess: clearFeedLoadError,
     onPage: (items) => {
       if (!items || items.length === 0) {
         renderFeed();
