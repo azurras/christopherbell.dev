@@ -56,10 +56,14 @@ function renderCoordinate(coordinate) {
 
 async function copyElementText(element, buttonElement) {
   if (!element || !buttonElement) return;
-  await navigator.clipboard.writeText(element.textContent || '');
-  const original = buttonElement.textContent;
-  buttonElement.textContent = 'Copied';
-  setTimeout(() => { buttonElement.textContent = original; }, 1200);
+  try {
+    await navigator.clipboard.writeText(element.textContent || '');
+    const original = buttonElement.textContent;
+    buttonElement.textContent = 'Copied';
+    setTimeout(() => { buttonElement.textContent = original; }, 1200);
+  } catch {
+    showAlert('Unable to copy text. Please copy it manually.');
+  }
 }
 
 form?.addEventListener('submit', async (event) => {
