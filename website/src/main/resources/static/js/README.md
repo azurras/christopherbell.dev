@@ -81,7 +81,8 @@ Owns browser-side behavior for server-rendered pages.
   personal vote and favorite controls, with failures isolated to that panel.
 - `zip-coordinates.js` renders the Tools ZIP coordinate lookup page around
   `GET /api/location/zip/{zipCode}`, including ZIP normalization, inline errors,
-  result fields, and copyable API/curl output.
+  result fields, and copyable API/curl output. Clipboard failures are reported
+  in the page alert region.
 - `vin-decoder.js` validates VIN length and allowed characters in the browser
   before sending a decode request, then renders summary, JSON, and curl output.
   Its JSON/curl copy controls report clipboard failures in the page alert region.
