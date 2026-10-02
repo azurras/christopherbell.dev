@@ -84,6 +84,7 @@ Owns browser-side behavior for server-rendered pages.
   result fields, and copyable API/curl output.
 - `vin-decoder.js` validates VIN length and allowed characters in the browser
   before sending a decode request, then renders summary, JSON, and curl output.
+  Its JSON/curl copy controls report clipboard failures in the page alert region.
 - `canes-box-tracker.js` renders the Tools Raising Canes Box Index page around
   the public history API, including month-over-month and year-over-year percent
   indexes, verified latest average price, data-quality counts, metro sample

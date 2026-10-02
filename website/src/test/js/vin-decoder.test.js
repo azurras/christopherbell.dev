@@ -48,3 +48,15 @@ test('short VIN shows local validation without consuming an API request', async 
   assert.equal(fetchCalls.length, 0);
   assert.equal(alert.textContent, 'VIN must be exactly 17 valid characters.');
 });
+
+test('clipboard rejection shows an actionable error on the VIN page', async () => {
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { clipboard: { writeText: async () => { throw new Error('Permission denied'); } } },
+  });
+
+  await elements.get('copyJsonButton').dispatch('click');
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.match(elements.get('vinDecodeAlert').textContent, /unable to copy/i);
+});

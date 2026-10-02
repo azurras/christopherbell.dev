@@ -53,10 +53,14 @@ function render(decoded) {
 
 async function copyText(el, buttonEl) {
   if (!el || !buttonEl) return;
-  await navigator.clipboard.writeText(el.textContent || '');
-  const original = buttonEl.textContent;
-  buttonEl.textContent = 'Copied';
-  setTimeout(() => { buttonEl.textContent = original; }, 1200);
+  try {
+    await navigator.clipboard.writeText(el.textContent || '');
+    const original = buttonEl.textContent;
+    buttonEl.textContent = 'Copied';
+    setTimeout(() => { buttonEl.textContent = original; }, 1200);
+  } catch {
+    showAlert('Unable to copy text. Please copy it manually.');
+  }
 }
 
 form?.addEventListener('submit', async (event) => {
