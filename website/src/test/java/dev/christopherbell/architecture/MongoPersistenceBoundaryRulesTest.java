@@ -222,11 +222,11 @@ class MongoPersistenceBoundaryRulesTest {
 
   @Test
   void auditedMongoDependencyJarClassSnapshotsAreExact() throws Exception {
-    assertJarClassSnapshot(MongoTemplate.class, "spring-data-mongodb-5.1.0.jar", 1668,
+    assertJarClassSnapshot(MongoTemplate.class, "spring-data-mongodb-5.1.1.jar", 1668,
         "ed41dc89ba4aa2684ed90f7deb2a7ebf4969e788f213043266ebfde0458a1cd1");
-    assertJarClassSnapshot(MongoClient.class, "mongodb-driver-sync-5.8.0.jar", 80,
+    assertJarClassSnapshot(MongoClient.class, "mongodb-driver-sync-5.8.1.jar", 80,
         "1a8d1d1021d23d3b9fbe5ff881fd2c9143724216cc74807726dd69e810562d18");
-    assertJarClassSnapshot(MongoClientSettings.class, "mongodb-driver-core-5.8.0.jar", 1356,
+    assertJarClassSnapshot(MongoClientSettings.class, "mongodb-driver-core-5.8.1.jar", 1356,
         "c14a7f42d611d50af5c28d15bd25eccdf93d06d40646f835d74c57498cd46a1a");
   }
 
