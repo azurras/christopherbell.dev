@@ -50,8 +50,11 @@ export function createInfiniteScroller({
         if (!Array.isArray(items)) {
           throw new TypeError('Feed page response must contain an items array.');
         }
-        const nextCursor = Array.isArray(page) ? cursor : page.nextCursor || null;
-        if (!Array.isArray(page) && nextCursor) {
+        const nextCursor = Array.isArray(page) ? cursor : page.nextCursor ?? null;
+        if (!Array.isArray(page) && nextCursor !== null) {
+          if (typeof nextCursor !== 'string' || nextCursor.length === 0) {
+            throw new TypeError('Feed page cursor must be a non-empty string or null.');
+          }
           if (nextCursor === requestCursor || seenCursors.has(nextCursor)) {
             throw new Error('Feed page cursor did not advance.');
           }

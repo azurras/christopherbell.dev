@@ -53,7 +53,8 @@ Owns browser-side behavior for server-rendered pages.
 - `home-feed.js` wires the signed-in Void composer preview mount. The preview is
   rendered client-side from draft text and does not store preview-only data.
   Infinite-feed load failures appear in the page alert, clear an empty feed's
-  loading skeleton, and remain retryable.
+  loading skeleton, and remain retryable. The shared infinite-scroll helper
+  rejects malformed non-null cursors before changing pagination state.
 - `user-feed.js` reports infinite-feed request failures in its accessible alert;
   later scroll or reload attempts can retry the failed page.
 - API calls go through `lib/api.js` so auth headers, response parsing, and

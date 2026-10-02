@@ -52,6 +52,52 @@ test('infinite scroller reports malformed page data and permits a retry', async 
   assert.equal(attempts, 2);
 });
 
+test('infinite scroller reports an empty cursor instead of treating the feed as complete', async () => {
+  const errors = [];
+  const rendered = [];
+  let attempts = 0;
+  const scroller = createInfiniteScroller({
+    async fetchPage() {
+      attempts += 1;
+      if (attempts === 1) return { items: [], nextCursor: '' };
+      return { items: [{ createdOn: 'recovered' }], nextCursor: null };
+    },
+    onPage: items => rendered.push(...items),
+    onError: error => errors.push(error.message),
+  });
+
+  await scroller.loadInitial();
+  assert.deepEqual(errors, ['Feed page cursor must be a non-empty string or null.']);
+  assert.equal(attempts, 1);
+
+  await scroller.loadInitial();
+  assert.deepEqual(rendered.map(item => item.createdOn), ['recovered']);
+  assert.equal(attempts, 2);
+});
+
+test('infinite scroller reports a non-string cursor before requesting another page', async () => {
+  const errors = [];
+  const rendered = [];
+  let attempts = 0;
+  const scroller = createInfiniteScroller({
+    async fetchPage() {
+      attempts += 1;
+      if (attempts === 1) return { items: [], nextCursor: { value: 'malformed' } };
+      return { items: [{ createdOn: 'recovered' }], nextCursor: null };
+    },
+    onPage: items => rendered.push(...items),
+    onError: error => errors.push(error.message),
+  });
+
+  await scroller.loadInitial();
+  assert.deepEqual(errors, ['Feed page cursor must be a non-empty string or null.']);
+  assert.equal(attempts, 1);
+
+  await scroller.loadInitial();
+  assert.deepEqual(rendered.map(item => item.createdOn), ['recovered']);
+  assert.equal(attempts, 2);
+});
+
 test('infinite scroller follows advancing cursors across empty pages', async () => {
   const errors = [];
   const cursors = [];
@@ -190,6 +236,61 @@ test('infinite scroller reports a scroll failure and retries the same cursor', a
     assert.deepEqual(pages.map(page => page.createdOn), ['first', 'second']);
     assert.equal(attempts, 3);
     assert.equal(successfulPages, 2);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+});
+
+test('infinite scroller retries a malformed scroll cursor from the previous valid cursor', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  let scrollHandler = null;
+  globalThis.window = {
+    innerHeight: 100,
+    scrollY: 0,
+    addEventListener(name, handler) {
+      if (name === 'scroll') scrollHandler = handler;
+    },
+    removeEventListener() {},
+  };
+  globalThis.document = { body: { offsetHeight: 50 } };
+
+  try {
+    const errors = [];
+    const pages = [];
+    const requests = [];
+    const scroller = createInfiniteScroller({
+      limit: 1,
+      async fetchPage(args) {
+        requests.push(args);
+        if (requests.length === 1) {
+          return { items: [{ createdOn: 'first' }], nextCursor: 'next' };
+        }
+        if (requests.length === 2) {
+          return { items: [], nextCursor: { value: 'malformed' } };
+        }
+        return { items: [{ createdOn: 'second' }], nextCursor: null };
+      },
+      onPage: items => pages.push(...items),
+      onError: error => errors.push(error.message),
+    });
+    scroller.attach();
+
+    await scroller.loadInitial();
+    await scrollHandler();
+
+    assert.deepEqual(errors, ['Feed page cursor must be a non-empty string or null.']);
+    assert.deepEqual(pages.map(page => page.createdOn), ['first']);
+    assert.deepEqual(requests.map(request => request.cursor), [null, 'next']);
+
+    await scrollHandler();
+
+    assert.deepEqual(requests.map(request => request.cursor), [null, 'next', 'next']);
+    assert.deepEqual(requests.map(request => request.before), [null, 'first', 'first']);
+    assert.deepEqual(pages.map(page => page.createdOn), ['first', 'second']);
   } finally {
     if (previousWindow === undefined) delete globalThis.window;
     else globalThis.window = previousWindow;
