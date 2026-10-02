@@ -250,9 +250,9 @@ function renderToolbar(path, canWrite = false) {
   copy.type = 'button';
   copy.className = 'btn btn-sm btn-outline-light';
   copy.textContent = 'Copy link';
-  copy.addEventListener('click', async () => {
-    await navigator.clipboard.writeText(new URL(internalSharedFolderUrl(path), window.location.origin).href);
-    status('Internal link copied');
+  bindSharedFolderToolbarCopyControl({
+    button: copy,
+    href: new URL(internalSharedFolderUrl(path), window.location.origin).href,
   });
   host.append(copy);
 }
@@ -698,6 +698,26 @@ export function bindSharedFolderRadioControl({
     } finally {
       button.disabled = false;
     }
+  });
+  return true;
+}
+
+/** Bind toolbar link copying and report Clipboard API failures in the page status region. */
+export function bindSharedFolderToolbarCopyControl({
+  button,
+  href,
+  clipboard = globalThis.navigator?.clipboard,
+  statusFn = status,
+}) {
+  if (!button || typeof href !== 'string' || typeof statusFn !== 'function') return false;
+  button.addEventListener('click', async () => {
+    try {
+      await clipboard.writeText(href);
+    } catch (_) {
+      statusFn(`Unable to copy the link. Copy it manually: ${href}`);
+      return;
+    }
+    statusFn('Internal link copied');
   });
   return true;
 }

@@ -84,6 +84,69 @@ test('shared-folder radio control delegates playback and reports an empty statio
   ]);
 });
 
+test('shared-folder toolbar reports a rejected clipboard write without claiming success', async () => {
+  const button = fakeButton();
+  const statuses = [];
+  let copiedText = null;
+
+  const bound = sharedFolderPage.bindSharedFolderToolbarCopyControl({
+    button,
+    href: 'https://christopherbell.dev/shared?path=reports',
+    clipboard: {
+      async writeText(text) {
+        copiedText = text;
+        throw new Error('Permission denied');
+      },
+    },
+    statusFn: message => statuses.push(message),
+  });
+
+  assert.equal(bound, true);
+  await button.click();
+  assert.equal(copiedText, 'https://christopherbell.dev/shared?path=reports');
+  assert.deepEqual(statuses, [
+    'Unable to copy the link. Copy it manually: https://christopherbell.dev/shared?path=reports',
+  ]);
+});
+
+test('shared-folder toolbar reports when the clipboard API is unavailable', async () => {
+  const button = fakeButton();
+  const statuses = [];
+
+  const bound = sharedFolderPage.bindSharedFolderToolbarCopyControl({
+    button,
+    href: 'https://christopherbell.dev/shared?path=reports',
+    clipboard: null,
+    statusFn: message => statuses.push(message),
+  });
+
+  assert.equal(bound, true);
+  await button.click();
+  assert.deepEqual(statuses, [
+    'Unable to copy the link. Copy it manually: https://christopherbell.dev/shared?path=reports',
+  ]);
+});
+
+test('shared-folder toolbar announces a link only after clipboard succeeds', async () => {
+  const button = fakeButton();
+  const statuses = [];
+  let copiedText = null;
+
+  const bound = sharedFolderPage.bindSharedFolderToolbarCopyControl({
+    button,
+    href: 'https://christopherbell.dev/shared?path=reports',
+    clipboard: {
+      async writeText(text) { copiedText = text; },
+    },
+    statusFn: message => statuses.push(message),
+  });
+
+  assert.equal(bound, true);
+  await button.click();
+  assert.equal(copiedText, 'https://christopherbell.dev/shared?path=reports');
+  assert.deepEqual(statuses, ['Internal link copied']);
+});
+
 test('shared-folder search encodes queries and presents validated recursive results', () => {
   assert.equal(typeof API.sharedFolder.search, 'function');
   assert.equal(API.sharedFolder.search('plans & notes', 'opaque', 10),
