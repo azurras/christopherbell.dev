@@ -11,6 +11,13 @@ test('main stylesheet includes visible focus states for Void controls', () => {
   assert.match(css, /\.post-rich-image-trigger:hover,\r?\n\.post-rich-image-trigger:focus-visible/);
 });
 
+test('Cane’s index cards stack into a shrinkable column on mobile', () => {
+  const css = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
+  const mobileRules = css.match(/@media \(max-width: 720px\)\s*{([\s\S]*?)\n}/)?.[1] ?? '';
+
+  assert.match(mobileRules, /\.canes-box-index-grid[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+});
+
 test('post template exposes thread controls as a labelled group', () => {
   const html = fs.readFileSync('website/src/main/resources/templates/post.html', 'utf8');
 

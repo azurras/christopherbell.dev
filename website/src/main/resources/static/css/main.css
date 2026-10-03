@@ -1454,6 +1454,7 @@ body {
 }
 
 @media (max-width: 720px) {
+    .canes-box-index-grid,
     .canes-box-summary,
     .canes-box-metro-trend-summary {
         grid-template-columns: minmax(0, 1fr);
