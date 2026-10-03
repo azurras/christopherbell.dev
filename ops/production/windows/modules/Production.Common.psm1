@@ -1,5 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:ProductionHeartbeat = $null
 
 function Test-ProductionAbsolutePath {
     [CmdletBinding()]
@@ -178,7 +179,13 @@ function Invoke-CheckedProcess {
     $process = [Diagnostics.Process]::Start($start)
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
-    $process.WaitForExit()
+    if ($script:ProductionHeartbeat) {
+        while (-not $process.WaitForExit(1000)) {
+            Invoke-ProductionHeartbeatIfDue
+        }
+    } else {
+        $process.WaitForExit()
+    }
     $stdout = $stdoutTask.GetAwaiter().GetResult()
     $stderr = $stderrTask.GetAwaiter().GetResult()
     if ($process.ExitCode -ne 0) {
@@ -194,6 +201,35 @@ function Invoke-CheckedProcess {
         throw $failure
     }
     return $stdout
+}
+
+function Set-ProductionHeartbeat {
+    [CmdletBinding()]
+    param(
+        [scriptblock]$HeartbeatCallback,
+        [ValidateRange(1,3600)][int]$HeartbeatIntervalSeconds = 60
+    )
+    if (-not $HeartbeatCallback) {
+        $script:ProductionHeartbeat = $null
+        return
+    }
+    $script:ProductionHeartbeat = [pscustomobject]@{
+        Callback = $HeartbeatCallback
+        IntervalSeconds = $HeartbeatIntervalSeconds
+        Stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    }
+}
+
+function Invoke-ProductionHeartbeatIfDue {
+    [CmdletBinding()]
+    param()
+    $heartbeat = $script:ProductionHeartbeat
+    if (-not $heartbeat -or
+        $heartbeat.Stopwatch.Elapsed.TotalSeconds -lt $heartbeat.IntervalSeconds) {
+        return
+    }
+    $heartbeat.Stopwatch.Restart()
+    try { & $heartbeat.Callback | Out-Null } catch { }
 }
 
 function Get-NativeMongoDumpArguments {
@@ -454,6 +490,7 @@ function Wait-HttpStatus {
     )
     $deadline = [DateTime]::UtcNow + $Timeout
     do {
+        Invoke-ProductionHeartbeatIfDue
         try {
             $response = Invoke-ProductionWebRequest -Uri $Uri -TimeoutSec 5
             if ([int]$response.StatusCode -eq $ExpectedStatus) { return $response }
@@ -580,4 +617,4 @@ mongo-consolidation-preview is read-only. mongo-consolidate requires
 '@ | Write-Output
 }
 
-Export-ModuleMember -Function Test-ProductionAbsolutePath,Read-ProductionConfig,New-ProductionProcessStartInfo,Invoke-CheckedProcess,Get-NativeMongoDumpArguments,Get-NativeMongoRestoreDryRunArguments,New-ProductionBackup,Enter-DeploymentLock,New-ProtectedProductionAcl,Assert-ProductionPathNotReparse,Assert-ProductionTreeNotReparse,Assert-ProtectedProductionPath,Protect-ProductionPath,Protect-ProductionTree,Assert-ProtectedProductionTree,Invoke-ProductionWebRequest,Wait-HttpStatus,Read-ProductionEnvironment,Assert-ReleasePath,Get-JunctionTarget,Set-AtomicJunction,Get-TrustedGitArguments,Show-ProductionHelp
+Export-ModuleMember -Function Test-ProductionAbsolutePath,Read-ProductionConfig,New-ProductionProcessStartInfo,Invoke-CheckedProcess,Set-ProductionHeartbeat,Invoke-ProductionHeartbeatIfDue,Get-NativeMongoDumpArguments,Get-NativeMongoRestoreDryRunArguments,New-ProductionBackup,Enter-DeploymentLock,New-ProtectedProductionAcl,Assert-ProductionPathNotReparse,Assert-ProductionTreeNotReparse,Assert-ProtectedProductionPath,Protect-ProductionPath,Protect-ProductionTree,Assert-ProtectedProductionTree,Invoke-ProductionWebRequest,Wait-HttpStatus,Read-ProductionEnvironment,Assert-ReleasePath,Get-JunctionTarget,Set-AtomicJunction,Get-TrustedGitArguments,Show-ProductionHelp
