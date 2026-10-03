@@ -61,7 +61,7 @@ public class SecurityConfig {
       "default-src 'self'",
       "base-uri 'self'",
       "object-src 'none'",
-      "script-src 'self'",
+      "script-src 'self' https://static.cloudflareinsights.com",
       "style-src 'self' 'unsafe-inline' https://maxcdn.bootstrapcdn.com",
       "font-src 'self' data: https://maxcdn.bootstrapcdn.com",
       "img-src 'self' data: blob: https:",
