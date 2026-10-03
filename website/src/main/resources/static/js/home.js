@@ -7,6 +7,7 @@ const ACTIVE_POST_FEED_LIMIT = 20;
 const activePostMount = typeof document !== 'undefined' && typeof document.getElementById === 'function'
     ? document.getElementById('homeActivePost')
     : null;
+let activePostRefreshSequence = 0;
 
 export function activeScore(post) {
   return Math.max(0, Number(post?.likesCount || 0)) + Math.max(0, Number(post?.replyCount || 0));
@@ -78,11 +79,14 @@ export function signalRailMarkup(posts = []) {
 async function loadActivePost() {
   if (!activePostMount) return;
 
+  const refreshSequence = ++activePostRefreshSequence;
   try {
     const params = new URLSearchParams({ limit: String(ACTIVE_POST_FEED_LIMIT) });
     const posts = await fetchJson(`${API.posts.feed}?${params.toString()}`);
+    if (refreshSequence !== activePostRefreshSequence) return;
     activePostMount.innerHTML = signalRailMarkup(selectMostActivePosts(posts || []));
   } catch (_) {
+    if (refreshSequence !== activePostRefreshSequence) return;
     activePostMount.innerHTML = `
       <div class="home-void-empty">
         <span class="home-void-eyebrow">Signal interrupted</span>
