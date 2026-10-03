@@ -741,17 +741,7 @@ wfl:
 reports:
   to: report@christopherbell.dev
 blog-properties:
-  posts:
-    - author: "Test"
-      contentText: "Test Content"
-      date: 10-1-2022
-      description: "test description"
-      id: "021e2435-7259-4b48-99a0-e4ce43f3948f"
-      imagePath: N/A
-      tags:
-        - testTag
-        - testTag2
-      title: test blog
+  posts: []
 photo-properties:
   photos:
     - name: "The River Walk - San Antonio"
