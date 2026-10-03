@@ -44,6 +44,16 @@ class BlogPosts extends HTMLElement {
         const postsContainer = this.querySelector('.blogPosts');
         postsContainer.replaceChildren();
 
+        if (this.posts.length === 0) {
+            appendTextElement(
+                postsContainer,
+                'p',
+                'text-center blog-empty-state',
+                'No posts have been published yet.'
+            );
+            return;
+        }
+
         for (const post of this.posts) {
             const article = document.createElement('article');
             article.className = 'blogArticle';
