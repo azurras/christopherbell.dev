@@ -244,6 +244,57 @@ Describe 'production common operations' {
         catch { $_.Exception.Message | Should -Not -Match 'sensitive-child-output' }
     }
 
+    It 'runs the progress callback during a checked child-process wait' {
+        $progressState = [pscustomobject]@{ count = 0 }
+        $progressAction = { $progressState.count++ }.GetNewClosure()
+        Set-ProductionHeartbeat `
+            -HeartbeatCallback $progressAction `
+            -HeartbeatIntervalSeconds 1
+        try {
+            $output = Invoke-CheckedProcess `
+                -FilePath 'cmd.exe' `
+                -ArgumentList @('/d','/c','ping -n 4 127.0.0.1 >nul') `
+                -WorkingDirectory $TestDrive
+        } finally {
+            Set-ProductionHeartbeat -HeartbeatCallback $null
+        }
+
+        $output | Should -Be ''
+        $progressState.count | Should -BeGreaterThan 0
+    }
+
+    It 'keeps child success when a heartbeat callback fails' {
+        Set-ProductionHeartbeat `
+            -HeartbeatCallback { throw 'private heartbeat failure' } `
+            -HeartbeatIntervalSeconds 1
+        try {
+            $output = Invoke-CheckedProcess `
+                -FilePath 'cmd.exe' `
+                -ArgumentList @('/d','/c','ping -n 3 127.0.0.1 >nul') `
+                -WorkingDirectory $TestDrive
+        } finally {
+            Set-ProductionHeartbeat -HeartbeatCallback $null
+        }
+
+        $output | Should -Be ''
+    }
+
+    It 'preserves the child exit failure when a heartbeat callback fails' {
+        Set-ProductionHeartbeat `
+            -HeartbeatCallback { throw 'private heartbeat failure' } `
+            -HeartbeatIntervalSeconds 1
+        try {
+            {
+                Invoke-CheckedProcess `
+                    -FilePath 'cmd.exe' `
+                    -ArgumentList @('/d','/c','ping -n 3 127.0.0.1 >nul & exit /b 7') `
+                    -WorkingDirectory $TestDrive
+            } | Should -Throw '*exited with code 7*'
+        } finally {
+            Set-ProductionHeartbeat -HeartbeatCallback $null
+        }
+    }
+
     It 'runs checked processes from Windows PowerShell 5.1 with arguments and environment' {
         $target = Join-Path $TestDrive 'legacy-process-target.ps1'
         @'

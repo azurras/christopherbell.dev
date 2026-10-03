@@ -537,6 +537,39 @@ Describe 'automatic origin main deployment' {
         (Read-AutoDeployState $config).successfulSha | Should -Be 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
     }
 
+    It 'publishes another deploying update when the heartbeat callback runs' {
+        $remoteSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+        $activeSha = '0123456789012345678901234567890123456789'
+        $script:heartbeatOutcomes = [Collections.Generic.List[object]]::new()
+        $script:activeReleaseReadCount = 0
+        Mock Get-RemoteMainSha { $remoteSha } -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha {
+            if ($script:activeReleaseReadCount++ -eq 0) { $activeSha } else { $remoteSha }
+        } -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatus {
+            param([string]$Outcome,[datetime]$UpdatedAt)
+            [void]$script:heartbeatOutcomes.Add([pscustomobject]@{
+                Outcome = $Outcome
+                UpdatedAt = if ($UpdatedAt) { $UpdatedAt } else { (Get-Date).ToUniversalTime() }
+            })
+        } -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionDeploy {
+            param([scriptblock]$HeartbeatCallback,[int]$HeartbeatIntervalSeconds,[switch]$Automatic)
+            $HeartbeatCallback | Should -Not -BeNullOrEmpty
+            $HeartbeatIntervalSeconds | Should -Be 60
+            Start-Sleep -Milliseconds 10
+            if ($HeartbeatCallback) { & $HeartbeatCallback }
+        } -ModuleName Production.AutoDeploy
+
+        Invoke-AutoDeployOnce $config -StatusRoot (Join-Path $TestDrive 'status')
+
+        $deployingUpdates = @($script:heartbeatOutcomes | Where-Object {
+            $_.Outcome -eq 'DEPLOYING'
+        })
+        $deployingUpdates | Should -HaveCount 2
+        $deployingUpdates[1].UpdatedAt | Should -BeGreaterThan $deployingUpdates[0].UpdatedAt
+    }
+
     It 'backs off the same failed SHA' {
         $state = New-AutoDeployState
         $state.failedSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'

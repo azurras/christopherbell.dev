@@ -971,9 +971,16 @@ function Invoke-AutoDeployOnce {
     Write-AutoDeployState $Config $state
     Publish-AutoDeployStatusBestEffort -Outcome 'DEPLOYING' -State $state `
         -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
+    $statusPublisher = Get-Command Publish-AutoDeployStatusBestEffort -ErrorAction Stop
+    $heartbeatCallback = {
+        & $statusPublisher -Outcome 'DEPLOYING' -State $state `
+            -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
+    }.GetNewClosure()
     $deploymentFailure = $null
     try {
-        Invoke-ProductionDeploy -Automatic
+        Invoke-ProductionDeploy -Automatic `
+            -HeartbeatCallback $heartbeatCallback `
+            -HeartbeatIntervalSeconds 60
         $active = Get-ActiveReleaseSha $Config
         if (-not $active) { throw 'Deployment completed without valid active release metadata.' }
         $state.successfulSha = $active

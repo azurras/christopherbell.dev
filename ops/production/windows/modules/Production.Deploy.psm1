@@ -601,6 +601,7 @@ function Wait-ProductionCandidateOwnedListener {
             Assert-ProductionCandidateProcessOwnsListener -Port $Port -Identity $Identity
             return $Identity
         }
+        Invoke-ProductionHeartbeatIfDue
         Start-Sleep -Milliseconds 100
     } while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds)
     throw 'The candidate process did not bind its configured port in time.'
@@ -1480,7 +1481,9 @@ function Invoke-ProductionDeploy {
     param(
         [switch]$WhatIf,
         [switch]$MusicSchemaCutover,
-        [switch]$Automatic
+        [switch]$Automatic,
+        [scriptblock]$HeartbeatCallback,
+        [ValidateRange(1,3600)][int]$HeartbeatIntervalSeconds = 60
     )
     $config = Read-ProductionConfig (
         Join-Path $script:FixedProductionRoot 'config\deploy.json')
@@ -1493,6 +1496,9 @@ function Invoke-ProductionDeploy {
         }
     $lock = $guard.Lock
     try {
+        Set-ProductionHeartbeat `
+            -HeartbeatCallback $HeartbeatCallback `
+            -HeartbeatIntervalSeconds $HeartbeatIntervalSeconds
         $domainDirection = Read-ProductionDomainSchemaDirection -Config $config
         $direction = Read-ProductionMusicSchemaDirection -Config $config
         if ($domainDirection -and
@@ -1642,7 +1648,10 @@ function Invoke-ProductionDeploy {
             }
         }
         Remove-ExpiredReleases $config
-    } finally { $lock.Dispose() }
+    } finally {
+        Set-ProductionHeartbeat -HeartbeatCallback $null
+        $lock.Dispose()
+    }
 }
 
 function Confirm-ProductionMusicTargetActive {

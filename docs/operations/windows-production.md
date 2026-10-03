@@ -291,6 +291,9 @@ task is absent, while `READY`, `RUNNING`, `DISABLED`, or `QUEUED` describe its
 safe scheduler state. `UNKNOWN` means the task could not be queried or returned
 an unrecognized state; `pollerReason` gives only a stable sanitized reason.
 Scheduler query failures do not hide an otherwise valid status record.
+During a deployment, the SYSTEM poller refreshes `DEPLOYING` status while it
+waits for build processes and candidate readiness. A deployment that stops
+making progress still ages to `STALE` after three minutes.
 
 The projection also checks the `ChristopherBellDev` service and its local
 readiness endpoint. `status=SERVICE_UNHEALTHY` identifies a stopped service or
