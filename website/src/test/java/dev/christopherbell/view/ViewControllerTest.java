@@ -464,7 +464,8 @@ public class ViewControllerTest {
     mockMvc
         .perform(get("/photos/usage"))
         .andExpect(status().isOk())
-        .andExpect(content().string(containsString("Photography Usage")));
+        .andExpect(content().string(containsString("Photography Usage")))
+        .andExpect(content().string(containsString("<h1>Photography Usage</h1>")));
   }
 
   @Test
