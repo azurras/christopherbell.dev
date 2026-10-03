@@ -244,11 +244,23 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
           FindAndModifyOptions.options().returnNew(true),
           Document.class,
           kind.collection());
-      return Optional.ofNullable(envelope).map(codec::decode);
+      if (envelope == null) {
+        validateMatchingEnvelopeAfterLeaseMiss(exactStateQuery);
+        return Optional.empty();
+      }
+      return Optional.of(codec.decode(envelope));
     } catch (DuplicateKeyException contention) {
       return Optional.empty();
     } catch (RuntimeException failure) {
       throw translateMalformed(failure);
+    }
+  }
+
+  private void validateMatchingEnvelopeAfterLeaseMiss(Query exactStateQuery) {
+    var envelope = mongo.findOne(
+        fieldMapper.mapQuery(exactStateQuery), Document.class, kind.collection());
+    if (envelope != null) {
+      codec.decode(envelope);
     }
   }
 

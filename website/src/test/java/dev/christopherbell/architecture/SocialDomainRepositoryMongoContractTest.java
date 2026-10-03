@@ -407,9 +407,12 @@ class SocialDomainRepositoryMongoContractTest {
 
     assertThat(generated).isNotNull();
     assertThat(generated.getId()).matches("[0-9a-f]{24}");
-    generated.setMessage("updated");
-    assertThat(repository.save(generated).getMessage()).isEqualTo("updated");
-    assertThat(repository.findById(generated.getId())).get()
+    var generatedActivity = generated;
+    assertThatThrownBy(() -> repository.insert(generatedActivity))
+        .isInstanceOf(DuplicateKeyException.class);
+    generatedActivity.setMessage("updated");
+    assertThat(repository.save(generatedActivity).getMessage()).isEqualTo("updated");
+    assertThat(repository.findById(generatedActivity.getId())).get()
         .extracting(AdminActivity::getMessage).isEqualTo("updated");
     assertThat(repository.findTop25ByOrderByCreatedOnDesc())
         .hasSize(25)

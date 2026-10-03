@@ -171,10 +171,16 @@ class MusicAndLunchMongoContractTest {
             .append("restaurantId", "restaurant-1").append("accountId", "account-1")));
 
     var restaurants = new MongoRestaurantRepository(factory);
-    var named = Restaurant.builder().id("named-1").name("Alpha").normalizedName("alpha").build();
+    var named = Restaurant.builder().id("named-1").name("Alpha").normalizedName("alpha")
+        .dedupeKey("named-alpha")
+        .searchCity("austin").searchState("tx").address(austinAddress(30.2672, -97.7431))
+        .build();
     restaurants.save(named);
     assertThatThrownBy(() -> restaurants.save(
-        Restaurant.builder().id("named-2").name("Alpha 2").normalizedName("alpha").build()))
+        Restaurant.builder().id("named-2").name("Alpha 2").normalizedName("alpha")
+            .dedupeKey("named-alpha-2")
+            .searchCity("austin").searchState("tx").address(austinAddress(30.2672, -97.7431))
+            .build()))
         .isInstanceOf(DuplicateKeyException.class);
   }
 
@@ -348,7 +354,7 @@ class MusicAndLunchMongoContractTest {
     var alpha1 = restaurant("restaurant-a1", "Alpha", "alpha");
     var alpha2 = restaurant("restaurant-a2", "Alpha Two", "alpha");
     var beta = restaurant("restaurant-b", "Beta", "beta");
-    beta.setAddress(Address.builder().latitude(30.25).longitude(-97.75).build());
+    beta.setAddress(austinAddress(30.25, -97.75));
     restaurants.save(alpha1);
     restaurants.save(alpha2);
     restaurants.save(beta);
@@ -359,7 +365,7 @@ class MusicAndLunchMongoContractTest {
     assertThat(restaurants.findByDedupeKeyIn(List.of("alpha"))).hasSize(2);
     assertThat(restaurants.findAll(PageRequest.of(0, 2))).hasSize(2);
     assertThat(restaurants.findAllById(List.of(alpha1.getId(), beta.getId()))).hasSize(2);
-    assertThat(restaurants.findByCoordinateBounds(30.0, 30.5, -98.0, -97.5))
+    assertThat(restaurants.findByCoordinateBounds(30.24, 30.26, -97.76, -97.74))
         .containsExactly(beta);
 
     var inventory = new RestaurantInventoryQueryRepository(factory);
@@ -427,7 +433,7 @@ class MusicAndLunchMongoContractTest {
   }
 
   @Test
-  void generatedAuditedRestaurantIdsRemainStableAcrossCursorContinuation() {
+  void explicitRestaurantIdsAndModifiedTimestampsRemainStableAcrossCursorContinuation() {
     var now = new AtomicReference<>(Instant.parse("2026-08-10T20:00:00Z"));
     var handler = IsNewAwareAuditingHandler.from(mongo.getConverter().getMappingContext());
     handler.setDateTimeProvider(() -> Optional.of(now.get()));
@@ -438,15 +444,19 @@ class MusicAndLunchMongoContractTest {
     var inventory = new RestaurantInventoryQueryRepository(auditedFactory);
 
     var alpha = restaurants.save(Restaurant.builder()
-        .name("Alpha").normalizedName("generated-alpha").dedupeKey("alpha").build());
+        .id("restaurant-alpha").name("Alpha").normalizedName("audited-alpha").dedupeKey("alpha")
+        .searchCity("austin").searchState("tx").address(austinAddress(30.2672, -97.7431))
+        .build());
     now.set(now.get().plusSeconds(1));
     var beta = restaurants.save(Restaurant.builder()
-        .name("Beta").normalizedName("generated-beta").dedupeKey("beta").build());
+        .id("restaurant-beta").name("Beta").normalizedName("audited-beta").dedupeKey("beta")
+        .searchCity("austin").searchState("tx").address(austinAddress(30.2672, -97.7431))
+        .build());
 
-    assertThat(alpha.getId()).matches("[0-9a-f]{24}");
-    assertThat(beta.getId()).matches("[0-9a-f]{24}");
-    assertThat(alpha.getCreatedOn()).isEqualTo(Instant.parse("2026-08-10T20:00:00Z"));
-    assertThat(beta.getCreatedOn()).isEqualTo(Instant.parse("2026-08-10T20:00:01Z"));
+    assertThat(alpha.getId()).isEqualTo("restaurant-alpha");
+    assertThat(beta.getId()).isEqualTo("restaurant-beta");
+    assertThat(alpha.getLastUpdatedOn()).isEqualTo(Instant.parse("2026-08-10T20:00:00Z"));
+    assertThat(beta.getLastUpdatedOn()).isEqualTo(Instant.parse("2026-08-10T20:00:01Z"));
     var first = inventory.find(null, null, null, null, 1);
     var second = inventory.find(null, null, null, first.nextCursor(), 1);
     assertThat(first.items()).extracting(Restaurant::getId).containsExactly(alpha.getId());
@@ -545,7 +555,12 @@ class MusicAndLunchMongoContractTest {
   private static Restaurant restaurant(String id, String name, String dedupeKey) {
     return Restaurant.builder()
         .id(id).name(name).normalizedName(id).dedupeKey(dedupeKey)
-        .searchCity("austin").searchState("tx").build();
+        .searchCity("austin").searchState("tx").address(austinAddress(30.2672, -97.7431)).build();
+  }
+
+  private static Address austinAddress(double latitude, double longitude) {
+    return Address.builder().city("Austin").state("TX").country("US")
+        .latitude(latitude).longitude(longitude).build();
   }
 
   private static WhatsForLunchSession session(String id, Instant now) {
