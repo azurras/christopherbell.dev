@@ -1,5 +1,26 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+
+test('home feed alert is outside the authentication-hidden composer', async () => {
+  const template = await readFile(new URL('../../main/resources/templates/void/index.html', import.meta.url), 'utf8');
+  const divStack = [];
+  let alertAncestors = [];
+
+  for (const match of template.matchAll(/<div\b([^>]*)>|<\/div>/gi)) {
+    if (match[0].startsWith('</')) {
+      divStack.pop();
+      continue;
+    }
+
+    const id = match[1].match(/\bid=["']([^"']+)["']/i)?.[1];
+    if (id === 'homeAlert') alertAncestors = [...divStack];
+    divStack.push(id);
+  }
+
+  assert.ok(alertAncestors.length, 'the home alert should be inside a page container');
+  assert.equal(alertAncestors.includes('composer'), false);
+});
 
 test('home feed failure removes skeletons and keeps the accessible alert', async () => {
   const previousDocument = globalThis.document;
