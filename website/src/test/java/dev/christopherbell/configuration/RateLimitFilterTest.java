@@ -223,11 +223,14 @@ public class RateLimitFilterTest {
   @Test
   public void sharedFolderUploadRequestsConsumeTheFirstMatchingDedicatedBucket()
       throws ServletException, IOException {
+    var properties = new RateLimitProperties();
+    properties.getRules().stream().filter(rule -> "shared-upload".equals(rule.getName()))
+        .findFirst().orElseThrow().setCapacity(1);
     RateLimitFilter filter = new RateLimitFilter(
-        new ClientIpResolver(new ClientIpProperties()), new RateLimitProperties());
+        new ClientIpResolver(new ClientIpProperties()), properties);
     FilterChain chain = mock(FilterChain.class);
     MockHttpServletResponse response = null;
-    for (int count = 0; count < 241; count++) {
+    for (int count = 0; count < 2; count++) {
       response = new MockHttpServletResponse();
       filter.doFilter(request(
           "PUT", "/api/shared-folder/2026-07-17/uploads/session/chunks/0"), response, chain);
