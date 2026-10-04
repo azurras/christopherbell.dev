@@ -4,8 +4,8 @@ Owns application-wide Spring and web infrastructure.
 
 ## What Lives Here
 
-- Exact public GET routes for the planned Software Handoff Kit page and its fixed
-  free sample attachment; the canonical page is included in the public sitemap.
+- Exact former offer/preview GET routes remain public only to return empty410 Gone.
+  Removed product URLs are excluded from the public sitemap.
 
 - `mongo` owns MongoDB persistence configuration, shared collection access, fixed-name leases,
   scheduled-collector coordination, and versioned MongoDB migrations.

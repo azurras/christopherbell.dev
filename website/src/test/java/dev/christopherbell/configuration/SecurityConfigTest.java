@@ -34,7 +34,7 @@ class SecurityConfigTest {
   }
 
   @Test
-  void handoffKitAllowsPublicReadsWithoutOpeningMutationMethods() throws Exception {
+  void retiredOfferKeepsPublicGetAndMutationBoundaries() throws Exception {
     var matchers = publicMatchers();
     for (var path : List.of("/software-handoff-kit", "/software-handoff-kit/preview")) {
       assertTrue(matchers.stream().anyMatch(matcher -> matcher.matches(request("GET", path))));

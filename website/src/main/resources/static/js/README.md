@@ -1,8 +1,5 @@
 # JavaScript
 
-The public Software Handoff Kit page is discoverable from the sorted Tools menu;
-its download is a regular server link and requires no page-specific JavaScript.
-
 Owns browser-side behavior for server-rendered pages.
 
 ## What Lives Here

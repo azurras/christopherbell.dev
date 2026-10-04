@@ -57,7 +57,6 @@ export function toolsMenuItems({
         ...(isAdmin || hasMusicRead ? [{ href: '/music', label: 'Music' }] : []),
         { href: '/canes-box-tracker', label: 'Raising Canes Box Index' },
         ...(hasSharedFolderRead ? [{ href: '/shared', label: 'Shared Folder' }] : []),
-        { href: '/software-handoff-kit', label: 'Software Handoff Kit' },
         { href: '/site-monitor', label: 'Website Monitor' },
         { href: '/vin-decoder', label: 'VIN Decoder' },
         { href: '/wfl', label: "What's For Lunch" },

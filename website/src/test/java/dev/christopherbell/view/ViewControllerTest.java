@@ -3,6 +3,7 @@ package dev.christopherbell.view;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.web.servlet.MockMvc;
@@ -57,43 +59,23 @@ public class ViewControllerTest {
         .andExpect(content().string(containsString("id=\"monitorWorkspace\"")));
   }
 
-  @Test
-  void handoffKitPageExplainsThePlannedProductWithoutOfferingCheckout() throws Exception {
-    mockMvc.perform(get("/software-handoff-kit"))
-        .andExpect(status().isOk())
-        .andExpect(content().string(containsString("<h1>Software Project Handoff Kit</h1>")))
-        .andExpect(content().string(containsString("$15 USD")))
-        .andExpect(content().string(containsString("Not available for purchase yet")))
-        .andExpect(content().string(containsString("href=\"/software-handoff-kit/preview\"")))
-        .andExpect(content().string(containsString("prepared with AI assistance")))
-        .andExpect(content().string(not(containsString("noindex"))))
-        .andExpect(content().string(not(containsString("<form"))));
+  @ParameterizedTest
+  @ValueSource(strings = {"/software-handoff-kit", "/software-handoff-kit/preview"})
+  void removedOfferReturnsGoneWithoutContentOrDownload(String path) throws Exception {
+    mockMvc.perform(get(path))
+        .andExpect(status().isGone())
+        .andExpect(content().string(""))
+        .andExpect(header().doesNotExist("Content-Disposition"))
+        .andExpect(header().string("Cache-Control", "no-store"))
+        .andExpect(header().string("X-Robots-Tag", "noindex"));
   }
 
   @Test
-  void handoffKitGuidanceCanBeEvaluatedWithoutDownloadingOrPurchasing() throws Exception {
-    mockMvc.perform(get("/software-handoff-kit"))
-        .andExpect(status().isOk())
-        .andExpect(content().string(containsString("Software project handoff checklist")))
-        .andExpect(content().string(containsString("Fictional delivery record")))
-        .andExpect(content().string(containsString("Release 1.2.0")))
-        .andExpect(content().string(containsString("Still open: production deployment")))
-        .andExpect(content().string(containsString("When the free worksheet is enough")))
-        .andExpect(content().string(containsString("Not available for purchase yet")));
-  }
-
-  @Test
-  void handoffKitPreviewDownloadsTheUsableSampleWithPermissionAndNoFullKit() throws Exception {
-    mockMvc.perform(get("/software-handoff-kit/preview"))
-        .andExpect(status().isOk())
-        .andExpect(content().contentType("text/markdown;charset=UTF-8"))
-        .andExpect(header().string("Content-Disposition",
-            "attachment; filename=\"software-project-handoff-preview.md\""))
-        .andExpect(content().string(containsString("## Delivery inventory")))
-        .andExpect(content().string(containsString("Evidence of receipt:")))
-        .andExpect(content().string(containsString("Never place credentials in the worksheet")))
-        .andExpect(content().string(containsString("free to use in your own completed project handoffs")))
-        .andExpect(content().string(not(containsString("## 08 / Worked example"))));
+  void removedOfferResourcesAreNotPackaged() {
+    assertFalse(new ClassPathResource(
+        "templates/resources/software-handoff-kit.html").exists());
+    assertFalse(new ClassPathResource(
+        "products/software-handoff-kit-preview.md").exists());
   }
 
   @ParameterizedTest

@@ -77,6 +77,7 @@ public class SecurityConfig {
   private static final String[] PUBLIC_URLS = {
       "/",
       "GET:/robots.txt",
+      // Former offer URLs stay readable only to return empty410 Gone.
       "GET:/software-handoff-kit",
       "GET:/site-monitor",
       "GET:/software-handoff-kit/preview",
