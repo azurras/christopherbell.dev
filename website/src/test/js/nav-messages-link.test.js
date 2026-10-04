@@ -87,7 +87,7 @@ test('Tools keeps public entries and Shared Folder effective-read gating', () =>
   assert.equal(toolsMenuItems().some((item) => item.href === '/shared'), false);
   assert.deepEqual(
     toolsMenuItems({ hasSharedFolderRead: true }).map((item) => item.label),
-    ['Raising Canes Box Index', 'Shared Folder', 'Software Handoff Kit', 'VIN Decoder', "What's For Lunch", 'ZIP Coordinates']
+    ['Raising Canes Box Index', 'Shared Folder', 'Software Handoff Kit', 'VIN Decoder', 'Website Monitor', "What's For Lunch", 'ZIP Coordinates']
   );
 });
 
@@ -95,12 +95,12 @@ test('Tools gates moved destinations and sorts every visible item alphabetically
   assert.equal(toolsMenuItems().some((item) => item.href === '/music'), false);
   assert.deepEqual(
     toolsMenuItems({ hasMusicRead: true }).map((item) => item.label),
-    ['Music', 'Raising Canes Box Index', 'Software Handoff Kit', 'VIN Decoder', "What's For Lunch", 'ZIP Coordinates']
+    ['Music', 'Raising Canes Box Index', 'Software Handoff Kit', 'VIN Decoder', 'Website Monitor', "What's For Lunch", 'ZIP Coordinates']
   );
   assert.deepEqual(
     toolsMenuItems({ isAdmin: true, hasSharedFolderRead: true }).map((item) => item.label),
     ['Back Office', 'Command Center', 'Music', 'Raising Canes Box Index', 'Shared Folder',
-      'Software Handoff Kit', 'VIN Decoder', "What's For Lunch", 'ZIP Coordinates']
+      'Software Handoff Kit', 'VIN Decoder', 'Website Monitor', "What's For Lunch", 'ZIP Coordinates']
   );
 });
 

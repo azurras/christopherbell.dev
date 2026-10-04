@@ -12,6 +12,9 @@ Owns application-wide Spring and web infrastructure.
 
 - Security configuration and route access rules under `security`.
 - Public static browser assets such as `/favicon.ico`.
+- Public static assets, including fingerprinted URLs and the pinned Bootstrap
+  WebJar, support both GET and HEAD. These reads skip account authentication;
+  private API namespaces and asset mutation methods remain protected.
 - `PublicMetadataController` serves `/robots.txt` and `/sitemap.xml` with
   explicit revalidation instead of the long-lived immutable browser-asset cache.
 - Standard Actuator liveness and readiness groups are public and detail-free;
@@ -108,3 +111,11 @@ local/default profiles do not enable native sensor loading.
 ## Update This Doc
 
 Update this README when public/private routes, security rules, JWT behavior, rate limits, or request limits change.
+
+## Additive Website Monitor runtime approvals
+
+`DomainMongoOperationsFactory` explicitly approves `site_monitor_workspace` and
+`site_monitor_schedule` in `application_runtime` outside the historical cutover
+manifest. The immutable manifest digest and indexes are unchanged. Workspace
+access uses ten fixed identities with indexed point reads; scheduling uses one
+fixed identity. Account deletion removes matching private workspace identities.

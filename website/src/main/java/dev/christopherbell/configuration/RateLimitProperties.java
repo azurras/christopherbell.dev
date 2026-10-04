@@ -49,6 +49,8 @@ public class RateLimitProperties {
 
   private static List<Rule> defaultRules() {
     var rules = new ArrayList<Rule>();
+    rules.add(new Rule("site-monitor-mutations", 10, Duration.ofMinutes(1),
+        List.of("POST", "DELETE"), List.of("/api/site-monitor/**")));
     rules.add(new Rule(
         "auth-mutations",
         20,

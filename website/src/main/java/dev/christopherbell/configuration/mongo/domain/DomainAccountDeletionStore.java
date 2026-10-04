@@ -12,6 +12,7 @@ public final class DomainAccountDeletionStore {
 
   private final KindScopedMongoOperations<?> posts;
   private final KindScopedMongoOperations<?> sessions;
+  private final KindScopedMongoOperations<?> monitorWorkspaces;
   private final KindScopedMongoOperations<?> messages;
   private final KindScopedMongoOperations<?> notifications;
   private final KindScopedMongoOperations<?> notificationPreferences;
@@ -34,6 +35,7 @@ public final class DomainAccountDeletionStore {
   public DomainAccountDeletionStore(DomainMongoOperationsFactory factory) {
     posts = factory.forExactKind("post");
     sessions = factory.forExactKind("browser_session");
+    monitorWorkspaces = factory.forExactKind("site_monitor_workspace");
     messages = factory.forExactKind("message");
     notifications = factory.forExactKind("notification");
     notificationPreferences = factory.forExactKind("notification_preference");
@@ -62,6 +64,11 @@ public final class DomainAccountDeletionStore {
   }
 
   public void removePrivateData(String accountId) {
+    for (int slot = 0; slot < 10; slot++) {
+      var query = exact("id", "pilot-" + slot);
+      query.addCriteria(Criteria.where("accountId").is(accountId));
+      monitorWorkspaces.remove(query);
+    }
     remove(sessions, accountId, "accountId");
     remove(messages, accountId, "participantIds", "senderAccountId", "recipientAccountId");
     remove(notifications, accountId, "accountId", "actorAccountId");

@@ -10,6 +10,13 @@ function discoveryPageUrl(path, cursor, size) {
  * Keep endpoints here to avoid repetition and make upgrades simple.
  */
 export const API = {
+  siteMonitor: {
+    workspace: '/api/site-monitor/v1',
+    sites: '/api/site-monitor/v1/sites',
+    action: (id, action) => `/api/site-monitor/v1/sites/${encodeURIComponent(id)}/${encodeURIComponent(action)}`,
+    site: (id) => `/api/site-monitor/v1/sites/${encodeURIComponent(id)}`,
+    report: (id, reportId) => `/api/site-monitor/v1/sites/${encodeURIComponent(id)}/reports/${encodeURIComponent(reportId)}`,
+  },
   admin: {
     activity: '/api/admin/activity/2026-05-09',
     activityPage: ({ page = 0, size = 25, action = '', targetType = '', actor = '',

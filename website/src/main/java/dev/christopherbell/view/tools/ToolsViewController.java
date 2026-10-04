@@ -9,6 +9,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 @Controller
 public class ToolsViewController {
 
+  /** Serves the public, data-free monitor pilot shell; customer APIs stay protected. */
+  @GetMapping("/site-monitor")
+  public String getSiteMonitorPage() {
+    return "site-monitor.html";
+  }
+
   /**
    * Serves the Cane's Box Tracker tool.
    *

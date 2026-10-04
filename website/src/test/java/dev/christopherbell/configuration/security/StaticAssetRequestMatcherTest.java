@@ -12,14 +12,15 @@ class StaticAssetRequestMatcherTest {
   private final StaticAssetRequestMatcher matcher = new StaticAssetRequestMatcher();
 
   @Test
-  @DisplayName("Only GET requests for the pinned Bootstrap WebJar are static assets")
-  void bootstrapAssetsArePinnedAndGetOnly() {
+  @DisplayName("Only GET and HEAD requests for the pinned Bootstrap WebJar are static assets")
+  void bootstrapAssetsArePinnedAndReadOnly() {
     var currentAssets = List.of(
         "/webjars/bootstrap/5.3.8/css/bootstrap.min.css",
         "/webjars/bootstrap/5.3.8/js/bootstrap.bundle.min.js");
 
     for (var path : currentAssets) {
       assertTrue(matcher.matches(request("GET", path)));
+      assertTrue(matcher.matches(request("HEAD", path)));
       assertFalse(matcher.matches(request("POST", path)));
     }
 

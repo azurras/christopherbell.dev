@@ -212,3 +212,11 @@ Owns browser-side behavior for server-rendered pages.
 
 Update this README when browser module ownership, shared entry behavior, or
 frontend directory structure changes.
+
+## Website Monitor
+
+`site-monitor.js` owns the private pilot workspace at `/site-monitor`, using
+`API.siteMonitor` and shared auth/CSRF fetch helpers. Remote labels and observations
+are escaped, mutation controls retain disabled states after failures, and reports
+use protected plain-text attachment routes. The public shell explains pilot caps,
+bounded coverage, dashboard-only results and deferred billing/email delivery.

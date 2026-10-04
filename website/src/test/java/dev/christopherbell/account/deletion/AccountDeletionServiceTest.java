@@ -25,12 +25,27 @@ class AccountDeletionServiceTest {
   @Mock private AccountDeletionJobRepository jobs;
   @Mock private AccountDeletionOperations operations;
   private AccountDeletionService service;
+  @Mock private dev.christopherbell.libs.lease.LeaseStore leases;
 
   @BeforeEach
   void setUp() {
-    service = new AccountDeletionService(jobs, operations);
+    var grant = new dev.christopherbell.libs.lease.LeaseGrant("site-monitor-pilot", "test", 1,
+        java.time.Instant.now().plusSeconds(180));
+    org.mockito.Mockito.lenient().when(leases.tryAcquire(any(), any(), any())).thenReturn(Optional.of(grant));
+    org.mockito.Mockito.lenient().when(leases.renew(any(), any())).thenReturn(Optional.of(grant));
+    service = new AccountDeletionService(jobs, operations, leases);
   }
 
+  @Test void monitorLeaseContentionDoesNotBeginDeletion() {
+    when(leases.tryAcquire(any(), any(), any())).thenReturn(Optional.empty());
+    assertThatThrownBy(() -> service.delete("account-123")).isInstanceOf(ServiceUnavailableException.class);
+    org.mockito.Mockito.verifyNoInteractions(jobs, operations);
+  }
+  @Test void failedDeletionStillBlocksMonitoring() {
+    when(jobs.findById(AccountDeletionService.pseudonymFor("account-123")))
+        .thenReturn(Optional.of(AccountDeletionJob.started(AccountDeletionService.pseudonymFor("account-123"))));
+    assertThat(service.hasStarted("account-123")).isTrue();
+  }
   @Test
   @DisplayName("Deletion executes every privacy step in order and stores only a pseudonym")
   void delete_executesOrderedStepsAndCompletesPseudonymousJob() throws Exception {

@@ -68,3 +68,10 @@ subfeature services own the larger account workflows.
 ## Update This Doc
 
 Update this README when account fields, login behavior, password reset behavior, profile/follow behavior, or account API contracts change.
+
+## Website Monitor account boundary
+
+`api.MonitorAccountAccess` publishes current active identity only. A started or failed
+deletion job blocks monitor reads, writes and fetches. Deletion shares the durable
+monitor lease while publishing its checkpoint and cleaning private workspace rows;
+contention returns a resumable service-unavailable response.
