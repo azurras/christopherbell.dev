@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="author" content="Christopher Bell" />
-    <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Software Project Handoff Kit', 'Six editable worksheets for handing off a small software project. Try the free delivery inventory sample.', 'https://www.christopherbell.dev/software-handoff-kit', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'christopherbell.dev')}"></th:block>
+    <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Software Project Handoff Kit', 'A software project handoff checklist, fictional delivery example, and free inventory worksheet. Explore the planned six-worksheet kit.', 'https://www.christopherbell.dev/software-handoff-kit', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'christopherbell.dev')}"></th:block>
     <title>CB | Software Project Handoff Kit</title>
     <link rel="stylesheet" href="/css/main.css" th:href="@{/css/main.css}" />
 </head>
@@ -21,6 +21,8 @@
                     This kit gives you six editable worksheets to organize those answers in one place.</p>
                 <a class="btn btn-dark btn-lg" href="/software-handoff-kit/preview">Download the free worksheet</a>
                 <p class="text-secondary mt-2">Delivery inventory sample &middot; Markdown file &middot; No account needed</p>
+                <p><a href="#checklistHeading">Read the handoff checklist</a> or
+                    <a href="#exampleHeading">see a fictional delivery record</a>.</p>
             </div>
             <aside class="col-lg-4" aria-labelledby="availabilityHeading">
                 <div class="card bg-light">
@@ -35,6 +37,69 @@
                 </div>
             </aside>
         </div>
+
+        <section class="mt-5" aria-labelledby="checklistHeading">
+            <h2 id="checklistHeading">Software project handoff checklist</h2>
+            <p>Use these six steps when an independent developer hands a small project to its next maintainer.
+                Start with the project's agreed scope and adapt the records to the work actually delivered.</p>
+            <ol>
+                <li class="mb-3"><strong>Name the delivered version.</strong> List the repository, release archive,
+                    documentation, and other agreed assets separately. Record a release or revision for each one,
+                    so the recipient can identify the exact work being handed over.</li>
+                <li class="mb-3"><strong>Name the receiving owners.</strong> Identify who will maintain each asset
+                    and who handles hosting, domain renewals, and billing. Keep unresolved responsibilities visible
+                    until the intended owners acknowledge them.</li>
+                <li class="mb-3"><strong>Verify recipient access.</strong> Use the service's approved sharing process,
+                    then record what the recipient could actually open or do with their own access. A sent invitation
+                    or a link that works for the author is not evidence of completed access transfer.</li>
+                <li class="mb-3"><strong>Record acceptance observations.</strong> Compare the agreed checks with
+                    actual results on the named environment and version. Label failed and untested checks explicitly,
+                    and record the receiving owner's response separately from the author's test results.</li>
+                <li class="mb-3"><strong>Explain everyday operation and recovery.</strong> Point to the project's
+                    startup, maintenance, backup, and recovery instructions. Name the person responsible for each
+                    operation. Keep credentials in the established secure system, outside the handoff record.</li>
+                <li><strong>Assign the remaining work.</strong> Give each open item an owner, next action, and review
+                    date. Send the handoff with those items visible, then record questions or acknowledgment rather
+                    than treating silence as acceptance.</li>
+            </ol>
+        </section>
+
+        <section class="mt-5" aria-labelledby="exampleHeading">
+            <h2 id="exampleHeading">Fictional delivery record</h2>
+            <p>This small example is fictional. It illustrates one inventory entry, not a customer result,
+                testimonial, or the full kit's worked example.</p>
+            <dl class="border rounded p-3">
+                <dt>Asset</dt>
+                <dd>A-01: Invoice Viewer release archive and README</dd>
+                <dt>Version</dt>
+                <dd>Release 1.2.0, matching the delivered source revision</dd>
+                <dt>Receiving owner</dt>
+                <dd>The client's designated application maintainer</dd>
+                <dt>Observed receipt</dt>
+                <dd>The maintainer opened the archive and README using their own access.
+                    The delivery thread records that observation.</dd>
+                <dt>Outstanding work</dt>
+                <dd>Still open: production deployment. The maintainer owns the next action:
+                    test the release in the agreed test environment, record the results, and review the
+                    deployment decision on the agreed review date.</dd>
+                <dt>Current status</dt>
+                <dd class="mb-0">Files received; production deployment and final acceptance remain open.</dd>
+            </dl>
+            <p>The record distinguishes receiving files from deploying or accepting them. Replace the example
+                with your own project's actual links, version, observations, owner, and review date.</p>
+        </section>
+
+        <section class="mt-5" aria-labelledby="fitHeading">
+            <h2 id="fitHeading">When the free worksheet is enough</h2>
+            <p>Start with the free inventory worksheet when you need to identify one or a few deliverables,
+                their versions, receiving owners, and evidence of receipt. You can also use the checklist above
+                with your existing project documents.</p>
+            <p>The planned full kit may be useful when you want separate, reusable records for service access,
+                acceptance checks, operating responsibilities, remaining work, and handoff messages, plus a
+                fictional example showing how those records fit together. You can edit its Markdown in a plain-text
+                editor and print the PDF companion.</p>
+            <p>The free worksheet is available now. The full kit is not available for purchase yet.</p>
+        </section>
 
         <section class="mt-5" aria-labelledby="contentsHeading">
             <h2 id="contentsHeading">What is in the full kit?</h2>

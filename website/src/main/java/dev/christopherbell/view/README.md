@@ -11,6 +11,8 @@ Owns server-side routing for HTML pages.
   exact GET `/software-handoff-kit/preview` attachment from a fixed classpath Markdown
   sample. Only the free worksheet is packaged; full paid files remain outside the site.
   The page displays a planned price and explicitly says purchases are unavailable.
+  Its original six-step handoff checklist, labeled fictional inventory record, and
+  suitability guidance can be read without downloading a file or signing in.
 - `content` also serves `/command-center` as a public, data-free HTML shell. The
   template contains no telemetry, logs, credentials, challenges, or action data;
   its browser module reveals and populates the console only after a fresh admin
