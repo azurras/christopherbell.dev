@@ -2,6 +2,11 @@ package dev.christopherbell.view.content;
 
 import dev.christopherbell.view.ViewIndexingPolicy;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -52,6 +57,22 @@ public class ContentViewController {
   @GetMapping(value = "/photos/usage")
   public String getPhotoUsagePage() {
     return "photo/usage.html";
+  }
+
+  /** Serves the planned handoff kit contents, availability, and free sample. */
+  @GetMapping("/software-handoff-kit")
+  public String getSoftwareHandoffKitPage() {
+    return "resources/software-handoff-kit.html";
+  }
+
+  /** Downloads only the fixed free worksheet; the full product is not a public resource. */
+  @GetMapping("/software-handoff-kit/preview")
+  public ResponseEntity<Resource> downloadSoftwareHandoffKitPreview() {
+    return ResponseEntity.ok()
+        .contentType(MediaType.parseMediaType("text/markdown;charset=UTF-8"))
+        .header(HttpHeaders.CONTENT_DISPOSITION,
+            "attachment; filename=\"software-project-handoff-preview.md\"")
+        .body(new ClassPathResource("products/software-handoff-kit-preview.md"));
   }
 
   /**

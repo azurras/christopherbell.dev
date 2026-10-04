@@ -33,6 +33,7 @@ public class PublicSitemapService {
       PUBLIC_ROOT + "/canes-box-tracker",
       PUBLIC_ROOT + "/photos",
       PUBLIC_ROOT + "/photos/usage",
+      PUBLIC_ROOT + "/software-handoff-kit",
       PUBLIC_ROOT + "/thebell",
       PUBLIC_ROOT + "/thebell/tony",
       PUBLIC_ROOT + "/vin-decoder",

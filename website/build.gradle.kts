@@ -10,6 +10,7 @@ import java.time.Duration
 import java.util.HexFormat
 import java.util.zip.ZipFile
 import org.gradle.api.GradleException
+import org.gradle.api.provider.Provider
 import org.gradle.language.base.plugins.LifecycleBasePlugin
 import org.gradle.language.jvm.tasks.ProcessResources
 
@@ -378,7 +379,14 @@ fun staticAssetFingerprint(entries: Iterable<StaticAssetFingerprintEntry>): Stri
     return HexFormat.of().formatHex(digest.digest()).take(20)
 }
 
-val staticAssetFingerprint = providers.provider {
+// Freeze the fingerprint on demand so every filtered YAML line uses one calculation.
+fun stableStaticAssetFingerprint(source: Provider<String>) =
+    objects.property(String::class.java).apply {
+        set(source)
+        finalizeValueOnRead()
+    }
+
+val staticAssetFingerprint = stableStaticAssetFingerprint(providers.provider {
     staticAssetFingerprint(staticAssetFiles.files
         .filter { it.isFile }
         .map { asset ->
@@ -394,7 +402,7 @@ val staticAssetFingerprint = providers.provider {
                 }
             }
         })
-}
+})
 
 val verifyStaticAssetFingerprintSerialization =
     tasks.register("verifyStaticAssetFingerprintSerialization") {
@@ -402,6 +410,17 @@ val verifyStaticAssetFingerprintSerialization =
         description = "Verifies static asset fingerprint records have unambiguous boundaries."
 
         doLast {
+            var calculations = 0
+            val stableValue = stableStaticAssetFingerprint(providers.provider {
+                calculations++
+                "fingerprint-$calculations"
+            })
+            check(calculations == 0) { "Fingerprint calculation must remain lazy." }
+            check(stableValue.get() == "fingerprint-1")
+            check(stableValue.get() == "fingerprint-1" && calculations == 1) {
+                "Repeated reads must not recalculate the asset fingerprint."
+            }
+
             fun entry(path: String, content: ByteArray) =
                 StaticAssetFingerprintEntry(path) { digest -> digest.update(content) }
 

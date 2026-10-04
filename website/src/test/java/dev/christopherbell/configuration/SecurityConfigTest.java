@@ -17,6 +17,17 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
 class SecurityConfigTest {
 
   @Test
+  void handoffKitAllowsPublicReadsWithoutOpeningMutationMethods() throws Exception {
+    var matchers = publicMatchers();
+    for (var path : List.of("/software-handoff-kit", "/software-handoff-kit/preview")) {
+      assertTrue(matchers.stream().anyMatch(matcher -> matcher.matches(request("GET", path))));
+      assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("POST", path))));
+      assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("PUT", path))));
+      assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("DELETE", path))));
+    }
+  }
+
+  @Test
   @DisplayName("Favicon is a public browser asset")
   void publicMatchers_whenFaviconRequested_matchesWithoutAuthentication() throws Exception {
     var request = new MockHttpServletRequest("GET", "/favicon.ico");

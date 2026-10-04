@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="author" content="Christopher Bell" />
+    <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Software Project Handoff Kit', 'Six editable worksheets for handing off a small software project. Try the free delivery inventory sample.', 'https://www.christopherbell.dev/software-handoff-kit', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'christopherbell.dev')}"></th:block>
+    <title>CB | Software Project Handoff Kit</title>
+    <link rel="stylesheet" href="/css/main.css" th:href="@{/css/main.css}" />
+</head>
+<body>
+    <div id="nav"></div>
+    <main class="container py-5">
+        <div class="row g-4 align-items-start">
+            <div class="col-lg-8">
+                <p class="text-uppercase fw-semibold text-secondary">Resources for independent developers</p>
+                <h1>Software Project Handoff Kit</h1>
+                <p class="lead">Make the handoff as clear as the work you delivered.</p>
+                <p>Finishing a small software project leaves practical questions: which files are included,
+                    who owns each account, how does the recipient run it, and what is still open?
+                    This kit gives you six editable worksheets to organize those answers in one place.</p>
+                <a class="btn btn-dark btn-lg" href="/software-handoff-kit/preview">Download the free worksheet</a>
+                <p class="text-secondary mt-2">Delivery inventory sample &middot; Markdown file &middot; No account needed</p>
+            </div>
+            <aside class="col-lg-4" aria-labelledby="availabilityHeading">
+                <div class="card bg-light">
+                    <div class="card-body">
+                        <h2 class="h4" id="availabilityHeading">Full kit</h2>
+                        <p class="fs-3 fw-semibold mb-1">$15 USD</p>
+                        <p>Planned one-time price</p>
+                        <p class="fw-semibold">Not available for purchase yet</p>
+                        <p class="mb-0">You can try the free worksheet now. The full kit is a planned
+                            download, with no subscription or ongoing support included.</p>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <section class="mt-5" aria-labelledby="contentsHeading">
+            <h2 id="contentsHeading">What is in the full kit?</h2>
+            <p>Six reusable worksheets, a complete fictional worked example, and a printable companion.</p>
+            <div class="row g-3">
+                <div class="col-md-6 col-lg-4"><div class="border rounded p-3 h-100">
+                    <h3 class="h5">Delivery inventory</h3>
+                    <p class="mb-0">List the assets, versions, recipient-accessible links, owners, and evidence of receipt.</p>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="border rounded p-3 h-100">
+                    <h3 class="h5">Access transfer</h3>
+                    <p class="mb-0">Record who should control each service and which transfers still need verification.</p>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="border rounded p-3 h-100">
+                    <h3 class="h5">Acceptance and evidence</h3>
+                    <p class="mb-0">Keep agreed checks, observed results, and the receiving owner's decision together.</p>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="border rounded p-3 h-100">
+                    <h3 class="h5">Operating notes</h3>
+                    <p class="mb-0">Document how to find, run, maintain, and recover the project.</p>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="border rounded p-3 h-100">
+                    <h3 class="h5">Open-work register</h3>
+                    <p class="mb-0">Give unfinished items an owner, next action, and review date.</p>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="border rounded p-3 h-100">
+                    <h3 class="h5">Handoff messages</h3>
+                    <p class="mb-0">Adapt delivery, incomplete-access, and requested-change messages to your project.</p>
+                </div></div>
+            </div>
+            <p class="mt-3">The files are editable Markdown and a nine-page printable PDF. The PDF is not an
+                interactive form. Use a plain-text or Markdown editor; no particular app or online account is required.</p>
+        </section>
+
+        <section class="mt-5" aria-labelledby="sampleHeading">
+            <h2 id="sampleHeading">Try it on one deliverable</h2>
+            <ol>
+                <li>Download the free inventory worksheet and open it in a text editor.</li>
+                <li>Describe one deliverable, its version, and who will maintain it.</li>
+                <li>Confirm the intended recipient can open the link, then record the evidence of receipt.</li>
+            </ol>
+            <p>Keep passwords, tokens, and other credentials out of the worksheet. Use your established secure
+                access-transfer process separately. Opening a link yourself does not verify the recipient's access.</p>
+            <a href="/software-handoff-kit/preview">Get the free delivery inventory worksheet</a>
+        </section>
+
+        <section class="mt-5" aria-labelledby="termsHeading">
+            <h2 id="termsHeading">Usage and scope</h2>
+            <p>The free preview is yours to adapt for your own work and include as a completed worksheet in
+                a client handoff. The planned full kit permits the same use. Do not resell or redistribute
+                the blank full toolkit as a separate template product.</p>
+            <p>This is an organizational aid. It does not transfer account access or legal ownership, certify
+                security, replace a client agreement, or guarantee project acceptance. No custom implementation,
+                consulting, software, or ongoing support is included.</p>
+            <p>The original material was prepared with AI assistance and reviewed for consistency.
+                The worked example is fictional.</p>
+        </section>
+    </main>
+    <footer id="footer"></footer>
+    <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
+</body>
+</html>
