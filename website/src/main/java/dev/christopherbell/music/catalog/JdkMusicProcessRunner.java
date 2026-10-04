@@ -6,9 +6,12 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** JDK process boundary that drains both streams and caps retained output. */
 public final class JdkMusicProcessRunner implements MusicProcessRunner {
@@ -64,10 +67,13 @@ public final class JdkMusicProcessRunner implements MusicProcessRunner {
     }
   }
 
-  private BoundedOutput result(Future<BoundedOutput> output) {
+  private BoundedOutput result(Future<BoundedOutput> output) throws InterruptedException {
     try {
       return output.get(TERMINATION_GRACE.toMillis(), TimeUnit.MILLISECONDS);
-    } catch (Exception failure) {
+    } catch (InterruptedException interruption) {
+      output.cancel(true);
+      throw interruption;
+    } catch (ExecutionException | TimeoutException | CancellationException failure) {
       output.cancel(true);
       return new BoundedOutput("", true);
     }

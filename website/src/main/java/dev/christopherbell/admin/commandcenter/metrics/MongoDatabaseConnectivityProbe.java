@@ -3,7 +3,11 @@ package dev.christopherbell.admin.commandcenter.metrics;
 import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import dev.christopherbell.configuration.persistence.MongoPersistence;
 import java.time.Duration;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
@@ -31,12 +35,12 @@ public class MongoDatabaseConnectivityProbe
     });
     Thread.ofVirtual().name("command-center-mongodb-ping").start(task);
     try {
-      return task.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+      return task.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
     } catch (InterruptedException failure) {
       Thread.currentThread().interrupt();
       task.cancel(true);
       return false;
-    } catch (Exception failure) {
+    } catch (ExecutionException | TimeoutException | CancellationException failure) {
       task.cancel(true);
       return false;
     }
@@ -48,14 +52,14 @@ public class MongoDatabaseConnectivityProbe
         "mongodb", mongo.getDb().getName(), "legacy"));
     Thread.ofVirtual().name("command-center-mongodb-identity").start(task);
     try {
-      return task.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+      return task.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
     } catch (InterruptedException failure) {
       Thread.currentThread().interrupt();
       task.cancel(true);
       throw new IllegalStateException("The MongoDB identity probe was interrupted.");
-    } catch (Exception failure) {
+    } catch (ExecutionException | TimeoutException | CancellationException failure) {
       task.cancel(true);
-      throw new IllegalStateException("The MongoDB identity probe failed.");
+      throw new IllegalStateException("The MongoDB identity probe failed.", failure);
     }
   }
 }

@@ -644,6 +644,20 @@ public class RestaurantServiceTest {
   }
 
   @Test
+  @DisplayName("Preferences: propagates unexpected caller identity failures")
+  void getPreferencesForCurrentViewerPropagatesUnexpectedIdentityFailure() {
+    when(permissionService.getSelfId())
+        .thenThrow(new UnsupportedOperationException("security context failed"));
+
+    var failure = assertThrows(
+        UnsupportedOperationException.class,
+        () -> restaurantService.getPreferencesForCurrentViewer());
+
+    assertEquals("security context failed", failure.getMessage());
+    verifyNoInteractions(whatsForLunchPreferenceRepository);
+  }
+
+  @Test
   @DisplayName("Preferences: current viewer gets saved filters when authenticated")
   public void testGetPreferencesForCurrentViewer_whenAuthenticated_ReturnsSavedFilters() {
     when(permissionService.getSelfId()).thenReturn("account-1");

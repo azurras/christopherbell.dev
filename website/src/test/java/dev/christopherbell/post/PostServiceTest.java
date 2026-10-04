@@ -761,6 +761,21 @@ public class PostServiceTest {
   }
 
   @Test
+  @DisplayName("GlobalFeed: propagates unexpected caller identity failures")
+  public void testGetGlobalFeed_whenCallerIdentityFailsUnexpectedly_PropagatesFailure() {
+    var service = spy(postService);
+    doThrow(new UnsupportedOperationException("security context failed"))
+        .when(service).getSelfId();
+
+    var failure = assertThrows(
+        UnsupportedOperationException.class,
+        () -> service.getGlobalFeed(null, 20));
+
+    assertEquals("security context failed", failure.getMessage());
+    verifyNoMoreInteractions(postFeedQueryRepository);
+  }
+
+  @Test
   @DisplayName("GlobalFeed: hides muted accounts and hidden threads for signed-in users")
   public void testGetGlobalFeed_filtersMutedAccountsAndHiddenThreads() {
     var created = Instant.now().minus(Duration.ofMinutes(5));

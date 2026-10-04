@@ -116,6 +116,44 @@ Run browser-side JavaScript tests:
   access.
 - Never commit real API keys, passwords, JWTs, or `.env`.
 
+## Code Style
+
+Use the Builder Chris Street Style standard with the repository's Java,
+JavaScript, template, configuration, and PowerShell conventions. Keep changes
+cohesive and names precise: method names should describe the action or question
+in context, and values should have names that show their role. When a value
+changes meaning, use a new variable rather than reusing the old one.
+
+- Validate external input at the owning boundary and represent constrained
+  states with validated values or closed alternatives where that prevents
+  invalid combinations.
+- Keep interfaces consistent with neighboring callers. Distinguish expected
+  absence, domain rejection, programming defects, and infrastructure failure.
+  Catch only to recover or translate; preserve causes and redact secrets.
+- Give mutable state and background work one clear owner. Make I/O, blocking,
+  time, cancellation, retries, and external effects explicit and bounded.
+- Prefer direct code. Extract an abstraction for demonstrated reuse, an
+  invariant, or an isolated effect; avoid wrappers that only rename one line.
+- Java: follow the configured Java version; prefer immutable records and
+  validated constructors where they express real invariants, preserve
+  interruption, and use bounded task ownership and explicit resource scopes.
+- JavaScript: validate runtime JSON/DOM/network data, own and await promises,
+  prevent stale work from replacing current state, pair subscriptions with
+  cleanup, and use context-safe DOM/URL/HTML rendering.
+- Templates and configuration: validate before rendering, escape for the
+  actual output context, make defaults and precedence explicit, and fail
+  clearly when required production/security configuration is absent.
+- PowerShell and build scripts: validate arguments before effects, keep
+  commands and process arguments structured, bound waits/retries, preserve
+  causal errors, and keep privilege and filesystem/service/database writes
+  visible at the owning boundary.
+
+Test the smallest meaningful public behavior boundary. Match evidence to risk:
+test valid, invalid, and boundary input; use real integration seams for
+filesystem, HTTP, persistence, and serialization; use deterministic control for
+concurrency and time. Review production code and tests together, including
+callers, failure paths, compatibility, and the actual effect owner.
+
 ## Documentation Rules
 
 Update documentation in the same change when behavior changes.

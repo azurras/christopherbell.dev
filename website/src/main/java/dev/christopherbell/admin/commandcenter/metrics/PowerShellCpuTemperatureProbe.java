@@ -8,9 +8,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.OptionalDouble;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
@@ -180,10 +183,13 @@ final class PowerShellCpuTemperatureProbe
       }
     }
 
-    private static BoundedOutput output(Future<BoundedOutput> output) {
+    private static BoundedOutput output(Future<BoundedOutput> output) throws InterruptedException {
       try {
         return output.get(TERMINATION_GRACE.toMillis(), TimeUnit.MILLISECONDS);
-      } catch (Exception failure) {
+      } catch (InterruptedException interruption) {
+        output.cancel(true);
+        throw interruption;
+      } catch (ExecutionException | TimeoutException | CancellationException failure) {
         output.cancel(true);
         return new BoundedOutput("", true);
       }

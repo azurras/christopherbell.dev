@@ -102,10 +102,10 @@ public class RestaurantService {
    * Creates a new restaurant based on the provided request.
    *
    * @param request containing the details of the restaurant to be created.
-   * @return a WhatsForLunchResponse containing the created restaurant details.
-   * @throws Exception if there is an error during the creation process.
+   * @return the created restaurant details.
    */
-  public RestaurantDetail createRestaurant(RestaurantCreateRequest request) throws Exception {
+  public RestaurantDetail createRestaurant(RestaurantCreateRequest request)
+      throws InvalidRequestException, ResourceExistsException {
     var restaurant = restaurantMapper.toRestaurant(request);
     restaurant.setWebsite(RestaurantWebsiteUrlPolicy.requireSafe(restaurant.getWebsite()));
     applyNormalizedName(restaurant);
@@ -1277,7 +1277,7 @@ public class RestaurantService {
   private String getSelfIdOrNull() {
     try {
       return permissionService.getSelfId();
-    } catch (Exception e) {
+    } catch (IllegalStateException unauthenticated) {
       return null;
     }
   }

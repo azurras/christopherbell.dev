@@ -137,7 +137,7 @@ public class PostService {
   private String getSelfIdOrNull() {
     try {
       return getSelfId();
-    } catch (Exception ignored) {
+    } catch (IllegalStateException unauthenticated) {
       return null;
     }
   }

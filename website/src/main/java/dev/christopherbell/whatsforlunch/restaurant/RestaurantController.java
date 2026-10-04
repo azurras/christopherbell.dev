@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import dev.christopherbell.libs.api.APIVersion;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
@@ -71,7 +73,7 @@ public class RestaurantController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<RestaurantDetail>> createRestaurant(
       @RequestBody RestaurantCreateRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceExistsException {
     var response = restaurantService.createRestaurant(request);
     return new ResponseEntity<>(
         Response.<RestaurantDetail>builder()
