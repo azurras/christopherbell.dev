@@ -15,6 +15,23 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
  * Unit tests for public route rules that should not require authentication.
  */
 class SecurityConfigTest {
+  @Test void headCanReadVersionedAssetsWithoutOpeningPrivateRoutes() throws Exception {
+    var matchers = publicMatchers();
+    for (var path : List.of("/fingerprint/js/app.js", "/fingerprint/css/main.css",
+        "/fingerprint/images/logo.png", "/webjars/bootstrap/5.3.8/css/bootstrap.min.css")) {
+      assertTrue(matchers.stream().anyMatch(matcher -> matcher.matches(request("HEAD", path))));
+      assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("POST", path))));
+    }
+    assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("HEAD", "/api/site-monitor/v1"))));
+  }
+  @Test void monitorOnlyExposesTheGetShell() throws Exception {
+    var matchers = publicMatchers();
+    assertTrue(matchers.stream().anyMatch(matcher -> matcher.matches(request("GET", "/site-monitor"))));
+    for (var method : List.of("POST", "DELETE", "PUT")) {
+      assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request(method, "/site-monitor"))));
+    }
+    assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("GET", "/api/site-monitor/v1"))));
+  }
 
   @Test
   void handoffKitAllowsPublicReadsWithoutOpeningMutationMethods() throws Exception {

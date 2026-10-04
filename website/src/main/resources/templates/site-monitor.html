@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Website Monitor', 'Check client websites after updates and share clear change reports.', 'https://www.christopherbell.dev/site-monitor', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'Website Monitor')}"></th:block>
+  <title>Website Monitor</title>
+  <link rel="stylesheet" href="/css/main.css" th:href="@{/css/main.css}" />
+</head>
+<body class="site-page void-shell-page zip-coordinate-page">
+  <div id="nav"></div>
+  <main class="site-main zip-coordinate-main">
+    <div class="zip-coordinate-container">
+      <header class="zip-coordinate-hero">
+        <p class="thread-label">For agencies maintaining client websites</p>
+        <h1>Website Monitor</h1>
+        <p>Catch problems after website updates and show your clients what changed.</p>
+        <p><strong>Free pilot</strong> · five sites per account · five pages per site · ten latest reports.</p>
+        <p>Daily checks compare your important pages with a baseline you approve. Run a check after an update and download a client report.</p>
+        <p>Future pricing experiment: $29/month. Paid subscriptions are not available. Pilot capacity is limited to ten accounts.</p>
+      </header>
+      <section class="zip-coordinate-panel" aria-labelledby="monitorCoverageTitle">
+        <h2 id="monitorCoverageTitle">What we check</h2>
+        <p>Page responses, redirect destinations, titles, descriptions, canonical URLs, robots metadata and up to ten same-origin scripts, stylesheets or images per run.</p>
+        <p>External assets and assets with query strings are omitted. Rendered layouts, form submissions, logins and checkout are untested. A passing report describes only the checks performed.</p>
+        <p>Email alerts are not included in this pilot. Automatic results and issue indicators appear in your workspace. Checks are available once every 15 minutes per site.</p>
+      </section>
+      <p id="monitorMessage" role="status" aria-live="polite"></p>
+      <section id="monitorSignedOut" class="zip-coordinate-panel" aria-labelledby="monitorStartTitle">
+        <h2 id="monitorStartTitle">Start your workspace</h2>
+        <p><a href="/login?redirect=%2Fsite-monitor">Sign in</a> or <a href="/signup">create an account</a> to try the demonstration and monitor sites you control.</p>
+      </section>
+      <section id="monitorWorkspace" class="zip-coordinate-panel" hidden aria-labelledby="monitorWorkspaceTitle">
+        <h2 id="monitorWorkspaceTitle">Your monitored websites</h2>
+        <button id="monitorDemo" type="button" class="btn btn-secondary">Add demonstration website</button>
+        <p>The demonstration checks our public website. It does not verify ownership of your own domain.</p>
+        <form id="monitorCreate">
+          <label for="monitorLabel" class="form-label">Client or site label</label>
+          <input id="monitorLabel" class="form-control" required maxlength="80" autocomplete="off" />
+          <label for="monitorOrigin" class="form-label">Website origin</label>
+          <input id="monitorOrigin" class="form-control" type="url" required maxlength="300" placeholder="https://client.example" autocomplete="url" />
+          <label for="monitorPaths" class="form-label">Important page paths, one per line</label>
+          <textarea id="monitorPaths" class="form-control" rows="5" required maxlength="1504">/</textarea>
+          <p>Use one to five paths, such as /contact. HTTPS on port 443 is required. Query strings and fragments are not supported.</p>
+          <button type="submit" class="btn btn-primary">Add website</button>
+        </form>
+        <div id="monitorSites"></div>
+      </section>
+    </div>
+  </main>
+  <div id="footer"></div>
+  <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
+  <script type="module" src="/js/site-monitor.js" th:src="@{/js/site-monitor.js}"></script>
+</body>
+</html>

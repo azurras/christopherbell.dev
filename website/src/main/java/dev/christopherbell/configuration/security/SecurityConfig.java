@@ -78,6 +78,7 @@ public class SecurityConfig {
       "/",
       "GET:/robots.txt",
       "GET:/software-handoff-kit",
+      "GET:/site-monitor",
       "GET:/software-handoff-kit/preview",
       "GET:/sitemap.xml",
       "GET:/sitemap-*.xml",
@@ -331,6 +332,7 @@ public class SecurityConfig {
     List<RequestMatcher> matchers = Arrays.stream(PUBLIC_URLS)
         .map(Sec::toMatcher)
         .collect(Collectors.toList());
+    matchers.add(new StaticAssetRequestMatcher());
     // Add a precise matcher for single post GET: /api/posts/{version}/{postId}
     // Excludes reserved paths like "/me" and "/account/**".
     matchers.add(request -> {

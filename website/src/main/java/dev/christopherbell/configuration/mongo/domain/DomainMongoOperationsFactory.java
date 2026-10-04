@@ -7,7 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mapping.callback.EntityCallbacks;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
-/** Creates type-bound operations whose physical collection and kind come only from the manifest. */
+/** Creates type-bound operations from the cutover manifest or explicit additive runtime approvals. */
 @MongoBackendComponent
 public final class DomainMongoOperationsFactory {
   private final MongoTemplate mongo;
@@ -29,11 +29,35 @@ public final class DomainMongoOperationsFactory {
 
   /** Returns a new stateless operations boundary for one exact approved domain type. */
   public <T> KindScopedMongoOperations<T> forType(Class<T> javaType) {
+    if (javaType.getName().equals(MONITOR_WORKSPACE_TYPE)) {
+      return new MongoKindScopedOperations<>(mongo, MONITOR_KINDS.require(
+          "site_monitor_workspace", 1, javaType), callbacks);
+    }
+    if (javaType.getName().equals(MONITOR_SCHEDULE_TYPE)) {
+      return new MongoKindScopedOperations<>(mongo, MONITOR_KINDS.require(
+          "site_monitor_schedule", 1, javaType), callbacks);
+    }
     return new MongoKindScopedOperations<>(
         mongo, DomainCollectionManifest.forType(javaType), callbacks);
   }
 
+  // Additive runtime approval is deliberately separate from the immutable cutover manifest.
+  private static final String MONITOR_WORKSPACE_TYPE =
+      "dev.christopherbell.sitemonitor.model.MonitorWorkspace";
+  private static final String MONITOR_SCHEDULE_TYPE =
+      "dev.christopherbell.sitemonitor.model.MonitorSchedule";
+  private static final DomainDocumentKindRegistry MONITOR_KINDS = DomainDocumentKindRegistry.of(
+      java.util.Map.of("site_monitor_workspace", "application_runtime",
+          "site_monitor_schedule", "application_runtime"));
+
   KindScopedMongoOperations<?> forExactKind(String kind) {
+    if ("site_monitor_workspace".equals(kind)) {
+      try {
+        return forUnknownType(Class.forName(MONITOR_WORKSPACE_TYPE));
+      } catch (ClassNotFoundException failure) {
+        throw new IllegalStateException("Monitor workspace owner type is unavailable.", failure);
+      }
+    }
     var definition = DomainCollectionManifest.forKind(kind)
         .orElseThrow(() -> new IllegalArgumentException("Mongo domain kind is not approved."));
     try {

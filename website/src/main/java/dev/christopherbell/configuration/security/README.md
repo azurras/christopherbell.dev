@@ -16,7 +16,7 @@ Owns Spring Security wiring and request authentication infrastructure.
   current account security fields in one Mongo command. Missing accounts are rejected by the
   join; inactive or stale accounts delete and reject the session. Persistence failures fail
   closed at the filter without a separate account-repository fallback.
-- `StaticAssetRequestMatcher` bypasses credential handling only for the listed GET favicon, CSS,
+- `StaticAssetRequestMatcher` bypasses credential handling only for the listed GET/HEAD favicon, CSS,
   image, JavaScript, vendor, pinned Bootstrap WebJar, and release-versioned asset namespaces.
   Shared-folder worker and media routes remain authentication boundaries.
 - `SharedFolderNoStoreFilter` runs before shared-folder authentication and applies
@@ -25,8 +25,8 @@ Owns Spring Security wiring and request authentication infrastructure.
 - The root worker bootstrap `/shared-folder-auth-sw.js` is public only for an exact `GET` so an
   anonymous browser can install it before the worker has a JWT to forward. Its POSTs, near-miss
   paths, and every `/api/shared-folder/**` endpoint remain protected.
-- The blog list/detail APIs, photo list API, and exact Bootstrap 5.3.8 WebJar paths are public for
-  `GET` only. Equivalent mutations and other WebJar versions remain authenticated.
+- The blog list/detail APIs and photo list API are public for `GET` only. Exact Bootstrap
+  5.3.8 WebJar paths allow `GET` and `HEAD`. Mutations and other WebJar versions remain authenticated.
 
 ## Design Notes
 

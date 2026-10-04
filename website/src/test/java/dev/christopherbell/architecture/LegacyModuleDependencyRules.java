@@ -34,6 +34,7 @@ final class LegacyModuleDependencyRules {
       "post",
       "report",
       "sharedfolder",
+      "sitemonitor",
       "vehicle",
       "view",
       "whatsforlunch");

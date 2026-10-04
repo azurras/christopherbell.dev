@@ -3,6 +3,7 @@ package dev.christopherbell.account.deletion;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
+import dev.christopherbell.libs.lease.LeaseStore;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -21,11 +22,30 @@ public class AccountDeletionService {
 
   private final AccountDeletionJobRepository jobs;
   private final AccountDeletionOperations operations;
+  private final LeaseStore leases;
+
+  /** A started or failed deletion also forbids creating new private monitoring data. */
+  public boolean hasStarted(String accountId) {
+    return jobs.findById(pseudonymFor(accountId)).isPresent();
+  }
 
   /** Creates or resumes a deletion job, returning only its stable pseudonymous identity. */
   public AccountDeletionResult delete(String rawAccountId)
       throws InvalidRequestException, ResourceNotFoundException {
     var accountId = validateAccountId(rawAccountId);
+    // Serialize the deletion marker and monitor cleanup with in-flight monitor saves.
+    var grant = leases.tryAcquire("site-monitor-pilot", java.util.UUID.randomUUID().toString(),
+        java.time.Duration.ofMinutes(3))
+        .orElseThrow(() -> new ServiceUnavailableException(UNAVAILABLE_MESSAGE, null));
+    try {
+      return deleteValidated(accountId, grant);
+    } finally {
+      leases.release(grant);
+    }
+  }
+
+  private AccountDeletionResult deleteValidated(String accountId, dev.christopherbell.libs.lease.LeaseGrant grant)
+      throws ResourceNotFoundException {
     var pseudonym = pseudonymFor(accountId);
     final Optional<AccountDeletionJob> existing;
     try {
@@ -54,6 +74,7 @@ public class AccountDeletionService {
     }
     job.resume();
     try {
+      requireHeld(grant);
       jobs.save(job);
     } catch (RuntimeException failure) {
       throw unavailable(failure);
@@ -61,6 +82,7 @@ public class AccountDeletionService {
     while (job.getNextStep() != null) {
       var step = job.getNextStep();
       try {
+        requireHeld(grant);
         step.execute(operations, accountId, pseudonym);
         job.advance();
         jobs.save(job);
@@ -75,6 +97,12 @@ public class AccountDeletionService {
       }
     }
     return job.result();
+  }
+
+  private void requireHeld(dev.christopherbell.libs.lease.LeaseGrant grant) {
+    if (leases.renew(grant, java.time.Duration.ofMinutes(3)).isEmpty()) {
+      throw new ServiceUnavailableException(UNAVAILABLE_MESSAGE, null);
+    }
   }
 
   private ServiceUnavailableException unavailable(RuntimeException cause) {

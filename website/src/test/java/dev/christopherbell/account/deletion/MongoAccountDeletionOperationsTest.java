@@ -41,10 +41,10 @@ class MongoAccountDeletionOperationsTest {
 
     var queries = ArgumentCaptor.forClass(Query.class);
     var collections = ArgumentCaptor.forClass(String.class);
-    verify(mongo, times(15)).remove(
+    verify(mongo, times(25)).remove(
         queries.capture(), eq(Document.class), collections.capture());
     assertThat(collections.getAllValues())
-        .containsOnly("accounts", "sessions", "communications", "content", "whatsforlunch");
+        .containsOnly("accounts", "sessions", "communications", "content", "whatsforlunch", "application_runtime");
     assertThat(queries.getAllValues().stream()
         .map(query -> query.getQueryObject().toString()).toList().toString())
         .contains("_kind=browser_session", "_kind=message", "_kind=notification",
@@ -52,7 +52,8 @@ class MongoAccountDeletionOperationsTest {
             "_kind=notification_rate_limit", "_kind=account_trust_relationship",
             "_kind=hidden_post_thread", "_kind=post_like", "_kind=account_follow",
             "_kind=preference", "_kind=favorite", "_kind=vote", "_kind=session",
-            "_kind=conversation_archive_state")
+            "_kind=conversation_archive_state", "_kind=site_monitor_workspace",
+            "payload.accountId=account-1", "_id.legacyId=pilot-0", "_id.legacyId=pilot-9")
         .contains("payload.createdByAccountId=account-1");
     var ownedLunchSession = queries.getAllValues().stream()
         .map(query -> query.getQueryObject().toString())

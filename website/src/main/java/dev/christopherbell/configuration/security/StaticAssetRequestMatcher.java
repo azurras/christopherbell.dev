@@ -5,28 +5,30 @@ import java.util.List;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
 
 /** Matches only public cacheable resources that never consume an authenticated principal. */
 public final class StaticAssetRequestMatcher implements RequestMatcher {
   private static final List<RequestMatcher> MATCHERS = List.of(
-      get("/favicon.ico"),
-      get("/css/**"),
-      get("/images/**"),
-      get("/js/**"),
-      get("/vendor/**"),
-      get("/webjars/bootstrap/5.3.8/**"),
-      get("/{assetVersion}/favicon.ico"),
-      get("/{assetVersion}/css/**"),
-      get("/{assetVersion}/images/**"),
-      get("/{assetVersion}/js/**"),
-      get("/{assetVersion}/vendor/**"));
+      read("/favicon.ico"),
+      read("/css/**"),
+      read("/images/**"),
+      read("/js/**"),
+      read("/vendor/**"),
+      read("/webjars/bootstrap/5.3.8/**"),
+      read("/{assetVersion}/favicon.ico"),
+      read("/{assetVersion}/css/**"),
+      read("/{assetVersion}/images/**"),
+      read("/{assetVersion}/js/**"),
+      read("/{assetVersion}/vendor/**"));
 
   @Override
   public boolean matches(HttpServletRequest request) {
     return MATCHERS.stream().anyMatch(matcher -> matcher.matches(request));
   }
 
-  private static RequestMatcher get(String pattern) {
-    return PathPatternRequestMatcher.pathPattern(HttpMethod.GET, pattern);
+  private static RequestMatcher read(String pattern) {
+    return new OrRequestMatcher(PathPatternRequestMatcher.pathPattern(HttpMethod.GET, pattern),
+        PathPatternRequestMatcher.pathPattern(HttpMethod.HEAD, pattern));
   }
 }

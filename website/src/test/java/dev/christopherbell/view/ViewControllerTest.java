@@ -47,6 +47,17 @@ public class ViewControllerTest {
   @MockitoBean private FederationConsentService federationConsent;
 
   @Test
+  void siteMonitorPilotExplainsRecurringChecksAndHonestCoverage() throws Exception {
+    mockMvc.perform(get("/site-monitor"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("Website Monitor")))
+        .andExpect(content().string(containsString("Daily checks")))
+        .andExpect(content().string(containsString("Free pilot")))
+        .andExpect(content().string(containsString("Email alerts are not included")))
+        .andExpect(content().string(containsString("id=\"monitorWorkspace\"")));
+  }
+
+  @Test
   void handoffKitPageExplainsThePlannedProductWithoutOfferingCheckout() throws Exception {
     mockMvc.perform(get("/software-handoff-kit"))
         .andExpect(status().isOk())
