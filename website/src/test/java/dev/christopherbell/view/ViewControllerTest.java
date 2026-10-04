@@ -60,6 +60,18 @@ public class ViewControllerTest {
   }
 
   @Test
+  void handoffKitGuidanceCanBeEvaluatedWithoutDownloadingOrPurchasing() throws Exception {
+    mockMvc.perform(get("/software-handoff-kit"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("Software project handoff checklist")))
+        .andExpect(content().string(containsString("Fictional delivery record")))
+        .andExpect(content().string(containsString("Release 1.2.0")))
+        .andExpect(content().string(containsString("Still open: production deployment")))
+        .andExpect(content().string(containsString("When the free worksheet is enough")))
+        .andExpect(content().string(containsString("Not available for purchase yet")));
+  }
+
+  @Test
   void handoffKitPreviewDownloadsTheUsableSampleWithPermissionAndNoFullKit() throws Exception {
     mockMvc.perform(get("/software-handoff-kit/preview"))
         .andExpect(status().isOk())
