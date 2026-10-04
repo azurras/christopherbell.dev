@@ -7,6 +7,10 @@ Owns server-side routing for HTML pages.
 - Spring MVC routes that return Thymeleaf templates.
 - `account` serves login, signup, password reset, and Void auth pages.
 - `content` serves the home gateway, blog, photos, reports, Back Office, and The Bell pages.
+- `content` serves the public `/software-handoff-kit` product information page and
+  exact GET `/software-handoff-kit/preview` attachment from a fixed classpath Markdown
+  sample. Only the free worksheet is packaged; full paid files remain outside the site.
+  The page displays a planned price and explicitly says purchases are unavailable.
 - `content` also serves `/command-center` as a public, data-free HTML shell. The
   template contains no telemetry, logs, credentials, challenges, or action data;
   its browser module reveals and populates the console only after a fresh admin

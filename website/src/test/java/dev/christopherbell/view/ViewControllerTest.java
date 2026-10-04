@@ -46,6 +46,42 @@ public class ViewControllerTest {
   @MockitoBean private RestaurantProfilePageService restaurantProfiles;
   @MockitoBean private FederationConsentService federationConsent;
 
+  @Test
+  void handoffKitPageExplainsThePlannedProductWithoutOfferingCheckout() throws Exception {
+    mockMvc.perform(get("/software-handoff-kit"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("<h1>Software Project Handoff Kit</h1>")))
+        .andExpect(content().string(containsString("$15 USD")))
+        .andExpect(content().string(containsString("Not available for purchase yet")))
+        .andExpect(content().string(containsString("href=\"/software-handoff-kit/preview\"")))
+        .andExpect(content().string(containsString("prepared with AI assistance")))
+        .andExpect(content().string(not(containsString("noindex"))))
+        .andExpect(content().string(not(containsString("<form"))));
+  }
+
+  @Test
+  void handoffKitPreviewDownloadsTheUsableSampleWithPermissionAndNoFullKit() throws Exception {
+    mockMvc.perform(get("/software-handoff-kit/preview"))
+        .andExpect(status().isOk())
+        .andExpect(content().contentType("text/markdown;charset=UTF-8"))
+        .andExpect(header().string("Content-Disposition",
+            "attachment; filename=\"software-project-handoff-preview.md\""))
+        .andExpect(content().string(containsString("## Delivery inventory")))
+        .andExpect(content().string(containsString("Evidence of receipt:")))
+        .andExpect(content().string(containsString("Never place credentials in the worksheet")))
+        .andExpect(content().string(containsString("free to use in your own completed project handoffs")))
+        .andExpect(content().string(not(containsString("## 08 / Worked example"))));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "/software-handoff-kit/full", "/software-handoff-kit/extra",
+      "/software-handoff-kit/preview/extra"
+  })
+  void neighboringHandoffPathsDoNotExposeContent(String path) throws Exception {
+    mockMvc.perform(get(path)).andExpect(status().isNotFound());
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {
       "/login", "/signup", "/forgot-password", "/reset-password",

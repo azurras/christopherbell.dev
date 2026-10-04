@@ -77,6 +77,8 @@ public class SecurityConfig {
   private static final String[] PUBLIC_URLS = {
       "/",
       "GET:/robots.txt",
+      "GET:/software-handoff-kit",
+      "GET:/software-handoff-kit/preview",
       "GET:/sitemap.xml",
       "GET:/sitemap-*.xml",
       "GET:/actuator/health/liveness",
