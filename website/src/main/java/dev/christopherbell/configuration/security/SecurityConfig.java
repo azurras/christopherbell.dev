@@ -85,6 +85,8 @@ public class SecurityConfig {
       "GET:/sitemap-*.xml",
       "GET:/actuator/health/liveness",
       "GET:/actuator/health/readiness",
+      // Build identity only; application.yml disables every host and runtime info contributor.
+      "GET:/actuator/info",
       "GET:/.well-known/webfinger",
       "GET:/.well-known/nodeinfo",
       "GET:/nodeinfo/2.1",

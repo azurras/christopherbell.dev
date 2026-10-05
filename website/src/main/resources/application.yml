@@ -23,7 +23,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,info
   endpoint:
     health:
       show-details: when-authorized
@@ -33,7 +33,22 @@ management:
       group:
         readiness:
           include: readinessState,database
+  # /actuator/info is public so monitors can read the running build version, which encodes
+  # the release commit. Only build data is published; every host and runtime contributor is off.
+  info:
+    env:
+      enabled: false
+    java:
+      enabled: false
+    os:
+      enabled: false
+    process:
+      enabled: false
+    ssl:
+      enabled: false
 logging:
+  pattern:
+    correlation: "[%X{requestId:-}] "
   level:
     root: INFO
     org.springframework: INFO

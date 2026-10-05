@@ -53,6 +53,16 @@ Owns application-wide Spring and web infrastructure.
   remains restricted to the same origin.
   Browser cookie security, HSTS, and the canonical password-reset origin bind
   under `app.browser-security`; production ignores forwarding headers.
+- `RequestCorrelationFilter` under `filter` runs first and gives every request an
+  `X-Request-Id` response header and a matching `requestId` log MDC field. It keeps a
+  well-formed inbound ID (8 to 64 letters, digits, `.`, `_` or `-`) and replaces anything
+  else, so untrusted text never reaches headers or logs. Console logs show the ID through
+  `logging.pattern.correlation`; production also writes ECS JSON lines to
+  `application.json.log` beside the plain WinSW log that Mission Control reads.
+- `/actuator/info` is public and returns only `build` data. Its `build.version` is
+  `0.0.0-dev.<commit>` for main builds, which lets Production Watch confirm the live
+  commit. The env, java, os, process and ssl info contributors stay disabled; do not
+  enable them, because the endpoint has no authentication.
 - Rate limiting and request size protection filters under `filter`. Ordinary
   bodies bind from the positive typed `app.request-size.default-max` setting;
   streamed shared-folder chunks retain their feature-owned upload-chunk limit.

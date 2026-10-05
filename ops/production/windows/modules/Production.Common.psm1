@@ -428,7 +428,8 @@ function Invoke-ProductionWebRequest {
         [ValidateSet('Get','Post')][string]$Method = 'Get',
         [string]$ContentType,
         [string]$Body,
-        [ValidateRange(1,300)][int]$TimeoutSec = 15
+        [ValidateRange(1,300)][int]$TimeoutSec = 15,
+        [hashtable]$Headers
     )
 
     $parameters = @{
@@ -441,6 +442,7 @@ function Invoke-ProductionWebRequest {
         $parameters.ContentType = $ContentType
     }
     if ($PSBoundParameters.ContainsKey('Body')) { $parameters.Body = $Body }
+    if ($PSBoundParameters.ContainsKey('Headers')) { $parameters.Headers = $Headers }
 
     try {
         return Invoke-WebRequest @parameters
@@ -609,11 +611,13 @@ Commands: install, deploy, status, logs, restart, releases, rollback, backup,
           mongo-inventory, mongo-consolidation-preview, mongo-consolidate,
           mongo-consolidation-rollback, verify-startup, uninstall,
           auto-install, auto-deploy, auto-status, auto-remove, sensor-install,
-          sensor-status, sensor-enable, sensor-disable
+          sensor-status, sensor-enable, sensor-disable, github-token-install
 
 mongo-consolidation-preview is read-only. mongo-consolidate requires
 -ConfirmDomainCollectionCutover. mongo-consolidation-rollback requires
 -ConfirmDomainCollectionRollback. Automatic deployment never supplies either switch.
+github-token-install requires -GitHubTokenPath and stores a verified token so
+automatic deployment records Production deployments in GitHub.
 '@ | Write-Output
 }
 

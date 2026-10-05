@@ -1,0 +1,39 @@
+name: Production Watch
+
+# Checks the public site from outside its single Windows host, so a host, tunnel or deploy
+# failure that the host cannot report still raises one `production-alert` issue.
+permissions: {}
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: production-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+      issues: write
+
+    steps:
+      - name: Checkout code
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Check production
+        shell: pwsh
+        timeout-minutes: 8
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: ./.github/scripts/Test-ProductionSite.ps1 -Repository $env:REPOSITORY -RunUrl $env:RUN_URL

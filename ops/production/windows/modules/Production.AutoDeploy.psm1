@@ -3,6 +3,12 @@ $ErrorActionPreference = 'Stop'
 $script:FixedProductionRoot = 'C:\ProgramData\christopherbell.dev'
 
 $script:autoDeployStatusWarningEmitted = $false
+$script:autoDeployGitHubWarningEmitted = $false
+$script:GitHubApiRoot = 'https://api.github.com'
+$script:GitHubDeploymentEnvironment = 'Production'
+$script:GitHubTokenFileName = 'github-deployments.token'
+$script:CiWorkflowFile = 'ci.yml'
+$script:GitHubDescriptionMaximumLength = 140
 
 function New-AutoDeployState {
     [pscustomobject][ordered]@{
@@ -19,6 +25,9 @@ function New-AutoDeployState {
         toolRefreshAt=$null
         serviceRecoverySha=$null
         serviceRecoveryAt=$null
+        ciSha=$null
+        ciConclusion=$null
+        ciCheckedAt=$null
     }
 }
 
@@ -36,6 +45,9 @@ function Read-AutoDeployState {
             toolRefreshAt = $null
             serviceRecoverySha = $null
             serviceRecoveryAt = $null
+            ciSha = $null
+            ciConclusion = $null
+            ciCheckedAt = $null
         }.GetEnumerator()) {
             if (-not $state.PSObject.Properties[$property.Key]) {
                 $state | Add-Member -NotePropertyName $property.Key -NotePropertyValue $property.Value
@@ -73,6 +85,294 @@ function Get-ActiveReleaseSha {
     $sha = (Get-Content -LiteralPath $metadata -Raw | ConvertFrom-Json).sha
     if ($sha -notmatch '^[0-9a-f]{40}$') { throw 'Active release metadata contains an invalid SHA.' }
     return $sha
+}
+
+function Write-AutoDeployGitHubWarning {
+    <# Warns once per poll; GitHub trouble degrades reporting but must never flood the task log. #>
+    param([Parameter(Mandatory)][string]$Reason)
+    if ($script:autoDeployGitHubWarningEmitted) { return }
+    $script:autoDeployGitHubWarningEmitted = $true
+    Write-Warning "GitHub deployment integration is degraded ($Reason); automatic deployment continues."
+}
+
+function Get-AutoDeployGitHubRepository {
+    <# Returns the owner/name slug of the configured HTTPS GitHub remote. #>
+    param([Parameter(Mandatory)]$Config)
+    $arguments = Get-TrustedGitArguments $Config.repositoryPath @('remote','get-url',$Config.remote)
+    $remoteUrl = ([string](Invoke-CheckedProcess 'git.exe' $arguments $Config.repositoryPath)).Trim()
+    if ($remoteUrl -notmatch '^https://github\.com/(?<owner>[A-Za-z0-9-]+)/(?<name>[A-Za-z0-9._-]+?)(?:\.git)?/?$') {
+        throw 'Automatic deployment remote is not an HTTPS GitHub repository URL.'
+    }
+    return "$($Matches.owner)/$($Matches.name)"
+}
+
+function Test-AutoDeployGitHubTokenShape {
+    param([AllowNull()][string]$Token)
+    return [bool]($Token -cmatch '^(?:github_pat_[A-Za-z0-9_]{20,255}|gh[opsu]_[A-Za-z0-9]{36,255})$')
+}
+
+function Get-AutoDeployGitHubTokenPath {
+    param([Parameter(Mandatory)]$Config)
+    return Join-Path $Config.programDataRoot "config\$script:GitHubTokenFileName"
+}
+
+function Read-AutoDeployGitHubToken {
+    <# Returns the protected deployment token, or $null when GitHub reporting is not configured. #>
+    param([Parameter(Mandatory)]$Config)
+    $tokenPath = Get-AutoDeployGitHubTokenPath $Config
+    if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf)) { return $null }
+    Assert-ProtectedProductionPath -Path $tokenPath
+    $token = ([string](Get-Content -LiteralPath $tokenPath -Raw -ErrorAction Stop)).Trim()
+    if (-not (Test-AutoDeployGitHubTokenShape $token)) {
+        throw 'The GitHub deployment token file does not contain a GitHub token.'
+    }
+    return $token
+}
+
+function Invoke-AutoDeployGitHubApi {
+    <#
+    Calls the GitHub REST API and returns the decoded response. A non-2xx response throws an
+    exception whose Data['StatusCode'] carries the status; messages never include the token.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [ValidateSet('Get','Post')][string]$Method = 'Get',
+        [hashtable]$Body,
+        [string]$Token
+    )
+    $headers = @{
+        Accept = 'application/vnd.github+json'
+        'X-GitHub-Api-Version' = '2022-11-28'
+        'User-Agent' = 'christopherbell.dev-auto-deploy'
+    }
+    if ($Token) { $headers.Authorization = "Bearer $Token" }
+    $request = @{
+        Uri = "$script:GitHubApiRoot/$Path"
+        Method = $Method
+        Headers = $headers
+        TimeoutSec = 15
+    }
+    if ($Body) {
+        $request.ContentType = 'application/json'
+        $request.Body = $Body | ConvertTo-Json -Depth 5 -Compress
+    }
+    $response = Invoke-ProductionWebRequest @request
+    $statusCode = [int]$response.StatusCode
+    if ($statusCode -lt 200 -or $statusCode -ge 300) {
+        $resource = ($Path -split '\?')[0]
+        $failure = [InvalidOperationException]::new("GitHub API $Method $resource returned HTTP $statusCode.")
+        $failure.Data['StatusCode'] = $statusCode
+        throw $failure
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$response.Content)) { return $null }
+    return [string]$response.Content | ConvertFrom-Json -ErrorAction Stop
+}
+
+function Invoke-AutoDeployGitHubReadApi {
+    <#
+    Reads with the installed token for its higher rate limit, falling back to anonymous access
+    (the repository is public) when the token is unreadable or rejected.
+    #>
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Path
+    )
+    $token = $null
+    try {
+        $token = Read-AutoDeployGitHubToken $Config
+    } catch {
+        Write-AutoDeployGitHubWarning -Reason 'TOKEN_UNREADABLE'
+    }
+    if ($token) {
+        try {
+            return Invoke-AutoDeployGitHubApi -Path $Path -Token $token
+        } catch {
+            if ($_.Exception.Data['StatusCode'] -notin @(401, 403)) { throw }
+            Write-AutoDeployGitHubWarning -Reason 'TOKEN_REJECTED'
+        }
+    }
+    return Invoke-AutoDeployGitHubApi -Path $Path
+}
+
+function Get-AutoDeployCiConclusion {
+    <#
+    Returns SUCCESS, PENDING or FAILED for the newest CI push run on a commit. A commit without a
+    run yet is PENDING because GitHub registers push runs shortly after the push lands.
+    #>
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Sha
+    )
+    if ($Sha -notmatch '^[0-9a-f]{40}$') { throw 'A CI conclusion requires a full commit SHA.' }
+    $repository = Get-AutoDeployGitHubRepository $Config
+    $branch = [uri]::EscapeDataString([string]$Config.branch)
+    $runsPath = "repos/$repository/actions/workflows/$script:CiWorkflowFile/runs" +
+        "?head_sha=$Sha&event=push&branch=$branch&per_page=5"
+    $runPage = Invoke-AutoDeployGitHubReadApi -Config $Config -Path $runsPath
+    $newestRun = @($runPage.workflow_runs) |
+        Sort-Object -Property { [long]$_.run_number } -Descending |
+        Select-Object -First 1
+    if (-not $newestRun -or [string]$newestRun.status -ne 'completed') { return 'PENDING' }
+    if ([string]$newestRun.conclusion -eq 'success') { return 'SUCCESS' }
+    return 'FAILED'
+}
+
+function ConvertTo-AutoDeployUtcTimestamp {
+    <# State JSON timestamps come back as DateTime values or round-trip strings; both must carry a zone. #>
+    param([Parameter(Mandatory)][object]$Timestamp)
+    if ($Timestamp -is [datetimeoffset]) { return $Timestamp }
+    if ($Timestamp -is [datetime]) {
+        if ($Timestamp.Kind -eq [DateTimeKind]::Unspecified) {
+            throw 'Automatic deployment timestamp has no time zone.'
+        }
+        return [datetimeoffset]::new($Timestamp)
+    }
+    return [datetimeoffset]::Parse([string]$Timestamp, [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind)
+}
+
+function Resolve-AutoDeployCiVerdict {
+    <#
+    Returns the CI verdict for a commit and records it in state. A FAILED verdict is reused until
+    the failure backoff ends, and any verdict checked moments ago is reused within the same poll,
+    so a failing commit costs a few anonymous API calls an hour instead of one a minute.
+    #>
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][string]$Sha,
+        [Parameter(Mandatory)][datetime]$Now
+    )
+    if ($State.ciSha -eq $Sha -and $State.ciConclusion -and $State.ciCheckedAt) {
+        $checkedAt = ConvertTo-AutoDeployUtcTimestamp -Timestamp $State.ciCheckedAt
+        $reuseSeconds = if ($State.ciConclusion -eq 'FAILED') {
+            [int]$Config.autoDeployFailureBackoffSeconds
+        } else { 30 }
+        if ($Now.ToUniversalTime() -lt $checkedAt.AddSeconds($reuseSeconds).UtcDateTime) {
+            return [string]$State.ciConclusion
+        }
+    }
+    $conclusion = Get-AutoDeployCiConclusion -Config $Config -Sha $Sha
+    $State.ciSha = $Sha
+    $State.ciConclusion = $conclusion
+    $State.ciCheckedAt = $Now.ToUniversalTime().ToString('o')
+    return $conclusion
+}
+
+function Publish-AutoDeployGitHubDeploymentStatus {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]$Deployment,
+        [Parameter(Mandatory)][ValidateSet('in_progress','success','failure')][string]$DeploymentState,
+        [string]$Description
+    )
+    $statusBody = @{ state = $DeploymentState }
+    if ($Description) {
+        $statusBody.description = $Description.Substring(0,
+            [math]::Min($Description.Length, $script:GitHubDescriptionMaximumLength))
+    }
+    if ($DeploymentState -eq 'success') { $statusBody.environment_url = [string]$Config.publicUrl }
+    $token = Read-AutoDeployGitHubToken $Config
+    Invoke-AutoDeployGitHubApi -Method Post -Token $token -Body $statusBody `
+        -Path "repos/$($Deployment.Repository)/deployments/$($Deployment.Id)/statuses" | Out-Null
+}
+
+function Start-AutoDeployGitHubDeployment {
+    <#
+    Records a deployment attempt in the GitHub Production environment when a token is installed.
+    Returns the deployment reference, or $null when reporting is off or GitHub refused it;
+    reporting never changes the deployment itself.
+    #>
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Sha
+    )
+    try {
+        $token = Read-AutoDeployGitHubToken $Config
+        if (-not $token) { return $null }
+        $repository = Get-AutoDeployGitHubRepository $Config
+        # required_contexts is empty because the CI gate has already proven this commit passed.
+        $created = Invoke-AutoDeployGitHubApi -Method Post -Token $token -Path "repos/$repository/deployments" -Body @{
+            ref = $Sha
+            environment = $script:GitHubDeploymentEnvironment
+            auto_merge = $false
+            required_contexts = @()
+            production_environment = $true
+            description = 'Automatic deployment of trusted main'
+        }
+        $deployment = [pscustomobject]@{ Repository = $repository; Id = [long]$created.id }
+        Publish-AutoDeployGitHubDeploymentStatus -Config $Config -Deployment $deployment `
+            -DeploymentState 'in_progress'
+        return $deployment
+    } catch {
+        Write-AutoDeployGitHubWarning -Reason 'DEPLOYMENT_RECORD_FAILED'
+        return $null
+    }
+}
+
+function Complete-AutoDeployGitHubDeployment {
+    <# Marks a recorded deployment as succeeded or failed; failures to report are only warned. #>
+    param(
+        [Parameter(Mandatory)]$Config,
+        [AllowNull()]$Deployment,
+        [Parameter(Mandatory)][bool]$Succeeded,
+        [string]$FailureMessage
+    )
+    if (-not $Deployment) { return }
+    try {
+        if ($Succeeded) {
+            Publish-AutoDeployGitHubDeploymentStatus -Config $Config -Deployment $Deployment `
+                -DeploymentState 'success' -Description 'The new release is active.'
+        } else {
+            $safeDetail = Get-AutoDeploySafeFailureDetail -Message $FailureMessage
+            $description = if ($safeDetail) { $safeDetail } else { 'Automatic deployment failed.' }
+            Publish-AutoDeployGitHubDeploymentStatus -Config $Config -Deployment $Deployment `
+                -DeploymentState 'failure' -Description $description
+        }
+    } catch {
+        Write-AutoDeployGitHubWarning -Reason 'DEPLOYMENT_STATUS_FAILED'
+    }
+}
+
+function Install-AutoDeployGitHubToken {
+    <#
+    Verifies a fine-grained GitHub token against this repository, then stores it in a protected
+    file so automatic deployment can record Production deployments. The operator deletes the
+    source file afterwards.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        $Config = (Read-ProductionConfig)
+    )
+    Assert-ProductionFixedRootBoundary -Config $Config -FixedRoot $script:FixedProductionRoot | Out-Null
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        throw 'GitHubTokenPath must reference an existing file.'
+    }
+    $token = ([string](Get-Content -LiteralPath $SourcePath -Raw -ErrorAction Stop)).Trim()
+    if (-not (Test-AutoDeployGitHubTokenShape $token)) {
+        throw 'GitHubTokenPath does not contain a GitHub token.'
+    }
+    $repository = Get-AutoDeployGitHubRepository $Config
+    # Verify before storing so a mistyped or under-scoped token never silently disables reporting.
+    Invoke-AutoDeployGitHubApi -Token $token -Path "repos/$repository/deployments?per_page=1" | Out-Null
+
+    $tokenPath = Get-AutoDeployGitHubTokenPath $Config
+    if (-not $PSCmdlet.ShouldProcess($tokenPath, 'Store the protected GitHub deployment token')) { return }
+    $temporaryPath = "$tokenPath.$PID.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        New-Item -ItemType File -Path $temporaryPath -Force | Out-Null
+        # Restrict the file before it holds the secret.
+        Protect-ProductionPath -Path $temporaryPath
+        [IO.File]::WriteAllText($temporaryPath, $token, [Text.UTF8Encoding]::new($false))
+        Move-AutoDeployFileAtomically -TemporaryPath $temporaryPath -DestinationPath $tokenPath
+        Assert-ProtectedProductionPath -Path $tokenPath
+    } finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Write-Output "Stored the GitHub deployment token for $repository. Delete $SourcePath now."
 }
 
 function Get-AutoDeployStatusStoreRoot {
@@ -288,6 +588,8 @@ function Get-AutoDeployStatusMessage {
         'CHECK_FAILED' { 'The automatic deployment check failed before release validation.' }
         'BLOCKED' { 'Automatic deployment is blocked by a protected migration gate.' }
         'TOOLS_UPDATED' { 'Trusted deployment tools were refreshed; the next scheduled poll will continue.' }
+        'AWAITING_CI' { 'The latest trusted revision is waiting for its CI build to pass.' }
+        'CI_FAILED' { 'The latest trusted revision failed CI and will not be deployed.' }
         default { throw 'Automatic deployment status outcome is invalid.' }
     }
 }
@@ -470,11 +772,11 @@ function Publish-AutoDeployStatus {
     param(
         [Parameter(Mandatory)]
         [ValidateSet('CHECKING','UP_TO_DATE','BACKING_OFF','DEPLOYING','SUCCEEDED',
-            'DEPLOYMENT_FAILED','CHECK_FAILED','BLOCKED','TOOLS_UPDATED')]
+            'DEPLOYMENT_FAILED','CHECK_FAILED','BLOCKED','TOOLS_UPDATED','AWAITING_CI','CI_FAILED')]
         [string]$Outcome,
         [Parameter(Mandatory)]$State,
         [ValidateSet('NONE','REMOTE_CHECK','PROTECTED_PRECONDITION','DEPLOYMENT',
-            'CANDIDATE_STARTUP','STATUS_STORE')]
+            'CANDIDATE_STARTUP','STATUS_STORE','CI_CHECK','CI_RESULT')]
         [string]$FailureCategory = 'NONE',
         [string]$ActiveSha,
         [string]$RetryAt,
@@ -765,11 +1067,11 @@ function Get-AutoDeployStatus {
         $record = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
             ConvertFrom-Json -ErrorAction Stop
         $allowedOutcomes = @('CHECKING','UP_TO_DATE','BACKING_OFF','DEPLOYING','SUCCEEDED',
-            'DEPLOYMENT_FAILED','CHECK_FAILED','BLOCKED','TOOLS_UPDATED')
+            'DEPLOYMENT_FAILED','CHECK_FAILED','BLOCKED','TOOLS_UPDATED','AWAITING_CI','CI_FAILED')
         if ($record.schemaVersion -ne 1 -or $record.status -notin $allowedOutcomes -or
             $record.toolRefreshStatus -notin @('UNKNOWN','SUCCEEDED','FAILED') -or
             $record.failureCategory -notin @('NONE','REMOTE_CHECK','PROTECTED_PRECONDITION',
-                'DEPLOYMENT','CANDIDATE_STARTUP','STATUS_STORE')) {
+                'DEPLOYMENT','CANDIDATE_STARTUP','STATUS_STORE','CI_CHECK','CI_RESULT')) {
             throw 'Automatic deployment status record is invalid.'
         }
         $failureDetailProperty = $record.PSObject.Properties['failureDetail']
@@ -944,6 +1246,33 @@ function Invoke-AutoDeployOnce {
             -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
         return
     }
+    try {
+        $ciConclusion = Resolve-AutoDeployCiVerdict -Config $Config -State $state -Sha $remote -Now $now
+    } catch {
+        Publish-AutoDeployStatusBestEffort -Outcome 'CHECK_FAILED' -FailureCategory 'CI_CHECK' `
+            -State $state -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
+        throw
+    }
+    if ($ciConclusion -ne 'SUCCESS') {
+        # Only a CI-green commit may replace the active release. A failed recovery of the active
+        # release still surfaces, exactly as it does when main is already active.
+        if ($recoveryFailure) {
+            Publish-AutoDeployStatusBestEffort -Outcome 'DEPLOYMENT_FAILED' `
+                -FailureCategory 'CANDIDATE_STARTUP' -State $state `
+                -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
+            throw $recoveryFailure
+        }
+        Write-AutoDeployState $Config $state
+        if ($recoveryBackoff) { return }
+        if ($ciConclusion -eq 'FAILED') {
+            Publish-AutoDeployStatusBestEffort -Outcome 'CI_FAILED' -FailureCategory 'CI_RESULT' `
+                -State $state -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
+        } else {
+            Publish-AutoDeployStatusBestEffort -Outcome 'AWAITING_CI' -State $state `
+                -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
+        }
+        return
+    }
     if ($state.failedSha -eq $remote -and $state.failedAt) {
         $failedAtValue = $state.failedAt
         if ($failedAtValue -is [datetimeoffset]) {
@@ -971,6 +1300,7 @@ function Invoke-AutoDeployOnce {
     Write-AutoDeployState $Config $state
     Publish-AutoDeployStatusBestEffort -Outcome 'DEPLOYING' -State $state `
         -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
+    $gitHubDeployment = Start-AutoDeployGitHubDeployment -Config $Config -Sha $remote
     $statusPublisher = Get-Command Publish-AutoDeployStatusBestEffort -ErrorAction Stop
     $heartbeatCallback = {
         & $statusPublisher -Outcome 'DEPLOYING' -State $state `
@@ -998,6 +1328,8 @@ function Invoke-AutoDeployOnce {
             -StatusRoot $StatusRoot | Out-Null
         $deploymentFailure = $_
     }
+    Complete-AutoDeployGitHubDeployment -Config $Config -Deployment $gitHubDeployment `
+        -Succeeded (-not $deploymentFailure) -FailureMessage ([string]$state.error)
     $stateWriteFailure = $null
     try { Write-AutoDeployState $Config $state }
     catch { $stateWriteFailure = $_ }
@@ -1093,6 +1425,16 @@ function Update-AutoDeployToolsFromOriginMain {
     }
 
     $sha = Resolve-OriginMainRelease -Config $Config
+    # These tools run as SYSTEM, so they follow the same CI gate as the website release.
+    $ciConclusion = Resolve-AutoDeployCiVerdict -Config $Config -State $state -Sha $sha `
+        -Now (Get-Date).ToUniversalTime()
+    Write-AutoDeployState $Config $state
+    if ($ciConclusion -ne 'SUCCESS') {
+        if ($currentSha -notmatch $versionPattern) {
+            throw "Automatic deployment tools cannot be installed from $sha until CI passes for it."
+        }
+        return [pscustomobject]@{ Sha=$currentSha; SourceSha=$state.toolSourceSha; Switched=$false }
+    }
     $treeArguments = Get-TrustedGitArguments $Config.repositoryPath @(
         'rev-parse',"$($sha):ops/production/windows")
     $treeSha = (Invoke-CheckedProcess 'git.exe' $treeArguments $Config.repositoryPath).Trim().ToLowerInvariant()
@@ -1214,6 +1556,7 @@ function Update-AutoDeployToolsFromOriginMain {
 
 function Start-AutoDeployLoop {
     $script:autoDeployStatusWarningEmitted = $false
+    $script:autoDeployGitHubWarningEmitted = $false
     $statusRoot = $null
     $state = New-AutoDeployState
     try {
@@ -1611,4 +1954,4 @@ Export-ModuleMember -Function New-AutoDeployState,Read-AutoDeployState,`
     Write-AutoDeployState,Get-RemoteMainSha,Get-ActiveReleaseSha,`
     Invoke-AutoDeployOnce,Start-AutoDeployLoop,Install-AutoDeployTask,`
     Update-ProductionAutoDeployToolsUnderHeldLock,Remove-AutoDeployTask,`
-    Get-AutoDeployStatus
+    Get-AutoDeployStatus,Read-AutoDeployGitHubToken,Install-AutoDeployGitHubToken

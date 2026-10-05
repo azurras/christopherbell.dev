@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Properties;
 import org.junit.jupiter.api.Test;
 
 class BuildAutomationConfigurationTest {
@@ -17,6 +18,20 @@ class BuildAutomationConfigurationTest {
     assertThat(script).contains(
         "releaseVersion", "RELEASE_VERSION", "0.0.0-dev.", "verifyDeterministicVersion");
     assertThat(script).doesNotContain("LocalDate", "BUILD_NUMBER");
+  }
+
+  @Test
+  void packagedBuildInfoCarriesTheCommitDerivedReleaseVersion() throws IOException {
+    var buildInfo = new Properties();
+    try (var packagedBuildInfo = getClass().getResourceAsStream("/META-INF/build-info.properties")) {
+      assertThat(packagedBuildInfo).isNotNull();
+      buildInfo.load(packagedBuildInfo);
+    }
+
+    // Production Watch reads the live commit from /actuator/info build.version.
+    assertThat(buildInfo.getProperty("build.version"))
+        .matches("0\\.0\\.0-dev\\.[0-9a-f]{40}|[0-9A-Za-z][0-9A-Za-z._+-]{0,127}")
+        .isNotEqualTo("unspecified");
   }
 
   @Test

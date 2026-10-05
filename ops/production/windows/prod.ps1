@@ -5,12 +5,13 @@ param(
         'mongo-inventory','mongo-consolidation-preview','mongo-consolidate',
         'mongo-consolidation-rollback','verify-startup','uninstall','auto-install',
         'auto-deploy','auto-status','auto-remove','sensor-install','sensor-status',
-        'sensor-enable','sensor-disable')]
+        'sensor-enable','sensor-disable','github-token-install')]
     [string]$Command = 'help',
     [switch]$WhatIf,
     [switch]$ConfirmDomainCollectionCutover,
     [switch]$ConfirmDomainCollectionRollback,
-    [string]$CloudflareTokenPath
+    [string]$CloudflareTokenPath,
+    [string]$GitHubTokenPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,7 +30,8 @@ function Invoke-ProductionCommand {
         [switch]$WhatIf,
         [switch]$ConfirmDomainCollectionCutover,
         [switch]$ConfirmDomainCollectionRollback,
-        [string]$CloudflareTokenPath
+        [string]$CloudflareTokenPath,
+        [string]$GitHubTokenPath
     )
 
     $handlers = @{
@@ -74,6 +76,12 @@ function Invoke-ProductionCommand {
         'sensor-status' = { Get-ProductionSensorStatus }
         'sensor-enable' = { Set-ProductionSensorState -Enabled $true -WhatIf:$WhatIf }
         'sensor-disable' = { Set-ProductionSensorState -Enabled $false -WhatIf:$WhatIf }
+        'github-token-install' = {
+            if ([string]::IsNullOrWhiteSpace($GitHubTokenPath)) {
+                throw 'github-token-install requires -GitHubTokenPath <protected token file>.'
+            }
+            Install-AutoDeployGitHubToken -SourcePath $GitHubTokenPath -WhatIf:$WhatIf
+        }
     }
 
     & $handlers[$Command]
@@ -82,4 +90,5 @@ function Invoke-ProductionCommand {
 Invoke-ProductionCommand -Command $Command -WhatIf:$WhatIf `
     -ConfirmDomainCollectionCutover:$ConfirmDomainCollectionCutover `
     -ConfirmDomainCollectionRollback:$ConfirmDomainCollectionRollback `
-    -CloudflareTokenPath $CloudflareTokenPath
+    -CloudflareTokenPath $CloudflareTokenPath `
+    -GitHubTokenPath $GitHubTokenPath

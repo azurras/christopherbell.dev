@@ -99,7 +99,13 @@ tasks.withType<Test>().configureEach {
 }
 
 springBoot {
-    buildInfo()
+    buildInfo {
+        properties {
+            // The release version lives on the root project; without this the website's build
+            // info says "unspecified" and /actuator/info cannot identify the running commit.
+            version.set(rootProject.version.toString())
+        }
+    }
 }
 
 val libreHardwareMonitorUri = URI(
@@ -525,6 +531,12 @@ val sharedFolderPesterInputs = rootProject.files(
     "ops/production/windows/modules",
     "ops/production/windows/service",
     "ops/production/windows/config")
+val automationPesterFiles = rootProject.files(
+    "ops/production/windows/tests/Production.AutoDeploy.Tests.ps1",
+    ".github/scripts/tests")
+val automationPesterInputs = rootProject.files(
+    "ops/production/windows/modules",
+    ".github/scripts")
 val requiredPesterVersion = "5.9.0"
 val pesterReportDirectory = layout.buildDirectory.dir("test-results/shared-folder-pester")
 val pwshExecutable = providers.environmentVariable("PWSH_EXE")
@@ -642,6 +654,43 @@ val sharedFolderOperationsPwshPester = tasks.register<Exec>("sharedFolderOperati
     }
 }
 
+val automationPester = tasks.register<Exec>("automationPester") {
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description = "Runs automatic-deployment and CI script Pester coverage under PowerShell 7."
+    workingDir = rootProject.projectDir
+    inputs.files(automationPesterFiles, automationPesterInputs)
+    val report = pesterReportDirectory.map { it.file("automation-pwsh7.xml") }
+    outputs.file(report)
+    outputs.upToDateWhen { false }
+
+    doFirst {
+        val executable = requireWindowsExecutable(pwshExecutable.get(), "PowerShell 7")
+        val reportFile = report.get().asFile
+        reportFile.parentFile.mkdirs()
+        val command = """
+            ${'$'}ErrorActionPreference = 'Stop'
+            if (${'$'}PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or newer is required.' }
+            try {
+                Import-Module Pester -RequiredVersion $requiredPesterVersion -ErrorAction Stop
+            } catch {
+                throw 'Required Pester $requiredPesterVersion module is unavailable.'
+            }
+            if ((Get-Module Pester).Version -ne [version]'$requiredPesterVersion') {
+                throw 'Required Pester $requiredPesterVersion module failed to load.'
+            }
+            ${'$'}configuration = New-PesterConfiguration
+            ${'$'}configuration.Run.Path = @(${pesterPaths(automationPesterFiles)})
+            ${'$'}configuration.Run.Exit = ${'$'}true
+            ${'$'}configuration.Output.Verbosity = 'Detailed'
+            ${'$'}configuration.TestResult.Enabled = ${'$'}true
+            ${'$'}configuration.TestResult.OutputFormat = 'NUnitXml'
+            ${'$'}configuration.TestResult.OutputPath = ${quotedPowerShellPath(reportFile.absolutePath)}
+            Invoke-Pester -Configuration ${'$'}configuration
+        """.trimIndent()
+        commandLine(executable, "-NoLogo", "-NoProfile", "-Command", command)
+    }
+}
+
 val sharedFolderOperationsWindowsPowerShellPester =
     tasks.register<Exec>("sharedFolderOperationsWindowsPowerShellPester") {
         group = LifecycleBasePlugin.VERIFICATION_GROUP
@@ -710,6 +759,7 @@ tasks.named("check") {
     dependsOn("jsTest")
     if (isWindowsHost && !productionDeploymentBuild) {
         dependsOn(windowsPesterVerification)
+        dependsOn(automationPester)
     }
 }
 

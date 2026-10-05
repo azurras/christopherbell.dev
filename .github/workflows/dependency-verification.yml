@@ -1,0 +1,108 @@
+name: Dependency Verification Metadata
+
+# Dependabot never updates gradle/verification-metadata.xml, so every grouped Gradle
+# update fails CI. This job regenerates the checksums for review; it never commits them,
+# because checksum changes must be read by a person before they are trusted.
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**/*.gradle.kts'
+      - 'gradle/**'
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event.pull_request.number }}"
+  cancel-in-progress: true
+
+jobs:
+  regenerate-verification-metadata:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up JDK
+        timeout-minutes: 5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: 'temurin'
+          java-version: 25
+
+      - name: Set up Node.js
+        timeout-minutes: 5
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+
+      - name: Set up Gradle
+        timeout-minutes: 5
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6
+        with:
+          cache-read-only: true
+
+      # The full build resolves the detached test configurations that CI verifies. Test or
+      # Pester failures do not matter here; only the regenerated metadata does.
+      - name: Regenerate verification metadata
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          .\gradlew.bat --write-verification-metadata sha256 --continue build
+          Write-Output "Gradle exited with code $LASTEXITCODE; this job reports only the metadata diff."
+          exit 0
+
+      - name: Describe metadata changes
+        id: metadata
+        shell: pwsh
+        timeout-minutes: 5
+        env:
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $metadataPath = 'gradle/verification-metadata.xml'
+          $addedComponentLines = @(git diff --unified=0 -- $metadataPath |
+            Select-String -Pattern '^\+\s*<component ' |
+            ForEach-Object { $_.Line.Substring(1).Trim() })
+          if ($LASTEXITCODE -ne 0) { throw "git diff failed with exit code $LASTEXITCODE." }
+          $hasChanges = -not [string]::IsNullOrWhiteSpace((git status --porcelain -- $metadataPath))
+          "changed=$($hasChanges.ToString().ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+          $summaryLines = [Collections.Generic.List[string]]::new()
+          $summaryLines.Add('## Dependency verification metadata')
+          $summaryLines.Add('')
+          if (-not $hasChanges) {
+            $summaryLines.Add('No verification-metadata changes are needed for this update.')
+          } else {
+            $summaryLines.Add("Regenerated checksums add $($addedComponentLines.Count) component entries:")
+            $summaryLines.Add('')
+            $summaryLines.Add('```xml')
+            foreach ($addedComponentLine in $addedComponentLines) { $summaryLines.Add($addedComponentLine) }
+            $summaryLines.Add('```')
+            $summaryLines.Add('')
+            $summaryLines.Add('Review the new components, then apply the file to this branch:')
+            $summaryLines.Add('')
+            $summaryLines.Add('```powershell')
+            $summaryLines.Add("git fetch origin $env:BRANCH; git switch $env:BRANCH")
+            $summaryLines.Add("gh run download $env:RUN_ID --repo $env:REPOSITORY --name verification-metadata --dir gradle")
+            $summaryLines.Add('git add gradle/verification-metadata.xml')
+            $summaryLines.Add("git commit -m 'Update dependency verification metadata'")
+            $summaryLines.Add('git push')
+            $summaryLines.Add('```')
+          }
+          $summaryLines -join "`n" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload regenerated verification metadata
+        if: steps.metadata.outputs.changed == 'true'
+        timeout-minutes: 5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: verification-metadata
+          retention-days: 7
+          path: gradle/verification-metadata.xml

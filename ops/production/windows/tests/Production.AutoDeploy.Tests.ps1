@@ -42,6 +42,9 @@ Describe 'automatic origin main deployment' {
         Mock Get-Service { [pscustomobject]@{ Status='Running' } } `
             -ModuleName Production.AutoDeploy
         Mock Wait-HttpStatus { } -ModuleName Production.AutoDeploy
+        # Existing scenarios describe commits that already passed CI on a host without a token.
+        Mock Get-AutoDeployCiConclusion { 'SUCCESS' } -ModuleName Production.AutoDeploy
+        Mock Read-AutoDeployGitHubToken { $null } -ModuleName Production.AutoDeploy
     }
 
     It 'warns once with sanitized details when status publication fails' {
@@ -1940,5 +1943,399 @@ Describe 'automatic deployment state reads' {
 
         $caught | Should -BeOfType [UnauthorizedAccessException]
         $caught.Message | Should -Be 'simulated state read denial'
+    }
+}
+
+Describe 'automatic deployment CI gate and GitHub reporting' {
+    BeforeAll {
+        $script:remoteSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+        $script:activeSha = '0123456789012345678901234567890123456789'
+        $script:validToken = 'github_pat_' + ('A1b2C3d4E5' * 4)
+    }
+
+    BeforeEach {
+        $script:config = [pscustomobject]@{
+            programDataRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            repositoryPath = $TestDrive
+            remote = 'origin'
+            branch = 'main'
+            productionPort = 8080
+            publicUrl = 'https://www.christopherbell.dev/'
+            autoDeployFailureBackoffSeconds = 900
+        }
+        $script:publishedOutcomes = [Collections.Generic.List[string]]::new()
+        $script:publishedCategories = [Collections.Generic.List[string]]::new()
+        $script:gitHubCalls = [Collections.Generic.List[object]]::new()
+        $script:activeReleaseReads = 0
+        Mock Assert-ProductionFixedRootBoundary { } -ModuleName Production.AutoDeploy
+        Mock Read-ProductionMusicSchemaDirection {
+            [pscustomobject]@{ state='TARGET_ACTIVE' }
+        } -ModuleName Production.AutoDeploy
+        Mock Get-Service { [pscustomobject]@{ Status='Running' } } -ModuleName Production.AutoDeploy
+        Mock Wait-HttpStatus { } -ModuleName Production.AutoDeploy
+        Mock Get-RemoteMainSha { $script:remoteSha } -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha {
+            if ($script:activeReleaseReads++ -eq 0) { $script:activeSha } else { $script:remoteSha }
+        } -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatus {
+            param([string]$Outcome, [string]$FailureCategory)
+            $script:publishedOutcomes.Add($Outcome)
+            $script:publishedCategories.Add($FailureCategory)
+        } -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionDeploy { } -ModuleName Production.AutoDeploy
+        Mock Get-AutoDeployGitHubRepository { 'azurras/christopherbell.dev' } -ModuleName Production.AutoDeploy
+        Mock Read-AutoDeployGitHubToken { $null } -ModuleName Production.AutoDeploy
+        Mock Invoke-AutoDeployGitHubApi {
+            param([string]$Path, [string]$Method = 'Get', [hashtable]$Body, [string]$Token)
+            $script:gitHubCalls.Add([pscustomobject]@{ Path=$Path; Method=$Method; Body=$Body; Token=$Token })
+            if ($Method -eq 'Post' -and $Path -like '*/deployments') { return [pscustomobject]@{ id = 77 } }
+            return [pscustomobject]@{}
+        } -ModuleName Production.AutoDeploy
+    }
+
+    It 'waits without deploying while CI for the new commit is pending' {
+        Mock Get-AutoDeployCiConclusion { 'PENDING' } -ModuleName Production.AutoDeploy
+
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
+        $script:publishedOutcomes[-1] | Should -Be 'AWAITING_CI'
+        (Read-AutoDeployState $config).attemptedSha | Should -BeNullOrEmpty
+    }
+
+    It 'refuses a commit whose CI failed and reuses that verdict until the failure backoff ends' {
+        Mock Get-AutoDeployCiConclusion { 'FAILED' } -ModuleName Production.AutoDeploy
+
+        Invoke-AutoDeployOnce $config
+        $script:activeReleaseReads = 0
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
+        Should -Invoke Get-AutoDeployCiConclusion -Times 1 -Exactly -ModuleName Production.AutoDeploy
+        $script:publishedOutcomes[-1] | Should -Be 'CI_FAILED'
+        $script:publishedCategories[-1] | Should -Be 'CI_RESULT'
+
+        $state = Read-AutoDeployState $config
+        $state.ciSha | Should -Be $script:remoteSha
+        $state.ciCheckedAt = ([datetime]::UtcNow.AddMinutes(-16)).ToString('o')
+        Write-AutoDeployState $config $state
+        Mock Get-AutoDeployCiConclusion { 'SUCCESS' } -ModuleName Production.AutoDeploy
+        $script:activeReleaseReads = 0
+
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Invoke-ProductionDeploy -Times 1 -Exactly -ModuleName Production.AutoDeploy
+    }
+
+    It 'reports a CI lookup failure as a failed CI check without deploying' {
+        Mock Get-AutoDeployCiConclusion { throw 'GitHub API GET repos/x returned HTTP 502.' } `
+            -ModuleName Production.AutoDeploy
+
+        { Invoke-AutoDeployOnce $config } | Should -Throw '*HTTP 502*'
+
+        Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
+        $script:publishedOutcomes[-1] | Should -Be 'CHECK_FAILED'
+        $script:publishedCategories[-1] | Should -Be 'CI_CHECK'
+    }
+
+    It 'still surfaces a failed service recovery while CI holds the new commit' {
+        Mock Get-AutoDeployCiConclusion { 'PENDING' } -ModuleName Production.AutoDeploy
+        Mock Invoke-AutoDeployWebsiteRecovery { throw 'active release would not start' } `
+            -ModuleName Production.AutoDeploy
+
+        { Invoke-AutoDeployOnce $config } | Should -Throw '*active release would not start*'
+
+        $script:publishedOutcomes[-1] | Should -Be 'DEPLOYMENT_FAILED'
+        Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
+    }
+
+    It 'records a successful deployment in the Production environment when a token is installed' {
+        Mock Get-AutoDeployCiConclusion { 'SUCCESS' } -ModuleName Production.AutoDeploy
+        Mock Read-AutoDeployGitHubToken { $script:validToken } -ModuleName Production.AutoDeploy
+
+        Invoke-AutoDeployOnce $config
+
+        $writes = @($script:gitHubCalls | Where-Object Method -eq 'Post')
+        $writes.Path | Should -Be @(
+            'repos/azurras/christopherbell.dev/deployments',
+            'repos/azurras/christopherbell.dev/deployments/77/statuses',
+            'repos/azurras/christopherbell.dev/deployments/77/statuses')
+        $writes[0].Body.ref | Should -Be $script:remoteSha
+        $writes[0].Body.environment | Should -Be 'Production'
+        $writes[0].Body.auto_merge | Should -BeFalse
+        @($writes[0].Body.required_contexts).Count | Should -Be 0
+        $writes[1].Body.state | Should -Be 'in_progress'
+        $writes[2].Body.state | Should -Be 'success'
+        $writes[2].Body.environment_url | Should -Be 'https://www.christopherbell.dev/'
+        $writes.Token | Should -Be @($script:validToken, $script:validToken, $script:validToken)
+    }
+
+    It 'records a failed deployment with a sanitized description and still surfaces the failure' {
+        Mock Get-AutoDeployCiConclusion { 'SUCCESS' } -ModuleName Production.AutoDeploy
+        Mock Read-AutoDeployGitHubToken { $script:validToken } -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionDeploy { throw 'Candidate smoke check failed for /blog.' } `
+            -ModuleName Production.AutoDeploy
+
+        { Invoke-AutoDeployOnce $config } | Should -Throw '*Candidate smoke check failed*'
+
+        $finalStatus = @($script:gitHubCalls | Where-Object Method -eq 'Post')[-1]
+        $finalStatus.Body.state | Should -Be 'failure'
+        $finalStatus.Body.description.Length | Should -BeLessOrEqual 140
+        $finalStatus.Body.description | Should -Not -BeNullOrEmpty
+        (Read-AutoDeployState $config).failedSha | Should -Be $script:remoteSha
+    }
+
+    It 'deploys normally and warns once without the token when GitHub reporting fails' {
+        Mock Get-AutoDeployCiConclusion { 'SUCCESS' } -ModuleName Production.AutoDeploy
+        Mock Read-AutoDeployGitHubToken { $script:validToken } -ModuleName Production.AutoDeploy
+        Mock Invoke-AutoDeployGitHubApi { throw "GitHub API POST failed for $script:validToken" } `
+            -ModuleName Production.AutoDeploy
+        InModuleScope Production.AutoDeploy { $script:autoDeployGitHubWarningEmitted = $false }
+
+        $warnings = @(Invoke-AutoDeployOnce $config 3>&1 |
+            Where-Object { $_ -is [Management.Automation.WarningRecord] })
+
+        Should -Invoke Invoke-ProductionDeploy -Times 1 -Exactly -ModuleName Production.AutoDeploy
+        (Read-AutoDeployState $config).successfulSha | Should -Be $script:remoteSha
+        $script:publishedOutcomes[-1] | Should -Be 'SUCCEEDED'
+        $warnings | Should -HaveCount 1
+        [string]$warnings[0] | Should -Not -Match ([regex]::Escape($script:validToken))
+    }
+
+    It 'makes no GitHub writes when no token is installed' {
+        Mock Get-AutoDeployCiConclusion { 'SUCCESS' } -ModuleName Production.AutoDeploy
+
+        Invoke-AutoDeployOnce $config
+
+        @($script:gitHubCalls | Where-Object Method -eq 'Post') | Should -HaveCount 0
+    }
+
+    It 'refuses to install first tools for a commit that has not passed CI' {
+        InModuleScope Production.AutoDeploy -Parameters @{ Config = $script:config } {
+            param($Config)
+            Mock Get-ScheduledTask { [pscustomobject]@{ Actions=@() } }
+            Mock Get-RemoteMainSha { 'abcdefabcdefabcdefabcdefabcdefabcdefabcd' }
+            Mock Resolve-OriginMainRelease { 'abcdefabcdefabcdefabcdefabcdefabcdefabcd' }
+            Mock Get-AutoDeployCiConclusion { 'PENDING' }
+            Mock Invoke-CheckedProcess { throw 'tools must not be staged before CI passes' }
+            Mock Set-ScheduledTask { throw 'task action must not change before CI passes' }
+
+            { Update-AutoDeployToolsFromOriginMain -Config $Config } |
+                Should -Throw '*until CI passes*'
+            Should -Invoke Set-ScheduledTask -Times 0
+        }
+    }
+}
+
+Describe 'automatic deployment CI conclusion' {
+    BeforeEach {
+        $script:config = [pscustomobject]@{
+            programDataRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            repositoryPath = $TestDrive
+            remote = 'origin'
+            branch = 'main'
+        }
+    }
+
+    It 'maps the newest CI push run on a commit to <Expected>' -ForEach @(
+        @{ Runs = @(); Expected = 'PENDING' }
+        @{ Runs = @(@{ run_number = 5; status = 'in_progress'; conclusion = $null }); Expected = 'PENDING' }
+        @{ Runs = @(@{ run_number = 5; status = 'completed'; conclusion = 'success' }); Expected = 'SUCCESS' }
+        @{ Runs = @(@{ run_number = 5; status = 'completed'; conclusion = 'cancelled' }); Expected = 'FAILED' }
+        @{ Runs = @(
+                @{ run_number = 5; status = 'completed'; conclusion = 'failure' },
+                @{ run_number = 6; status = 'completed'; conclusion = 'success' }); Expected = 'SUCCESS' }
+    ) {
+        InModuleScope Production.AutoDeploy -Parameters @{ Config = $script:config; Runs = $Runs; Expected = $Expected } {
+            param($Config, $Runs, $Expected)
+            $script:requestedPath = $null
+            Mock Get-AutoDeployGitHubRepository { 'azurras/christopherbell.dev' }
+            Mock Invoke-AutoDeployGitHubReadApi {
+                param($Config, [string]$Path)
+                $script:requestedPath = $Path
+                [pscustomobject]@{ workflow_runs = @($Runs | ForEach-Object { [pscustomobject]$_ }) }
+            }
+
+            Get-AutoDeployCiConclusion -Config $Config -Sha 'abcdefabcdefabcdefabcdefabcdefabcdefabcd' |
+                Should -Be $Expected
+            $script:requestedPath | Should -Be ('repos/azurras/christopherbell.dev/actions/workflows/ci.yml/runs' +
+                '?head_sha=abcdefabcdefabcdefabcdefabcdefabcdefabcd&event=push&branch=main&per_page=5')
+        }
+    }
+
+    It 'falls back to anonymous reads once when the installed token is rejected' {
+        InModuleScope Production.AutoDeploy -Parameters @{ Config = $script:config } {
+            param($Config)
+            $script:autoDeployGitHubWarningEmitted = $false
+            $script:readTokens = [Collections.Generic.List[string]]::new()
+            $script:rejectedToken = 'github_pat_' + ('Z9y8X7w6V5' * 4)
+            Mock Read-AutoDeployGitHubToken { $script:rejectedToken }
+            Mock Invoke-AutoDeployGitHubApi {
+                param([string]$Path, [string]$Token)
+                $script:readTokens.Add([string]$Token)
+                if ($Token) {
+                    $rejection = [InvalidOperationException]::new('GitHub API GET returned HTTP 401.')
+                    $rejection.Data['StatusCode'] = 401
+                    throw $rejection
+                }
+                [pscustomobject]@{ workflow_runs = @() }
+            }
+            $warnings = @()
+
+            $result = Invoke-AutoDeployGitHubReadApi -Config $Config -Path 'repos/o/r/actions/runs' `
+                -WarningVariable +warnings -WarningAction SilentlyContinue
+
+            @($result.workflow_runs).Count | Should -Be 0
+            $script:readTokens | Should -Be @($script:rejectedToken, '')
+            $warnings | Should -HaveCount 1
+            [string]$warnings[0] | Should -Not -Match $script:rejectedToken
+        }
+    }
+
+    It 'does not hide a non-authentication failure behind an anonymous retry' {
+        InModuleScope Production.AutoDeploy -Parameters @{ Config = $script:config } {
+            param($Config)
+            Mock Read-AutoDeployGitHubToken { 'github_pat_' + ('Z9y8X7w6V5' * 4) }
+            Mock Invoke-AutoDeployGitHubApi {
+                $outage = [InvalidOperationException]::new('GitHub API GET returned HTTP 502.')
+                $outage.Data['StatusCode'] = 502
+                throw $outage
+            }
+
+            { Invoke-AutoDeployGitHubReadApi -Config $Config -Path 'repos/o/r/actions/runs' } |
+                Should -Throw '*HTTP 502*'
+            Should -Invoke Invoke-AutoDeployGitHubApi -Times 1 -Exactly
+        }
+    }
+
+    It 'parses the GitHub repository from the configured HTTPS remote <RemoteUrl>' -ForEach @(
+        @{ RemoteUrl = 'https://github.com/azurras/christopherbell.dev.git'; Expected = 'azurras/christopherbell.dev' }
+        @{ RemoteUrl = 'https://github.com/azurras/christopherbell.dev'; Expected = 'azurras/christopherbell.dev' }
+    ) {
+        InModuleScope Production.AutoDeploy -Parameters @{ Config = $script:config; RemoteUrl = $RemoteUrl; Expected = $Expected } {
+            param($Config, $RemoteUrl, $Expected)
+            $script:remoteUrlOutput = "$RemoteUrl`n"
+            Mock Invoke-CheckedProcess { $script:remoteUrlOutput }
+
+            Get-AutoDeployGitHubRepository $Config | Should -Be $Expected
+        }
+    }
+
+    It 'rejects a remote that is not an HTTPS GitHub repository' {
+        InModuleScope Production.AutoDeploy -Parameters @{ Config = $script:config } {
+            param($Config)
+            Mock Invoke-CheckedProcess { 'git@github.com:azurras/christopherbell.dev.git' }
+
+            { Get-AutoDeployGitHubRepository $Config } | Should -Throw '*not an HTTPS GitHub repository*'
+        }
+    }
+}
+
+Describe 'GitHub deployment token' {
+    BeforeEach {
+        $script:config = [pscustomobject]@{
+            programDataRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            repositoryPath = $TestDrive
+            remote = 'origin'
+        }
+        New-Item -ItemType Directory -Path (Join-Path $config.programDataRoot 'config') -Force | Out-Null
+        $script:validToken = 'github_pat_' + ('A1b2C3d4E5' * 4)
+        $script:sourcePath = Join-Path $TestDrive 'token-source.txt'
+        Set-Content -LiteralPath $sourcePath -Value "$validToken`n"
+        $script:tokenPath = Join-Path $config.programDataRoot 'config\github-deployments.token'
+    }
+
+    It 'reads no token when reporting is not configured' {
+        Read-AutoDeployGitHubToken $config | Should -BeNullOrEmpty
+    }
+
+    It 'reads a token only from a protected file' {
+        Set-Content -LiteralPath $tokenPath -Value $validToken
+        Mock Assert-ProtectedProductionPath { } -ModuleName Production.AutoDeploy
+
+        Read-AutoDeployGitHubToken $config | Should -Be $validToken
+        Should -Invoke Assert-ProtectedProductionPath -Times 1 -Exactly -ModuleName Production.AutoDeploy `
+            -ParameterFilter { $Path -eq $tokenPath }
+    }
+
+    It 'rejects a token file that does not hold a GitHub token' {
+        Set-Content -LiteralPath $tokenPath -Value 'not a token'
+        Mock Assert-ProtectedProductionPath { } -ModuleName Production.AutoDeploy
+
+        { Read-AutoDeployGitHubToken $config } | Should -Throw '*does not contain a GitHub token*'
+    }
+
+    It 'verifies then stores the token in a file protected before the secret is written' {
+        InModuleScope Production.AutoDeploy -Parameters @{
+            Config = $script:config; SourcePath = $script:sourcePath; TokenPath = $script:tokenPath; Token = $script:validToken
+        } {
+            param($Config, $SourcePath, $TokenPath, $Token)
+            $script:tokenEvents = [Collections.Generic.List[string]]::new()
+            Mock Assert-ProductionFixedRootBoundary { }
+            Mock Get-AutoDeployGitHubRepository { 'azurras/christopherbell.dev' }
+            Mock Invoke-AutoDeployGitHubApi { $script:tokenEvents.Add("verify:$Path"); @() }
+            Mock Protect-ProductionPath {
+                $script:tokenEvents.Add("protect-length:$((Get-Item -LiteralPath $Path).Length)")
+            }
+            Mock Assert-ProtectedProductionPath { $script:tokenEvents.Add('assert') }
+
+            Install-AutoDeployGitHubToken -SourcePath $SourcePath -Config $Config | Out-Null
+
+            Get-Content -LiteralPath $TokenPath -Raw | Should -Be $Token
+            $script:tokenEvents | Should -Be @(
+                'verify:repos/azurras/christopherbell.dev/deployments?per_page=1',
+                'protect-length:0',
+                'assert')
+        }
+    }
+
+    It 'stores nothing when the token is malformed or GitHub rejects it' {
+        InModuleScope Production.AutoDeploy -Parameters @{
+            Config = $script:config; SourcePath = $script:sourcePath; TokenPath = $script:tokenPath
+        } {
+            param($Config, $SourcePath, $TokenPath)
+            Mock Assert-ProductionFixedRootBoundary { }
+            Mock Get-AutoDeployGitHubRepository { 'azurras/christopherbell.dev' }
+            Mock Invoke-AutoDeployGitHubApi { throw 'GitHub API GET returned HTTP 401.' }
+            Mock Protect-ProductionPath { }
+
+            { Install-AutoDeployGitHubToken -SourcePath $SourcePath -Config $Config } |
+                Should -Throw '*HTTP 401*'
+            Set-Content -LiteralPath $SourcePath -Value 'ghp_short'
+            { Install-AutoDeployGitHubToken -SourcePath $SourcePath -Config $Config } |
+                Should -Throw '*does not contain a GitHub token*'
+
+            Test-Path -LiteralPath $TokenPath | Should -BeFalse
+            Should -Invoke Invoke-AutoDeployGitHubApi -Times 1 -Exactly
+        }
+    }
+}
+
+Describe 'automatic deployment CI status outcomes' {
+    It 'publishes and reads back <Outcome> with category <Category>' -ForEach @(
+        @{ Outcome = 'AWAITING_CI'; Category = 'NONE' }
+        @{ Outcome = 'CI_FAILED'; Category = 'CI_RESULT' }
+        @{ Outcome = 'CHECK_FAILED'; Category = 'CI_CHECK' }
+    ) {
+        InModuleScope Production.AutoDeploy -Parameters @{ Outcome = $Outcome; Category = $Category } {
+            param($Outcome, $Category)
+            $statusRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+            Mock Get-AutoDeployTaskSchedulerEntry {
+                [pscustomobject]@{ registered=$false; state=$null; reason='TASK_NOT_REGISTERED' }
+            }
+            Mock Get-Service { [pscustomobject]@{ Status='Running' } }
+            Mock Wait-HttpStatus { }
+
+            Publish-AutoDeployStatus -Outcome $Outcome -FailureCategory $Category `
+                -State (New-AutoDeployState) -StatusRoot $statusRoot
+            $result = Get-AutoDeployStatus -StatusRoot $statusRoot
+
+            $result.status | Should -Be $Outcome
+            $result.failureCategory | Should -Be $Category
+            $result.message | Should -Not -BeNullOrEmpty
+        }
     }
 }

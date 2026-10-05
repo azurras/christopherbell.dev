@@ -142,6 +142,20 @@ Describe 'native Windows production command surface' {
         $makefile | Should -Match '\bprod-mongo-inventory\b'
     }
 
+    It 'routes the GitHub deployment token install with its source path' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
+        Mock Install-AutoDeployGitHubToken { }
+
+        { Invoke-ProductionCommand -Command 'github-token-install' } |
+            Should -Throw '*requires -GitHubTokenPath*'
+        Invoke-ProductionCommand -Command 'github-token-install' -GitHubTokenPath 'C:\Secure\github-token.txt'
+
+        Should -Invoke Install-AutoDeployGitHubToken -Times 1 -Exactly `
+            -ParameterFilter { $SourcePath -eq 'C:\Secure\github-token.txt' -and -not $WhatIf }
+        (Get-Content (Join-Path $root 'Makefile') -Raw) | Should -Not -Match 'prod-github-token-install'
+    }
+
     It 'routes the read-only domain collection preview without a confirmation switch' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
