@@ -48,7 +48,7 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
 
   @Override
   public Map<String, MetricReading> read(Instant sampledAt) {
-    ProbeResult result = probe.read();
+    var result = probe.read();
     var readings = new LinkedHashMap<String, MetricReading>();
     readings.put("production.port", available(
         "production.port", "Production port", properties.getProductionPort(), "port", sampledAt));
@@ -154,10 +154,10 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
         }
         String output = new String(process.getInputStream().readNBytes(8_192), StandardCharsets.UTF_8);
         return Optional.of(process.exitValue() == 0 && output.contains("RUNNING"));
-      } catch (Exception failure) {
-        if (failure instanceof InterruptedException) {
-          Thread.currentThread().interrupt();
-        }
+      } catch (IOException failure) {
+        return Optional.empty();
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
         return Optional.empty();
       } finally {
         if (process != null && process.isAlive()) {
@@ -179,10 +179,10 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
           return OptionalDouble.empty();
         }
         return OptionalDouble.of(Duration.ofNanos(System.nanoTime() - started).toNanos() / 1_000_000.0);
-      } catch (Exception failure) {
-        if (failure instanceof InterruptedException) {
-          Thread.currentThread().interrupt();
-        }
+      } catch (IOException failure) {
+        return OptionalDouble.empty();
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
         return OptionalDouble.empty();
       }
     }

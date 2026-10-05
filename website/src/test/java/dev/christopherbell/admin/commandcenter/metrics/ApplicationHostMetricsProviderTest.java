@@ -91,7 +91,6 @@ class ApplicationHostMetricsProviderTest {
     assertThat(readings.get("production.service.running").status()).isEqualTo(MetricStatus.UNAVAILABLE);
     assertThat(readings.get("application.local-response").status()).isEqualTo(MetricStatus.UNAVAILABLE);
   }
-
   @Test
   void propagatesUnexpectedProbeDefects() {
     var provider = new ApplicationHostMetricsProvider(
@@ -101,5 +100,15 @@ class ApplicationHostMetricsProviderTest {
     assertThatThrownBy(() -> provider.read(START))
         .isInstanceOf(IllegalStateException.class)
         .hasMessage("Unexpected probe defect");
+  }
+
+  @Test
+  void missingProviderTimeoutIsNotReportedAsAnUnavailableProbe() {
+    var properties = new CommandCenterProperties();
+    properties.setProviderTimeout(null);
+    var provider = new ApplicationHostMetricsProvider(properties, Clock.fixed(START, ZoneOffset.UTC));
+
+    assertThatThrownBy(() -> provider.read(START))
+        .isInstanceOf(NullPointerException.class);
   }
 }
