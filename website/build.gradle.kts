@@ -181,12 +181,20 @@ fun resolvePinnedArchive(
         throw GradleException(
             "Concurrent LibreHardwareMonitor cache publication failed verification: $cache")
     } catch (failure: Exception) {
-        Files.deleteIfExists(partial)
-        if (failure is GradleException) {
-            throw failure
+        try {
+            Files.deleteIfExists(partial)
+        } catch (cleanupFailure: Exception) {
+            if (cleanupFailure !== failure) {
+                failure.addSuppressed(cleanupFailure)
+            }
         }
-        throw GradleException(
-            "LibreHardwareMonitor upstream was unavailable within configured timeouts.", failure)
+        when (failure) {
+            is GradleException -> throw failure
+            is IOException -> throw GradleException(
+                "LibreHardwareMonitor upstream was unavailable within configured timeouts.",
+                failure)
+            else -> throw failure
+        }
     }
 }
 
@@ -236,7 +244,7 @@ val prepareSensorResources = tasks.register("prepareSensorResources") {
         val archivePath = resolvePinnedArchive(
             sensorArchiveCache.get().toPath(),
             libreHardwareMonitorArchiveSha256,
-            offlineMode) { target ->
+            offline = offlineMode) { target ->
             downloadPinnedArchive(libreHardwareMonitorUri, target)
         }
         val output = sensorResourceDirectory.get().dir("lib").asFile.toPath()
@@ -276,21 +284,21 @@ val verifySensorArchiveResolution = tasks.register("verifySensorArchiveResolutio
 
         var downloads = 0
         val cache = root.resolve("clean-online.zip")
-        val resolved = resolvePinnedArchive(cache, expected, false) { target ->
+        val resolved = resolvePinnedArchive(cache, expected, offline = false) { target ->
             downloads++
             Files.write(target, payload)
         }
         check(resolved == cache && downloads == 1 && sha256(cache) == expected) {
             "Clean online sensor resolution did not publish one verified cache file."
         }
-        resolvePinnedArchive(cache, expected, true) {
+        resolvePinnedArchive(cache, expected, offline = true) {
             error("Cached offline resolution attempted a download.")
         }
         check(downloads == 1) { "Cached offline resolution performed a second download." }
 
         val offlineMissing = root.resolve("offline-missing.zip")
         try {
-            resolvePinnedArchive(offlineMissing, expected, true) {
+            resolvePinnedArchive(offlineMissing, expected, offline = true) {
                 error("Offline missing-cache resolution attempted a download.")
             }
             error("Offline missing-cache resolution was accepted.")
@@ -304,7 +312,7 @@ val verifySensorArchiveResolution = tasks.register("verifySensorArchiveResolutio
         val corruptCache = root.resolve("corrupt-cache.zip")
         Files.write(corruptCache, "corrupt-cache".toByteArray())
         try {
-            resolvePinnedArchive(corruptCache, expected, false) {
+            resolvePinnedArchive(corruptCache, expected, offline = false) {
                 error("Corrupt existing cache attempted a replacement download.")
             }
             error("Corrupt existing sensor cache was accepted.")
@@ -316,7 +324,7 @@ val verifySensorArchiveResolution = tasks.register("verifySensorArchiveResolutio
         }
 
         val concurrent = root.resolve("concurrent.zip")
-        val concurrentResult = resolvePinnedArchive(concurrent, expected, false) { target ->
+        val concurrentResult = resolvePinnedArchive(concurrent, expected, offline = false) { target ->
             Files.write(target, payload)
             Files.write(concurrent, payload)
         }
@@ -327,7 +335,7 @@ val verifySensorArchiveResolution = tasks.register("verifySensorArchiveResolutio
 
         val corrupt = root.resolve("corrupt-download.zip")
         try {
-            resolvePinnedArchive(corrupt, expected, false) { target ->
+            resolvePinnedArchive(corrupt, expected, offline = false) { target ->
                 Files.write(target, "corrupt".toByteArray())
             }
             error("Corrupt sensor download was accepted.")
@@ -340,7 +348,7 @@ val verifySensorArchiveResolution = tasks.register("verifySensorArchiveResolutio
 
         val unavailable = root.resolve("unavailable.zip")
         try {
-            resolvePinnedArchive(unavailable, expected, false) {
+            resolvePinnedArchive(unavailable, expected, offline = false) {
                 throw IOException("simulated unavailable upstream")
             }
             error("Unavailable sensor upstream was accepted.")
@@ -349,6 +357,24 @@ val verifySensorArchiveResolution = tasks.register("verifySensorArchiveResolutio
         }
         check(Files.notExists(unavailable) && !hasSensorPartial(root, "unavailable.zip.")) {
             "Unavailable sensor resolution left a published or partial cache file."
+        }
+
+        val programmingDefect = IllegalStateException("simulated downloader programming defect")
+        val defectiveDownload = root.resolve("programming-defect.zip")
+        val observedDefect = try {
+            resolvePinnedArchive(defectiveDownload, expected, offline = false) {
+                throw programmingDefect
+            }
+            null
+        } catch (failure: Exception) {
+            failure
+        }
+        check(observedDefect === programmingDefect) {
+            "A downloader programming defect was translated instead of propagated unchanged."
+        }
+        check(Files.notExists(defectiveDownload) &&
+            !hasSensorPartial(root, "programming-defect.zip.")) {
+            "Programming failure left a published or partial archive."
         }
     }
 }
