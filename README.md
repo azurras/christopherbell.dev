@@ -180,6 +180,10 @@ $mongoListener = Get-NetTCPConnection -State Listen -LocalPort $mongoPort
 if ($mongoListener.OwningProcess -ne $mongoProcess.Id) {
     throw 'The disposable MongoDB listener is not owned by the launched process.'
 }
+$javaSocketRoot = Join-Path $env:SystemDrive `
+    ('Temp\cbell-jdk-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $javaSocketRoot -Force | Out-Null
+$env:JAVA_TOOL_OPTIONS = "-Djdk.net.unixdomain.tmpdir=$javaSocketRoot"
 ```
 
 If the listener is not owned by `$mongoProcess.Id`, stop and investigate; do not
@@ -206,7 +210,9 @@ child of `[IO.Path]::GetTempPath()` with the generated
 `christopherbell-test-mongo-<guid>` name. Never run this flow against a restored
 production database or an existing production listener. Remove the temporary
 `SPRING_PROFILES_ACTIVE`, `SPRING_MONGODB_URI`, and `APP_JWT_SECRET` values from
-the shell after the run.
+the shell after the run. Also clear `JAVA_TOOL_OPTIONS` and remove only the
+resolved `$javaSocketRoot` whose parent is `<system-drive>\Temp` and whose name
+matches `cbell-jdk-<guid>`.
 
 Database shape changes must be appended through the versioned migration runner;
 never edit an applied migration ID or checksum. See the

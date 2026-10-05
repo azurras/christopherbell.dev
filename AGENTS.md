@@ -71,7 +71,10 @@ test database can complete V015 through the normal migration runner without a
 fabricated cutover ledger. Other profiles still require the genuine
 `TARGET_ACTIVE` ledger. The test bootstrap rejects populated domain collections,
 unknown collections, malformed migration state, and any URI outside this exact
-test target. Follow the disposable setup and cleanup steps in `README.md`.
+test target. For Java 25 on Windows, use the README's generated short Unix
+socket temp directory through `JAVA_TOOL_OPTIONS`; clean up that directory and
+the disposable Mongo directory after the run. Follow the setup steps in
+`README.md`.
 
 ## Architecture Rules
 
