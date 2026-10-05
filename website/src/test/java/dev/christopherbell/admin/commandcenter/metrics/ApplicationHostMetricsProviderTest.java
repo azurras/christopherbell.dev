@@ -69,6 +69,17 @@ class ApplicationHostMetricsProviderTest {
   }
 
   @Test
+  void malformedOrNonRegularReleaseMetadataReturnsEmpty() throws Exception {
+    Path metadata = tempDir.resolve("release.json");
+    Files.writeString(metadata, "{");
+
+    assertThat(ApplicationHostMetricsProvider.readReleaseCommit(metadata)).isEmpty();
+
+    Path metadataDirectory = Files.createDirectory(tempDir.resolve("metadata-directory"));
+    assertThat(ApplicationHostMetricsProvider.readReleaseCommit(metadataDirectory)).isEmpty();
+  }
+
+  @Test
   void probeFailuresHaveExplicitUnavailableSemantics() {
     var provider = new ApplicationHostMetricsProvider(
         new CommandCenterProperties(), Clock.fixed(START, ZoneOffset.UTC),

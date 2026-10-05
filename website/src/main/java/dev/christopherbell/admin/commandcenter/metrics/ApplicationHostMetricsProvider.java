@@ -3,6 +3,7 @@ package dev.christopherbell.admin.commandcenter.metrics;
 import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.MetricReading;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.MetricStatus;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -21,6 +22,7 @@ import java.util.OptionalDouble;
 import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 /** Publishes fixed production-service and local application reachability metrics. */
@@ -91,7 +93,7 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
       if (sha == null || !sha.isString()) return Optional.empty();
       String value = sha.stringValue();
       return value.matches("^[0-9a-f]{40}$") ? Optional.of(value) : Optional.empty();
-    } catch (Exception failure) {
+    } catch (IOException | JacksonException failure) {
       return Optional.empty();
     }
   }
