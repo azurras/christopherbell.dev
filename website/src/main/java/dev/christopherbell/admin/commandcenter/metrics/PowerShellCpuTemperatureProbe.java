@@ -8,9 +8,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.OptionalDouble;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
@@ -141,6 +144,21 @@ final class PowerShellCpuTemperatureProbe
       boolean timedOut,
       boolean outputTruncated) {}
 
+  record BoundedOutput(String text, boolean truncated) {}
+
+  static BoundedOutput awaitOutput(Future<BoundedOutput> outputTask)
+      throws InterruptedException {
+    try {
+      return outputTask.get(TERMINATION_GRACE.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (InterruptedException failure) {
+      outputTask.cancel(true);
+      throw failure;
+    } catch (ExecutionException | TimeoutException | CancellationException failure) {
+      outputTask.cancel(true);
+      return new BoundedOutput("", true);
+    }
+  }
+
   private static final class JdkManagedProcess implements ManagedProcess {
     private final Process process;
     private final int maxOutputBytes;
@@ -165,8 +183,8 @@ final class PowerShellCpuTemperatureProbe
             () -> readBounded(process.getErrorStream(), maxOutputBytes));
         boolean completed = process.waitFor(Math.max(1, timeout.toMillis()), TimeUnit.MILLISECONDS);
         if (!completed) terminateTree();
-        var out = output(stdout);
-        var err = output(stderr);
+        var out = PowerShellCpuTemperatureProbe.awaitOutput(stdout);
+        var err = PowerShellCpuTemperatureProbe.awaitOutput(stderr);
         return new ProcessResult(
             out.text(),
             err.text(),
@@ -177,15 +195,6 @@ final class PowerShellCpuTemperatureProbe
         Thread.currentThread().interrupt();
         terminateTree();
         return new ProcessResult("", "", -1, true, false);
-      }
-    }
-
-    private static BoundedOutput output(Future<BoundedOutput> output) {
-      try {
-        return output.get(TERMINATION_GRACE.toMillis(), TimeUnit.MILLISECONDS);
-      } catch (Exception failure) {
-        output.cancel(true);
-        return new BoundedOutput("", true);
       }
     }
 
@@ -219,5 +228,4 @@ final class PowerShellCpuTemperatureProbe
     }
   }
 
-  private record BoundedOutput(String text, boolean truncated) {}
 }
