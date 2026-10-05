@@ -5,6 +5,7 @@ import { appendTextWithMentionLinks, authHeaders, fetchJson, formatWhen, isLogge
 let ACTIVE_USERNAME = null;
 let CONVERSATIONS = [];
 let THREAD_STATE = { items: [], nextCursor: null };
+let conversationSelectionGeneration = 0;
 let suggestionTimer = null;
 let suggestionRequest = null;
 const MESSAGE_SUGGESTION_LIMIT = 8;
@@ -189,55 +190,73 @@ function renderConversationActions() {
   archive?.classList.toggle('d-none', !ACTIVE_USERNAME);
 }
 
-async function loadConversations() {
-  CONVERSATIONS = await fetchJson(`${API.messages.conversations}?limit=30`, {
+async function loadConversations(selectionGeneration = null) {
+  const conversations = await fetchJson(`${API.messages.conversations}?limit=30`, {
     headers: authHeaders(),
     redirectOnUnauthorized: true,
   });
+  if (selectionGeneration !== null
+      && selectionGeneration !== conversationSelectionGeneration) return;
+  CONVERSATIONS = conversations;
   renderConversations();
+}
+
+function isCurrentConversationSelectionFor(username, selectionGeneration) {
+  return ACTIVE_USERNAME === username
+      && conversationSelectionGeneration === selectionGeneration;
 }
 
 async function openConversation(username) {
   if (!username) return;
   clearAlert();
   clearRecipientSuggestions();
-  ACTIVE_USERNAME = username.trim().replace(/^@/, '');
+  const selectedUsername = username.trim().replace(/^@/, '');
+  const selectionGeneration = ++conversationSelectionGeneration;
+  ACTIVE_USERNAME = selectedUsername;
   const title = document.getElementById('conversationTitle');
-  if (title) title.textContent = `@${ACTIVE_USERNAME}`;
+  if (title) title.textContent = `@${selectedUsername}`;
   const profileLink = document.getElementById('conversationProfileLink');
   if (profileLink) {
-    profileLink.href = `/u/${encodeURIComponent(ACTIVE_USERNAME)}`;
+    profileLink.href = `/u/${encodeURIComponent(selectedUsername)}`;
     profileLink.classList.remove('d-none');
   }
   document.getElementById('messageForm')?.classList.remove('d-none');
+  const olderMessagesButton = document.getElementById('loadOlderMessages');
+  if (olderMessagesButton) olderMessagesButton.disabled = false;
   renderConversations();
   const page = parseConversationPage(await fetchJson(
-      API.messages.conversationPage(ACTIVE_USERNAME, null, 50), {
+      API.messages.conversationPage(selectedUsername, null, 50), {
     headers: authHeaders(),
     redirectOnUnauthorized: true,
   }));
+  if (!isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) return;
   THREAD_STATE = page;
   renderMessages(THREAD_STATE.items);
   renderConversationActions();
-  await loadConversations();
+  await loadConversations(selectionGeneration);
+  if (!isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) return;
   renderConversations();
   const url = new URL(window.location.href);
-  url.searchParams.set('with', ACTIVE_USERNAME);
+  url.searchParams.set('with', selectedUsername);
   window.history.replaceState({}, '', url.toString());
 }
 
 async function loadOlderMessages() {
   if (!ACTIVE_USERNAME || !THREAD_STATE.nextCursor) return;
+  const selectedUsername = ACTIVE_USERNAME;
+  const selectionGeneration = conversationSelectionGeneration;
+  const nextCursor = THREAD_STATE.nextCursor;
   const button = document.getElementById('loadOlderMessages');
   const list = document.getElementById('messageList');
   const priorHeight = list?.scrollHeight || 0;
   try {
     if (button) button.disabled = true;
     const olderPage = parseConversationPage(await fetchJson(
-        API.messages.conversationPage(ACTIVE_USERNAME, THREAD_STATE.nextCursor, 50), {
+        API.messages.conversationPage(selectedUsername, nextCursor, 50), {
           headers: authHeaders(),
           redirectOnUnauthorized: true,
         }));
+    if (!isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) return;
     THREAD_STATE = {
       items: mergeOlderConversationPage(THREAD_STATE.items, olderPage),
       nextCursor: olderPage.nextCursor,
@@ -246,9 +265,12 @@ async function loadOlderMessages() {
     if (list) list.scrollTop = Math.max(0, list.scrollHeight - priorHeight);
     renderConversationActions();
   } catch (err) {
-    showAlert(err?.message || 'Failed to load older messages.');
+    if (isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) {
+      showAlert(err?.message || 'Failed to load older messages.');
+    }
   } finally {
-    if (button) button.disabled = false;
+    if (isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)
+        && button) button.disabled = false;
   }
 }
 
