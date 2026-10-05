@@ -2,6 +2,7 @@ package dev.christopherbell.music.catalog;
 
 import java.nio.file.Path;
 import java.util.List;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -65,7 +66,7 @@ public final class FfprobeMusicProbe implements MusicProbe {
           hasArtwork(streams));
     } catch (MusicProbeException failure) {
       throw failure;
-    } catch (Exception failure) {
+    } catch (JacksonException failure) {
       throw new MusicProbeException("FFprobe JSON is malformed.", failure);
     }
   }

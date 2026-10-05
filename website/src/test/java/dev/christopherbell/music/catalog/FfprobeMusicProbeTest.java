@@ -2,12 +2,15 @@ package dev.christopherbell.music.catalog;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 class FfprobeMusicProbeTest {
@@ -49,8 +52,28 @@ class FfprobeMusicProbeTest {
     assertRejected(new MusicProcessResult("", "", -1, true, false));
     assertRejected(new MusicProcessResult("{}", "", 0, false, true));
     assertRejected(new MusicProcessResult("{}", "failure", 1, false, false));
-    assertRejected(result("not-json"));
     assertRejected(result("{\"format\":{\"duration\":\"30\"},\"streams\":[]}"));
+  }
+
+  @Test
+  void malformedJsonRetainsTheJacksonParserFailure() {
+    var probe = new FfprobeMusicProbe(properties(), command -> result("not-json"), new ObjectMapper());
+
+    assertThatThrownBy(() -> probe.probe(tempDir.resolve("song.flac").toAbsolutePath().normalize()))
+        .isInstanceOf(MusicProbeException.class)
+        .hasCauseInstanceOf(JacksonException.class);
+  }
+
+  @Test
+  void unexpectedMapperRuntimeFailurePropagatesUnchanged() throws Exception {
+    String probeOutput = "{}";
+    var objectMapper = mock(ObjectMapper.class);
+    var expectedFailure = new IllegalStateException("mapper defect");
+    when(objectMapper.readTree(probeOutput)).thenThrow(expectedFailure);
+    var probe = new FfprobeMusicProbe(properties(), command -> result(probeOutput), objectMapper);
+
+    assertThatThrownBy(() -> probe.probe(tempDir.resolve("song.flac").toAbsolutePath().normalize()))
+        .isSameAs(expectedFailure);
   }
 
   private void assertRejected(MusicProcessResult result) {
