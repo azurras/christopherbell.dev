@@ -86,6 +86,29 @@ Run browser-side JavaScript tests:
 - Server-rendered page routes live in `dev.christopherbell.view`.
 - Cross-cutting filters/security/config live in `dev.christopherbell.configuration`.
 
+## Chris Street Style
+
+Use the Builder `write-chris-street-style-code` skill as the detailed standard
+for production code, tests, scripts, migrations, code-bearing configuration, and
+executable examples. Apply these principles in the repository's native
+language and tooling:
+
+- Read calls like sentences. Choose domain names that explain each value's
+  role, distinguish objects from identifiers and collections from items, and
+  include units when they are not obvious.
+- Give a materially transformed value a new name that describes its new
+  meaning; do not keep calling decoded, validated, or aggregated data by its
+  former name.
+- Validate external input at its boundary before relying on it. Parsing,
+  casting, and loading a persisted value do not establish domain validity.
+- Make I/O, mutation, cancellation, background work, and resource ownership
+  visible where they are controlled. Preserve the original cause when
+  translating an error and distinguish absence, rejected input, infrastructure
+  failures, and programming defects.
+- Prefer direct, small operations over abstractions without demonstrated reuse.
+  Test observable behavior with meaningful inputs and outputs, including the
+  failure paths the contract promises.
+
 ## Frontend Rules
 
 - Prefer vanilla JavaScript for frontend changes. Do not introduce frontend
