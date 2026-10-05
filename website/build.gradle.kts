@@ -533,9 +533,11 @@ val sharedFolderPesterInputs = rootProject.files(
     "ops/production/windows/config")
 val automationPesterFiles = rootProject.files(
     "ops/production/windows/tests/Production.AutoDeploy.Tests.ps1",
+    "ops/production/windows/tests/Production.OpsRequests.Tests.ps1",
     ".github/scripts/tests")
 val automationPesterInputs = rootProject.files(
     "ops/production/windows/modules",
+    "ops/requests",
     ".github/scripts")
 val requiredPesterVersion = "5.9.0"
 val pesterReportDirectory = layout.buildDirectory.dir("test-results/shared-folder-pester")

@@ -4,6 +4,7 @@ $script:FixedProductionRoot = 'C:\ProgramData\christopherbell.dev'
 
 $script:autoDeployStatusWarningEmitted = $false
 $script:autoDeployGitHubWarningEmitted = $false
+$script:autoDeployGitHubTokenExpiresAt = $null
 $script:GitHubApiRoot = 'https://api.github.com'
 $script:GitHubDeploymentEnvironment = 'Production'
 $script:GitHubTokenFileName = 'github-deployments.token'
@@ -28,6 +29,10 @@ function New-AutoDeployState {
         ciSha=$null
         ciConclusion=$null
         ciCheckedAt=$null
+        heldRemoteSha=$null
+        opsOnlyAcknowledgedSha=$null
+        githubTokenExpiresAt=$null
+        processedOpsRequests=@()
     }
 }
 
@@ -48,11 +53,17 @@ function Read-AutoDeployState {
             ciSha = $null
             ciConclusion = $null
             ciCheckedAt = $null
+            heldRemoteSha = $null
+            opsOnlyAcknowledgedSha = $null
+            githubTokenExpiresAt = $null
+            processedOpsRequests = @()
         }.GetEnumerator()) {
             if (-not $state.PSObject.Properties[$property.Key]) {
                 $state | Add-Member -NotePropertyName $property.Key -NotePropertyValue $property.Value
             }
         }
+        # A one-element JSON array reads back as a single object.
+        $state.processedOpsRequests = @($state.processedOpsRequests | Where-Object { $null -ne $_ })
         return $state
     }
     catch { throw 'Automatic deployment state is invalid JSON.' }
@@ -178,6 +189,7 @@ function Invoke-AutoDeployGitHubApi {
     }
     $response = Invoke-ProductionWebRequest @request
     $statusCode = [int]$response.StatusCode
+    if ($Token) { Save-AutoDeployGitHubTokenExpiration -Response $response }
     if ($statusCode -lt 200 -or $statusCode -ge 300) {
         $resource = ($Path -split '\?')[0]
         $failure = [InvalidOperationException]::new("GitHub API $Method $resource returned HTTP $statusCode.")
@@ -186,6 +198,35 @@ function Invoke-AutoDeployGitHubApi {
     }
     if ([string]::IsNullOrWhiteSpace([string]$response.Content)) { return $null }
     return [string]$response.Content | ConvertFrom-Json -ErrorAction Stop
+}
+
+function ConvertFrom-AutoDeployTokenExpirationHeader {
+    <#
+    Parses GitHub's github-authentication-token-expiration header, such as
+    "2026-11-04 15:00:00 UTC" or "2026-11-04 10:00:00 -0500", into a round-trip UTC string.
+    Returns $null for an absent or unrecognized value.
+    #>
+    param([AllowNull()][AllowEmptyString()][string]$HeaderValue)
+    if ($HeaderValue -cnotmatch '^(?<date>\d{4}-\d{2}-\d{2}) (?<time>\d{2}:\d{2}:\d{2}) (?<zone>UTC|[+-]\d{4})$') {
+        return $null
+    }
+    $offset = if ($Matches.zone -eq 'UTC') { '+00:00' } else {
+        $Matches.zone.Substring(0, 3) + ':' + $Matches.zone.Substring(3)
+    }
+    $expiresAt = [datetimeoffset]::Parse("$($Matches.date)T$($Matches.time)$offset",
+        [Globalization.CultureInfo]::InvariantCulture)
+    return $expiresAt.ToUniversalTime().ToString('o')
+}
+
+function Save-AutoDeployGitHubTokenExpiration {
+    <# Remembers the token expiry GitHub reports on authenticated responses for this poll. #>
+    param([Parameter(Mandatory)]$Response)
+    $headersProperty = $Response.PSObject.Properties['Headers']
+    if (-not $headersProperty -or $null -eq $headersProperty.Value) { return }
+    $headerValue = @($headersProperty.Value['github-authentication-token-expiration']) |
+        Select-Object -First 1
+    $expiresAt = ConvertFrom-AutoDeployTokenExpirationHeader -HeaderValue ([string]$headerValue)
+    if ($expiresAt) { $script:autoDeployGitHubTokenExpiresAt = $expiresAt }
 }
 
 function Invoke-AutoDeployGitHubReadApi {
@@ -308,12 +349,18 @@ function Start-AutoDeployGitHubDeployment {
     #>
     param(
         [Parameter(Mandatory)]$Config,
-        [Parameter(Mandatory)][string]$Sha
+        [Parameter(Mandatory)][string]$Sha,
+        [string]$Description = 'Automatic deployment of trusted main',
+        [string]$KnownTokenExpiresAt
     )
     try {
         $token = Read-AutoDeployGitHubToken $Config
         if (-not $token) { return $null }
         $repository = Get-AutoDeployGitHubRepository $Config
+        # The payload carries the token expiry so Production Watch can warn before it lapses.
+        $tokenExpiresAt = if ($script:autoDeployGitHubTokenExpiresAt) {
+            $script:autoDeployGitHubTokenExpiresAt
+        } else { $KnownTokenExpiresAt }
         # required_contexts is empty because the CI gate has already proven this commit passed.
         $created = Invoke-AutoDeployGitHubApi -Method Post -Token $token -Path "repos/$repository/deployments" -Body @{
             ref = $Sha
@@ -321,7 +368,8 @@ function Start-AutoDeployGitHubDeployment {
             auto_merge = $false
             required_contexts = @()
             production_environment = $true
-            description = 'Automatic deployment of trusted main'
+            description = $Description
+            payload = @{ tokenExpiresAt = $tokenExpiresAt }
         }
         $deployment = [pscustomobject]@{ Repository = $repository; Id = [long]$created.id }
         Publish-AutoDeployGitHubDeploymentStatus -Config $Config -Deployment $deployment `
@@ -400,6 +448,11 @@ function Install-AutoDeployGitHubToken {
         }
     }
     Write-Output "Stored the GitHub deployment token for $repository. Delete $SourcePath now."
+    if ($script:autoDeployGitHubTokenExpiresAt) {
+        Write-Output "GitHub reports that this token expires at $script:autoDeployGitHubTokenExpiresAt. Production Watch warns 14 days before."
+    } else {
+        Write-Output 'GitHub reported no expiry for this token.'
+    }
 }
 
 function Get-AutoDeployStatusStoreRoot {
@@ -568,13 +621,16 @@ function Initialize-AutoDeployStatusStore {
 
 function Assert-AutoDeployStatusFile {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Path)
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [ValidateRange(1, 1048576)][int]$MaximumBytes = 8192
+    )
 
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if ($item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
         throw 'Automatic deployment status file is not a normal file.'
     }
-    if ($item.Length -gt 8192) { throw 'Automatic deployment status file exceeds its size limit.' }
+    if ($item.Length -gt $MaximumBytes) { throw 'Automatic deployment status file exceeds its size limit.' }
     $rules = @((Get-Acl -LiteralPath $Path -ErrorAction Stop).GetAccessRules(
         $true,$true,[Security.Principal.SecurityIdentifier]))
     $system = 'S-1-5-18'
@@ -607,7 +663,7 @@ function Get-AutoDeployStatusMessage {
     param([Parameter(Mandatory)][string]$Outcome)
     switch ($Outcome) {
         'CHECKING' { 'Checking the trusted main branch and active release.' }
-        'UP_TO_DATE' { 'The active release matches the trusted main branch.' }
+        'UP_TO_DATE' { 'The active release matches the trusted main branch (request-only changes are not deployed).' }
         'BACKING_OFF' { 'Retry is deferred for the recorded failed revision.' }
         'DEPLOYING' { 'Building and validating the latest trusted revision.' }
         'SUCCEEDED' { 'The new release is active.' }
@@ -617,6 +673,8 @@ function Get-AutoDeployStatusMessage {
         'TOOLS_UPDATED' { 'Trusted deployment tools were refreshed; the next scheduled poll will continue.' }
         'AWAITING_CI' { 'The latest trusted revision is waiting for its CI build to pass.' }
         'CI_FAILED' { 'The latest trusted revision failed CI and will not be deployed.' }
+        'HELD' { 'A requested rollback holds the latest trusted revision until main moves on.' }
+        'OPS_REQUEST' { 'An operations request from trusted main is running.' }
         default { throw 'Automatic deployment status outcome is invalid.' }
     }
 }
@@ -799,7 +857,7 @@ function Publish-AutoDeployStatus {
     param(
         [Parameter(Mandatory)]
         [ValidateSet('CHECKING','UP_TO_DATE','BACKING_OFF','DEPLOYING','SUCCEEDED',
-            'DEPLOYMENT_FAILED','CHECK_FAILED','BLOCKED','TOOLS_UPDATED','AWAITING_CI','CI_FAILED')]
+            'DEPLOYMENT_FAILED','CHECK_FAILED','BLOCKED','TOOLS_UPDATED','AWAITING_CI','CI_FAILED','HELD','OPS_REQUEST')]
         [string]$Outcome,
         [Parameter(Mandatory)]$State,
         [ValidateSet('NONE','REMOTE_CHECK','PROTECTED_PRECONDITION','DEPLOYMENT',
@@ -1078,6 +1136,9 @@ function Get-AutoDeployStatus {
 
     $path = Join-Path $StatusRoot 'auto-deploy.json'
     $pollerStatus = Get-AutoDeployPollerStatus
+    if ($pollerStatus.pollerReason -eq 'ACCESS_DENIED') {
+        $pollerStatus = Get-AutoDeployPublishedPollerStatus -StatusRoot $StatusRoot -Fallback $pollerStatus
+    }
     try {
         if (-not (Test-Path -LiteralPath $StatusRoot -PathType Container -ErrorAction Stop)) {
             return Add-AutoDeployPollerStatus `
@@ -1094,7 +1155,7 @@ function Get-AutoDeployStatus {
         $record = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
             ConvertFrom-Json -ErrorAction Stop
         $allowedOutcomes = @('CHECKING','UP_TO_DATE','BACKING_OFF','DEPLOYING','SUCCEEDED',
-            'DEPLOYMENT_FAILED','CHECK_FAILED','BLOCKED','TOOLS_UPDATED','AWAITING_CI','CI_FAILED')
+            'DEPLOYMENT_FAILED','CHECK_FAILED','BLOCKED','TOOLS_UPDATED','AWAITING_CI','CI_FAILED','HELD','OPS_REQUEST')
         if ($record.schemaVersion -ne 1 -or $record.status -notin $allowedOutcomes -or
             $record.toolRefreshStatus -notin @('UNKNOWN','SUCCEEDED','FAILED') -or
             $record.failureCategory -notin @('NONE','REMOTE_CHECK','PROTECTED_PRECONDITION',
@@ -1256,7 +1317,13 @@ function Invoke-AutoDeployOnce {
         throw
     }
     $state.remoteSha = $remote
-    if ($remote -eq $active) {
+    if ($state.heldRemoteSha -and $state.heldRemoteSha -ne $remote) {
+        # main moved past the rolled-away commit, so the rollback hold ends.
+        $state.heldRemoteSha = $null
+    }
+    $isHeld = [bool]$state.heldRemoteSha
+    $isAcknowledgedOpsOnly = $remote -ne $active -and $state.opsOnlyAcknowledgedSha -eq $remote
+    if ($remote -eq $active -or $isHeld -or $isAcknowledgedOpsOnly) {
         if ($recoveryFailure) {
             Publish-AutoDeployStatusBestEffort -Outcome 'DEPLOYMENT_FAILED' `
                 -FailureCategory 'CANDIDATE_STARTUP' -State $state `
@@ -1264,13 +1331,14 @@ function Invoke-AutoDeployOnce {
             throw $recoveryFailure
         }
         if ($recoveryBackoff) { return }
-        $state.successfulSha = $remote
-        $state.error = $null
-        $state.failedSha = $null
-        $state.failedAt = $null
-        Write-AutoDeployState $Config $state
-        Publish-AutoDeployStatusBestEffort -Outcome 'UP_TO_DATE' -State $state `
-            -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
+        if ($remote -eq $active) {
+            $state.successfulSha = $remote
+            $state.error = $null
+            $state.failedSha = $null
+            $state.failedAt = $null
+        }
+        Complete-AutoDeployCurrentRelease -Config $Config -State $state -RemoteSha $remote `
+            -ActiveSha $active -StatusRoot $StatusRoot -Now $now
         return
     }
     try {
@@ -1298,6 +1366,24 @@ function Invoke-AutoDeployOnce {
             Publish-AutoDeployStatusBestEffort -Outcome 'AWAITING_CI' -State $state `
                 -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
         }
+        return
+    }
+    if (Test-AutoDeployOpsOnlyChange -Config $Config -FromSha $active -ToSha $remote) {
+        # A commit that only adds operations requests must not deploy: it would replace the
+        # previous release with an identical build and defeat a requested rollback.
+        if ($recoveryFailure) {
+            Publish-AutoDeployStatusBestEffort -Outcome 'DEPLOYMENT_FAILED' `
+                -FailureCategory 'CANDIDATE_STARTUP' -State $state `
+                -ActiveSha $active -StatusRoot $StatusRoot | Out-Null
+            throw $recoveryFailure
+        }
+        if ($recoveryBackoff) {
+            Write-AutoDeployState $Config $state
+            return
+        }
+        $state.opsOnlyAcknowledgedSha = $remote
+        Complete-AutoDeployCurrentRelease -Config $Config -State $state -RemoteSha $remote `
+            -ActiveSha $active -StatusRoot $StatusRoot -Now $now
         return
     }
     if ($state.failedSha -eq $remote -and $state.failedAt) {
@@ -1584,6 +1670,7 @@ function Update-AutoDeployToolsFromOriginMain {
 function Start-AutoDeployLoop {
     $script:autoDeployStatusWarningEmitted = $false
     $script:autoDeployGitHubWarningEmitted = $false
+    $script:autoDeployGitHubTokenExpiresAt = $null
     $statusRoot = $null
     $state = New-AutoDeployState
     try {
@@ -1644,7 +1731,11 @@ function Start-AutoDeployLoop {
         }
         $state = Read-AutoDeployState $config
         $invokeStarted = $true
-        Invoke-AutoDeployOnce -Config $config -StatusRoot $statusRoot
+        try {
+            Invoke-AutoDeployOnce -Config $config -StatusRoot $statusRoot
+        } finally {
+            Publish-AutoDeployDiagnosticsBestEffort -Config $config -StatusRoot $statusRoot
+        }
     }
     catch {
         if (-not $boundaryValidated) {
@@ -1676,6 +1767,528 @@ function Start-AutoDeployLoop {
         throw $failureRecord
     }
 }
+
+#region Operations requests
+
+$script:OpsRequestDirectory = 'ops/requests'
+$script:OpsRequestActions = @('restart','backup','verify-startup','redeploy','rollback')
+$script:OpsRequestProperties = @('id','action','reason','requestedAt','expectedActiveSha')
+$script:OpsRequestMaximumAge = [timespan]::FromHours(24)
+$script:OpsRequestMaximumClockSkew = [timespan]::FromMinutes(5)
+$script:OpsRequestHistoryLimit = 200
+
+function Complete-AutoDeployCurrentRelease {
+    <#
+    Finishes a poll whose main tip needs no deployment: the active release matches it, a rollback
+    holds it, or it differs only by operations requests. Publishes the status, then runs the next
+    pending request from that tip.
+    #>
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][string]$RemoteSha,
+        [AllowNull()][string]$ActiveSha,
+        [string]$StatusRoot,
+        [Parameter(Mandatory)][datetime]$Now
+    )
+    Write-AutoDeployState $Config $State
+    $outcome = if ($State.heldRemoteSha -eq $RemoteSha) { 'HELD' } else { 'UP_TO_DATE' }
+    Publish-AutoDeployStatusBestEffort -Outcome $outcome -State $State `
+        -ActiveSha $ActiveSha -StatusRoot $StatusRoot | Out-Null
+    Invoke-AutoDeployPendingOpsRequests -Config $Config -State $State -RemoteSha $RemoteSha `
+        -ActiveSha $ActiveSha -StatusRoot $StatusRoot -Now $Now
+}
+
+function Assert-AutoDeployCommitAvailable {
+    <# Fetches the configured branch when a commit the poller must inspect is not yet local. #>
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Sha
+    )
+    $probeArguments = Get-TrustedGitArguments $Config.repositoryPath @('cat-file','-e',"$Sha^{commit}")
+    try {
+        Invoke-CheckedProcess 'git.exe' $probeArguments $Config.repositoryPath | Out-Null
+    } catch {
+        Resolve-OriginMainRelease -Config $Config | Out-Null
+        Invoke-CheckedProcess 'git.exe' $probeArguments $Config.repositoryPath | Out-Null
+    }
+}
+
+function Test-AutoDeployOpsOnlyChange {
+    <# True when every path that differs between two commits is under ops/requests/. #>
+    param(
+        [Parameter(Mandatory)]$Config,
+        [AllowNull()][string]$FromSha,
+        [Parameter(Mandatory)][string]$ToSha
+    )
+    if (-not $FromSha -or $FromSha -eq $ToSha) { return $false }
+    foreach ($sha in $FromSha, $ToSha) { Assert-AutoDeployCommitAvailable -Config $Config -Sha $sha }
+    $diffArguments = Get-TrustedGitArguments $Config.repositoryPath @('diff','--name-only',$FromSha,$ToSha)
+    $changedPaths = @(([string](Invoke-CheckedProcess 'git.exe' $diffArguments $Config.repositoryPath)) -split '\r?\n' |
+        Where-Object { $_ })
+    if ($changedPaths.Count -eq 0) { return $false }
+    $deployablePaths = @($changedPaths | Where-Object { -not $_.StartsWith("$script:OpsRequestDirectory/", [StringComparison]::Ordinal) })
+    return $deployablePaths.Count -eq 0
+}
+
+function Get-AutoDeployOpsRequestFiles {
+    <# Lists ops/requests/*.json at a commit and returns each file's id and raw content. #>
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Sha
+    )
+    Assert-AutoDeployCommitAvailable -Config $Config -Sha $Sha
+    $listArguments = Get-TrustedGitArguments $Config.repositoryPath @(
+        'ls-tree','--name-only',$Sha,"$script:OpsRequestDirectory/")
+    $listing = [string](Invoke-CheckedProcess 'git.exe' $listArguments $Config.repositoryPath)
+    foreach ($requestPath in $listing -split '\r?\n' | Where-Object { $_ -match '^ops/requests/[^/]+\.json$' }) {
+        $showArguments = Get-TrustedGitArguments $Config.repositoryPath @('show',"$($Sha):$requestPath")
+        [pscustomobject]@{
+            Id = [IO.Path]::GetFileNameWithoutExtension($requestPath)
+            Content = [string](Invoke-CheckedProcess 'git.exe' $showArguments $Config.repositoryPath)
+        }
+    }
+}
+
+function Test-AutoDeployOpsRequestDocument {
+    <#
+    Validates one request file. Returns Outcome READY, REJECTED (malformed) or EXPIRED (outside
+    the freshness window when -Now is given; CI omits -Now and checks only the schema).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$FileId,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
+        [Nullable[datetime]]$Now
+    )
+    function New-OpsRequestVerdict([string]$Outcome, [string]$Detail, $Request, [string]$Action) {
+        [pscustomobject]@{ Id = $FileId; Action = $Action; Outcome = $Outcome; Detail = $Detail; Request = $Request }
+    }
+    try {
+        $document = $Content | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        return New-OpsRequestVerdict 'REJECTED' 'The request is not valid JSON.' $null $null
+    }
+    if ($document -isnot [pscustomobject]) {
+        return New-OpsRequestVerdict 'REJECTED' 'The request must be a JSON object.' $null $null
+    }
+    $propertyNames = @($document.PSObject.Properties.Name)
+    $unknownProperties = @($propertyNames | Where-Object { $_ -cnotin $script:OpsRequestProperties })
+    if ($unknownProperties.Count -gt 0) {
+        return New-OpsRequestVerdict 'REJECTED' "Unknown request properties: $($unknownProperties -join ', ')." $null $null
+    }
+    $action = if ($propertyNames -contains 'action') { [string]$document.action } else { $null }
+    if ($propertyNames -notcontains 'id' -or [string]$document.id -cne $FileId -or
+        $FileId -cnotmatch '^[a-z0-9][a-z0-9-]{2,79}$') {
+        return New-OpsRequestVerdict 'REJECTED' 'id must match the file name and use 3-80 lowercase letters, digits or hyphens.' $null $action
+    }
+    if ($action -cnotin $script:OpsRequestActions) {
+        return New-OpsRequestVerdict 'REJECTED' "action must be one of $($script:OpsRequestActions -join ', ')." $null $action
+    }
+    $reason = if ($propertyNames -contains 'reason') { $document.reason } else { $null }
+    if ($reason -isnot [string] -or $reason.Trim().Length -eq 0 -or $reason.Length -gt 200 -or $reason -match '[\r\n]') {
+        return New-OpsRequestVerdict 'REJECTED' 'reason must be a single line of 1-200 characters.' $null $action
+    }
+    $requestedAt = $null
+    try {
+        if ($propertyNames -notcontains 'requestedAt') { throw 'missing' }
+        $requestedAtValue = $document.requestedAt
+        if ($requestedAtValue -is [string] -and $requestedAtValue -notmatch '(Z|[+-]\d{2}:\d{2})$') { throw 'no zone' }
+        $requestedAt = ConvertTo-AutoDeployUtcTimestamp -Timestamp $requestedAtValue
+    } catch {
+        return New-OpsRequestVerdict 'REJECTED' 'requestedAt must be an ISO 8601 timestamp with a time zone.' $null $action
+    }
+    $expectedActiveSha = if ($propertyNames -contains 'expectedActiveSha') { [string]$document.expectedActiveSha } else { $null }
+    if ($expectedActiveSha -and $expectedActiveSha -cnotmatch '^[0-9a-f]{40}$') {
+        return New-OpsRequestVerdict 'REJECTED' 'expectedActiveSha must be a full lowercase commit SHA.' $null $action
+    }
+    if ($action -eq 'rollback' -and -not $expectedActiveSha) {
+        return New-OpsRequestVerdict 'REJECTED' 'rollback requires expectedActiveSha, the release it replaces.' $null $action
+    }
+    $request = [pscustomobject]@{
+        id = $FileId
+        action = $action
+        reason = $reason
+        requestedAt = $requestedAt
+        expectedActiveSha = $expectedActiveSha
+    }
+    if ($null -ne $Now) {
+        $nowUtc = [datetimeoffset]::new(([datetime]$Now).ToUniversalTime())
+        if ($requestedAt -gt $nowUtc.Add($script:OpsRequestMaximumClockSkew)) {
+            return New-OpsRequestVerdict 'EXPIRED' 'requestedAt is in the future.' $request $action
+        }
+        if ($nowUtc - $requestedAt -gt $script:OpsRequestMaximumAge) {
+            return New-OpsRequestVerdict 'EXPIRED' 'The request is older than 24 hours and was not run.' $request $action
+        }
+    }
+    return New-OpsRequestVerdict 'READY' 'Valid request.' $request $action
+}
+
+function Add-AutoDeployOpsRequestResult {
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][string]$Id,
+        [AllowNull()][string]$Action,
+        [Parameter(Mandatory)][ValidateSet('SUCCEEDED','FAILED','REJECTED','EXPIRED')][string]$Outcome,
+        [Parameter(Mandatory)][string]$Detail,
+        [Parameter(Mandatory)][string]$Sha
+    )
+    $result = [pscustomobject][ordered]@{
+        id = $Id
+        action = $Action
+        outcome = $Outcome
+        detail = ConvertTo-AutoDeployRedactedText -Text $Detail -MaximumLength 240
+        sha = $Sha
+        finishedAt = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    $State.processedOpsRequests = @(@($State.processedOpsRequests) + $result |
+        Select-Object -Last $script:OpsRequestHistoryLimit)
+}
+
+function Invoke-AutoDeployOpsRequest {
+    <# Runs one validated request through the existing guarded operation and returns its outcome. #>
+    param(
+        [Parameter(Mandatory)]$Request,
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][string]$RemoteSha,
+        [AllowNull()][string]$ActiveSha
+    )
+    switch ($Request.action) {
+        'restart' {
+            Restart-ProductionService -Verify | Out-Null
+            return [pscustomobject]@{ Outcome = 'SUCCEEDED'; Detail = 'The website service restarted and passed its checks.' }
+        }
+        'backup' {
+            $archivePath = New-ProductionBackup
+            return [pscustomobject]@{ Outcome = 'SUCCEEDED'; Detail = "Verified backup $([IO.Path]::GetFileName([string]$archivePath))." }
+        }
+        'verify-startup' {
+            Test-ProductionStartup | Out-Null
+            return [pscustomobject]@{ Outcome = 'SUCCEEDED'; Detail = 'Services, scheduler task, local and public endpoints passed.' }
+        }
+        'redeploy' {
+            $deployment = Start-AutoDeployGitHubDeployment -Config $Config -Sha $RemoteSha `
+                -Description "Redeploy requested by $($Request.id)" -KnownTokenExpiresAt $State.githubTokenExpiresAt
+            try {
+                Invoke-ProductionDeploy -Automatic
+            } catch {
+                Complete-AutoDeployGitHubDeployment -Config $Config -Deployment $deployment `
+                    -Succeeded $false -FailureMessage $_.Exception.Message
+                throw
+            }
+            Complete-AutoDeployGitHubDeployment -Config $Config -Deployment $deployment -Succeeded $true
+            $State.successfulSha = Get-ActiveReleaseSha $Config
+            $State.opsOnlyAcknowledgedSha = $null
+            return [pscustomobject]@{ Outcome = 'SUCCEEDED'; Detail = "Redeployed $($RemoteSha.Substring(0, 7))." }
+        }
+        'rollback' {
+            if ($Request.expectedActiveSha -ne $ActiveSha) {
+                return [pscustomobject]@{
+                    Outcome = 'REJECTED'
+                    Detail = 'expectedActiveSha no longer matches the active release; nothing was rolled back.'
+                }
+            }
+            Invoke-ProductionRollback
+            $restoredSha = Get-ActiveReleaseSha $Config
+            if (-not $restoredSha -or $restoredSha -eq $ActiveSha) {
+                throw 'Rollback finished without changing the active release.'
+            }
+            $State.heldRemoteSha = $RemoteSha
+            $State.opsOnlyAcknowledgedSha = $null
+            $deployment = Start-AutoDeployGitHubDeployment -Config $Config -Sha $restoredSha `
+                -Description "Rollback requested by $($Request.id)" -KnownTokenExpiresAt $State.githubTokenExpiresAt
+            Complete-AutoDeployGitHubDeployment -Config $Config -Deployment $deployment -Succeeded $true
+            return [pscustomobject]@{
+                Outcome = 'SUCCEEDED'
+                Detail = "Rolled back to $($restoredSha.Substring(0, 7)); main $($RemoteSha.Substring(0, 7)) is held until main moves."
+            }
+        }
+    }
+}
+
+function Invoke-AutoDeployPendingOpsRequests {
+    <#
+    Records malformed and expired requests from the main tip, then runs at most one valid request,
+    oldest first. Each request id is handled once; a failed request is not retried.
+    #>
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][string]$RemoteSha,
+        [AllowNull()][string]$ActiveSha,
+        [string]$StatusRoot,
+        [Parameter(Mandatory)][datetime]$Now
+    )
+    try {
+        $requestFiles = @(Get-AutoDeployOpsRequestFiles -Config $Config -Sha $RemoteSha)
+    } catch {
+        Write-Warning 'Operations requests could not be read from trusted main; they will be retried next poll.'
+        return
+    }
+    $processedIds = @($State.processedOpsRequests | ForEach-Object { [string]$_.id })
+    $pendingFiles = @($requestFiles | Where-Object { $_.Id -notin $processedIds })
+    if ($pendingFiles.Count -eq 0) { return }
+    # Requests run only from a CI-green tip, like any deployment.
+    $ciConclusion = Resolve-AutoDeployCiVerdict -Config $Config -State $State -Sha $RemoteSha -Now $Now
+    if ($ciConclusion -ne 'SUCCESS') {
+        Write-AutoDeployState $Config $State
+        return
+    }
+    $verdicts = @($pendingFiles | ForEach-Object {
+        Test-AutoDeployOpsRequestDocument -FileId $_.Id -Content $_.Content -Now $Now
+    })
+    foreach ($verdict in $verdicts | Where-Object Outcome -in @('REJECTED','EXPIRED')) {
+        Add-AutoDeployOpsRequestResult -State $State -Id $verdict.Id -Action $verdict.Action `
+            -Outcome $verdict.Outcome -Detail $verdict.Detail -Sha $RemoteSha
+    }
+    $nextRequest = $verdicts | Where-Object Outcome -eq 'READY' |
+        Sort-Object -Property { $_.Request.requestedAt }, Id | Select-Object -First 1
+    if ($nextRequest) {
+        Write-AutoDeployState $Config $State
+        Publish-AutoDeployStatusBestEffort -Outcome 'OPS_REQUEST' -State $State `
+            -ActiveSha $ActiveSha -StatusRoot $StatusRoot | Out-Null
+        try {
+            $result = Invoke-AutoDeployOpsRequest -Request $nextRequest.Request -Config $Config `
+                -State $State -RemoteSha $RemoteSha -ActiveSha $ActiveSha
+        } catch {
+            $result = [pscustomobject]@{
+                Outcome = 'FAILED'
+                Detail = Get-AutoDeployFailureMessage -Exception $_.Exception
+            }
+        }
+        Add-AutoDeployOpsRequestResult -State $State -Id $nextRequest.Id -Action $nextRequest.Action `
+            -Outcome $result.Outcome -Detail $result.Detail -Sha $RemoteSha
+    }
+    Write-AutoDeployState $Config $State
+    $currentActiveSha = Get-ActiveReleaseSha $Config
+    $outcome = if ($State.heldRemoteSha -eq $RemoteSha) { 'HELD' } else { 'UP_TO_DATE' }
+    Publish-AutoDeployStatusBestEffort -Outcome $outcome -State $State `
+        -ActiveSha $currentActiveSha -StatusRoot $StatusRoot | Out-Null
+}
+
+#endregion
+
+#region Diagnostics
+
+$script:DiagnosticsFileName = 'diagnostics.json'
+$script:DiagnosticsMaximumBytes = 524288
+$script:DiagnosticsLogEntryLimit = 100
+$script:DiagnosticsFreshnessSeconds = 180
+$script:DiagnosticsServiceNames = @('ChristopherBellDev','MongoDB','cloudflared')
+
+function ConvertTo-AutoDeployRedactedText {
+    <#
+    Masks credentials, tokens, connection-string passwords and email addresses, flattens the text
+    to one line and bounds its length. Diagnostics are readable by every local user.
+    #>
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Text,
+        [ValidateRange(16, 4000)][int]$MaximumLength = 400
+    )
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+    $redacted = $Text
+    $redacted = $redacted -replace '\bgithub_pat_[A-Za-z0-9_]+', '[REDACTED_TOKEN]'
+    $redacted = $redacted -replace '\bgh[opsur]_[A-Za-z0-9]{16,}', '[REDACTED_TOKEN]'
+    $redacted = $redacted -replace '\bre_[A-Za-z0-9_]{16,}', '[REDACTED_TOKEN]'
+    $redacted = $redacted -replace '(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+', 'Bearer [REDACTED]'
+    $redacted = $redacted -replace '\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', '[REDACTED_JWT]'
+    $redacted = $redacted -replace '(?i)\b(mongodb(?:\+srv)?://)[^/\s@]+@', '$1[REDACTED]@'
+    $redacted = $redacted -replace '(?i)\b(password|passwd|pwd|secret|api[_-]?key|token)(\s*[=:]\s*)[^\s,;&"]+', '$1$2[REDACTED]'
+    $redacted = $redacted -replace '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[REDACTED_EMAIL]'
+    $redacted = ($redacted -replace '[\x00-\x1F\x7F]+', ' ').Trim()
+    if ($redacted.Length -gt $MaximumLength) {
+        $redacted = $redacted.Substring(0, $MaximumLength - 3) + '...'
+    }
+    return $redacted
+}
+
+function Read-AutoDeployRecentLogEntries {
+    <# Returns the newest structured log entries with only allowlisted, redacted fields. #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [ValidateRange(1, 1000)][int]$MaximumEntries = $script:DiagnosticsLogEntryLimit
+    )
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return @() }
+    $entries = foreach ($line in Get-Content -LiteralPath $Path -Tail ($MaximumEntries * 4) -ErrorAction Stop) {
+        try { $record = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+        if ($record -isnot [pscustomobject]) { continue }
+        $logField = $record.PSObject.Properties['log']
+        $errorField = $record.PSObject.Properties['error']
+        $timestampField = $record.PSObject.Properties['@timestamp']
+        [pscustomobject][ordered]@{
+            timestamp = if ($timestampField) {
+                $timestampValue = $timestampField.Value
+                if ($timestampValue -is [datetime]) { $timestampValue.ToUniversalTime().ToString('o') } else { [string]$timestampValue }
+            } else { $null }
+            level = if ($logField -and $logField.Value.PSObject.Properties['level']) { [string]$logField.Value.level } else { $null }
+            logger = if ($logField -and $logField.Value.PSObject.Properties['logger']) {
+                ConvertTo-AutoDeployRedactedText -Text ([string]$logField.Value.logger) -MaximumLength 120
+            } else { $null }
+            requestId = if ($record.PSObject.Properties['requestId']) {
+                ConvertTo-AutoDeployRedactedText -Text ([string]$record.requestId) -MaximumLength 64
+            } else { $null }
+            message = if ($record.PSObject.Properties['message']) {
+                ConvertTo-AutoDeployRedactedText -Text ([string]$record.message)
+            } else { '' }
+            errorType = if ($errorField -and $errorField.Value.PSObject.Properties['type']) {
+                ConvertTo-AutoDeployRedactedText -Text ([string]$errorField.Value.type) -MaximumLength 160
+            } else { $null }
+            errorMessage = if ($errorField -and $errorField.Value.PSObject.Properties['message']) {
+                ConvertTo-AutoDeployRedactedText -Text ((([string]$errorField.Value.message) -split '\r?\n')[0])
+            } else { $null }
+        }
+    }
+    return @($entries | Select-Object -Last $MaximumEntries)
+}
+
+function Get-AutoDeployServiceSnapshot {
+    foreach ($serviceName in $script:DiagnosticsServiceNames) {
+        $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+        [pscustomobject][ordered]@{
+            name = $serviceName
+            status = if ($service) { [string]$service.Status } else { 'NotInstalled' }
+            startType = if ($service) { [string]$service.StartType } else { $null }
+        }
+    }
+}
+
+function Get-AutoDeployReleaseSnapshot {
+    param([Parameter(Mandatory)]$Config)
+    $releasesRoot = Join-Path $Config.programDataRoot 'releases'
+    if (-not (Test-Path -LiteralPath $releasesRoot -PathType Container)) { return @() }
+    $currentTarget = Get-JunctionTarget (Join-Path $Config.programDataRoot 'current')
+    $previousTarget = Get-JunctionTarget (Join-Path $Config.programDataRoot 'previous')
+    return @(Get-ChildItem -LiteralPath $releasesRoot -Directory -ErrorAction Stop |
+        Where-Object Name -match '^[0-9a-f]{40}$' |
+        Sort-Object LastWriteTimeUtc -Descending |
+        ForEach-Object {
+            [pscustomobject][ordered]@{
+                sha = $_.Name
+                builtAt = $_.LastWriteTimeUtc.ToString('o')
+                current = $_.FullName -eq $currentTarget
+                previous = $_.FullName -eq $previousTarget
+            }
+        })
+}
+
+function Publish-AutoDeployDiagnostics {
+    <#
+    Writes a sanitized, size-bounded diagnostics record that standard users can read, so operators
+    and agents without administrator rights can see service, release, log and request state.
+    #>
+    param(
+        [Parameter(Mandatory)]$Config,
+        [string]$StatusRoot = (Get-AutoDeployStatusStoreRoot)
+    )
+    Assert-AutoDeployStatusDirectory -Path $StatusRoot
+    $state = Read-AutoDeployState $Config
+    if ($script:autoDeployGitHubTokenExpiresAt -and
+        $state.githubTokenExpiresAt -ne $script:autoDeployGitHubTokenExpiresAt) {
+        $state.githubTokenExpiresAt = $script:autoDeployGitHubTokenExpiresAt
+        Write-AutoDeployState $Config $state
+    }
+    $schedulerEntry = Get-AutoDeployTaskSchedulerEntry
+    $logEntries = @(Read-AutoDeployRecentLogEntries `
+        -Path (Join-Path $Config.programDataRoot 'logs\application.json.log'))
+    $record = [ordered]@{
+        schemaVersion = 1
+        generatedAt = (Get-Date).ToUniversalTime().ToString('o')
+        scheduler = [ordered]@{
+            registered = [bool]$schedulerEntry.registered
+            state = $schedulerEntry.state
+            reason = [string]$schedulerEntry.reason
+        }
+        services = @(Get-AutoDeployServiceSnapshot)
+        releases = @(Get-AutoDeployReleaseSnapshot -Config $Config)
+        heldRemoteSha = $state.heldRemoteSha
+        githubTokenExpiresAt = $state.githubTokenExpiresAt
+        opsRequests = @(@($state.processedOpsRequests) | Select-Object -Last 20)
+        recentLogEntries = $logEntries
+    }
+    $json = $record | ConvertTo-Json -Depth 6
+    # Shed the oldest log entries until the record fits; everything else is small and bounded.
+    while ([Text.Encoding]::UTF8.GetByteCount($json) -gt $script:DiagnosticsMaximumBytes -and
+        $record.recentLogEntries.Count -gt 0) {
+        $record.recentLogEntries = @($record.recentLogEntries | Select-Object -Last ([math]::Floor($record.recentLogEntries.Count / 2)))
+        $json = $record | ConvertTo-Json -Depth 6
+    }
+    $path = Join-Path $StatusRoot $script:DiagnosticsFileName
+    if (Test-Path -LiteralPath $path) {
+        Assert-AutoDeployStatusFile -Path $path -MaximumBytes $script:DiagnosticsMaximumBytes
+    }
+    $temporary = "$path.$PID.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        Set-Content -LiteralPath $temporary -Value $json -Encoding utf8 -ErrorAction Stop
+        Assert-AutoDeployStatusFile -Path $temporary -MaximumBytes $script:DiagnosticsMaximumBytes
+        Move-AutoDeployFileAtomically -TemporaryPath $temporary -DestinationPath $path
+        Assert-AutoDeployStatusFile -Path $path -MaximumBytes $script:DiagnosticsMaximumBytes
+    } finally {
+        if (Test-Path -LiteralPath $temporary) {
+            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-AutoDeployPublishedPollerStatus {
+    <#
+    Standard users cannot query the SYSTEM task. Fresh diagnostics prove the poller ran within the
+    last three minutes, so report the scheduler state it published instead of UNKNOWN.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$StatusRoot,
+        [Parameter(Mandatory)]$Fallback
+    )
+    try {
+        $diagnostics = Get-AutoDeployDiagnostics -StatusRoot $StatusRoot
+    } catch {
+        return $Fallback
+    }
+    if ($diagnostics.freshness -ne 'FRESH' -or -not $diagnostics.scheduler.registered) { return $Fallback }
+    $publishedState = switch ([int]$diagnostics.scheduler.state) {
+        1 { 'DISABLED' }
+        2 { 'QUEUED' }
+        3 { 'READY' }
+        4 { 'RUNNING' }
+        default { $null }
+    }
+    if (-not $publishedState) { return $Fallback }
+    return [pscustomobject]@{
+        pollerState = $publishedState
+        pollerReason = 'REPORTED_BY_POLLER'
+    }
+}
+
+function Publish-AutoDeployDiagnosticsBestEffort {
+    param($Config, [string]$StatusRoot)
+    if (-not $Config) { return }
+    try {
+        $arguments = @{ Config = $Config }
+        if ($StatusRoot) { $arguments.StatusRoot = $StatusRoot }
+        Publish-AutoDeployDiagnostics @arguments
+    } catch {
+        Write-Warning 'Automatic deployment diagnostics could not be published; operator diagnostics may be stale.'
+    }
+}
+
+function Get-AutoDeployDiagnostics {
+    <# Reads the published diagnostics record; standard users can run it. #>
+    [CmdletBinding()]
+    param([string]$StatusRoot = (Get-AutoDeployStatusStoreRoot))
+    $path = Join-Path $StatusRoot $script:DiagnosticsFileName
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw 'No diagnostics have been published yet; the automatic deployment poller publishes them every minute.'
+    }
+    Assert-AutoDeployStatusFile -Path $path -MaximumBytes $script:DiagnosticsMaximumBytes
+    $record = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if ($record.schemaVersion -ne 1) { throw 'Diagnostics record has an unsupported schema version.' }
+    $generatedAt = ConvertTo-AutoDeployUtcTimestamp -Timestamp $record.generatedAt
+    $ageSeconds = ([datetimeoffset]::UtcNow - $generatedAt).TotalSeconds
+    $freshness = if ($ageSeconds -le $script:DiagnosticsFreshnessSeconds) { 'FRESH' } else { 'STALE' }
+    $record | Add-Member -NotePropertyName freshness -NotePropertyValue $freshness -Force
+    return $record
+}
+
+#endregion
 
 function Resolve-PowerShell7Executable {
     $executable = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
@@ -1981,4 +2594,5 @@ Export-ModuleMember -Function New-AutoDeployState,Read-AutoDeployState,`
     Write-AutoDeployState,Get-RemoteMainSha,Get-ActiveReleaseSha,`
     Invoke-AutoDeployOnce,Start-AutoDeployLoop,Install-AutoDeployTask,`
     Update-ProductionAutoDeployToolsUnderHeldLock,Remove-AutoDeployTask,`
-    Get-AutoDeployStatus,Read-AutoDeployGitHubToken,Install-AutoDeployGitHubToken
+    Get-AutoDeployStatus,Read-AutoDeployGitHubToken,Install-AutoDeployGitHubToken,`
+    Get-AutoDeployDiagnostics,Test-AutoDeployOpsRequestDocument

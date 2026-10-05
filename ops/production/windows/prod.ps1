@@ -5,7 +5,7 @@ param(
         'mongo-inventory','mongo-consolidation-preview','mongo-consolidate',
         'mongo-consolidation-rollback','verify-startup','uninstall','auto-install',
         'auto-deploy','auto-status','auto-remove','sensor-install','sensor-status',
-        'sensor-enable','sensor-disable','github-token-install')]
+        'sensor-enable','sensor-disable','github-token-install','diagnostics')]
     [string]$Command = 'help',
     [switch]$WhatIf,
     [switch]$ConfirmDomainCollectionCutover,
@@ -71,6 +71,7 @@ function Invoke-ProductionCommand {
         'auto-install' = { Install-AutoDeployTask -WhatIf:$WhatIf }
         'auto-deploy' = { Start-AutoDeployLoop }
         'auto-status' = { Get-AutoDeployStatus }
+        diagnostics = { Get-AutoDeployDiagnostics | ConvertTo-Json -Depth 6 }
         'auto-remove' = { Remove-AutoDeployTask -WhatIf:$WhatIf }
         'sensor-install' = { Install-PawnIoProvider -WhatIf:$WhatIf }
         'sensor-status' = { Get-ProductionSensorStatus }
