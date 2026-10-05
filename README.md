@@ -122,6 +122,92 @@ The service listens only on `mongodb://localhost:27017` and stores data in the
 that data. To reset only this Compose project's local data, first confirm the
 project and volume names, then run `docker compose down --volumes`.
 
+### Isolated MongoDB for Candidate Verification (Windows)
+
+Do not use the Compose volume for candidate verification. Start a fresh MongoDB
+process with a unique temporary data directory, loopback binding, and an
+OS-selected port. The candidate must use exactly profile `test` and database
+`test`; that profile can pass V015 without a cutover ledger only while all
+domain collections are empty and the remaining database state belongs to the
+migration runner. Production and every other profile still require a genuine
+`TARGET_ACTIVE` ledger.
+
+In PowerShell, locate the installed MongoDB tools, create a private temporary
+root, choose a free port, and start the disposable process:
+
+```powershell
+$mongodExe = (Get-Command mongod.exe -ErrorAction Stop).Source
+$mongoshExe = (Get-Command mongosh.exe -ErrorAction Stop).Source
+$testMongoRoot = Join-Path ([IO.Path]::GetTempPath()) `
+    ('christopherbell-test-mongo-' + [guid]::NewGuid().ToString('N'))
+$databasePath = Join-Path $testMongoRoot 'db'
+New-Item -ItemType Directory -Path $databasePath -Force | Out-Null
+$mongoPortPicker = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+try {
+    $mongoPortPicker.Start()
+    $mongoPort = ([Net.IPEndPoint]$mongoPortPicker.LocalEndpoint).Port
+} finally {
+    $mongoPortPicker.Stop()
+}
+$appPortPicker = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+try {
+    $appPortPicker.Start()
+    $candidatePort = ([Net.IPEndPoint]$appPortPicker.LocalEndpoint).Port
+} finally {
+    $appPortPicker.Stop()
+}
+if ($mongoPort -in 27017, 8080, 8081) { throw 'MongoDB selected a reserved port.' }
+if ($candidatePort -in 27017, 8080, 8081, $mongoPort) {
+    throw 'The candidate web server selected a reserved port.'
+}
+if (Get-NetTCPConnection -State Listen -LocalPort $candidatePort -ErrorAction SilentlyContinue) {
+    throw 'The candidate web server port is already in use.'
+}
+$mongoProcess = Start-Process -FilePath $mongodExe `
+    -ArgumentList @('--dbpath', "`"$databasePath`"", '--port', [string]$mongoPort,
+        '--bind_ip', '127.0.0.1', '--quiet', '--logpath',
+        "`"$(Join-Path $testMongoRoot 'mongod.log')`"") `
+    -WindowStyle Hidden -PassThru
+$mongoReady = $false
+for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    & $mongoshExe '--quiet' '--norc' "mongodb://127.0.0.1:$mongoPort/admin" `
+        '--eval' 'quit(db.runCommand({ping:1}).ok===1?0:1)' 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { $mongoReady = $true; break }
+    Start-Sleep -Milliseconds 250
+}
+if (-not $mongoReady) { throw 'Disposable MongoDB did not become ready.' }
+$mongoListener = Get-NetTCPConnection -State Listen -LocalPort $mongoPort
+if ($mongoListener.OwningProcess -ne $mongoProcess.Id) {
+    throw 'The disposable MongoDB listener is not owned by the launched process.'
+}
+```
+
+If the listener is not owned by `$mongoProcess.Id`, stop and investigate; do not
+use the endpoint. The second OS-selected port is for the candidate web server.
+Then start the candidate from the repository root:
+
+```powershell
+$env:SPRING_PROFILES_ACTIVE = 'test'
+$env:SPRING_MONGODB_URI = "mongodb://127.0.0.1:$mongoPort/test"
+$secretBytes = [byte[]]::new(32)
+[Security.Cryptography.RandomNumberGenerator]::Fill($secretBytes)
+$env:APP_JWT_SECRET = [Convert]::ToBase64String($secretBytes)
+.\gradlew.bat :website:bootJar
+$javaExe = (Get-Command java.exe -ErrorAction Stop).Source
+$candidateJar = Join-Path $PWD 'website\build\libs\website.jar'
+& $javaExe -jar $candidateJar '--server.address=127.0.0.1' "--server.port=$candidatePort"
+```
+
+From another terminal, verify readiness and `GET /` on
+`http://127.0.0.1:$candidatePort`. Stop the Gradle candidate first. Then stop
+only the recorded mongod process, verify its port is no longer listening, and
+remove only `$testMongoRoot` after confirming its resolved path is a direct
+child of `[IO.Path]::GetTempPath()` with the generated
+`christopherbell-test-mongo-<guid>` name. Never run this flow against a restored
+production database or an existing production listener. Remove the temporary
+`SPRING_PROFILES_ACTIVE`, `SPRING_MONGODB_URI`, and `APP_JWT_SECRET` values from
+the shell after the run.
+
 Database shape changes must be appended through the versioned migration runner;
 never edit an applied migration ID or checksum. See the
 [MongoDB migration runbook](docs/operations/mongodb-migrations.md).

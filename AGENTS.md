@@ -61,6 +61,18 @@ Run browser-side JavaScript tests:
 ./gradlew :website:jsTest
 ```
 
+## Isolated Application Runtime Checks
+
+For database-backed candidate verification, use the exact `test` profile and a
+disposable MongoDB instance bound to loopback. Set `SPRING_MONGODB_URI` to
+`mongodb://127.0.0.1:<non-production-port>/test`; do not point the candidate at
+the Compose database, port 27017, or the `christopherbell` database. A clean
+test database can complete V015 through the normal migration runner without a
+fabricated cutover ledger. Other profiles still require the genuine
+`TARGET_ACTIVE` ledger. The test bootstrap rejects populated domain collections,
+unknown collections, malformed migration state, and any URI outside this exact
+test target. Follow the disposable setup and cleanup steps in `README.md`.
+
 ## Architecture Rules
 
 - Keep backend code organized by feature package, not by technical layer.

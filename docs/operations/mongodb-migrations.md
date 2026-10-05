@@ -7,7 +7,8 @@ Application rollback does not reverse MongoDB data.
 
 ## Authoring Contract
 
-- Add a new `ApplicationMigration` with a unique, ordered ID.
+- Add a new `ApplicationMigration` with the next zero-padded three-digit
+  version and a lowercase kebab-case name, such as `016-add-example-index`.
 - Make the operation additive and idempotent wherever MongoDB permits it.
 - Preserve compatibility with the previously deployed application version.
 - Derive and review a stable SHA-256 checksum for the migration descriptor.
@@ -32,6 +33,33 @@ approved production restore. Deployment never restores live data automatically.
 The runner serializes deployments with the fixed `application-migrations` lease
 in `application_leases`. Lifecycle records live in `application_migrations` and
 use `RUNNING`, `APPLIED`, or `FAILED` status.
+
+### Disposable Test-Profile Database
+
+Local candidate runtime checks use the exact `test` Spring profile and a fresh
+MongoDB instance bound to `127.0.0.1` on an OS-selected port other than 27017.
+The URI must name database `test`. The setup in the root `README.md` creates a
+unique temporary database directory and confirms that the launched mongod owns
+the listener before the application starts.
+
+V015 retains its genuine `TARGET_ACTIVE` requirement for production and every
+profile other than exactly `test`. In `test`, the gate requires an isolated
+loopback URI, database `test`, a non-production port, approved collection
+names, and empty domain namespaces, even when a genuine ledger is present. It
+supports all three migration-runner call points: fresh preflight before any
+migration rows or lease exist; V015 with an ordered applied migration prefix,
+V015 `RUNNING`, and at most one migration lease; and later startup with V015
+`APPLIED`, which is the durable empty-schema marker, and an absent or released
+migration lease. Malformed cutover rows, non-contiguous or unexpected migration
+state, domain documents, unknown collections, and other leases stop startup.
+This read-only gate never creates a `TARGET_ACTIVE` ledger. It checks the
+zero-padded three-digit migration ID sequence, so all future migration IDs must
+preserve the authoring format above.
+
+Do not use a restored live database, the Compose volume, or port 27017 for this
+workflow. Do not hand-create migration records or a `TARGET_ACTIVE` ledger.
+Stop the candidate and the exact mongod process started for the check, verify
+that its listener is gone, and remove only the generated temporary directory.
 
 ## Inspecting a Blocked Startup
 
