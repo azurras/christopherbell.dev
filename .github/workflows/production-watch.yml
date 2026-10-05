@@ -2,6 +2,10 @@ name: Production Watch
 
 # Checks the public site from outside its single Windows host, so a host, tunnel or deploy
 # failure that the host cannot report still raises one `production-alert` issue.
+#
+# GitHub registers schedule- and dispatch-only workflows when a push to main changes this
+# file. If that push event is ever dropped (as happened for 06c3718), the workflow stays
+# missing from the Actions tab until another main push touches this file.
 permissions: {}
 
 on:
