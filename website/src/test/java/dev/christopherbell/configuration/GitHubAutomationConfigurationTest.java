@@ -23,6 +23,7 @@ class GitHubAutomationConfigurationTest {
       "gradle/actions/setup-gradle";
   private static final String UPLOAD_ARTIFACT =
       "actions/upload-artifact";
+  private static final String CACHE = "actions/cache";
   private static final String CODEQL_INIT = "github/codeql-action/init";
   private static final String CODEQL_ANALYZE =
       "github/codeql-action/analyze";
@@ -104,6 +105,40 @@ class GitHubAutomationConfigurationTest {
         .contains("gradlew.bat build");
     assertThat(stepUsing(steps, UPLOAD_ARTIFACT).at("/with/path").asText())
         .contains("**/build/test-results/shared-folder-pester/*.xml");
+  }
+
+  @Test
+  void ciRestoresCachedPesterAndRetriesTransientGalleryFailures() throws IOException {
+    var steps = readYaml(".github/workflows/ci.yml").at("/jobs/build/steps");
+    var cache = stepNamed(steps, "Cache Pester 5.9.0");
+    var install = stepNamed(steps, "Install Pester 5.9.0");
+
+    assertThat(cache.path("uses").asText()).startsWith(CACHE + "@");
+    assertThat(cache.at("/with/path").asText())
+        .isEqualTo("~/Documents/PowerShell/Modules/Pester/5.9.0");
+    assertThat(cache.at("/with/key").asText()).isEqualTo("pester-5.9.0-${{ runner.os }}");
+    assertThat(cache.path("timeout-minutes").asInt()).isEqualTo(5);
+    assertThat(stepIndex(steps, "Cache Pester 5.9.0"))
+        .isLessThan(stepIndex(steps, "Install Pester 5.9.0"));
+    assertThat(install.path("run").asText())
+        .contains(
+            "Get-Module -ListAvailable -Name Pester",
+            "$maximumInstallAttempts = 3",
+            "Start-Sleep -Seconds");
+  }
+
+  @Test
+  void ciSummarizesTestResultsOnEveryOutcome() throws IOException {
+    var steps = readYaml(".github/workflows/ci.yml").at("/jobs/build/steps");
+    var summary = stepNamed(steps, "Summarize test results");
+
+    assertThat(summary.path("if").asText()).isEqualTo("always()");
+    assertThat(summary.path("shell").asText()).isEqualTo("pwsh");
+    assertThat(summary.path("timeout-minutes").asInt()).isEqualTo(5);
+    assertThat(summary.path("run").asText())
+        .contains("./.github/scripts/Write-TestSummary.ps1", "$env:GITHUB_STEP_SUMMARY");
+    assertThat(Files.isRegularFile(REPOSITORY_ROOT.resolve(".github/scripts/Write-TestSummary.ps1")))
+        .isTrue();
   }
 
   @Test
@@ -190,6 +225,59 @@ class GitHubAutomationConfigurationTest {
   }
 
   @Test
+  void dependabotVerificationMetadataIsRegeneratedReadOnlyForReview() throws IOException {
+    var workflow = readYaml(".github/workflows/dependency-verification.yml");
+    var job = workflow.at("/jobs/regenerate-verification-metadata");
+    var steps = job.path("steps");
+
+    assertThat(workflow.at("/permissions/contents").asText()).isEqualTo("read");
+    assertThat(workflow.path("permissions").size()).isEqualTo(1);
+    assertThat(job.path("permissions").isMissingNode()).isTrue();
+    assertThat(workflow.at("/on/pull_request/branches/0").asText()).isEqualTo("main");
+    assertThat(workflow.at("/on/pull_request_target").isMissingNode()).isTrue();
+    assertThat(textValues(workflow.at("/on/pull_request/paths")))
+        .contains("**/*.gradle.kts", "gradle/**");
+    assertThat(job.path("if").asText()).isEqualTo("github.actor == 'dependabot[bot]'");
+    assertThat(job.path("runs-on").asText()).isEqualTo("windows-latest");
+    assertThat(job.path("timeout-minutes").asInt()).isEqualTo(30);
+    assertThat(stepNamed(steps, "Regenerate verification metadata").path("run").asText())
+        .contains("--write-verification-metadata sha256");
+    var upload = stepUsing(steps, UPLOAD_ARTIFACT);
+    assertThat(upload.path("if").asText())
+        .isEqualTo("steps.metadata.outputs.changed == 'true'");
+    assertThat(upload.at("/with/path").asText()).isEqualTo("gradle/verification-metadata.xml");
+    assertThat(upload.at("/with/retention-days").asInt()).isEqualTo(7);
+    var executedCommands = StreamSupport.stream(steps.spliterator(), false)
+        .flatMap(step -> step.path("run").asText().lines())
+        .map(String::strip)
+        .toList();
+    assertThat(executedCommands)
+        .noneMatch(command -> command.startsWith("git push") || command.startsWith("git commit"));
+  }
+
+  @Test
+  void productionWatchRunsOftenWithLeastPrivilegeAndNoInjectedContext() throws IOException {
+    var workflow = readYaml(".github/workflows/production-watch.yml");
+    var job = workflow.at("/jobs/watch");
+    var check = stepNamed(job.path("steps"), "Check production");
+
+    assertThat(workflow.at("/on/schedule/0/cron").asText()).isEqualTo("*/15 * * * *");
+    assertThat(workflow.at("/on").has("workflow_dispatch")).isTrue();
+    assertThat(workflow.path("permissions").isEmpty()).isTrue();
+    assertThat(job.at("/permissions/issues").asText()).isEqualTo("write");
+    assertThat(List.of("contents", "actions", "deployments"))
+        .allSatisfy(scope -> assertThat(job.at("/permissions/" + scope).asText()).isEqualTo("read"));
+    assertThat(job.path("permissions").size()).isEqualTo(4);
+    assertThat(job.path("timeout-minutes").asInt()).isEqualTo(10);
+    assertThat(workflow.at("/concurrency/cancel-in-progress").asBoolean()).isFalse();
+    assertThat(check.path("run").asText())
+        .contains("./.github/scripts/Test-ProductionSite.ps1")
+        .doesNotContain("${{");
+    assertThat(Files.isRegularFile(REPOSITORY_ROOT.resolve(".github/scripts/Test-ProductionSite.ps1")))
+        .isTrue();
+  }
+
+  @Test
   void staleAutomationIsBoundedExemptibleAndLeastPrivilege() throws IOException {
     var workflow = readYaml(".github/workflows/stale.yml");
     var job = workflow.at("/jobs/stale");
@@ -230,6 +318,15 @@ class GitHubAutomationConfigurationTest {
         .filter(step -> step.path("uses").asText().startsWith(action + "@"))
         .findFirst()
         .orElse(MissingNode.getInstance());
+  }
+
+  private static int stepIndex(JsonNode steps, String name) {
+    for (var index = 0; index < steps.size(); index++) {
+      if (name.equals(steps.get(index).path("name").asText())) {
+        return index;
+      }
+    }
+    throw new AssertionError("Workflow has no step named " + name);
   }
 
   private static JsonNode stepNamed(JsonNode steps, String name) {

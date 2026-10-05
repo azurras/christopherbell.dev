@@ -42,20 +42,55 @@ jobs:
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
+      # PowerShell Gallery outages have failed main builds on unchanged trees; a cached
+      # module avoids the Gallery entirely and retries absorb transient misses.
+      - name: Cache Pester 5.9.0
+        timeout-minutes: 5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Documents/PowerShell/Modules/Pester/5.9.0
+          key: pester-5.9.0-${{ runner.os }}
+
       - name: Install Pester 5.9.0
         shell: pwsh
         timeout-minutes: 5
         run: |
           $ErrorActionPreference = 'Stop'
-          Install-Module Pester -RequiredVersion 5.9.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          $requiredPesterVersion = [version]'5.9.0'
+          $maximumInstallAttempts = 3
+          $retryDelaysInSeconds = @(15, 45)
+          $installedPester = Get-Module -ListAvailable -Name Pester |
+            Where-Object Version -eq $requiredPesterVersion
+          if ($installedPester) {
+            Write-Output "Using cached Pester $requiredPesterVersion."
+          } else {
+            for ($installAttempt = 1; $installAttempt -le $maximumInstallAttempts; $installAttempt++) {
+              try {
+                Install-Module Pester -RequiredVersion 5.9.0 -Scope CurrentUser -Force -SkipPublisherCheck
+                break
+              } catch {
+                if ($installAttempt -eq $maximumInstallAttempts) { throw }
+                $retryDelayInSeconds = $retryDelaysInSeconds[$installAttempt - 1]
+                Write-Warning ("Pester install attempt $installAttempt of $maximumInstallAttempts failed: " +
+                  "$($_.Exception.Message) Retrying in $retryDelayInSeconds seconds.")
+                Start-Sleep -Seconds $retryDelayInSeconds
+              }
+            }
+          }
           Import-Module Pester -RequiredVersion 5.9.0 -Force -ErrorAction Stop
-          if ((Get-Module Pester).Version -ne [version]'5.9.0') {
+          if ((Get-Module Pester).Version -ne $requiredPesterVersion) {
             throw 'Required Pester 5.9.0 module failed to load.'
           }
 
       - name: Build and Test
         timeout-minutes: 20
         run: .\gradlew.bat build
+
+      - name: Summarize test results
+        if: always()
+        shell: pwsh
+        timeout-minutes: 5
+        run: ./.github/scripts/Write-TestSummary.ps1 -ResultsRoot . -SummaryPath $env:GITHUB_STEP_SUMMARY
 
       - name: Upload failed test reports
         if: failure()

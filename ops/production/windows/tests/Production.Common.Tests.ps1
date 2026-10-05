@@ -355,8 +355,21 @@ if ($output -ne 'argument with spaces "and quotes"\tail|legacy value') {
         Should -Invoke Invoke-WebRequest -ModuleName Production.Common -Times 1 -Exactly `
             -ParameterFilter {
                 $Method -eq 'Get' -and
-                -not $PSBoundParameters.ContainsKey('Body')
+                -not $PSBoundParameters.ContainsKey('Body') -and
+                -not $PSBoundParameters.ContainsKey('Headers')
             }
+    }
+
+    It 'passes request headers through only when the caller supplies them' {
+        Mock Invoke-WebRequest -ModuleName Production.Common {
+            [pscustomobject]@{ StatusCode = 200; Content = '{}' }
+        }
+
+        Invoke-ProductionWebRequest -Uri 'https://api.github.com/repos/o/r' `
+            -Headers @{ Accept = 'application/vnd.github+json' } | Out-Null
+
+        Should -Invoke Invoke-WebRequest -ModuleName Production.Common -Times 1 -Exactly `
+            -ParameterFilter { $Headers.Accept -eq 'application/vnd.github+json' }
     }
 
     It 'scopes Git repository trust to each production command' {

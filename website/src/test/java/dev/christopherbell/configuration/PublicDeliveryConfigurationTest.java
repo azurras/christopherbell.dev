@@ -50,7 +50,7 @@ class PublicDeliveryConfigurationTest {
   void healthGroupsAreDetailFreeAndOnlyProbePathsArePublic() throws Exception {
     var configuration = applicationConfiguration();
     assertThat(configuration.at("/management/endpoints/web/exposure/include").asText())
-        .isEqualTo("health");
+        .isEqualTo("health,info");
     assertThat(configuration.at("/management/endpoint/health/show-details").asText())
         .isEqualTo("when-authorized");
     assertThat(configuration.at("/management/endpoint/health/roles").asText())
@@ -64,6 +64,43 @@ class PublicDeliveryConfigurationTest {
     assertThat(isPublic("GET", "/actuator/health/readiness")).isTrue();
     assertThat(isPublic("GET", "/actuator/health")).isFalse();
     assertThat(isPublic("GET", "/actuator/health/database")).isFalse();
+  }
+
+  @Test
+  void infoIsPublicAndPublishesOnlyBuildIdentity() throws Exception {
+    var configuration = applicationConfiguration();
+
+    assertThat(List.of("env", "java", "os", "process", "ssl"))
+        .allSatisfy(contributor -> assertThat(
+            configuration.at("/management/info/" + contributor + "/enabled").asText())
+            .isEqualTo("false"));
+    assertThat(isPublic("GET", "/actuator/info")).isTrue();
+    assertThat(isPublic("POST", "/actuator/info")).isFalse();
+    assertThat(isPublic("GET", "/actuator/env")).isFalse();
+  }
+
+  @Test
+  void productionWritesRollingStructuredJsonLogsBesideTheServiceLog() throws Exception {
+    var configuration = YAML.readTree(RESOURCES.resolve("application-prod.yml").toFile());
+
+    assertThat(configuration.at("/logging/file/name").asText())
+        .isEqualTo("C:/ProgramData/christopherbell.dev/logs/application.json.log");
+    assertThat(configuration.at("/logging/structured/format/file").asText()).isEqualTo("ecs");
+    assertThat(configuration.at("/logging/structured/format/console").isMissingNode()).isTrue();
+    assertThat(configuration.at("/logging/logback/rollingpolicy/max-file-size").asText())
+        .isEqualTo("10MB");
+    assertThat(configuration.at("/logging/logback/rollingpolicy/max-history").asInt())
+        .isEqualTo(14);
+    assertThat(configuration.at("/logging/logback/rollingpolicy/total-size-cap").asText())
+        .isEqualTo("256MB");
+    assertThat(configuration.at("/command-center/log-path").asText())
+        .isEqualTo("C:/ProgramData/christopherbell.dev/logs/ChristopherBellDev.out.log");
+  }
+
+  @Test
+  void consoleLogsCarryTheRequestCorrelationId() throws Exception {
+    assertThat(applicationConfiguration().at("/logging/pattern/correlation").asText())
+        .isEqualTo("[%X{requestId:-}] ");
   }
 
   @Test

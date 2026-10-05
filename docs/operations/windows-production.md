@@ -247,10 +247,49 @@ release and does not depend on refreshing the installed service launcher.
 ## Application Releases
 
 Normal releases require only a merge or push to `origin/main`. The poller reads
-the remote SHA without an inbound webhook or GitHub token. Unchanged checks do
+the remote SHA without an inbound webhook. Unchanged checks do
 not fetch, build, restart, or modify the database. The one-shot check runs as a
 hidden, noninteractive SYSTEM task, so routine releases require neither a
 visible terminal nor an administrator approval prompt.
+
+The poller deploys a new `main` commit, and refreshes its own SYSTEM-run tool
+bundle from it, only after that commit's `CI Build` push run succeeded. It asks
+GitHub's public Actions API, anonymously or with the optional deployment token
+below. While the run is queued, running, or not yet registered, `auto-status`
+reports `AWAITING_CI` and the active release keeps serving. A failed, cancelled,
+or timed-out run reports `CI_FAILED` with failure category `CI_RESULT`. That
+verdict is rechecked only after `autoDeployFailureBackoffSeconds`, so a re-run
+that turns green is picked up without polling GitHub every minute. When GitHub
+cannot be reached, the poll reports `CHECK_FAILED` with category `CI_CHECK` and
+deploys nothing. Active-release recovery still runs first. The break-glass
+`.\prod.cmd deploy` below is an explicit operator decision and does not consult
+CI.
+
+### GitHub Deployment Records
+
+With a token installed, each automatic deployment attempt is recorded in the
+repository's `Production` environment: `in_progress` when it starts, then
+`success` with the public URL or `failure` with a sanitized 140-character
+reason. Production Watch alerts on a failed latest deployment. Without a token
+the poller behaves exactly as before and makes no GitHub writes.
+
+1. Create a fine-grained personal access token limited to
+   `azurras/christopherbell.dev` with **Deployments: Read and write** and
+   **Actions: Read**. Choose an expiry and note when to rotate it.
+2. Save only the token to a temporary file, then from an elevated prompt:
+
+   ```powershell
+   .\prod.cmd github-token-install -GitHubTokenPath C:\Secure\github-token.txt
+   Remove-Item -LiteralPath C:\Secure\github-token.txt
+   ```
+
+   The command verifies the token against the repository before storing it in
+   `C:\ProgramData\christopherbell.dev\config\github-deployments.token`, which is
+   protected to SYSTEM and Administrators before the secret is written.
+3. To rotate, run the same command with the new token. To turn reporting off,
+   delete the protected token file. A rejected or unreadable token produces one
+   warning per poll; CI checks fall back to anonymous access and deployments
+   continue.
 
 Manual deployment remains available as a break-glass operation:
 
@@ -543,7 +582,12 @@ Get-Service MongoDB,ChristopherBellDev,ChristopherBellMediaWorker,cloudflared |
   Select-Object Name,Status,StartType
 ```
 
-- Website/WinSW logs: `C:\ProgramData\christopherbell.dev\logs`.
+- Website/WinSW logs: `C:\ProgramData\christopherbell.dev\logs`. The WinSW
+  output log stays plain text for Mission Control. `application.json.log` holds
+  the same application events as ECS JSON lines, rolled at 10 MB and kept for 14
+  files or 256 MB. Each request's `X-Request-Id` response header matches the
+  `requestId` field in that file, for example
+  `Select-String -LiteralPath application.json.log -Pattern '<request id>'`.
 - Auto-deploy state: `C:\ProgramData\christopherbell.dev\state\auto-deploy.json`.
 - cloudflared: Windows service state and Windows Application/System event logs.
 - MongoDB: the log configured by the native MongoDB Server installation.

@@ -543,9 +543,13 @@ the secret-bearing configuration file.
 at boot and once per minute. Each invocation checks the remote SHA once and
 exits, so there is no persistent terminal process to interrupt or confirm.
 Unchanged checks do not fetch, build, or restart the site. A changed SHA enters
-the same locked deployment and forward-only cutover pipeline; no inbound webhook, GitHub
-runner, routine administrator approval, or manual deployment command is
-required.
+the same locked deployment and forward-only cutover pipeline only after its
+`CI Build` push run succeeded; until then `auto-status` reports `AWAITING_CI`,
+or `CI_FAILED` for a red commit. No inbound webhook, GitHub runner, routine
+administrator approval, or manual deployment command is required. An optional
+`.\prod.cmd github-token-install -GitHubTokenPath <file>` records each attempt
+as a GitHub `Production` deployment; see the
+[Windows production runbook](docs/operations/windows-production.md#github-deployment-records).
 
 Common operations:
 
@@ -578,6 +582,10 @@ Public crawler and availability contracts:
 - `/actuator/health/liveness` and `/actuator/health/readiness` are public and
   expose status without component details. The readiness group includes MongoDB.
 - `/actuator/health` and component-specific health routes remain protected.
+- `/actuator/info` is public and reports only build data; `build.version` names
+  the running commit as `0.0.0-dev.<sha>`.
+- Every response carries an `X-Request-Id` that matches the `requestId` field
+  in the logs.
 - Thymeleaf emits release-SHA-prefixed CSS, JavaScript, image, and favicon URLs;
   those responses use one-year immutable public caching, while direct
   unversioned paths use a bounded one-hour cache. Relative ES-module imports
@@ -609,10 +617,33 @@ Static JS changes are not visible:
 
 ## Repository Automation
 
-Pull requests and main run the Java 25 build on Ubuntu, macOS, and Windows.
-CI caches Gradle state and retains Java, JavaScript, and Gradle diagnostic
-reports for 14 days when a matrix job fails. Browser tests write JUnit XML
-under `website/build/test-results/jsTest/`.
+Pull requests and main run the Java 25 build on Windows, including the
+shared-folder, operations and automation Pester suites. CI caches Gradle state
+and Pester 5.9.0, retries a failed PowerShell Gallery install, and writes a test
+summary (totals per results directory, failed tests and the slowest suites) to
+every run's job summary. Java, JavaScript, Pester and Gradle diagnostic reports
+are retained for 14 days when the job fails. Browser tests write JUnit XML under
+`website/build/test-results/jsTest/`.
+
+The `main` ruleset requires the `build`, `Analyze (java-kotlin)`,
+`Analyze (javascript-typescript)`, `Analyze (actions)` and `dependency-review`
+checks on a branch that is up to date with `main`. Renaming a workflow job or
+the CodeQL matrix changes those check names, so update the ruleset in the same
+change.
+
+Dependabot does not update `gradle/verification-metadata.xml`. On a Dependabot
+Gradle pull request, the Dependency Verification Metadata workflow regenerates
+it with read-only permissions, lists the new components in its job summary and
+uploads the file as an artifact. Review the components, then apply the file
+with the commands in that summary; a person's push reruns the required checks.
+
+Production Watch runs every 15 minutes and on demand. From outside the host it
+checks readiness, `/`, `/blog` and `/actuator/info`, the latest `Production`
+deployment status, and whether `main` has been CI-green for more than 45
+minutes without going live. Failures open or update one `production-alert`
+issue, and recovery closes it. GitHub disables scheduled workflows after 60
+days without repository activity; re-enable it from the Actions tab if that
+happens.
 
 CodeQL analyzes Java changes and Dependency Review rejects newly introduced
 high-or-critical vulnerable dependencies. Dependabot groups weekly Gradle and
