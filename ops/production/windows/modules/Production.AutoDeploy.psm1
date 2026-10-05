@@ -122,11 +122,31 @@ function Read-AutoDeployGitHubToken {
     $tokenPath = Get-AutoDeployGitHubTokenPath $Config
     if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf)) { return $null }
     Assert-ProtectedProductionPath -Path $tokenPath
-    $token = ([string](Get-Content -LiteralPath $tokenPath -Raw -ErrorAction Stop)).Trim()
+    $token = Read-AutoDeployTokenFileText -Path $tokenPath
     if (-not (Test-AutoDeployGitHubTokenShape $token)) {
         throw 'The GitHub deployment token file does not contain a GitHub token.'
     }
     return $token
+}
+
+function Read-AutoDeployTokenFileText {
+    <# Returns the trimmed file text; an empty file yields '' because Get-Content -Raw emits nothing for it. #>
+    param([Parameter(Mandatory)][string]$Path)
+    $fileText = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+    if ($null -eq $fileText) { return '' }
+    return ([string]$fileText).Trim()
+}
+
+function Test-AutoDeployAdministrator {
+    $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Assert-AutoDeployAdministrator {
+    param([Parameter(Mandatory)][string]$Operation)
+    if (-not (Test-AutoDeployAdministrator)) {
+        throw "$Operation requires elevated PowerShell. Open PowerShell 7 with Run as administrator and retry."
+    }
 }
 
 function Invoke-AutoDeployGitHubApi {
@@ -196,8 +216,10 @@ function Invoke-AutoDeployGitHubReadApi {
 
 function Get-AutoDeployCiConclusion {
     <#
-    Returns SUCCESS, PENDING or FAILED for the newest CI push run on a commit. A commit without a
-    run yet is PENDING because GitHub registers push runs shortly after the push lands.
+    Returns SUCCESS, PENDING or FAILED for the newest CI run of a commit on the deployed branch.
+    Push runs and manual (workflow_dispatch) runs count, so a run started by hand recovers a push
+    whose event GitHub never delivered; pull request runs test a merge preview and never count.
+    A commit without a qualifying run is PENDING.
     #>
     param(
         [Parameter(Mandatory)]$Config,
@@ -207,9 +229,10 @@ function Get-AutoDeployCiConclusion {
     $repository = Get-AutoDeployGitHubRepository $Config
     $branch = [uri]::EscapeDataString([string]$Config.branch)
     $runsPath = "repos/$repository/actions/workflows/$script:CiWorkflowFile/runs" +
-        "?head_sha=$Sha&event=push&branch=$branch&per_page=5"
+        "?head_sha=$Sha&branch=$branch&per_page=10"
     $runPage = Invoke-AutoDeployGitHubReadApi -Config $Config -Path $runsPath
     $newestRun = @($runPage.workflow_runs) |
+        Where-Object { [string]$_.event -in @('push', 'workflow_dispatch') } |
         Sort-Object -Property { [long]$_.run_number } -Descending |
         Select-Object -First 1
     if (-not $newestRun -or [string]$newestRun.status -ne 'completed') { return 'PENDING' }
@@ -343,13 +366,17 @@ function Install-AutoDeployGitHubToken {
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][string]$SourcePath,
-        $Config = (Read-ProductionConfig)
+        # Read in the body, after the elevation check: a default-value expression would run during
+        # parameter binding and fail on the protected file before any clear message could appear.
+        $Config
     )
+    Assert-AutoDeployAdministrator -Operation 'github-token-install'
+    if ($null -eq $Config) { $Config = Read-ProductionConfig }
     Assert-ProductionFixedRootBoundary -Config $Config -FixedRoot $script:FixedProductionRoot | Out-Null
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
         throw 'GitHubTokenPath must reference an existing file.'
     }
-    $token = ([string](Get-Content -LiteralPath $SourcePath -Raw -ErrorAction Stop)).Trim()
+    $token = Read-AutoDeployTokenFileText -Path $SourcePath
     if (-not (Test-AutoDeployGitHubTokenShape $token)) {
         throw 'GitHubTokenPath does not contain a GitHub token.'
     }

@@ -253,7 +253,11 @@ hidden, noninteractive SYSTEM task, so routine releases require neither a
 visible terminal nor an administrator approval prompt.
 
 The poller deploys a new `main` commit, and refreshes its own SYSTEM-run tool
-bundle from it, only after that commit's `CI Build` push run succeeded. It asks
+bundle from it, only after that commit's `CI Build` run on `main` succeeded. Push
+runs and manual runs count; pull request runs do not. If GitHub drops a push
+event and no run ever starts, `auto-status` stays at `AWAITING_CI` and Production
+Watch alerts after 45 minutes. Recover by running **CI Build** on `main` from the
+repository's Actions tab (**Run workflow**). It asks
 GitHub's public Actions API, anonymously or with the optional deployment token
 below. While the run is queued, running, or not yet registered, `auto-status`
 reports `AWAITING_CI` and the active release keeps serving. A failed, cancelled,
@@ -276,7 +280,9 @@ the poller behaves exactly as before and makes no GitHub writes.
 1. Create a fine-grained personal access token limited to
    `azurras/christopherbell.dev` with **Deployments: Read and write** and
    **Actions: Read**. Choose an expiry and note when to rotate it.
-2. Save only the token to a temporary file, then from an elevated prompt:
+2. Save only the token to a temporary file, then from PowerShell 7 started with
+   **Run as administrator** (the command refuses a non-elevated prompt and an
+   empty or malformed token file):
 
    ```powershell
    .\prod.cmd github-token-install -GitHubTokenPath C:\Secure\github-token.txt

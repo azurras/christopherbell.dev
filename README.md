@@ -639,8 +639,10 @@ with the commands in that summary; a person's push reruns the required checks.
 
 Production Watch runs every 15 minutes and on demand. From outside the host it
 checks readiness, `/`, `/blog` and `/actuator/info`, the latest `Production`
-deployment status, and whether `main` has been CI-green for more than 45
-minutes without going live. Failures open or update one `production-alert`
+deployment status, and whether `main` has gone more than 45 minutes without
+going live, either after passing CI or because no CI run finished for it. If
+GitHub never starts CI for a `main` commit, run **CI Build** on `main` from the
+Actions tab; auto-deploy accepts that manual run. Failures open or update one `production-alert`
 issue, and recovery closes it. GitHub disables scheduled workflows after 60
 days without repository activity; re-enable it from the Actions tab if that
 happens.

@@ -92,6 +92,16 @@ class GitHubAutomationConfigurationTest {
   }
 
   @Test
+  void ciCanBeRerunByHandForAMissedPush() throws IOException {
+    var triggers = readYaml(".github/workflows/ci.yml").path("on");
+
+    // Auto-deploy waits for a CI run on the main commit; a dropped push event must be recoverable.
+    assertThat(triggers.has("workflow_dispatch")).isTrue();
+    assertThat(triggers.at("/push/branches/0").asText()).isEqualTo("main");
+    assertThat(triggers.at("/pull_request/branches/0").asText()).isEqualTo("main");
+  }
+
+  @Test
   void ciRunsPinnedWindowsPesterAndRetainsItsNunitResults() throws IOException {
     var workflow = readYaml(".github/workflows/ci.yml");
     var steps = workflow.at("/jobs/build/steps");

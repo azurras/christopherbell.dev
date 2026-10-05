@@ -2137,14 +2137,18 @@ Describe 'automatic deployment CI conclusion' {
         }
     }
 
-    It 'maps the newest CI push run on a commit to <Expected>' -ForEach @(
-        @{ Runs = @(); Expected = 'PENDING' }
-        @{ Runs = @(@{ run_number = 5; status = 'in_progress'; conclusion = $null }); Expected = 'PENDING' }
-        @{ Runs = @(@{ run_number = 5; status = 'completed'; conclusion = 'success' }); Expected = 'SUCCESS' }
-        @{ Runs = @(@{ run_number = 5; status = 'completed'; conclusion = 'cancelled' }); Expected = 'FAILED' }
-        @{ Runs = @(
-                @{ run_number = 5; status = 'completed'; conclusion = 'failure' },
-                @{ run_number = 6; status = 'completed'; conclusion = 'success' }); Expected = 'SUCCESS' }
+    It 'maps the newest push or manual CI run on a commit to <Expected> (<Case>)' -ForEach @(
+        @{ Case = 'no run'; Runs = @(); Expected = 'PENDING' }
+        @{ Case = 'running'; Runs = @(@{ run_number = 5; event = 'push'; status = 'in_progress'; conclusion = $null }); Expected = 'PENDING' }
+        @{ Case = 'passed'; Runs = @(@{ run_number = 5; event = 'push'; status = 'completed'; conclusion = 'success' }); Expected = 'SUCCESS' }
+        @{ Case = 'cancelled'; Runs = @(@{ run_number = 5; event = 'push'; status = 'completed'; conclusion = 'cancelled' }); Expected = 'FAILED' }
+        @{ Case = 'green re-run'; Runs = @(
+                @{ run_number = 5; event = 'push'; status = 'completed'; conclusion = 'failure' },
+                @{ run_number = 6; event = 'push'; status = 'completed'; conclusion = 'success' }); Expected = 'SUCCESS' }
+        @{ Case = 'manual run recovers a missed push'; Runs = @(
+                @{ run_number = 7; event = 'workflow_dispatch'; status = 'completed'; conclusion = 'success' }); Expected = 'SUCCESS' }
+        @{ Case = 'pull request runs never count'; Runs = @(
+                @{ run_number = 8; event = 'pull_request'; status = 'completed'; conclusion = 'success' }); Expected = 'PENDING' }
     ) {
         InModuleScope Production.AutoDeploy -Parameters @{ Config = $script:config; Runs = $Runs; Expected = $Expected } {
             param($Config, $Runs, $Expected)
@@ -2159,7 +2163,7 @@ Describe 'automatic deployment CI conclusion' {
             Get-AutoDeployCiConclusion -Config $Config -Sha 'abcdefabcdefabcdefabcdefabcdefabcdefabcd' |
                 Should -Be $Expected
             $script:requestedPath | Should -Be ('repos/azurras/christopherbell.dev/actions/workflows/ci.yml/runs' +
-                '?head_sha=abcdefabcdefabcdefabcdefabcdefabcdefabcd&event=push&branch=main&per_page=5')
+                '?head_sha=abcdefabcdefabcdefabcdefabcdefabcdefabcd&branch=main&per_page=10')
         }
     }
 
@@ -2271,6 +2275,7 @@ Describe 'GitHub deployment token' {
         } {
             param($Config, $SourcePath, $TokenPath, $Token)
             $script:tokenEvents = [Collections.Generic.List[string]]::new()
+            Mock Test-AutoDeployAdministrator { $true }
             Mock Assert-ProductionFixedRootBoundary { }
             Mock Get-AutoDeployGitHubRepository { 'azurras/christopherbell.dev' }
             Mock Invoke-AutoDeployGitHubApi { $script:tokenEvents.Add("verify:$Path"); @() }
@@ -2294,6 +2299,7 @@ Describe 'GitHub deployment token' {
             Config = $script:config; SourcePath = $script:sourcePath; TokenPath = $script:tokenPath
         } {
             param($Config, $SourcePath, $TokenPath)
+            Mock Test-AutoDeployAdministrator { $true }
             Mock Assert-ProductionFixedRootBoundary { }
             Mock Get-AutoDeployGitHubRepository { 'azurras/christopherbell.dev' }
             Mock Invoke-AutoDeployGitHubApi { throw 'GitHub API GET returned HTTP 401.' }
@@ -2307,6 +2313,41 @@ Describe 'GitHub deployment token' {
 
             Test-Path -LiteralPath $TokenPath | Should -BeFalse
             Should -Invoke Invoke-AutoDeployGitHubApi -Times 1 -Exactly
+        }
+    }
+
+    It 'rejects an empty or blank token file with a clear message before calling GitHub (<Case>)' -ForEach @(
+        @{ Case = 'empty'; Content = '' }
+        @{ Case = 'blank'; Content = "  `r`n" }
+    ) {
+        InModuleScope Production.AutoDeploy -Parameters @{
+            Config = $script:config; SourcePath = $script:sourcePath; TokenPath = $script:tokenPath; Content = $Content
+        } {
+            param($Config, $SourcePath, $TokenPath, $Content)
+            Mock Test-AutoDeployAdministrator { $true }
+            Mock Assert-ProductionFixedRootBoundary { }
+            Mock Invoke-AutoDeployGitHubApi { throw 'GitHub must not be called for an empty token file.' }
+            Mock Assert-ProtectedProductionPath { }
+            Set-Content -LiteralPath $SourcePath -Value $Content -NoNewline
+            Set-Content -LiteralPath $TokenPath -Value $Content -NoNewline
+
+            { Install-AutoDeployGitHubToken -SourcePath $SourcePath -Config $Config } |
+                Should -Throw 'GitHubTokenPath does not contain a GitHub token.'
+            { Read-AutoDeployGitHubToken $Config } |
+                Should -Throw 'The GitHub deployment token file does not contain a GitHub token.'
+            Should -Invoke Invoke-AutoDeployGitHubApi -Times 0
+        }
+    }
+
+    It 'requires elevated PowerShell before reading the protected configuration' {
+        InModuleScope Production.AutoDeploy -Parameters @{ SourcePath = $script:sourcePath } {
+            param($SourcePath)
+            Mock Test-AutoDeployAdministrator { $false }
+            Mock Read-ProductionConfig { throw 'protected configuration must not be read' }
+
+            { Install-AutoDeployGitHubToken -SourcePath $SourcePath } |
+                Should -Throw '*requires elevated PowerShell*'
+            Should -Invoke Read-ProductionConfig -Times 0
         }
     }
 }
