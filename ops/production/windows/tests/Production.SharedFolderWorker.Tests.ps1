@@ -399,6 +399,49 @@ Describe 'fixed media tool arguments' {
             Should -Throw '*deadline*'
     }
 
+    It 'bounds cleanup and reports a child when process-tree termination fails' {
+        $pwsh = (Get-Command pwsh.exe).Source
+        $childProcess = Start-Process -FilePath $pwsh `
+            -ArgumentList @('-NoLogo','-NoProfile','-Command','Start-Sleep -Seconds 10') `
+            -PassThru -WindowStyle Hidden
+        try {
+            $startedAt = [DateTimeOffset]::UtcNow
+            $operationFailure = [TimeoutException]::new('Media job exceeded its deadline.')
+            $result = InModuleScope 'Production.SharedFolderWorker' `
+                -Parameters @{ childProcess = $childProcess; operationFailure = $operationFailure } {
+                $cleanupResult = Stop-PinnedMediaToolProcess `
+                    -Process $childProcess `
+                    -OutputReaderTasks @() `
+                    -ExitWaitMilliseconds 100 `
+                    -ReaderWaitMilliseconds 100 `
+                    -StopProcessTree { param($process) throw 'Simulated process-tree termination failure.' }
+                $combinedFailure = New-PinnedMediaToolCleanupFailure `
+                    -OperationFailure $operationFailure `
+                    -CleanupResult $cleanupResult
+                [pscustomobject]@{
+                    Cleanup = $cleanupResult
+                    Failure = $combinedFailure
+                }
+            }
+            $elapsed = [DateTimeOffset]::UtcNow - $startedAt
+
+            $result.Cleanup.ProcessExited | Should -BeFalse
+            $result.Cleanup.ProcessId | Should -Be $childProcess.Id
+            $result.Cleanup.Failures.Count | Should -Be 2
+            $result.Cleanup.Failures[0].Message | Should -Be 'Simulated process-tree termination failure.'
+            $result.Cleanup.Failures[1].Message | Should -Match ([string]$childProcess.Id)
+            $result.Failure | Should -BeOfType [AggregateException]
+            $result.Failure.InnerExceptions[0].Message | Should -Be 'Media job exceeded its deadline.'
+            $result.Failure.InnerExceptions[1].Message | Should -Be 'Simulated process-tree termination failure.'
+            $result.Failure.Message | Should -Match "Child process $($childProcess.Id) is still running."
+            $elapsed.TotalSeconds | Should -BeLessThan 3
+        } finally {
+            if (-not $childProcess.HasExited) { $childProcess.Kill($true) }
+            [void]$childProcess.WaitForExit(3000)
+            $childProcess.Dispose()
+        }
+    }
+
     It 'does not start a child when cancellation already exists' {
         $marker = Join-Path $TestDrive 'pre-canceled-child-started.txt'
         $cancellation = Join-Path $TestDrive 'pre-canceled.cancel'
