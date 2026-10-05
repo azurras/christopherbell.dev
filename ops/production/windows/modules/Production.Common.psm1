@@ -611,8 +611,12 @@ Commands: install, deploy, status, logs, restart, releases, rollback, backup,
           mongo-inventory, mongo-consolidation-preview, mongo-consolidate,
           mongo-consolidation-rollback, verify-startup, uninstall,
           auto-install, auto-deploy, auto-status, auto-remove, sensor-install,
-          sensor-status, sensor-enable, sensor-disable, github-token-install
+          sensor-status, sensor-enable, sensor-disable, github-token-install,
+          diagnostics
 
+auto-status and diagnostics run without administrator rights. Agents request
+restart, backup, verify-startup, redeploy or rollback through ops/requests/
+files merged to main; see ops/requests/README.md.
 mongo-consolidation-preview is read-only. mongo-consolidate requires
 -ConfirmDomainCollectionCutover. mongo-consolidation-rollback requires
 -ConfirmDomainCollectionRollback. Automatic deployment never supplies either switch.

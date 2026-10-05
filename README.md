@@ -561,8 +561,17 @@ Common operations:
 .\prod.cmd backup
 .\prod.cmd mongo-inventory
 .\prod.cmd auto-status
+.\prod.cmd diagnostics
 .\prod.cmd verify-startup
 ```
+
+`auto-status` and `diagnostics` work without administrator rights. Standard
+users and agents request `restart`, `backup`, `verify-startup`, `redeploy` or
+`rollback` by merging a JSON file under [`ops/requests/`](ops/requests/README.md);
+the SYSTEM poller runs each request once after CI passes and reports the result
+in `diagnostics`. See
+[Delegated Operations](docs/operations/windows-production.md#delegated-operations)
+for what still needs an administrator.
 
 `rollback` changes application release junctions only. Do not use it after an
 incompatible migration has crossed the live migration boundary; repair forward

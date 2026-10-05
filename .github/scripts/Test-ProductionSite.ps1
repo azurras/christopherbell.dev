@@ -137,6 +137,61 @@ function Test-LatestProductionDeployment {
         -Detail ("Deployment of $shortCommit is $latestState" + $(if ($statuses[0].description) { ": $($statuses[0].description)" } else { '.' }))
 }
 
+function Test-DeploymentTokenExpiry {
+    <#
+    Reads the token expiry the production poller records in each deployment's payload and fails
+    when it is within the warning window, so the token is renewed before reporting stops.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Repository,
+        [Parameter(Mandatory)][string]$Token,
+        [Parameter(Mandatory)][datetimeoffset]$Now,
+        [ValidateRange(1, 90)][int]$WarningDays = 14
+    )
+    # Flatten: a JSON array can arrive as one array object, which hides each deployment's properties.
+    $deployments = @(@(Invoke-GitHubApi -Path "repos/$Repository/deployments?environment=Production&per_page=1" -Token $Token) |
+        ForEach-Object { $_ })
+    $payload = if ($deployments.Count -gt 0 -and $deployments[0].PSObject.Properties['payload']) {
+        $deployments[0].payload
+    } else { $null }
+    $expiresValue = if ($payload -and $payload.PSObject.Properties['tokenExpiresAt']) { $payload.tokenExpiresAt } else { $null }
+    if (-not $expiresValue) {
+        return New-WatchCheck -Name 'Deployment token expiry' -Passed $true -Detail 'No token expiry has been recorded.'
+    }
+    $expiresAt = ConvertTo-UtcTimestamp -Timestamp $expiresValue
+    $expiryDate = $expiresAt.UtcDateTime.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    $daysRemaining = [math]::Floor(($expiresAt - $Now).TotalDays)
+    if ($daysRemaining -lt 0) {
+        return New-WatchCheck -Name 'Deployment token expiry' -Passed $false `
+            -Detail ("The production deployment token expired on $expiryDate; deployment records stopped. " +
+                'Install a new one with prod.cmd github-token-install.')
+    }
+    if ($daysRemaining -le $WarningDays) {
+        return New-WatchCheck -Name 'Deployment token expiry' -Passed $false `
+            -Detail "The production deployment token expires in $daysRemaining days ($expiryDate); renew it with prod.cmd github-token-install."
+    }
+    return New-WatchCheck -Name 'Deployment token expiry' -Passed $true `
+        -Detail "The production deployment token expires in $daysRemaining days ($expiryDate)."
+}
+
+function Test-OpsRequestOnlyDifference {
+    <# True when main differs from the live commit only under ops/requests/, which never deploys. #>
+    param(
+        [Parameter(Mandatory)][string]$Repository,
+        [Parameter(Mandatory)][string]$Token,
+        [Parameter(Mandatory)][string]$LiveCommit,
+        [Parameter(Mandatory)][string]$MainCommit
+    )
+    try {
+        $comparison = Invoke-GitHubApi -Path "repos/$Repository/compare/$LiveCommit...$MainCommit" -Token $Token
+    } catch {
+        return $false
+    }
+    $changedPaths = @(@($comparison.files) | ForEach-Object { [string]$_.filename })
+    if ([string]$comparison.status -ne 'ahead' -or $changedPaths.Count -eq 0) { return $false }
+    return -not ($changedPaths | Where-Object { -not $_.StartsWith('ops/requests/', [StringComparison]::Ordinal) })
+}
+
 function ConvertTo-UtcTimestamp {
     <# Invoke-RestMethod turns ISO timestamps into DateTime values; strings stay round-trip parsed. #>
     param([Parameter(Mandatory)][object]$Timestamp)
@@ -175,6 +230,11 @@ function Test-DeploymentLag {
     $shortMainCommit = $mainCommit.Substring(0, 7)
     if ($LiveCommit -eq $mainCommit) {
         return New-WatchCheck -Name 'Deployment lag' -Passed $true -Detail "main $shortMainCommit is live."
+    }
+    if ($LiveCommit -and (Test-OpsRequestOnlyDifference -Repository $Repository -Token $Token `
+            -LiveCommit $LiveCommit -MainCommit $mainCommit)) {
+        return New-WatchCheck -Name 'Deployment lag' -Passed $true `
+            -Detail "main $shortMainCommit differs from live $($LiveCommit.Substring(0, 7)) only by operations requests, which are not deployed."
     }
     if (-not $newestRun -or [string]$newestRun.status -ne 'completed') {
         $committedAt = ConvertTo-UtcTimestamp -Timestamp $mainHead.commit.committer.date
@@ -227,6 +287,7 @@ function Get-ProductionWatchVerdict {
         $checks.Add($buildInfoProbe.Check)
     }
     $checks.Add((Test-LatestProductionDeployment -Repository $Repository -Token $Token))
+    $checks.Add((Test-DeploymentTokenExpiry -Repository $Repository -Token $Token -Now $Now))
     $checks.Add((Test-DeploymentLag -Repository $Repository -Token $Token -LiveCommit $liveCommit `
         -ThresholdMinutes $DeployLagThresholdMinutes -Now $Now))
     return [pscustomobject]@{

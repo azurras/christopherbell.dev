@@ -45,6 +45,9 @@ Describe 'automatic origin main deployment' {
         # Existing scenarios describe commits that already passed CI on a host without a token.
         Mock Get-AutoDeployCiConclusion { 'SUCCESS' } -ModuleName Production.AutoDeploy
         Mock Read-AutoDeployGitHubToken { $null } -ModuleName Production.AutoDeploy
+        # Existing scenarios carry no operations requests and change deployable code.
+        Mock Test-AutoDeployOpsOnlyChange { $false } -ModuleName Production.AutoDeploy
+        Mock Get-AutoDeployOpsRequestFiles { @() } -ModuleName Production.AutoDeploy
     }
 
     It 'warns once with sanitized details when status publication fails' {
@@ -1991,6 +1994,8 @@ Describe 'automatic deployment CI gate and GitHub reporting' {
             if ($Method -eq 'Post' -and $Path -like '*/deployments') { return [pscustomobject]@{ id = 77 } }
             return [pscustomobject]@{}
         } -ModuleName Production.AutoDeploy
+        Mock Test-AutoDeployOpsOnlyChange { $false } -ModuleName Production.AutoDeploy
+        Mock Get-AutoDeployOpsRequestFiles { @() } -ModuleName Production.AutoDeploy
     }
 
     It 'waits without deploying while CI for the new commit is pending' {
@@ -2377,6 +2382,435 @@ Describe 'automatic deployment CI status outcomes' {
             $result.status | Should -Be $Outcome
             $result.failureCategory | Should -Be $Category
             $result.message | Should -Not -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'operator diagnostics' {
+    It 'redacts <Case>' -ForEach @(
+        @{ Case = 'a fine-grained token'; Text = 'auth with github_pat_11ABCDEFG0123456789_abcdefXYZ failed'; Forbidden = 'github_pat_11ABC'; Expected = '[REDACTED_TOKEN]' }
+        @{ Case = 'a classic token'; Text = 'token ghp_abcdefghijklmnopqrstuvwxyz0123456789 used'; Forbidden = 'ghp_abcdefghij'; Expected = '[REDACTED_TOKEN]' }
+        @{ Case = 'a Resend key'; Text = 'mail key re_AbCdEfGhIjKlMnOpQrSt rejected'; Forbidden = 're_AbCdEf'; Expected = '[REDACTED_TOKEN]' }
+        @{ Case = 'a bearer header'; Text = 'Authorization: Bearer abc.def-ghi'; Forbidden = 'abc.def-ghi'; Expected = 'Bearer [REDACTED]' }
+        @{ Case = 'a JWT'; Text = 'cookie eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl here'; Forbidden = 'eyJhbGci'; Expected = '[REDACTED_JWT]' }
+        @{ Case = 'Mongo credentials'; Text = 'connect mongodb://admin:hunter2@127.0.0.1:27017/christopherbell'; Forbidden = 'hunter2'; Expected = 'mongodb://[REDACTED]@127.0.0.1' }
+        @{ Case = 'a password assignment'; Text = 'login failed password=hunter2; retry'; Forbidden = 'hunter2'; Expected = 'password=[REDACTED]' }
+        @{ Case = 'an email address'; Text = 'reset requested for person@example.com'; Forbidden = 'person@example.com'; Expected = '[REDACTED_EMAIL]' }
+    ) {
+        InModuleScope Production.AutoDeploy -Parameters @{ Text = $Text; Forbidden = $Forbidden; Expected = $Expected } {
+            param($Text, $Forbidden, $Expected)
+            $redacted = ConvertTo-AutoDeployRedactedText -Text $Text
+
+            $redacted | Should -Not -Match ([regex]::Escape($Forbidden))
+            $redacted | Should -Match ([regex]::Escape($Expected))
+        }
+    }
+
+    It 'flattens and bounds a redacted message' {
+        InModuleScope Production.AutoDeploy {
+            $redacted = ConvertTo-AutoDeployRedactedText -Text ("line one`r`nline two " + ('x' * 500)) -MaximumLength 40
+
+            $redacted.Length | Should -Be 40
+            $redacted | Should -Match '^line one line two x+\.\.\.$'
+        }
+    }
+
+    It 'keeps only allowlisted, redacted fields from the newest structured log lines' {
+        InModuleScope Production.AutoDeploy {
+            $logPath = Join-Path $TestDrive 'application.json.log'
+            @(
+                '{"@timestamp":"2026-10-05T15:00:00Z","log":{"level":"INFO","logger":"a.B"},"message":"old","requestId":"r-000000001"}'
+                'not json at all'
+                '{"@timestamp":"2026-10-05T15:01:00Z","log":{"level":"ERROR","logger":"dev.Mail"},"message":"send to person@example.com failed","requestId":"r-000000002","error":{"type":"MailException","message":"auth password=hunter2\n at stack"},"process":{"pid":4}}'
+            ) | Set-Content -LiteralPath $logPath
+
+            $entries = @(Read-AutoDeployRecentLogEntries -Path $logPath -MaximumEntries 1)
+
+            $entries | Should -HaveCount 1
+            $entries[0].level | Should -Be 'ERROR'
+            $entries[0].requestId | Should -Be 'r-000000002'
+            $entries[0].message | Should -Be 'send to [REDACTED_EMAIL] failed'
+            $entries[0].errorMessage | Should -Be 'auth password=[REDACTED]'
+            $entries[0].PSObject.Properties.Name | Should -Not -Contain 'process'
+        }
+    }
+
+    It 'publishes a bounded record that standard users read back' {
+        InModuleScope Production.AutoDeploy {
+            $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            $statusRoot = Join-Path $root 'status'
+            New-Item -ItemType Directory -Path $statusRoot, (Join-Path $root 'logs') -Force | Out-Null
+            $config = [pscustomobject]@{ programDataRoot = $root }
+            $state = New-AutoDeployState
+            $state.heldRemoteSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+            Write-AutoDeployState $config $state
+            $bigLine = '{"@timestamp":"2026-10-05T15:01:00Z","log":{"level":"INFO","logger":"x"},"message":"' + ('y' * 390) + '"}'
+            Set-Content -LiteralPath (Join-Path $root 'logs\application.json.log') -Value (@($bigLine) * 3000)
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+            Mock Get-AutoDeployTaskSchedulerEntry { [pscustomobject]@{ registered = $true; state = 4; reason = 'NONE' } }
+            Mock Get-Service { [pscustomobject]@{ Status = 'Running'; StartType = 'Automatic' } }
+            $script:DiagnosticsMaximumBytes = 20000
+            try {
+                Publish-AutoDeployDiagnostics -Config $config -StatusRoot $statusRoot
+            } finally {
+                $script:DiagnosticsMaximumBytes = 524288
+            }
+
+            (Get-Item -LiteralPath (Join-Path $statusRoot 'diagnostics.json')).Length | Should -BeLessOrEqual 20000
+            $record = Get-AutoDeployDiagnostics -StatusRoot $statusRoot
+            $record.freshness | Should -Be 'FRESH'
+            $record.scheduler.state | Should -Be 4
+            @($record.services).Count | Should -Be 3
+            $record.heldRemoteSha | Should -Be 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+            @($record.recentLogEntries).Count | Should -BeGreaterThan 0
+            @($record.recentLogEntries).Count | Should -BeLessThan 100
+        }
+    }
+
+    It 'reports the poller''s published scheduler state when a standard user is denied' {
+        InModuleScope Production.AutoDeploy {
+            $statusRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            Mock Assert-AutoDeployStatusFile {}
+            Set-Content -LiteralPath (Join-Path $statusRoot 'diagnostics.json') -Value (@{
+                schemaVersion = 1
+                generatedAt = (Get-Date).ToUniversalTime().ToString('o')
+                scheduler = @{ registered = $true; state = 4; reason = 'NONE' }
+            } | ConvertTo-Json)
+            $denied = [pscustomobject]@{ pollerState = 'UNKNOWN'; pollerReason = 'ACCESS_DENIED' }
+
+            $result = Get-AutoDeployPublishedPollerStatus -StatusRoot $statusRoot -Fallback $denied
+
+            $result.pollerState | Should -Be 'RUNNING'
+            $result.pollerReason | Should -Be 'REPORTED_BY_POLLER'
+        }
+    }
+
+    It 'keeps UNKNOWN when the published scheduler state is stale' {
+        InModuleScope Production.AutoDeploy {
+            $statusRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $statusRoot -Force | Out-Null
+            Mock Assert-AutoDeployStatusFile {}
+            Set-Content -LiteralPath (Join-Path $statusRoot 'diagnostics.json') -Value (@{
+                schemaVersion = 1
+                generatedAt = (Get-Date).ToUniversalTime().AddMinutes(-10).ToString('o')
+                scheduler = @{ registered = $true; state = 4; reason = 'NONE' }
+            } | ConvertTo-Json)
+            $denied = [pscustomobject]@{ pollerState = 'UNKNOWN'; pollerReason = 'ACCESS_DENIED' }
+
+            (Get-AutoDeployPublishedPollerStatus -StatusRoot $statusRoot -Fallback $denied).pollerState |
+                Should -Be 'UNKNOWN'
+        }
+    }
+}
+
+Describe 'operations request validation' {
+    BeforeAll {
+        $script:now = [datetime]::Parse('2026-10-05T18:00:00Z', [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AdjustToUniversal)
+        function New-RequestJson {
+            param([hashtable]$Overrides = @{}, [string[]]$Remove = @())
+            $document = [ordered]@{
+                id = 'verify-after-cert'
+                action = 'verify-startup'
+                reason = 'Confirm the tunnel after renewing the certificate.'
+                requestedAt = '2026-10-05T17:30:00Z'
+            }
+            foreach ($key in $Overrides.Keys) { $document[$key] = $Overrides[$key] }
+            foreach ($key in $Remove) { $document.Remove($key) }
+            return ($document | ConvertTo-Json)
+        }
+    }
+
+    It 'accepts a well-formed request' {
+        $verdict = Test-AutoDeployOpsRequestDocument -FileId 'verify-after-cert' -Content (New-RequestJson) -Now $now
+
+        $verdict.Outcome | Should -Be 'READY'
+        $verdict.Request.action | Should -Be 'verify-startup'
+    }
+
+    It 'rejects <Case>' -ForEach @(
+        @{ Case = 'malformed JSON'; Content = '{ "id": '; FileId = 'verify-after-cert'; Detail = 'not valid JSON' }
+        @{ Case = 'an id that differs from the file name'; Overrides = @{ id = 'other-name' }; FileId = 'verify-after-cert'; Detail = 'id must match' }
+        @{ Case = 'an unknown action'; Overrides = @{ action = 'mongo-consolidate' }; FileId = 'verify-after-cert'; Detail = 'action must be one of' }
+        @{ Case = 'an unknown property'; Overrides = @{ command = 'del /s' }; FileId = 'verify-after-cert'; Detail = 'Unknown request properties: command' }
+        @{ Case = 'a missing reason'; Remove = @('reason'); FileId = 'verify-after-cert'; Detail = 'reason must be' }
+        @{ Case = 'a timestamp without a zone'; Overrides = @{ requestedAt = '2026-10-05T17:30:00' }; FileId = 'verify-after-cert'; Detail = 'requestedAt must be' }
+        @{ Case = 'a rollback without expectedActiveSha'; Overrides = @{ action = 'rollback' }; FileId = 'verify-after-cert'; Detail = 'rollback requires expectedActiveSha' }
+        @{ Case = 'an abbreviated expectedActiveSha'; Overrides = @{ action = 'rollback'; expectedActiveSha = 'abc1234' }; FileId = 'verify-after-cert'; Detail = 'expectedActiveSha must be' }
+    ) {
+        $content = if ($Content) { $Content } else {
+            $overrideTable = if ($Overrides) { $Overrides } else { @{} }
+            $removeList = if ($Remove) { $Remove } else { @() }
+            New-RequestJson -Overrides $overrideTable -Remove $removeList
+        }
+
+        $verdict = Test-AutoDeployOpsRequestDocument -FileId $FileId -Content $content -Now $now
+
+        $verdict.Outcome | Should -Be 'REJECTED'
+        $verdict.Detail | Should -Match ([regex]::Escape($Detail))
+    }
+
+    It 'expires <Case> without running it' -ForEach @(
+        @{ Case = 'a request older than 24 hours'; RequestedAt = '2026-10-04T17:59:00Z'; Detail = 'older than 24 hours' }
+        @{ Case = 'a request dated in the future'; RequestedAt = '2026-10-05T18:10:00Z'; Detail = 'in the future' }
+    ) {
+        $verdict = Test-AutoDeployOpsRequestDocument -FileId 'verify-after-cert' `
+            -Content (New-RequestJson -Overrides @{ requestedAt = $RequestedAt }) -Now $now
+
+        $verdict.Outcome | Should -Be 'EXPIRED'
+        $verdict.Detail | Should -Match $Detail
+    }
+
+    It 'checks only the schema when no clock is given, as CI does' {
+        (Test-AutoDeployOpsRequestDocument -FileId 'verify-after-cert' `
+            -Content (New-RequestJson -Overrides @{ requestedAt = '2020-01-01T00:00:00Z' })).Outcome |
+            Should -Be 'READY'
+    }
+}
+
+Describe 'operations requests from trusted main' {
+    BeforeAll {
+        $script:activeSha = '0123456789012345678901234567890123456789'
+        $script:previousSha = '1111111111111111111111111111111111111111'
+        $script:nextSha = '2222222222222222222222222222222222222222'
+        function New-RequestFile {
+            param([string]$Id, [string]$Action, [datetime]$RequestedAt, [string]$ExpectedActiveSha)
+            $document = [ordered]@{
+                id = $Id
+                action = $Action
+                reason = 'Agent maintenance request.'
+                requestedAt = $RequestedAt.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            }
+            if ($ExpectedActiveSha) { $document.expectedActiveSha = $ExpectedActiveSha }
+            [pscustomobject]@{ Id = $Id; Content = ($document | ConvertTo-Json) }
+        }
+    }
+
+    BeforeEach {
+        $script:config = [pscustomobject]@{
+            programDataRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            repositoryPath = $TestDrive
+            remote = 'origin'
+            branch = 'main'
+            productionPort = 8080
+            publicUrl = 'https://www.christopherbell.dev/'
+            autoDeployFailureBackoffSeconds = 900
+        }
+        $script:remoteSha = $script:activeSha
+        $script:currentActiveSha = $script:activeSha
+        $script:requestFiles = @()
+        $script:publishedOutcomes = [Collections.Generic.List[string]]::new()
+        Mock Assert-ProductionFixedRootBoundary { } -ModuleName Production.AutoDeploy
+        Mock Read-ProductionMusicSchemaDirection { [pscustomobject]@{ state = 'TARGET_ACTIVE' } } -ModuleName Production.AutoDeploy
+        Mock Get-Service { [pscustomobject]@{ Status = 'Running' } } -ModuleName Production.AutoDeploy
+        Mock Wait-HttpStatus { } -ModuleName Production.AutoDeploy
+        Mock Get-RemoteMainSha { $script:remoteSha } -ModuleName Production.AutoDeploy
+        Mock Get-ActiveReleaseSha { $script:currentActiveSha } -ModuleName Production.AutoDeploy
+        Mock Publish-AutoDeployStatus {
+            param([string]$Outcome)
+            $script:publishedOutcomes.Add($Outcome)
+        } -ModuleName Production.AutoDeploy
+        Mock Get-AutoDeployCiConclusion { 'SUCCESS' } -ModuleName Production.AutoDeploy
+        Mock Read-AutoDeployGitHubToken { $null } -ModuleName Production.AutoDeploy
+        Mock Test-AutoDeployOpsOnlyChange { $false } -ModuleName Production.AutoDeploy
+        Mock Get-AutoDeployOpsRequestFiles { $script:requestFiles } -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionDeploy { $script:currentActiveSha = $script:remoteSha } -ModuleName Production.AutoDeploy
+        Mock Test-ProductionStartup { [pscustomobject]@{ Services = 'RunningAutomatic' } } -ModuleName Production.AutoDeploy
+        Mock Restart-ProductionService { } -ModuleName Production.AutoDeploy
+        Mock New-ProductionBackup { 'A:\backups\christopherbell-native-20261005T180000Z.archive.gz' } -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionRollback { $script:currentActiveSha = $script:previousSha } -ModuleName Production.AutoDeploy
+    }
+
+    It 'runs a valid request once and records the result' {
+        $script:requestFiles = @(New-RequestFile -Id 'verify-now' -Action 'verify-startup' -RequestedAt (Get-Date).AddMinutes(-5))
+
+        Invoke-AutoDeployOnce $config
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Test-ProductionStartup -Times 1 -Exactly -ModuleName Production.AutoDeploy
+        $result = @((Read-AutoDeployState $config).processedOpsRequests)
+        $result | Should -HaveCount 1
+        $result[0].id | Should -Be 'verify-now'
+        $result[0].outcome | Should -Be 'SUCCEEDED'
+        $script:publishedOutcomes | Should -Contain 'OPS_REQUEST'
+        $script:publishedOutcomes[-1] | Should -Be 'UP_TO_DATE'
+    }
+
+    It 'records old requests on a fresh host as expired without running them' {
+        $script:requestFiles = @(New-RequestFile -Id 'old-restart' -Action 'restart' -RequestedAt (Get-Date).AddDays(-3))
+
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Restart-ProductionService -Times 0 -ModuleName Production.AutoDeploy
+        @((Read-AutoDeployState $config).processedOpsRequests)[0].outcome | Should -Be 'EXPIRED'
+    }
+
+    It 'records a failed request and does not retry it' {
+        Mock Restart-ProductionService { throw 'Readiness did not return within 60 seconds.' } -ModuleName Production.AutoDeploy
+        $script:requestFiles = @(New-RequestFile -Id 'restart-now' -Action 'restart' -RequestedAt (Get-Date).AddMinutes(-2))
+
+        Invoke-AutoDeployOnce $config
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Restart-ProductionService -Times 1 -Exactly -ModuleName Production.AutoDeploy
+        $result = @((Read-AutoDeployState $config).processedOpsRequests)[0]
+        $result.outcome | Should -Be 'FAILED'
+        $result.detail | Should -Match 'Readiness did not return'
+    }
+
+    It 'runs one request per poll, oldest first' {
+        $script:requestFiles = @(
+            New-RequestFile -Id 'second-backup' -Action 'backup' -RequestedAt (Get-Date).AddMinutes(-1)
+            New-RequestFile -Id 'first-verify' -Action 'verify-startup' -RequestedAt (Get-Date).AddMinutes(-9)
+        )
+
+        Invoke-AutoDeployOnce $config
+        @((Read-AutoDeployState $config).processedOpsRequests).id | Should -Be @('first-verify')
+        Should -Invoke New-ProductionBackup -Times 0 -ModuleName Production.AutoDeploy
+
+        Invoke-AutoDeployOnce $config
+        @((Read-AutoDeployState $config).processedOpsRequests).id | Should -Be @('first-verify', 'second-backup')
+    }
+
+    It 'waits for CI before running requests from a new tip' {
+        Mock Get-AutoDeployCiConclusion { 'PENDING' } -ModuleName Production.AutoDeploy
+        $script:requestFiles = @(New-RequestFile -Id 'verify-now' -Action 'verify-startup' -RequestedAt (Get-Date).AddMinutes(-5))
+
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Test-ProductionStartup -Times 0 -ModuleName Production.AutoDeploy
+        @((Read-AutoDeployState $config).processedOpsRequests) | Should -HaveCount 0
+    }
+
+    It 'does not deploy a commit that only adds requests, and runs its request' {
+        $script:remoteSha = $script:nextSha
+        Mock Test-AutoDeployOpsOnlyChange { $true } -ModuleName Production.AutoDeploy
+        $script:requestFiles = @(New-RequestFile -Id 'verify-now' -Action 'verify-startup' -RequestedAt (Get-Date).AddMinutes(-5))
+
+        Invoke-AutoDeployOnce $config
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
+        Should -Invoke Test-ProductionStartup -Times 1 -Exactly -ModuleName Production.AutoDeploy
+        (Read-AutoDeployState $config).opsOnlyAcknowledgedSha | Should -Be $script:nextSha
+        $script:publishedOutcomes[-1] | Should -Be 'UP_TO_DATE'
+    }
+
+    It 'rolls back, holds the rolled-away commit, then deploys when main moves' {
+        $script:requestFiles = @(New-RequestFile -Id 'rollback-bad-release' -Action 'rollback' `
+            -RequestedAt (Get-Date).AddMinutes(-3) -ExpectedActiveSha $script:activeSha)
+
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Invoke-ProductionRollback -Times 1 -Exactly -ModuleName Production.AutoDeploy
+        $state = Read-AutoDeployState $config
+        $state.heldRemoteSha | Should -Be $script:activeSha
+        @($state.processedOpsRequests)[0].outcome | Should -Be 'SUCCEEDED'
+        $script:publishedOutcomes[-1] | Should -Be 'HELD'
+
+        Invoke-AutoDeployOnce $config
+        Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
+        $script:publishedOutcomes[-1] | Should -Be 'HELD'
+
+        $script:remoteSha = $script:nextSha
+        Invoke-AutoDeployOnce $config
+        Should -Invoke Invoke-ProductionDeploy -Times 1 -Exactly -ModuleName Production.AutoDeploy
+        (Read-AutoDeployState $config).heldRemoteSha | Should -BeNullOrEmpty
+    }
+
+    It 'refuses a rollback whose expectedActiveSha is stale' {
+        $script:requestFiles = @(New-RequestFile -Id 'rollback-stale' -Action 'rollback' `
+            -RequestedAt (Get-Date).AddMinutes(-3) -ExpectedActiveSha $script:previousSha)
+
+        Invoke-AutoDeployOnce $config
+
+        Should -Invoke Invoke-ProductionRollback -Times 0 -ModuleName Production.AutoDeploy
+        $result = @((Read-AutoDeployState $config).processedOpsRequests)[0]
+        $result.outcome | Should -Be 'REJECTED'
+        (Read-AutoDeployState $config).heldRemoteSha | Should -BeNullOrEmpty
+    }
+
+    It 'records rollback and redeploy in the GitHub Production environment' {
+        $script:gitHubWrites = [Collections.Generic.List[object]]::new()
+        Mock Read-AutoDeployGitHubToken { 'github_pat_' + ('A1b2C3d4E5' * 4) } -ModuleName Production.AutoDeploy
+        Mock Get-AutoDeployGitHubRepository { 'azurras/christopherbell.dev' } -ModuleName Production.AutoDeploy
+        Mock Invoke-AutoDeployGitHubApi {
+            param([string]$Path, [string]$Method = 'Get', [hashtable]$Body, [string]$Token)
+            if ($Method -eq 'Post') { $script:gitHubWrites.Add([pscustomobject]@{ Path = $Path; Body = $Body }) }
+            if ($Method -eq 'Post' -and $Path -like '*/deployments') { return [pscustomobject]@{ id = 91 } }
+            return [pscustomobject]@{}
+        } -ModuleName Production.AutoDeploy
+        $script:requestFiles = @(New-RequestFile -Id 'rollback-bad-release' -Action 'rollback' `
+            -RequestedAt (Get-Date).AddMinutes(-3) -ExpectedActiveSha $script:activeSha)
+
+        Invoke-AutoDeployOnce $config
+
+        $script:gitHubWrites[0].Body.ref | Should -Be $script:previousSha
+        $script:gitHubWrites[0].Body.description | Should -Be 'Rollback requested by rollback-bad-release'
+        $script:gitHubWrites[-1].Body.state | Should -Be 'success'
+    }
+
+}
+
+Describe 'request-only change detection' {
+    It 'detects request-only changes from the commit diff' -ForEach @(
+        @{ Case = 'only requests'; Paths = "ops/requests/a.json`nops/requests/README.md"; Expected = $true }
+        @{ Case = 'code and requests'; Paths = "ops/requests/a.json`nwebsite/src/App.java"; Expected = $false }
+        @{ Case = 'a look-alike path'; Paths = 'ops/requests-old/a.json'; Expected = $false }
+    ) {
+        InModuleScope Production.AutoDeploy -Parameters @{ Paths = $Paths; Expected = $Expected; Config = [pscustomobject]@{ repositoryPath = $TestDrive } } {
+            param($Paths, $Expected, $Config)
+            $script:diffOutput = $Paths
+            Mock Invoke-CheckedProcess {
+                if ($ArgumentList -contains 'diff') { return $script:diffOutput }
+                return ''
+            }
+
+            Test-AutoDeployOpsOnlyChange -Config $Config -FromSha ('a' * 40) -ToSha ('b' * 40) |
+                Should -Be $Expected
+        }
+    }
+}
+
+Describe 'GitHub deployment token expiry' {
+    It 'parses the expiry header <Header>' -ForEach @(
+        @{ Header = '2026-11-04 15:00:00 UTC'; Expected = '2026-11-04T15:00:00.0000000+00:00' }
+        @{ Header = '2026-11-04 10:00:00 -0500'; Expected = '2026-11-04T15:00:00.0000000+00:00' }
+        @{ Header = 'next Tuesday'; Expected = $null }
+    ) {
+        InModuleScope Production.AutoDeploy -Parameters @{ Header = $Header; Expected = $Expected } {
+            param($Header, $Expected)
+            ConvertFrom-AutoDeployTokenExpirationHeader -HeaderValue $Header | Should -Be $Expected
+        }
+    }
+
+    It 'captures the expiry from authenticated calls and puts it in the deployment payload' {
+        InModuleScope Production.AutoDeploy {
+            $script:autoDeployGitHubTokenExpiresAt = $null
+            $script:postedBodies = [Collections.Generic.List[object]]::new()
+            Mock Invoke-ProductionWebRequest {
+                param([uri]$Uri, [string]$Method, [string]$Body)
+                if ($Method -eq 'Post') { $script:postedBodies.Add(($Body | ConvertFrom-Json)) }
+                [pscustomobject]@{
+                    StatusCode = 201
+                    Content = '{"id":5}'
+                    Headers = @{ 'github-authentication-token-expiration' = @('2026-11-04 15:00:00 UTC') }
+                }
+            }
+            Mock Read-AutoDeployGitHubToken { 'github_pat_' + ('A1b2C3d4E5' * 4) }
+            Mock Get-AutoDeployGitHubRepository { 'azurras/christopherbell.dev' }
+            $config = [pscustomobject]@{ programDataRoot = $TestDrive }
+
+            Invoke-AutoDeployGitHubApi -Path 'repos/o/r/actions/runs' -Token ('github_pat_' + ('A1b2C3d4E5' * 4)) | Out-Null
+            Start-AutoDeployGitHubDeployment -Config $config -Sha ('c' * 40) | Out-Null
+
+            $script:autoDeployGitHubTokenExpiresAt | Should -Be '2026-11-04T15:00:00.0000000+00:00'
+            # ConvertFrom-Json turns the ISO string back into a DateTime, so compare instants.
+            ([datetime]$script:postedBodies[0].payload.tokenExpiresAt).ToUniversalTime() |
+                Should -Be ([datetime]::Parse('2026-11-04T15:00:00Z', [Globalization.CultureInfo]::InvariantCulture,
+                    [Globalization.DateTimeStyles]::AdjustToUniversal))
         }
     }
 }

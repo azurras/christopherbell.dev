@@ -397,6 +397,51 @@ immediately.
 Equivalent Makefile targets include `prod-status`, `prod-deploy`,
 `prod-backup`, `prod-mongo-inventory`, and `prod-verify-startup`.
 
+## Delegated Operations
+
+Routine releases and the operations below need no administrator account, so an
+agent or operator running as a standard user can operate production end to end.
+
+| Need | How, without administrator rights |
+|---|---|
+| Release a change | Merge to `main`; the SYSTEM poller deploys it after CI passes |
+| Deployment state | `.\prod.cmd auto-status` |
+| Services, releases, recent logs, request results, token expiry | `.\prod.cmd diagnostics` |
+| Restart, backup, verify startup, redeploy, roll back | Merge a request file under `ops/requests/`; see [its README](../../ops/requests/README.md) |
+| External health and alerts | Production Watch in GitHub Actions, and its `production-alert` issue |
+
+Every poll, the poller publishes `diagnostics.json` beside the status record.
+That folder is writable only by SYSTEM and Administrators and readable by
+standard users. The record holds the scheduler state as SYSTEM sees it, service
+states, retained releases, any rollback hold, the last 20 request results, the
+token expiry, and up to 100 recent log entries. Log entries keep only the
+timestamp, level, logger, request ID, message and error summary. Tokens, bearer
+values, JWTs, connection-string passwords, `password=`/`secret=` values and
+email addresses are masked, and the record never includes `config`. When a
+standard user cannot query the SYSTEM task, `auto-status` reports the
+published scheduler state with `pollerReason: REPORTED_BY_POLLER`, as long as
+the record is under three minutes old.
+
+A request merged to `main` runs once, after its commit passes CI, under the
+same lock and guards as the matching `prod.cmd` command. A commit that changes
+only `ops/requests/` is never deployed. A successful rollback request holds the
+rolled-away `main` commit (`auto-status`: `HELD`) until a new commit lands, and
+Production Watch reports the lag while the hold lasts.
+
+### Administrator Bootstrap
+
+These steps still need an elevated prompt, because they install services,
+drivers or secrets. Each is a one-time or rare event:
+
+- `install` and `auto-install` on a new host, `uninstall`, and `auto-remove`.
+- `sensor-install`, `sensor-enable` and `sensor-disable` (kernel driver).
+- `install -CloudflareTokenPath` and cloudflared token rotation.
+- `github-token-install` for a new or renewed deployment token. Production
+  Watch fails its "Deployment token expiry" check 14 days before the token
+  expires.
+- Destructive data operations: `mongo-consolidate`, `mongo-consolidation-rollback`
+  and database restores.
+
 ## Shared-Folder Operations
 
 The website keeps its existing `ChristopherBellDev` service identity and

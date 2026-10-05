@@ -142,6 +142,20 @@ Describe 'native Windows production command surface' {
         $makefile | Should -Match '\bprod-mongo-inventory\b'
     }
 
+    It 'routes diagnostics to the published record as JSON' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
+        Mock Get-AutoDeployDiagnostics {
+            [pscustomobject]@{ schemaVersion = 1; freshness = 'FRESH'; heldRemoteSha = $null }
+        }
+
+        $output = @(Invoke-ProductionCommand -Command 'diagnostics')
+
+        $output | Should -HaveCount 1
+        ($output[0] | ConvertFrom-Json).freshness | Should -Be 'FRESH'
+        Should -Invoke Get-AutoDeployDiagnostics -Times 1 -Exactly
+    }
+
     It 'routes the GitHub deployment token install with its source path' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help

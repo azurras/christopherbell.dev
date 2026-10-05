@@ -19,7 +19,9 @@ BeforeAll {
             [string]$CiStatus = 'completed',
             [string]$CiEvent = 'push',
             [string]$CiUpdatedAt = '2026-10-05T14:50:00Z',
-            [AllowNull()][string]$DeploymentState = 'success'
+            [AllowNull()][string]$DeploymentState = 'success',
+            [AllowNull()][string]$TokenExpiresAt,
+            [string[]]$ComparedFiles = @('website/src/main/java/App.java')
         )
         $script:gitHubState = @{
             MainCommit = $MainCommit
@@ -29,6 +31,8 @@ BeforeAll {
             CiEvent = $CiEvent
             CiUpdatedAt = $CiUpdatedAt
             DeploymentState = $DeploymentState
+            TokenExpiresAt = $TokenExpiresAt
+            ComparedFiles = $ComparedFiles
         }
         Mock Invoke-GitHubApi {
             param([string]$Path, [string]$Token)
@@ -58,7 +62,18 @@ BeforeAll {
                 }
                 '/deployments\?' {
                     if ($null -eq $state.DeploymentState) { return ,@() }
-                    return ,@([pscustomobject]@{ id = 42; sha = $state.MainCommit })
+                    $deployment = [pscustomobject]@{ id = 42; sha = $state.MainCommit }
+                    if ($state.TokenExpiresAt) {
+                        $deployment | Add-Member -NotePropertyName payload `
+                            -NotePropertyValue ([pscustomobject]@{ tokenExpiresAt = $state.TokenExpiresAt })
+                    }
+                    return ,@($deployment)
+                }
+                '/compare/' {
+                    return [pscustomobject]@{
+                        status = 'ahead'
+                        files = @($state.ComparedFiles | ForEach-Object { [pscustomobject]@{ filename = $_ } })
+                    }
                 }
                 default { throw "Unexpected GitHub API path $Path" }
             }
@@ -228,6 +243,41 @@ Describe 'Production Watch verdict' {
         $verdict.Healthy | Should -BeTrue
         ($verdict.Checks | Where-Object Name -eq 'Deployment lag').Detail |
             Should -Be 'main b126b64 failed CI; auto-deploy refuses it.'
+    }
+
+    It 'warns about the deployment token <Case>' -ForEach @(
+        @{ Case = 'within 14 days'; ExpiresAt = '2026-10-15T15:00:00Z'; Passed = $false; Detail = 'expires in 10 days (2026-10-15); renew it' }
+        @{ Case = 'after it expired'; ExpiresAt = '2026-10-01T00:00:00Z'; Passed = $false; Detail = 'expired on 2026-10-01' }
+        @{ Case = 'not when it is far off'; ExpiresAt = '2027-01-01T00:00:00Z'; Passed = $true; Detail = 'expires in 87 days (2027-01-01)' }
+    ) {
+        Set-GitHubState -TokenExpiresAt $ExpiresAt
+
+        $check = (Get-TestVerdict).Checks | Where-Object Name -eq 'Deployment token expiry'
+
+        $check.Passed | Should -Be $Passed
+        $check.Detail | Should -Match ([regex]::Escape($Detail))
+    }
+
+    It 'passes the token check when no expiry was recorded' {
+        ((Get-TestVerdict).Checks | Where-Object Name -eq 'Deployment token expiry').Detail |
+            Should -Be 'No token expiry has been recorded.'
+    }
+
+    It 'treats a main that differs from live only by operations requests as live' {
+        Set-GitHubState -MainCommit $script:newerCommit -CiUpdatedAt '2026-10-05T12:00:00Z' `
+            -ComparedFiles @('ops/requests/verify-now.json')
+
+        $check = (Get-TestVerdict).Checks | Where-Object Name -eq 'Deployment lag'
+
+        $check.Passed | Should -BeTrue
+        $check.Detail | Should -Match 'only by operations requests'
+    }
+
+    It 'still reports lag when main also changed deployable code' {
+        Set-GitHubState -MainCommit $script:newerCommit -CiUpdatedAt '2026-10-05T12:00:00Z' `
+            -ComparedFiles @('ops/requests/verify-now.json', 'website/src/main/java/App.java')
+
+        ((Get-TestVerdict).Checks | Where-Object Name -eq 'Deployment lag').Passed | Should -BeFalse
     }
 
     It 'fails build info that does not identify a release commit' {
