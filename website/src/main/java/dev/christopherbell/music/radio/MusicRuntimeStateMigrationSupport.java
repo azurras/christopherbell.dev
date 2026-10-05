@@ -255,43 +255,43 @@ public class MusicRuntimeStateMigrationSupport implements MusicRuntimeStateMigra
   }
 
   private static String requireString(Document document, String field, String context) {
-    Object value = document.get(field);
-    if (!(value instanceof String string)) {
+    Object rawFieldValue = document.get(field);
+    if (!(rawFieldValue instanceof String string)) {
       throw malformed(context);
     }
     return string;
   }
 
   private static Document requireDocument(Document document, String field, String context) {
-    Object value = document.get(field);
-    if (!(value instanceof Document nested)) {
+    Object rawFieldValue = document.get(field);
+    if (!(rawFieldValue instanceof Document nested)) {
       throw malformed(context);
     }
     return nested;
   }
 
   private static Instant requireInstant(Document document, String field, String context) {
-    Object value = document.get(field);
-    if (!(value instanceof Date date)) {
+    Object rawFieldValue = document.get(field);
+    if (!(rawFieldValue instanceof Date date)) {
       throw malformed(context);
     }
     return date.toInstant();
   }
 
   private static long requireIntegral(Document document, String field, String context) {
-    Object value = document.get(field);
-    if (value instanceof Long longValue) {
+    Object rawFieldValue = document.get(field);
+    if (rawFieldValue instanceof Long longValue) {
       return longValue;
     }
-    if (value instanceof Integer integerValue) {
+    if (rawFieldValue instanceof Integer integerValue) {
       return integerValue.longValue();
     }
     throw malformed(context);
   }
 
   private static double requireDouble(Document document, String field, String context) {
-    Object value = document.get(field);
-    if (!(value instanceof Double doubleValue)) {
+    Object rawFieldValue = document.get(field);
+    if (!(rawFieldValue instanceof Double doubleValue)) {
       throw malformed(context);
     }
     return doubleValue;
