@@ -7,7 +7,7 @@ BeforeAll {
     $script:now = [datetimeoffset]::Parse('2026-10-05T15:00:00Z')
 
     function New-SiteResponse {
-        param([int]$StatusCode, [string]$Content = '')
+        param([int]$StatusCode, [object]$Content = '')
         [pscustomobject]@{ StatusCode = $StatusCode; Content = $Content }
     }
 
@@ -155,6 +155,22 @@ Describe 'Production Watch verdict' {
 
         Set-GitHubState -MainCommit $script:newerCommit -CiConclusion $null
         (Get-TestVerdict).Healthy | Should -BeTrue
+    }
+
+    It 'reads the live commit from actuator JSON delivered as bytes' {
+        Mock Invoke-WebRequest {
+            param([uri]$Uri)
+            if ($Uri.AbsolutePath -eq '/actuator/info') {
+                $actuatorJson = "{`"build`":{`"version`":`"0.0.0-dev.$($script:liveCommit)`"}}"
+                return New-SiteResponse 200 ([Text.Encoding]::UTF8.GetBytes($actuatorJson))
+            }
+            return New-SiteResponse 200 'ok'
+        }
+
+        $verdict = Get-TestVerdict
+
+        $verdict.Healthy | Should -BeTrue
+        $verdict.LiveCommit | Should -Be $script:liveCommit
     }
 
     It 'fails build info that does not identify a release commit' {

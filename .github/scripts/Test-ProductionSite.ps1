@@ -56,6 +56,13 @@ function Invoke-SiteProbe {
     throw "GET $RouteUri failed after $Attempts attempts: $lastFailure"
 }
 
+function ConvertTo-ResponseText {
+    <# Invoke-WebRequest returns bytes for vendor media types such as actuator JSON. #>
+    param([AllowNull()][object]$Content)
+    if ($Content -is [byte[]]) { return [Text.Encoding]::UTF8.GetString($Content) }
+    return [string]$Content
+}
+
 function Test-SiteRoute {
     param(
         [Parameter(Mandatory)][string]$SiteUrl,
@@ -68,7 +75,7 @@ function Test-SiteRoute {
         $response = Invoke-SiteProbe -RouteUri $routeUri -Attempts $Attempts -RetryDelaySeconds $RetryDelaySeconds
         return [pscustomobject]@{
             Check = New-WatchCheck -Name "GET $RoutePath" -Passed $true -Detail 'HTTP 200'
-            Content = [string]$response.Content
+            Content = ConvertTo-ResponseText $response.Content
         }
     } catch {
         return [pscustomobject]@{
