@@ -761,6 +761,20 @@ public class PostServiceTest {
   }
 
   @Test
+  @DisplayName("GlobalFeed: unexpected identity failure remains visible")
+  void getGlobalFeed_whenIdentityResolutionHasUnexpectedFailure_propagatesFailure() {
+    var service = spy(postService);
+    var identityFailure = new IllegalArgumentException("invalid identity state");
+    doThrow(identityFailure).when(service).getSelfId();
+
+    var thrown = assertThrows(
+        IllegalArgumentException.class,
+        () -> service.getGlobalFeed(null, 20));
+
+    assertEquals(identityFailure, thrown);
+  }
+
+  @Test
   @DisplayName("GlobalFeed: hides muted accounts and hidden threads for signed-in users")
   public void testGetGlobalFeed_filtersMutedAccountsAndHiddenThreads() {
     var created = Instant.now().minus(Duration.ofMinutes(5));

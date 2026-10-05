@@ -1277,7 +1277,7 @@ public class RestaurantService {
   private String getSelfIdOrNull() {
     try {
       return permissionService.getSelfId();
-    } catch (Exception e) {
+    } catch (IllegalStateException e) {
       return null;
     }
   }
