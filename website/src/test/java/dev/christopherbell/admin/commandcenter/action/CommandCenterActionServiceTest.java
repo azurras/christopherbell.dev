@@ -589,7 +589,8 @@ class CommandCenterActionServiceTest {
         .when(orderedExecutor).execute(CommandCenterActionType.CANCEL_PENDING_ACTION);
 
     assertThatThrownBy(() -> orderedService.cancel(request))
-        .isInstanceOf(InvalidRequestException.class);
+        .isInstanceOf(InvalidRequestException.class)
+        .hasCauseInstanceOf(java.io.IOException.class);
 
     var order = inOrder(activities, orderedExecutor);
     order.verify(activities).recordForActor(

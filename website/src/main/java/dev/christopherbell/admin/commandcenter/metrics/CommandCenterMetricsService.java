@@ -18,11 +18,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.FutureTask;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
@@ -165,7 +167,7 @@ public class CommandCenterMetricsService {
         cancel(entry.getValue());
         retainStale(provider, readings);
         alerts.add(new Alert("PROVIDER_ERROR", "WARNING", "Metrics sampling was interrupted."));
-      } catch (Exception failure) {
+      } catch (ExecutionException | CancellationException failure) {
         inFlightProviders.remove(provider, entry.getValue());
         LOGGER.warn(
             "Command-center metrics provider {} failed.",

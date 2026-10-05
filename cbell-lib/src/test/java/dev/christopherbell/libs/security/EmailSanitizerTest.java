@@ -168,7 +168,9 @@ public final class EmailSanitizerTest {
   @Test
   @DisplayName("Throws when IDN domain is invalid (emoji label rejected by STD3)")
   public void testSanitize_whenIdnEmojiLabelInvalid() {
-    assertThrows(IllegalArgumentException.class, () -> EmailSanitizer.sanitize("user@😀.com"));
+    var failure = assertThrows(
+        IllegalArgumentException.class, () -> EmailSanitizer.sanitize("user@😀.com"));
+    assertInstanceOf(IllegalArgumentException.class, failure.getCause());
   }
 
   @Test

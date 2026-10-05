@@ -3,6 +3,7 @@ package dev.christopherbell.libs.security;
 import java.net.IDN;
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.text.Normalizer;
 import java.text.Normalizer.Form;
 import java.util.Locale;
@@ -121,8 +122,8 @@ public final class EmailSanitizer {
         InetAddress addr = InetAddress.getByName(inside);
         if (!(addr instanceof Inet6Address)) throw new IllegalArgumentException("invalid IPv6 literal");
         return "[" + inside + "]";
-      } catch (Exception e) {
-        throw new IllegalArgumentException("invalid IPv6 literal");
+      } catch (UnknownHostException | IllegalArgumentException e) {
+        throw new IllegalArgumentException("invalid IPv6 literal", e);
       }
     }
 
@@ -130,8 +131,8 @@ public final class EmailSanitizer {
     String ascii;
     try {
       ascii = IDN.toASCII(domain, IDN.USE_STD3_ASCII_RULES);
-    } catch (Exception e) {
-      throw new IllegalArgumentException("invalid idn domain");
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException("invalid idn domain", e);
     }
     if (ascii.isEmpty() || ascii.length() > MAX_DOMAIN_LEN) {
       throw new IllegalArgumentException("bad domain length");
