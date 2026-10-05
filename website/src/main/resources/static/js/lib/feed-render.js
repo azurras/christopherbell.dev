@@ -523,9 +523,9 @@ function startLifespanTimer(item, post, ctx) {
  */
 export function createFeedItem(post, ctx) {
   ensurePostMenuEscapeHandler();
-  const s = ctx.sanitize;
+  const sanitizeText = ctx.sanitize;
   const when = ctx.formatWhen(post.createdOn || post.lastUpdatedOn);
-  const handle = post.username ? `@${s(post.username)}` : '@user';
+  const handle = post.username ? `@${sanitizeText(post.username)}` : '@user';
   const avatarInitial = (post.username || 'U')[0].toUpperCase();
   const liked = !!post.liked;
   const likes = post.likesCount || 0;
@@ -534,10 +534,10 @@ export function createFeedItem(post, ctx) {
   const shouldCollapse = (post.text || '').length > COLLAPSE_AT;
   const previewMarkup = (post.linkPreviews || [])
     .filter(preview => !hasRichEmbedForPreview(preview))
-    .map(preview => linkPreviewCardMarkup(preview, s))
+    .map(preview => linkPreviewCardMarkup(preview, sanitizeText))
     .filter(Boolean)
     .join('');
-  const richEmbedMarkup = richEmbedMarkupForPost(post, s);
+  const richEmbedMarkup = richEmbedMarkupForPost(post, sanitizeText);
 
   const item = document.createElement('div');
   item.className = `post-item${isRecent(post) ? ' post-item-new' : ''}`;
@@ -711,7 +711,7 @@ export function createFeedItem(post, ctx) {
         // Append a minimal inline reply row
         const replies = item.querySelector('.replies');
         if (replies) {
-          const who = ctx.currentUserName ? `@${s(ctx.currentUserName)}` : 'You';
+          const who = ctx.currentUserName ? `@${sanitizeText(ctx.currentUserName)}` : 'You';
           const whenStr = ctx.formatWhen(new Date().toISOString());
           const row = document.createElement('div');
           row.className = 'inline-reply';
@@ -751,24 +751,24 @@ export function createFeedItem(post, ctx) {
           try {
             const thread = await (typeof ctx.fetchThread === 'function' ? ctx.fetchThread(post.id) : Promise.resolve([]));
             // Render only direct replies to this post for a compact view
-            const direct = (thread || []).filter(r => r.parentId === post.id);
+            const directReplies = (thread || []).filter(replyPost => replyPost.parentId === post.id);
             replies.innerHTML = '';
-            if (direct.length === 0) {
+            if (directReplies.length === 0) {
               const empty = document.createElement('div');
               empty.className = 'text-muted small mt-1';
               empty.textContent = 'No replies yet';
               replies.appendChild(empty);
             } else {
-              for (const r of direct) {
+              for (const reply of directReplies) {
                 const row = document.createElement('div');
                 row.className = 'inline-reply';
                 row.innerHTML = `
                   <div class="inline-reply-body">
-                      <div class="inline-reply-meta"><a href="/u/${encodeURIComponent(r.username || '')}">@${s(r.username || 'user')}</a> · ${ctx.formatWhen(r.createdOn || r.lastUpdatedOn)}</div>
+                      <div class="inline-reply-meta"><a href="/u/${encodeURIComponent(reply.username || '')}">@${sanitizeText(reply.username || 'user')}</a> · ${ctx.formatWhen(reply.createdOn || reply.lastUpdatedOn)}</div>
                       <div class="post-body"></div>
                   </div>`;
                 const replyBody = row.querySelector('.post-body');
-                if (replyBody) appendTextWithMentionLinks(replyBody, r.text || '');
+                if (replyBody) appendTextWithMentionLinks(replyBody, reply.text || '');
                 replies.appendChild(row);
               }
               // View full thread link
@@ -778,8 +778,8 @@ export function createFeedItem(post, ctx) {
               replies.appendChild(more);
             }
             replies.dataset.loaded = 'true';
-          } catch (err) {
-            replies.innerHTML = `<div class="text-danger small mt-1">${s(err.message)}</div>`;
+          } catch (replyLoadFailure) {
+            replies.innerHTML = `<div class="text-danger small mt-1">${sanitizeText(replyLoadFailure.message)}</div>`;
             replies.dataset.loaded = 'true';
           }
         }
@@ -887,9 +887,9 @@ export function createFeedItem(post, ctx) {
       (async () => {
         try {
           const parent = await fetchContext(post.parentId);
-          const h = parent.username ? `@${s(parent.username)}` : '@user';
+          const parentHandle = parent.username ? `@${sanitizeText(parent.username)}` : '@user';
           if (handleEl) {
-            handleEl.textContent = h;
+            handleEl.textContent = parentHandle;
             handleEl.setAttribute('href', `/u/${encodeURIComponent(parent.username || '')}`);
           }
           appendTextWithMentionLinks(ctxEl, parent.text || '');
