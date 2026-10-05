@@ -45,7 +45,7 @@ public class DomainCollectionCutoverLedger {
   private static final String TEST_DATABASE = "test";
   private static final int PRODUCTION_MONGO_PORT = 27017;
   private static final Set<String> MIGRATION_RUNNER_COLLECTIONS =
-      Set.of(COLLECTION, "application_leases");
+      Set.of(COLLECTION, "application_runtime");
   private final MongoTemplate mongo;
   private final Environment environment;
 
@@ -105,8 +105,8 @@ public class DomainCollectionCutoverLedger {
         throw new IllegalStateException("Test Mongo database contains application data.");
       }
     }
-    requireOnlyMigrationRecords(hasActiveCutoverLedger);
-    requireOnlyMigrationLease();
+    var v015IsRunning = requireOnlyMigrationRecords(hasActiveCutoverLedger);
+    requireOnlyMigrationLease(v015IsRunning);
   }
 
   private void requireSafeTestDatabaseConnection() {
@@ -143,9 +143,10 @@ public class DomainCollectionCutoverLedger {
     }
   }
 
-  private void requireOnlyMigrationRecords(boolean hasActiveCutoverLedger) {
+  private boolean requireOnlyMigrationRecords(boolean hasActiveCutoverLedger) {
     var migrationVersions = new HashSet<Integer>();
     boolean foundActiveCutoverLedger = false;
+    boolean v015IsRunning = false;
     for (var record : mongo.findAll(Document.class, COLLECTION)) {
       if (hasActiveCutoverLedger
           && isActive(record, DomainCollectionManifest.DIGEST)) {
@@ -163,11 +164,15 @@ public class DomainCollectionCutoverLedger {
           || !migrationVersions.add(migrationVersion)) {
         throw new IllegalStateException("Test Mongo migration state is not a pristine bootstrap.");
       }
+      if (migrationVersion == 15 && "RUNNING".equals(payload.getString("status"))) {
+        v015IsRunning = true;
+      }
     }
     if (hasActiveCutoverLedger != foundActiveCutoverLedger
         || !migrationVersionsAreContiguous(migrationVersions)) {
       throw new IllegalStateException("Test Mongo migration state is not a pristine bootstrap.");
     }
+    return v015IsRunning;
   }
 
   private static boolean isAcceptedBootstrapMigrationRecord(
@@ -176,9 +181,7 @@ public class DomainCollectionCutoverLedger {
         || !"migration_record".equals(record.getString("_kind"))
         || !Integer.valueOf(1).equals(record.getInteger("schemaVersion"))
         || !"migration_record".equals(recordId.getString("kind"))
-        || !(recordId.get("legacyId") instanceof String migrationId)
-        || !(payload.get("id") instanceof String payloadId)
-        || !migrationId.equals(payloadId)
+        || !(recordId.get("legacyId") instanceof String)
         || !(payload.get("checksum") instanceof String checksum)
         || !SHA256.matcher(checksum).matches()
         || !(payload.get("status") instanceof String status)) {
@@ -209,23 +212,35 @@ public class DomainCollectionCutoverLedger {
     return true;
   }
 
-  private void requireOnlyMigrationLease() {
-    var leaseDocuments = mongo.findAll(Document.class, "application_leases");
+  private void requireOnlyMigrationLease(boolean v015IsRunning) {
+    var leaseDocuments = mongo.findAll(Document.class, "application_runtime");
     if (leaseDocuments.size() > 1) {
       throw new IllegalStateException("Test Mongo lease state is not a pristine bootstrap.");
     }
     if (leaseDocuments.isEmpty()) {
+      if (v015IsRunning) {
+        throw new IllegalStateException("Test Mongo V015 migration requires its migration lease.");
+      }
       return;
     }
     var lease = leaseDocuments.getFirst();
     var leaseId = lease.get("_id", Document.class);
     var leasePayload = lease.get("payload", Document.class);
+    var ownerToken = leasePayload == null ? null : leasePayload.get("ownerToken");
+    var fenceToken = leasePayload == null ? null : leasePayload.get("fenceToken");
+    var expiresAt = leasePayload == null ? null : leasePayload.get("expiresAt");
+    var hasOwnerToken = ownerToken instanceof String owner && !owner.isBlank();
     if (!"application_lease".equals(lease.getString("_kind"))
         || !Integer.valueOf(1).equals(lease.getInteger("schemaVersion"))
         || leaseId == null
         || !"application_lease".equals(leaseId.getString("kind"))
+        || !"application-migrations".equals(leaseId.getString("legacyId"))
         || leasePayload == null
-        || !"application-migrations".equals(leasePayload.getString("id"))) {
+        || !(fenceToken instanceof Number fenceNumber)
+        || fenceNumber.longValue() < 1
+        || !(expiresAt instanceof java.util.Date)
+        || (ownerToken != null && !hasOwnerToken)
+        || (v015IsRunning && !hasOwnerToken)) {
       throw new IllegalStateException("Test Mongo lease state is not a pristine bootstrap.");
     }
   }

@@ -14,8 +14,10 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -103,11 +105,11 @@ class DomainCollectionCutoverLedgerTest {
   void permitsAnEmptyDatabaseOnlyForAnExplicitIsolatedTestProfile() {
     environment.setActiveProfiles("test");
     stubTestDatabaseConnection("mongodb://127.0.0.1:63152/test");
-    when(mongo.getCollectionNames()).thenReturn(Set.of("application_migrations", "application_leases"));
+    when(mongo.getCollectionNames()).thenReturn(Set.of("application_migrations", "application_runtime"));
     when(mongo.findAll(Document.class, "application_migrations"))
         .thenReturn(migrationRecords("RUNNING"));
-    when(mongo.findAll(Document.class, "application_leases"))
-        .thenReturn(List.of(migrationLeaseRecord()));
+    when(mongo.findAll(Document.class, "application_runtime"))
+        .thenReturn(List.of(migrationLeaseRecord(true)));
     when(mongo.findOne(any(), eq(Document.class), eq("application_migrations"))).thenReturn(null);
 
     assertThatCode(() -> new DomainCollectionCutoverLedger(mongo, environment)
@@ -116,12 +118,28 @@ class DomainCollectionCutoverLedgerTest {
   }
 
   @Test
+  void requiresTheRunnerLeaseWhileV015IsRunning() {
+    environment.setActiveProfiles("test");
+    stubTestDatabaseConnection("mongodb://127.0.0.1:63152/test");
+    when(mongo.getCollectionNames()).thenReturn(Set.of("application_migrations"));
+    when(mongo.findAll(Document.class, "application_migrations"))
+        .thenReturn(migrationRecords("RUNNING"));
+    when(mongo.findAll(Document.class, "application_runtime")).thenReturn(List.of());
+    when(mongo.findOne(any(), eq(Document.class), eq("application_migrations"))).thenReturn(null);
+
+    assertThatThrownBy(() -> new DomainCollectionCutoverLedger(mongo, environment)
+        .requireTargetSchemaReady())
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("Test Mongo V015 migration requires its migration lease.");
+  }
+
+  @Test
   void permitsFreshTestPreflightBeforeTheMigrationRunnerStarts() {
     environment.setActiveProfiles("test");
     stubTestDatabaseConnection("mongodb://127.0.0.1:63152/test");
     when(mongo.getCollectionNames()).thenReturn(Set.of());
     when(mongo.findAll(Document.class, "application_migrations")).thenReturn(List.of());
-    when(mongo.findAll(Document.class, "application_leases")).thenReturn(List.of());
+    when(mongo.findAll(Document.class, "application_runtime")).thenReturn(List.of());
     when(mongo.findOne(any(), eq(Document.class), eq("application_migrations"))).thenReturn(null);
 
     assertThatCode(() -> new DomainCollectionCutoverLedger(mongo, environment)
@@ -132,11 +150,11 @@ class DomainCollectionCutoverLedgerTest {
   void acceptsAppliedV015AsTheDurableEmptyTestBootstrapMarker() {
     environment.setActiveProfiles("test");
     stubTestDatabaseConnection("mongodb://127.0.0.1:63152/test");
-    when(mongo.getCollectionNames()).thenReturn(Set.of("application_migrations", "application_leases"));
+    when(mongo.getCollectionNames()).thenReturn(Set.of("application_migrations", "application_runtime"));
     when(mongo.findAll(Document.class, "application_migrations"))
         .thenReturn(migrationRecords("APPLIED"));
-    when(mongo.findAll(Document.class, "application_leases"))
-        .thenReturn(List.of(migrationLeaseRecord()));
+    when(mongo.findAll(Document.class, "application_runtime"))
+        .thenReturn(List.of(migrationLeaseRecord(false)));
     when(mongo.findOne(any(), eq(Document.class), eq("application_migrations"))).thenReturn(null);
 
     assertThatCode(() -> new DomainCollectionCutoverLedger(mongo, environment)
@@ -147,13 +165,13 @@ class DomainCollectionCutoverLedgerTest {
   void acceptsARealCutoverLedgerOnTheIsolatedTestDatabase() {
     environment.setActiveProfiles("test");
     stubTestDatabaseConnection("mongodb://127.0.0.1:63152/test");
-    when(mongo.getCollectionNames()).thenReturn(Set.of("application_migrations", "application_leases"));
+    when(mongo.getCollectionNames()).thenReturn(Set.of("application_migrations", "application_runtime"));
     var migrationStateWithActiveLedger = new ArrayList<>(migrationRecords("APPLIED"));
     migrationStateWithActiveLedger.add(envelope("TARGET_ACTIVE", true, DomainCollectionManifest.DIGEST));
     when(mongo.findAll(Document.class, "application_migrations"))
         .thenReturn(migrationStateWithActiveLedger);
-    when(mongo.findAll(Document.class, "application_leases"))
-        .thenReturn(List.of(migrationLeaseRecord()));
+    when(mongo.findAll(Document.class, "application_runtime"))
+        .thenReturn(List.of(migrationLeaseRecord(false)));
     when(mongo.findOne(any(), eq(Document.class), eq("application_migrations")))
         .thenReturn(envelope("TARGET_ACTIVE", true, DomainCollectionManifest.DIGEST));
 
@@ -338,23 +356,35 @@ class DomainCollectionCutoverLedgerTest {
       var checksum = migrationId.startsWith("015-")
           ? DomainCollectionManifest.DIGEST
           : "0".repeat(64);
+      var migrationPayload = new Document("checksum", checksum)
+          .append("description", migrationId)
+          .append("status", status)
+          .append("ownerToken", "migration-owner")
+          .append("startedAt", Date.from(Instant.EPOCH));
+      if ("APPLIED".equals(status)) {
+        migrationPayload.append("completedAt", Date.from(Instant.EPOCH));
+      }
       return new Document("_id", new Document("kind", "migration_record")
           .append("legacyId", migrationId))
           .append("_kind", "migration_record")
           .append("schemaVersion", 1)
-          .append("payload", new Document("id", migrationId)
-              .append("checksum", checksum)
-              .append("status", status));
+          .append("payload", migrationPayload);
     }).toList();
   }
 
-  private static Document migrationLeaseRecord() {
+  private static Document migrationLeaseRecord(boolean isActive) {
+    var leasePayload = new Document("fenceToken", 1L)
+        .append("acquiredAt", Date.from(Instant.EPOCH))
+        .append("expiresAt", Date.from(isActive
+            ? Instant.parse("2099-01-01T00:00:00Z")
+            : Instant.EPOCH));
+    if (isActive) {
+      leasePayload.append("ownerToken", "migration-owner");
+    }
     return new Document("_id", new Document("kind", "application_lease")
         .append("legacyId", "application-migrations"))
         .append("_kind", "application_lease")
         .append("schemaVersion", 1)
-        .append("payload", new Document("id", "application-migrations")
-            .append("ownerToken", "running-owner")
-            .append("fenceToken", 1L));
+        .append("payload", leasePayload);
   }
 }

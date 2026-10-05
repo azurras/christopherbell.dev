@@ -48,10 +48,11 @@ loopback URI, database `test`, a non-production port, approved collection
 names, and empty domain namespaces, even when a genuine ledger is present. It
 supports all three migration-runner call points: fresh preflight before any
 migration rows or lease exist; V015 with an ordered applied migration prefix,
-V015 `RUNNING`, and at most one migration lease; and later startup with V015
+V015 `RUNNING` with its migration lease; and later startup with V015
 `APPLIED`, which is the durable empty-schema marker, and an absent or released
-migration lease. Malformed cutover rows, non-contiguous or unexpected migration
-state, domain documents, unknown collections, and other leases stop startup.
+migration lease stored in the `application_runtime` target collection.
+Malformed cutover rows, non-contiguous or unexpected migration state, domain
+documents, unknown collections, and other leases stop startup.
 This read-only gate never creates a `TARGET_ACTIVE` ledger. It checks the
 zero-padded three-digit migration ID sequence, so all future migration IDs must
 preserve the authoring format above.
