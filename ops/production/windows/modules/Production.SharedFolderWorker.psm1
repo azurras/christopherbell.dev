@@ -880,6 +880,85 @@ function Assert-MediaToolSetUnchanged {
     }
 }
 
+function Stop-PinnedMediaToolProcess {
+    param(
+        [Parameter(Mandatory)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$OutputReaderTasks,
+        [int]$ExitWaitMilliseconds = 5000,
+        [int]$ReaderWaitMilliseconds = 1000,
+        [scriptblock]$StopProcessTree = { param($childProcess) $childProcess.Kill($true) }
+    )
+
+    $cleanupFailures = [Collections.Generic.List[Exception]]::new()
+    $processExited = $false
+    try {
+        $processExited = $Process.HasExited
+    } catch {
+        $cleanupFailures.Add($_.Exception)
+    }
+    if (-not $processExited) {
+        try {
+            & $StopProcessTree $Process
+        } catch {
+            $cleanupFailures.Add($_.Exception)
+        }
+    }
+
+    try {
+        $processExited = $Process.HasExited
+        if (-not $processExited) {
+            $processExited = $Process.WaitForExit($ExitWaitMilliseconds)
+        }
+    } catch {
+        $cleanupFailures.Add($_.Exception)
+    }
+
+    if (-not $processExited) {
+        $cleanupFailures.Add([TimeoutException]::new(
+            "Media tool process $($Process.Id) was still running after $ExitWaitMilliseconds milliseconds."))
+    } else {
+        foreach ($outputReaderTask in $OutputReaderTasks) {
+            if ($null -eq $outputReaderTask) { continue }
+            try {
+                if (-not $outputReaderTask.Wait($ReaderWaitMilliseconds)) {
+                    $cleanupFailures.Add([TimeoutException]::new(
+                        "Media tool output reader did not finish within $ReaderWaitMilliseconds milliseconds."))
+                }
+            } catch {
+                $cleanupFailures.Add($_.Exception)
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        ProcessExited = $processExited
+        ProcessId = $Process.Id
+        Failures = $cleanupFailures.ToArray()
+    }
+}
+
+function New-PinnedMediaToolCleanupFailure {
+    param(
+        [Parameter(Mandatory)][Exception]$OperationFailure,
+        [Parameter(Mandatory)][pscustomobject]$CleanupResult
+    )
+
+    $failures = [Collections.Generic.List[Exception]]::new()
+    $failures.Add($OperationFailure)
+    foreach ($cleanupFailure in $CleanupResult.Failures) {
+        $failures.Add($cleanupFailure)
+    }
+
+    $survivingProcess = if ($CleanupResult.ProcessExited) {
+        'No child process remains.'
+    } else {
+        "Child process $($CleanupResult.ProcessId) is still running."
+    }
+    return [AggregateException]::new(
+        "Media tool operation failed and cleanup was incomplete. $survivingProcess",
+        [Exception[]]$failures.ToArray())
+}
+
 function Invoke-PinnedMediaTool {
     [CmdletBinding()]
     param(
@@ -955,13 +1034,16 @@ function Invoke-PinnedMediaTool {
             ErrorTruncated = $stderr.Truncated
         }
     } catch {
-        if ($started -and -not $process.HasExited) {
-            try { $process.Kill($true) } catch [InvalidOperationException] { }
-        }
+        $operationFailure = $_.Exception
         if ($started) {
-            $process.WaitForExit()
-            if ($stdoutTask) { [void]$stdoutTask.GetAwaiter().GetResult() }
-            if ($stderrTask) { [void]$stderrTask.GetAwaiter().GetResult() }
+            $cleanup = Stop-PinnedMediaToolProcess `
+                -Process $process `
+                -OutputReaderTasks @($stdoutTask, $stderrTask)
+            if ($cleanup.Failures.Count -gt 0) {
+                throw (New-PinnedMediaToolCleanupFailure `
+                    -OperationFailure $operationFailure `
+                    -CleanupResult $cleanup)
+            }
         }
         throw
     } finally {

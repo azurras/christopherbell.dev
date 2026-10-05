@@ -14,6 +14,7 @@ import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HexFormat;
@@ -426,8 +427,9 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
     try {
       var digest = MessageDigest.getInstance("SHA-256");
       return HexFormat.of().formatHex(digest.digest(String.valueOf(value).getBytes(StandardCharsets.UTF_8)));
-    } catch (Exception e) {
-      throw new IllegalStateException("Unable to hash Raising Canes Box Index source response.", e);
+    } catch (NoSuchAlgorithmException exception) {
+      throw new IllegalStateException(
+          "Unable to hash Raising Canes Box Index source response.", exception);
     }
   }
 

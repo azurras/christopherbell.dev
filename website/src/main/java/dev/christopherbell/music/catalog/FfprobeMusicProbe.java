@@ -2,6 +2,7 @@ package dev.christopherbell.music.catalog;
 
 import java.nio.file.Path;
 import java.util.List;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -27,19 +28,19 @@ public final class FfprobeMusicProbe implements MusicProbe {
     if (source == null || !source.isAbsolute()) {
       throw new MusicProbeException("Music probe source must be absolute.");
     }
-    var result = runner.run(List.of(
+    var probeResult = runner.run(List.of(
         properties.ffprobeCommand(),
         "-v", "error",
         "-print_format", "json",
         "-show_format",
         "-show_streams",
         source.toAbsolutePath().normalize().toString()));
-    if (result.timedOut() || result.outputTruncated() || result.exitCode() != 0
-        || result.stderr() == null || !result.stderr().isBlank()) {
+    if (probeResult.timedOut() || probeResult.outputTruncated() || probeResult.exitCode() != 0
+        || probeResult.stderr() == null || !probeResult.stderr().isBlank()) {
       throw new MusicProbeException("FFprobe did not return a bounded successful result.");
     }
     try {
-      JsonNode root = objectMapper.readTree(result.stdout());
+      JsonNode root = objectMapper.readTree(probeResult.stdout());
       JsonNode format = root.path("format");
       JsonNode streams = root.path("streams");
       JsonNode audio = firstStream(streams, "audio");
@@ -65,7 +66,7 @@ public final class FfprobeMusicProbe implements MusicProbe {
           hasArtwork(streams));
     } catch (MusicProbeException failure) {
       throw failure;
-    } catch (Exception failure) {
+    } catch (JacksonException failure) {
       throw new MusicProbeException("FFprobe JSON is malformed.", failure);
     }
   }
@@ -88,46 +89,52 @@ public final class FfprobeMusicProbe implements MusicProbe {
   }
 
   private double duration(JsonNode format, JsonNode audio) {
-    String raw = format.path("duration").asText(null);
-    if (raw == null) raw = audio.path("duration").asText(null);
+    String rawDuration = format.path("duration").asText(null);
+    if (rawDuration == null) rawDuration = audio.path("duration").asText(null);
     try {
-      double duration = Double.parseDouble(raw);
-      if (!Double.isFinite(duration) || duration <= 0 || duration > MAX_DURATION_SECONDS) {
+      double parsedDurationSeconds = Double.parseDouble(rawDuration);
+      if (!Double.isFinite(parsedDurationSeconds)
+          || parsedDurationSeconds <= 0
+          || parsedDurationSeconds > MAX_DURATION_SECONDS) {
         throw new MusicProbeException("FFprobe duration is outside the supported range.");
       }
-      return duration;
+      return parsedDurationSeconds;
     } catch (NullPointerException | NumberFormatException failure) {
       throw new MusicProbeException("FFprobe duration is invalid.", failure);
     }
   }
 
-  private String tag(JsonNode tags, String name) {
-    String value = tags.path(name).asText(null);
-    if (value == null) value = tags.path(name.toUpperCase(java.util.Locale.ROOT)).asText(null);
-    return clean(value);
+  private String tag(JsonNode tags, String tagName) {
+    String rawTagValue = tags.path(tagName).asText(null);
+    if (rawTagValue == null) {
+      rawTagValue = tags.path(tagName.toUpperCase(java.util.Locale.ROOT)).asText(null);
+    }
+    return clean(rawTagValue);
   }
 
-  private String clean(String value) {
-    if (value == null) return null;
-    var cleaned = value.replaceAll("[\\p{Cc}\\p{Cf}]", " ")
+  private String clean(String rawMetadataText) {
+    if (rawMetadataText == null) return null;
+    var cleaned = rawMetadataText.replaceAll("[\\p{Cc}\\p{Cf}]", " ")
         .replaceAll("\\s+", " ")
         .strip();
     if (cleaned.isEmpty()) return null;
     return cleaned.length() <= MAX_TAG_LENGTH ? cleaned : cleaned.substring(0, MAX_TAG_LENGTH);
   }
 
-  private Integer number(String value, int minimum, int maximum) {
-    if (value == null) return null;
+  private Integer number(String rawNumberTag, int minimumValue, int maximumValue) {
+    if (rawNumberTag == null) return null;
     try {
-      int number = Integer.parseInt(value.split("/", 2)[0].strip());
-      return number >= minimum && number <= maximum ? number : null;
+      String leadingNumberText = rawNumberTag.split("/", 2)[0].strip();
+      int parsedNumber = Integer.parseInt(leadingNumberText);
+      return parsedNumber >= minimumValue && parsedNumber <= maximumValue ? parsedNumber : null;
     } catch (NumberFormatException failure) {
       return null;
     }
   }
 
-  private Integer year(String value) {
-    if (value == null || value.length() < 4) return null;
-    return number(value.substring(0, 4), 1000, 9999);
+  private Integer year(String rawDateTag) {
+    if (rawDateTag == null || rawDateTag.length() < 4) return null;
+    String rawYearText = rawDateTag.substring(0, 4);
+    return number(rawYearText, 1000, 9999);
   }
 }

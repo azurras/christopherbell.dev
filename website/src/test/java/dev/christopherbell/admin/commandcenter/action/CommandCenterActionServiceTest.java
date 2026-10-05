@@ -662,9 +662,10 @@ class CommandCenterActionServiceTest {
   @Test
   void failedPowerLaunchDoesNotLeaveAPhantomPendingAction() throws Exception {
     var failLaunch = new java.util.concurrent.atomic.AtomicBoolean(true);
+    var launchFailure = new java.io.IOException("simulated fixed power launch failure");
     CommandExecutor failingExecutor = action -> {
       if (failLaunch.get()) {
-        throw new java.io.IOException("simulated fixed power launch failure");
+        throw launchFailure;
       }
     };
     var failingService = new CommandCenterActionService(
@@ -675,13 +676,33 @@ class CommandCenterActionServiceTest {
     assertThatThrownBy(() -> failingService.execute(
         new ActionConfirmation(
             challenge.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER"),
-        request)).isInstanceOf(InvalidRequestException.class);
+        request))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessage("The fixed host action could not be launched.")
+        .hasCause(launchFailure);
 
     assertThat(failingService.pendingAction()).isEmpty();
     failLaunch.set(false);
     var retry = failingService.createChallenge(RESTART_COMPUTER);
     assertThat(failingService.execute(new ActionConfirmation(
         retry.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER"), request).accepted()).isTrue();
+  }
+
+  @Test
+  void unexpectedCommandExecutorFailurePropagatesUnchanged() throws Exception {
+    var unexpectedFailure = new IllegalStateException("simulated command executor defect");
+    CommandExecutor defectiveExecutor = action -> {
+      throw unexpectedFailure;
+    };
+    var defectiveService = new CommandCenterActionService(
+        properties, accounts, permissions, activities, clientIps, defectiveExecutor, scheduler,
+        new InMemoryPendingActionStore(), clock, new SecureRandom());
+    var challenge = defectiveService.createChallenge(RESTART_COMPUTER);
+
+    assertThatThrownBy(() -> defectiveService.execute(
+        new ActionConfirmation(challenge.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER"),
+        request))
+        .isSameAs(unexpectedFailure);
   }
 
   @Test

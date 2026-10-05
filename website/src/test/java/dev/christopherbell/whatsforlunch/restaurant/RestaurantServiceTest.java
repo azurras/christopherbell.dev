@@ -644,6 +644,20 @@ public class RestaurantServiceTest {
   }
 
   @Test
+  @DisplayName("Preferences: unexpected identity failure remains visible")
+  void getPreferencesForCurrentViewer_whenIdentityResolutionHasUnexpectedFailure_propagatesFailure() {
+    var identityFailure = new IllegalArgumentException("invalid identity state");
+    when(permissionService.getSelfId()).thenThrow(identityFailure);
+
+    var thrown = assertThrows(
+        IllegalArgumentException.class,
+        restaurantService::getPreferencesForCurrentViewer);
+
+    assertEquals(identityFailure, thrown);
+    verifyNoInteractions(whatsForLunchPreferenceRepository);
+  }
+
+  @Test
   @DisplayName("Preferences: current viewer gets saved filters when authenticated")
   public void testGetPreferencesForCurrentViewer_whenAuthenticated_ReturnsSavedFilters() {
     when(permissionService.getSelfId()).thenReturn("account-1");

@@ -24,6 +24,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.RequestParam;
 
 class MusicReadControllerTest {
 
@@ -74,6 +75,16 @@ class MusicReadControllerTest {
         List.of("track-a", "track-b"), 1, 50));
     verify(playback).requireCatalogRead();
     verify(library).playlistTrackIds(eq("playlist-1"));
+  }
+
+  @Test
+  void catalogPinsSearchTextToTheExistingQRequestParameter() throws NoSuchMethodException {
+    var catalogMethod = MusicReadController.class.getDeclaredMethod(
+        "catalog", String.class, String.class, String.class, String.class,
+        Boolean.class, String.class, int.class, int.class, Integer.class);
+    var searchParameter = catalogMethod.getParameters()[0].getAnnotation(RequestParam.class);
+
+    assertThat(searchParameter.name()).isEqualTo("q");
   }
 
   @Test

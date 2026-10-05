@@ -494,6 +494,49 @@ Describe 'native Windows deployment' {
             }
         }
 
+        It 'stops a started candidate when process-log setup fails' {
+            $powerShellPath = (Get-Command pwsh.exe).Source
+            $childProcess = Start-Process -FilePath $powerShellPath `
+                -ArgumentList @('-NoLogo','-NoProfile','-Command','Start-Sleep -Seconds 10') `
+                -PassThru -WindowStyle Hidden
+            $childProcessId = $childProcess.Id
+            $candidateLogPath = Join-Path $TestDrive 'candidate-process-setup-failure.log'
+            $startedAt = [DateTimeOffset]::UtcNow
+            $setupFailure = [InvalidOperationException]::new(
+                'Simulated process-log setup failure.')
+            try {
+                $observedFailure = $null
+                try {
+                    InModuleScope 'Production.Deploy' `
+                        -Parameters @{
+                            process = $childProcess
+                            logPath = $candidateLogPath
+                            setupFailure = $setupFailure
+                        } {
+                        Complete-ProductionCandidateProcessSetup `
+                            -Process $process `
+                            -CandidateLogPath $logPath `
+                            -CreateLogWriter { throw $setupFailure }
+                    }
+                } catch {
+                    $observedFailure = $_.Exception
+                }
+
+                [object]::ReferenceEquals($observedFailure, $setupFailure) | Should -BeTrue
+                Get-Process -Id $childProcessId -ErrorAction SilentlyContinue |
+                    Should -BeNullOrEmpty
+                ([DateTimeOffset]::UtcNow - $startedAt).TotalSeconds |
+                    Should -BeLessThan 5
+            } finally {
+                $remainingProcess = Get-Process -Id $childProcessId -ErrorAction SilentlyContinue
+                if ($remainingProcess) {
+                    Stop-Process -Id $childProcessId -Force
+                    Wait-Process -Id $childProcessId -Timeout 3 -ErrorAction SilentlyContinue
+                }
+                $childProcess.Dispose()
+            }
+        }
+
         It 'bounds checked processes that do not exit' {
             $slowPowerShell = (Get-Process -Id $PID).Path
             $watch = [Diagnostics.Stopwatch]::StartNew()

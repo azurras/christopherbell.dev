@@ -3,6 +3,7 @@ package dev.christopherbell.admin.commandcenter.metrics;
 import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.MetricReading;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.MetricStatus;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -21,6 +22,7 @@ import java.util.OptionalDouble;
 import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 /** Publishes fixed production-service and local application reachability metrics. */
@@ -46,12 +48,7 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
 
   @Override
   public Map<String, MetricReading> read(Instant sampledAt) {
-    ProbeResult result;
-    try {
-      result = probe.read();
-    } catch (RuntimeException failure) {
-      result = new ProbeResult(Optional.empty(), OptionalDouble.empty(), Optional.empty());
-    }
+    var result = probe.read();
     var readings = new LinkedHashMap<String, MetricReading>();
     readings.put("production.port", available(
         "production.port", "Production port", properties.getProductionPort(), "port", sampledAt));
@@ -96,7 +93,7 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
       if (sha == null || !sha.isString()) return Optional.empty();
       String value = sha.stringValue();
       return value.matches("^[0-9a-f]{40}$") ? Optional.of(value) : Optional.empty();
-    } catch (Exception failure) {
+    } catch (IOException | JacksonException failure) {
       return Optional.empty();
     }
   }
@@ -157,10 +154,10 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
         }
         String output = new String(process.getInputStream().readNBytes(8_192), StandardCharsets.UTF_8);
         return Optional.of(process.exitValue() == 0 && output.contains("RUNNING"));
-      } catch (Exception failure) {
-        if (failure instanceof InterruptedException) {
-          Thread.currentThread().interrupt();
-        }
+      } catch (IOException failure) {
+        return Optional.empty();
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
         return Optional.empty();
       } finally {
         if (process != null && process.isAlive()) {
@@ -182,10 +179,10 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
           return OptionalDouble.empty();
         }
         return OptionalDouble.of(Duration.ofNanos(System.nanoTime() - started).toNanos() / 1_000_000.0);
-      } catch (Exception failure) {
-        if (failure instanceof InterruptedException) {
-          Thread.currentThread().interrupt();
-        }
+      } catch (IOException failure) {
+        return OptionalDouble.empty();
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
         return OptionalDouble.empty();
       }
     }

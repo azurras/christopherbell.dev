@@ -22,7 +22,7 @@ class DomainCollectionStartupPreflightTest {
     preflight.requireReady();
     preflight.requireReady();
 
-    verify(ledger, org.mockito.Mockito.times(2)).requireTargetActive();
+    verify(ledger, org.mockito.Mockito.times(2)).requireTargetSchemaReady();
   }
 
   @Test
@@ -31,6 +31,6 @@ class DomainCollectionStartupPreflightTest {
 
     preflight.requireReady();
 
-    verify(ledger, never()).requireTargetActive();
+    verify(ledger, never()).requireTargetSchemaReady();
   }
 }

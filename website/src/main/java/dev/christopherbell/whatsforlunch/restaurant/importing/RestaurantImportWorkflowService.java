@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.time.LocalTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -207,6 +208,7 @@ public class RestaurantImportWorkflowService {
     }
 
     saveState(detail(RestaurantImportRunStatus.RUNNING, trigger, startedOn, null, null, null), actor);
+    InterruptedException interruption = null;
     try {
       var expectedChecksum = previewToken == null
           ? null
@@ -240,6 +242,9 @@ public class RestaurantImportWorkflowService {
       saveState(succeeded, actor);
       return succeeded;
     } catch (Exception failure) {
+      if (failure instanceof InterruptedException interruptedFailure) {
+        interruption = interruptedFailure;
+      }
       var failed = detail(
           RestaurantImportRunStatus.FAILED,
           trigger,
@@ -250,8 +255,14 @@ public class RestaurantImportWorkflowService {
       saveState(failed, actor);
       throw failure;
     } finally {
-      if (!leases.release(LEASE_NAME, ownerToken)) {
-        log.warn("OpenStreetMap import lease was not released by its owner. Trigger: {}.", trigger);
+      try {
+        if (!leases.release(LEASE_NAME, ownerToken)) {
+          log.warn("OpenStreetMap import lease was not released by its owner. Trigger: {}.", trigger);
+        }
+      } finally {
+        if (interruption != null) {
+          Thread.currentThread().interrupt();
+        }
       }
     }
   }
@@ -322,7 +333,6 @@ public class RestaurantImportWorkflowService {
       return "REMOTE_IO";
     }
     if (failure instanceof InterruptedException) {
-      Thread.currentThread().interrupt();
       return "INTERRUPTED";
     }
     return "IMPORT_FAILED";
@@ -333,10 +343,12 @@ public class RestaurantImportWorkflowService {
     return YearMonth.now(clock.withZone(zone));
   }
 
-  private Optional<YearMonth> parseYearMonth(String value) {
+  private Optional<YearMonth> parseYearMonth(String persistedMonth) {
     try {
-      return value == null || value.isBlank() ? Optional.empty() : Optional.of(YearMonth.parse(value));
-    } catch (Exception ignored) {
+      return persistedMonth == null || persistedMonth.isBlank()
+          ? Optional.empty()
+          : Optional.of(YearMonth.parse(persistedMonth));
+    } catch (DateTimeParseException invalidPersistedMonth) {
       return Optional.empty();
     }
   }

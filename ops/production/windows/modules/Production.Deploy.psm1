@@ -443,6 +443,79 @@ function New-ReleaseFromOriginMain {
     }
 }
 
+function Complete-ProductionCandidateProcessSetup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][string]$CandidateLogPath,
+        [scriptblock]$CreateLogWriter = {
+            param($path)
+            [ChristopherBell.Production.BoundedProcessLog]::new($path)
+        }
+    )
+
+    $processId = $Process.Id
+    try {
+        $Process | Add-Member -MemberType NoteProperty -Name CandidateProcessLogPath `
+            -Value $CandidateLogPath
+        $logWriter = & $CreateLogWriter $CandidateLogPath
+        $logWriter.Attach($Process)
+        $Process | Add-Member -MemberType NoteProperty -Name CandidateProcessLogWriter `
+            -Value $logWriter
+        return $Process
+    } catch {
+        $setupFailure = $_.Exception
+        $cleanupFailures = [Collections.Generic.List[Exception]]::new()
+        $processExited = $false
+        try {
+            $processExited = $Process.HasExited
+        } catch {
+            $cleanupFailures.Add($_.Exception)
+        }
+        if (-not $processExited) {
+            try {
+                $Process.Kill($true)
+            } catch {
+                $cleanupFailures.Add($_.Exception)
+            }
+        }
+        try {
+            $processExited = $Process.HasExited
+            if (-not $processExited) {
+                $processExited = $Process.WaitForExit(5000)
+            }
+        } catch {
+            $cleanupFailures.Add($_.Exception)
+        }
+        if (-not $processExited) {
+            $cleanupFailures.Add([TimeoutException]::new(
+                "Candidate process $processId remained alive after bounded setup cleanup."))
+        }
+        try {
+            $Process.Dispose()
+        } catch {
+            $cleanupFailures.Add($_.Exception)
+        }
+
+        if ($cleanupFailures.Count -gt 0) {
+            $failures = [Collections.Generic.List[Exception]]::new()
+            $failures.Add($setupFailure)
+            foreach ($cleanupFailure in $cleanupFailures) {
+                $failures.Add($cleanupFailure)
+            }
+            $survivingProcess = if ($processExited) {
+                'No candidate process remains.'
+            } else {
+                "Candidate process $processId may still be running."
+            }
+            throw [AggregateException]::new(
+                "Candidate process setup failed and cleanup was incomplete. $survivingProcess",
+                [Exception[]]$failures.ToArray())
+        }
+        throw
+    }
+}
+
 function Start-ProductionJar {
     param($Config, [Parameter(Mandatory)][string]$Release, [int]$Port, [string]$Profiles, [hashtable]$AdditionalEnvironment = @{})
     Assert-ProductionFixedRootBoundary `
@@ -482,13 +555,9 @@ function Start-ProductionJar {
         throw 'Candidate process log path is required.'
     }
     $process = [Diagnostics.Process]::Start($start)
-    $process | Add-Member -MemberType NoteProperty -Name CandidateProcessLogPath `
-        -Value $candidateLogPath
-    $logWriter = [ChristopherBell.Production.BoundedProcessLog]::new($candidateLogPath)
-    $logWriter.Attach($process)
-    $process | Add-Member -MemberType NoteProperty -Name CandidateProcessLogWriter `
-        -Value $logWriter
-    return $process
+    return Complete-ProductionCandidateProcessSetup `
+        -Process $process `
+        -CandidateLogPath $candidateLogPath
 }
 
 function Test-ProductionEndpoints {

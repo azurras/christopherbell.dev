@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
+import java.net.UnknownHostException;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("EmailSanitizer (pragmatic): normalization, strict whitespace, ASCII local, IDN domain")
@@ -166,9 +168,33 @@ public final class EmailSanitizerTest {
   }
 
   @Test
+  @DisplayName("Preserves the IPv6 parser cause behind the safe validation message")
+  public void testSanitize_whenIpv6ParserRejectsLiteral() {
+    IllegalArgumentException failure = assertThrows(
+        IllegalArgumentException.class,
+        () -> EmailSanitizer.sanitize("user@[::1:zz]")
+    );
+
+    assertEquals("invalid IPv6 literal", failure.getMessage());
+    assertInstanceOf(UnknownHostException.class, failure.getCause());
+  }
+
+  @Test
   @DisplayName("Throws when IDN domain is invalid (emoji label rejected by STD3)")
   public void testSanitize_whenIdnEmojiLabelInvalid() {
     assertThrows(IllegalArgumentException.class, () -> EmailSanitizer.sanitize("user@😀.com"));
+  }
+
+  @Test
+  @DisplayName("Preserves the IDN parser cause behind the safe validation message")
+  public void testSanitize_whenIdnParserRejectsDomain() {
+    IllegalArgumentException failure = assertThrows(
+        IllegalArgumentException.class,
+        () -> EmailSanitizer.sanitize("user@😀.com")
+    );
+
+    assertEquals("invalid idn domain", failure.getMessage());
+    assertInstanceOf(IllegalArgumentException.class, failure.getCause());
   }
 
   @Test

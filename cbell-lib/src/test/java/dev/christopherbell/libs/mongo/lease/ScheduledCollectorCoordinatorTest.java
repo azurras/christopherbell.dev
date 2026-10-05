@@ -102,4 +102,35 @@ class ScheduledCollectorCoordinatorTest {
 
     verify(leases).release(org.mockito.ArgumentMatchers.eq("collector:test"), any());
   }
+
+  @Test
+  void interruptionRecordsFailureRestoresInterruptAndReleasesExactLeaseOwner() {
+    var leases = Mockito.mock(LeaseService.class);
+    var runs = Mockito.mock(ScheduledCollectorRunStore.class);
+    when(leases.tryAcquire(any(), any(), any(), any())).thenReturn(true);
+    var coordinator = new ScheduledCollectorCoordinator(
+        leases, runs, Clock.fixed(NOW, ZoneOffset.UTC));
+    var interruption = new InterruptedException("collector interrupted");
+
+    try {
+      assertThatThrownBy(() -> coordinator.run(
+          "collector:test", Duration.ofMinutes(2), lease -> {
+            throw interruption;
+          }))
+          .isInstanceOf(IllegalStateException.class)
+          .hasCauseReference(interruption);
+
+      assertThat(Thread.currentThread().isInterrupted()).isTrue();
+      var savedRuns = ArgumentCaptor.forClass(ScheduledCollectorRun.class);
+      verify(runs, Mockito.times(2)).save(savedRuns.capture());
+      var failedRun = savedRuns.getAllValues().get(1);
+      assertThat(failedRun.getStatus()).isEqualTo(ScheduledCollectorRunStatus.FAILED);
+      assertThat(failedRun.getErrorCategory()).isEqualTo("COLLECTOR_FAILED");
+      verify(leases).release(
+          org.mockito.ArgumentMatchers.eq("collector:test"),
+          org.mockito.ArgumentMatchers.eq(failedRun.getOwnerToken()));
+    } finally {
+      Thread.interrupted();
+    }
+  }
 }

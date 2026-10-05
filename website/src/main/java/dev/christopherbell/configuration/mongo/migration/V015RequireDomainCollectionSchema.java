@@ -30,6 +30,6 @@ public final class V015RequireDomainCollectionSchema implements ApplicationMigra
 
   @Override
   public void apply(MongoTemplate mongo) {
-    ledger.requireTargetActive();
+    ledger.requireTargetSchemaReady();
   }
 }

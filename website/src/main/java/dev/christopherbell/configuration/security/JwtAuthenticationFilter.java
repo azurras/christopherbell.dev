@@ -95,40 +95,46 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       chain.doFilter(request, response);
       return;
     }
+    Account authenticatedAccount = null;
+    AuthenticatedBrowserSession authenticatedBrowserSession = null;
     try {
       if (bearerToken != null && accounts != null) {
         var claims = PermissionService.validateToken(bearerToken);
-        var account = accounts.findById(claims.getSubject())
+        authenticatedAccount = accounts.findById(claims.getSubject())
             .filter(candidate -> candidate.getStatus() == AccountStatus.ACTIVE)
             .filter(candidate -> AccountSecurityFingerprint.matches(
                 claims.get(AccountSecurityFingerprint.CLAIM, String.class), candidate))
             .orElse(null);
-        if (account != null) {
-          SecurityContextHolder.getContext().setAuthentication(
-              getAuthentication(account, bearerToken));
-          chain.doFilter(request, response);
-          return;
-        }
       }
-      if (cookieToken != null && browserSessions != null) {
+      if (authenticatedAccount == null && cookieToken != null && browserSessions != null) {
         var resolved = browserSessions.authenticate(
             cookieToken,
             interactiveRequests != null && interactiveRequests.matches(request));
         if (resolved.isPresent()) {
-          var session = resolved.get();
-          SecurityContextHolder.getContext().setAuthentication(getAuthentication(session));
-          if (browserCookies != null) {
-            session.rotatedToken().ifPresent(token -> addCookies(
-                response, browserCookies.authenticated(token)));
-          }
-          chain.doFilter(request, response);
-          return;
+          authenticatedBrowserSession = resolved.get();
         }
       }
+    } catch (RuntimeException e) {
       rejectCredential(publicRequest, response, chain, request, cookieToken != null);
-    } catch (Exception e) {
-      rejectCredential(publicRequest, response, chain, request, cookieToken != null);
+      return;
     }
+
+    if (authenticatedAccount != null) {
+      SecurityContextHolder.getContext().setAuthentication(
+          getAuthentication(authenticatedAccount, bearerToken));
+      chain.doFilter(request, response);
+      return;
+    }
+    if (authenticatedBrowserSession != null) {
+      SecurityContextHolder.getContext().setAuthentication(getAuthentication(authenticatedBrowserSession));
+      if (browserCookies != null) {
+        authenticatedBrowserSession.rotatedToken().ifPresent(token -> addCookies(
+            response, browserCookies.authenticated(token)));
+      }
+      chain.doFilter(request, response);
+      return;
+    }
+    rejectCredential(publicRequest, response, chain, request, cookieToken != null);
   }
 
   private boolean isPublicRequest(HttpServletRequest request) {

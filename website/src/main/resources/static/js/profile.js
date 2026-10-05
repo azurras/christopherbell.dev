@@ -173,14 +173,14 @@ function renderPosts(posts, username) {
     canEdit: post => canEditFor({ id: post.accountId })(post),
     currentUserName: username
   });
-  for (const p of posts) {
+  for (const post of posts) {
     const fetchRootCached = async (rootId) => {
       if (!ROOT_CACHE[rootId]) ROOT_CACHE[rootId] = await fetchJson(API.posts.byId(rootId));
       return ROOT_CACHE[rootId];
     };
     ctx.fetchRoot = fetchRootCached;
     ctx.fetchParent = fetchRootCached;
-    const el = createFeedItem({ ...p, username }, ctx);
+    const el = createFeedItem({ ...post, username }, ctx);
     container.appendChild(el);
   }
   initLazyMedia(container);
@@ -221,6 +221,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   // Close menus on outside click
   document.addEventListener('click', () => {
-    document.querySelectorAll('.post-menu').forEach(m => m.classList.add('d-none'));
+    document.querySelectorAll('.post-menu').forEach(menu => menu.classList.add('d-none'));
   });
 });

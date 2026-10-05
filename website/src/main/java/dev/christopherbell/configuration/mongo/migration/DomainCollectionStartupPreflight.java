@@ -20,7 +20,7 @@ public final class DomainCollectionStartupPreflight {
   /** Rechecks the current durable ledger on every managed target release startup. */
   public void requireReady() {
     if (metadata.requiresTarget()) {
-      ledger.requireTargetActive();
+      ledger.requireTargetSchemaReady();
     }
   }
 }

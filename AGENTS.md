@@ -61,6 +61,21 @@ Run browser-side JavaScript tests:
 ./gradlew :website:jsTest
 ```
 
+## Isolated Application Runtime Checks
+
+For database-backed candidate verification, use the exact `test` profile and a
+disposable MongoDB instance bound to loopback. Set `SPRING_MONGODB_URI` to
+`mongodb://127.0.0.1:<non-production-port>/test`; do not point the candidate at
+the Compose database, port 27017, or the `christopherbell` database. A clean
+test database can complete V015 through the normal migration runner without a
+fabricated cutover ledger. Other profiles still require the genuine
+`TARGET_ACTIVE` ledger. The test bootstrap rejects populated domain collections,
+unknown collections, malformed migration state, and any URI outside this exact
+test target. For Java 25 on Windows, use the README's generated short Unix
+socket temp directory through `JAVA_TOOL_OPTIONS`; clean up that directory and
+the disposable Mongo directory after the run. Follow the setup steps in
+`README.md`.
+
 ## Architecture Rules
 
 - Keep backend code organized by feature package, not by technical layer.
@@ -85,6 +100,29 @@ Run browser-side JavaScript tests:
   needs it and the abstraction is stable.
 - Server-rendered page routes live in `dev.christopherbell.view`.
 - Cross-cutting filters/security/config live in `dev.christopherbell.configuration`.
+
+## Chris Street Style
+
+Use the Builder `write-chris-street-style-code` skill as the detailed standard
+for production code, tests, scripts, migrations, code-bearing configuration, and
+executable examples. Apply these principles in the repository's native
+language and tooling:
+
+- Read calls like sentences. Choose domain names that explain each value's
+  role, distinguish objects from identifiers and collections from items, and
+  include units when they are not obvious.
+- Give a materially transformed value a new name that describes its new
+  meaning; do not keep calling decoded, validated, or aggregated data by its
+  former name.
+- Validate external input at its boundary before relying on it. Parsing,
+  casting, and loading a persisted value do not establish domain validity.
+- Make I/O, mutation, cancellation, background work, and resource ownership
+  visible where they are controlled. Preserve the original cause when
+  translating an error and distinguish absence, rejected input, infrastructure
+  failures, and programming defects.
+- Prefer direct, small operations over abstractions without demonstrated reuse.
+  Test observable behavior with meaningful inputs and outputs, including the
+  failure paths the contract promises.
 
 ## Frontend Rules
 

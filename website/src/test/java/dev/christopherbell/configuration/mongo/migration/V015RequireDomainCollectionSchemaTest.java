@@ -20,6 +20,6 @@ class V015RequireDomainCollectionSchemaTest {
     assertThat(migration.checksum()).isEqualTo(DomainCollectionManifest.DIGEST);
     assertThat(migration.description()).isEqualTo("Require the published 14-collection schema");
     assertThatCode(() -> migration.apply(mongo)).doesNotThrowAnyException();
-    verify(ledger).requireTargetActive();
+    verify(ledger).requireTargetSchemaReady();
   }
 }

@@ -16,8 +16,8 @@ import { createInfiniteScroller } from './lib/infinite.js';
 
 /** Extract the username from the /u/{username} path. */
 function getUsernameFromPath() {
-  const m = window.location.pathname.match(/\/u\/(.+)$/);
-  return m ? decodeURIComponent(m[1]) : null;
+  const usernamePathMatch = window.location.pathname.match(/\/u\/(.+)$/);
+  return usernamePathMatch ? decodeURIComponent(usernamePathMatch[1]) : null;
 }
 
 function initialsFromUsername(username) {
@@ -215,10 +215,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       onSuccess: clearFeedLoadError,
       onPage: (items) => {
         if (!items || items.length === 0) return;
-        for (const p of items) list.appendChild(createFeedItem(p, RENDER_CTX));
+        for (const feedPost of items) list.appendChild(createFeedItem(feedPost, RENDER_CTX));
         initLazyMedia(list);
       },
-      getCursor: (it) => it.createdOn || it.lastUpdatedOn,
+      getCursor: (feedPost) => feedPost.createdOn || feedPost.lastUpdatedOn,
       onEmpty: renderEmptyFeed
     });
     SCROLLER.attach();

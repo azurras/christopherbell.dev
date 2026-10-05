@@ -18,7 +18,10 @@ let currentThread = [];
 let currentUser = null;
 
 /** Extract the post id from the /p/{id} path. */
-function getPostId() { const m = location.pathname.match(/\/p\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; }
+function getPostId() {
+  const postPathMatch = location.pathname.match(/\/p\/(.+)$/);
+  return postPathMatch ? decodeURIComponent(postPathMatch[1]) : null;
+}
 
 function setText(id, value) {
   const el = document.getElementById(id);
@@ -296,7 +299,7 @@ function renderThread(items, currentUser, currentId) {
   if (!list) return;
   list.innerHTML = '';
   const thread = Array.isArray(items) ? items : [];
-  const directReplies = thread.filter(p => p.parentId === currentId);
+  const directReplies = thread.filter(threadPost => threadPost.parentId === currentId);
   const visibleThread = visibleThreadAfterCollapsedBranches(thread, collapsedBranches);
   const visibleReplies = descendantPostsForCurrent(visibleThread, currentId);
   if (visibleReplies.length === 0) {
@@ -310,9 +313,9 @@ function renderThread(items, currentUser, currentId) {
   const ctx = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(currentUser), canEdit: canEditFor(currentUser), currentUserName: currentUser?.username || null, suppressParentContext: true });
   const childIds = replyIdsWithChildren(thread);
   const selectedLevel = numericLevel(thread.find(post => post?.id === currentId));
-  for (const p of visibleReplies) {
-    const item = createFeedItem(p, ctx);
-    decorateReplyItem(item, p, childIds, selectedLevel);
+  for (const replyPost of visibleReplies) {
+    const item = createFeedItem(replyPost, ctx);
+    decorateReplyItem(item, replyPost, childIds, selectedLevel);
     list.appendChild(item);
   }
   initLazyMedia(list);

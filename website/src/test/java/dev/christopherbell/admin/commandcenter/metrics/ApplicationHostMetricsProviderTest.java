@@ -1,6 +1,7 @@
 package dev.christopherbell.admin.commandcenter.metrics;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.MetricStatus;
@@ -68,6 +69,17 @@ class ApplicationHostMetricsProviderTest {
   }
 
   @Test
+  void malformedOrNonRegularReleaseMetadataReturnsEmpty() throws Exception {
+    Path metadata = tempDir.resolve("release.json");
+    Files.writeString(metadata, "{");
+
+    assertThat(ApplicationHostMetricsProvider.readReleaseCommit(metadata)).isEmpty();
+
+    Path metadataDirectory = Files.createDirectory(tempDir.resolve("metadata-directory"));
+    assertThat(ApplicationHostMetricsProvider.readReleaseCommit(metadataDirectory)).isEmpty();
+  }
+
+  @Test
   void probeFailuresHaveExplicitUnavailableSemantics() {
     var provider = new ApplicationHostMetricsProvider(
         new CommandCenterProperties(), Clock.fixed(START, ZoneOffset.UTC),
@@ -78,5 +90,25 @@ class ApplicationHostMetricsProviderTest {
 
     assertThat(readings.get("production.service.running").status()).isEqualTo(MetricStatus.UNAVAILABLE);
     assertThat(readings.get("application.local-response").status()).isEqualTo(MetricStatus.UNAVAILABLE);
+  }
+  @Test
+  void propagatesUnexpectedProbeDefects() {
+    var provider = new ApplicationHostMetricsProvider(
+        new CommandCenterProperties(), Clock.fixed(START, ZoneOffset.UTC),
+        () -> { throw new IllegalStateException("Unexpected probe defect"); });
+
+    assertThatThrownBy(() -> provider.read(START))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("Unexpected probe defect");
+  }
+
+  @Test
+  void missingProviderTimeoutIsNotReportedAsAnUnavailableProbe() {
+    var properties = new CommandCenterProperties();
+    properties.setProviderTimeout(null);
+    var provider = new ApplicationHostMetricsProvider(properties, Clock.fixed(START, ZoneOffset.UTC));
+
+    assertThatThrownBy(() -> provider.read(START))
+        .isInstanceOf(NullPointerException.class);
   }
 }

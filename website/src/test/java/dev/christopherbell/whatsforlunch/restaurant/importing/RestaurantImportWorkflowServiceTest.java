@@ -12,6 +12,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,7 +22,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.server.ResponseStatusException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -115,6 +120,54 @@ class RestaurantImportWorkflowServiceTest {
     assertEquals(1, outcome.result().imported());
     verify(states, times(2)).save(any());
     verify(leases).release(eq(RestaurantImportWorkflowService.LEASE_NAME), any());
+  }
+
+  @Test
+  void interruptedApplyPersistsFailureAndReleasesLeaseBeforeRestoringInterrupt() throws Exception {
+    var interruption = new InterruptedException("OpenStreetMap request interrupted");
+    var wasInterruptedDuringFailedStateSave = new AtomicBoolean();
+    var wasInterruptedDuringLeaseRelease = new AtomicBoolean();
+    var savedFailure = new AtomicReference<RestaurantImportState>();
+    var acquiredLeaseOwnerToken = new AtomicReference<String>();
+    when(permissionService.getSelfId()).thenReturn("operator-1");
+    when(leases.tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(NOW), any()))
+        .thenAnswer(invocation -> {
+          acquiredLeaseOwnerToken.set(invocation.getArgument(1, String.class));
+          return true;
+        });
+    when(previews.claim(eq("token-1"), eq("operator-1"), eq(NOW)))
+        .thenReturn(Optional.of(preview("checksum-a")));
+    when(restaurantService.prepareConfiguredMetroImport()).thenThrow(interruption);
+    when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.empty());
+    when(states.save(any())).thenAnswer(invocation -> {
+      var savedState = invocation.getArgument(0, RestaurantImportState.class);
+      if (savedState.getStatus() == RestaurantImportRunStatus.FAILED) {
+        wasInterruptedDuringFailedStateSave.set(Thread.currentThread().isInterrupted());
+        savedFailure.set(savedState);
+      }
+      return savedState;
+    });
+    when(leases.release(eq(RestaurantImportWorkflowService.LEASE_NAME), any())).thenAnswer(invocation -> {
+      wasInterruptedDuringLeaseRelease.set(Thread.currentThread().isInterrupted());
+      return true;
+    });
+
+    try {
+      var propagatedInterruption = assertThrows(
+          InterruptedException.class,
+          () -> workflow.applyOpenStreetMapImport("token-1"));
+
+      assertSame(interruption, propagatedInterruption);
+      assertFalse(wasInterruptedDuringFailedStateSave.get());
+      assertFalse(wasInterruptedDuringLeaseRelease.get());
+      assertEquals(RestaurantImportRunStatus.FAILED, savedFailure.get().getStatus());
+      assertEquals("INTERRUPTED", savedFailure.get().getLastErrorCategory());
+      assertTrue(Thread.currentThread().isInterrupted());
+      verify(leases).release(
+          eq(RestaurantImportWorkflowService.LEASE_NAME), eq(acquiredLeaseOwnerToken.get()));
+    } finally {
+      Thread.interrupted();
+    }
   }
 
   @Test
@@ -342,6 +395,23 @@ class RestaurantImportWorkflowServiceTest {
     var failedState = RestaurantImportState.builder()
         .id(RestaurantImportWorkflowService.STATE_ID)
         .lastCompletedMonth("2026-08")
+        .lastFailedOn(Instant.parse("2026-09-15T08:01:00Z"))
+        .build();
+    when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.of(failedState));
+    when(leases.tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(now), any()))
+        .thenReturn(false);
+
+    workflowAt(now, new WflProperties()).retryFailedMonthlyOpenStreetMapImport();
+
+    verify(leases).tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(now), any());
+  }
+
+  @Test
+  void dailyRetryTreatsMalformedLegacyMonthAsMissingState() {
+    var now = Instant.parse("2026-09-16T09:00:00Z");
+    var failedState = RestaurantImportState.builder()
+        .id(RestaurantImportWorkflowService.STATE_ID)
+        .lastCompletedMonth("invalid-month")
         .lastFailedOn(Instant.parse("2026-09-15T08:01:00Z"))
         .build();
     when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.of(failedState));

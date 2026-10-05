@@ -31,7 +31,8 @@ Owns browser-side behavior for server-rendered pages.
   counter, send action, unread-first conversation rows, a handle-based
   conversation starter that avoids password-manager username heuristics,
   debounced username autocomplete against the account search API, and login
-  redirect.
+  redirect. A selection-generation guard prevents late history responses from
+  replacing the conversation that is currently selected.
 - `notifications.js` renders the `/notifications` Signal Log page for signed-in
   users, showing notification category settings, the full notification list, and
   routing each item through the same mark-read behavior used by the nav dropdown.
