@@ -22,6 +22,7 @@ import java.util.Base64;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.server.ResponseStatusException;
@@ -79,7 +80,7 @@ public final class MusicMetadataService {
     var account = access.requireWrite();
     requireIdentifier(trackId);
     MusicMetadataUpdate update = validate(rawUpdate);
-    return locked(trackId, () -> {
+    return withTrackLock(trackId, () -> {
       MusicTrack current = ready(trackId);
       requireRevision(current.observedToken(), update.expectedObservedToken());
       String extension = extension(current.path());
@@ -132,7 +133,7 @@ public final class MusicMetadataService {
     if (edit.status() != MusicMetadataEdit.Status.APPLIED
         || edit.expiresAt().isBefore(clock.instant())) throw conflict();
     requireRevision(edit.replacementObservedToken(), expectedObservedToken);
-    return locked(edit.trackId(), () -> {
+    return withTrackLock(edit.trackId(), () -> {
       MusicMetadataEdit currentEdit = edits.findById(edit.id()).orElseThrow(this::notFound);
       if (currentEdit.status() != MusicMetadataEdit.Status.APPLIED
           || !expectedObservedToken.equals(currentEdit.replacementObservedToken())) throw conflict();
@@ -197,7 +198,7 @@ public final class MusicMetadataService {
         previous, previous.path(), revision.token(), metadata, artworkRevision, clock.instant()));
   }
 
-  private <T> T locked(String trackId, java.util.concurrent.Callable<T> work) {
+  private <T> T withTrackLock(String trackId, Supplier<T> metadataOperation) {
     synchronized (localLock) {
       String owner = UUID.randomUUID().toString();
       String leaseName = "music-metadata:" + trackId;
@@ -206,10 +207,10 @@ public final class MusicMetadataService {
         throw conflict();
       }
       try {
-        return work.call();
+        return metadataOperation.get();
       } catch (ResponseStatusException failure) {
         throw failure;
-      } catch (Exception failure) {
+      } catch (RuntimeException failure) {
         throw new ResponseStatusException(
             HttpStatus.SERVICE_UNAVAILABLE, "Music metadata edit failed.", failure);
       } finally {
