@@ -51,7 +51,7 @@ public final class MusicReadController {
 
   @GetMapping("/catalog")
   public ResponseEntity<MusicCatalogView> catalog(
-      @RequestParam(required = false) String q,
+      @RequestParam(name = "q", required = false) String searchText,
       @RequestParam(required = false) String artist,
       @RequestParam(required = false) String album,
       @RequestParam(required = false) String genre,
@@ -66,7 +66,7 @@ public final class MusicReadController {
         ? null
         : library.playlistTrackIds(playlistId);
     var result = catalog.search(new MusicQuery(
-        q, artist, album, genre, favorite, trackIds, page, requestedSize));
+        searchText, artist, album, genre, favorite, trackIds, page, requestedSize));
     return ResponseEntity.ok().headers(noStore()).body(MusicCatalogView.from(result));
   }
 
