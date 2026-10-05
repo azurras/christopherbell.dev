@@ -15,11 +15,16 @@ import dev.christopherbell.configuration.security.browser.BrowserSessionReposito
 import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
 import jakarta.servlet.DispatcherType;
 import java.nio.charset.StandardCharsets;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -32,6 +37,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.config.annotation.AsyncSupportConfigurer;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 @WebMvcTest(AsyncDispatcherSecurityIntegrationTest.ProtectedController.class)
@@ -39,10 +46,12 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
     SecurityConfig.class,
     BrowserAuthenticationCookies.class,
     InteractiveBrowserRequest.class,
-    AsyncDispatcherSecurityIntegrationTest.ProtectedController.class
+    AsyncDispatcherSecurityIntegrationTest.ProtectedController.class,
+    AsyncDispatcherSecurityIntegrationTest.DeferredAsyncConfiguration.class
 })
 class AsyncDispatcherSecurityIntegrationTest {
   @Autowired private SecurityFilterChain securityFilterChain;
+  @Autowired private DeferredTaskExecutor asyncTaskExecutor;
   @Autowired private MockMvc mockMvc;
   @MockitoBean private AccountRepository accounts;
   @MockitoBean private BrowserSessionRepository browserSessions;
@@ -71,6 +80,9 @@ class AsyncDispatcherSecurityIntegrationTest {
         .andExpect(request().asyncStarted())
         .andReturn();
 
+    // The request thread has finished; only now may the streaming body write, as a servlet
+    // container orders it. Running it concurrently raced the mock response's header map.
+    asyncTaskExecutor.runPendingTasks();
     result.getAsyncResult();
     mockMvc.perform(asyncDispatch(result))
         .andExpect(status().isOk())
@@ -95,6 +107,46 @@ class AsyncDispatcherSecurityIntegrationTest {
         .map(AuthorizationFilter.class::cast)
         .findFirst()
         .orElseThrow();
+  }
+
+  /**
+   * MockMvc starts async work immediately, while the request thread is still writing headers
+   * on the same non-thread-safe mock response. Deferring the work until the test releases it
+   * keeps the two threads apart.
+   */
+  @TestConfiguration(proxyBeanMethods = false)
+  static class DeferredAsyncConfiguration {
+    @Bean
+    DeferredTaskExecutor deferredTaskExecutor() {
+      return new DeferredTaskExecutor();
+    }
+
+    @Bean
+    WebMvcConfigurer deferredAsyncSupport(DeferredTaskExecutor deferredTaskExecutor) {
+      return new WebMvcConfigurer() {
+        @Override
+        public void configureAsyncSupport(AsyncSupportConfigurer configurer) {
+          configurer.setTaskExecutor(deferredTaskExecutor);
+        }
+      };
+    }
+  }
+
+  /** Queues async tasks and runs them on the calling thread when the test releases them. */
+  static final class DeferredTaskExecutor implements AsyncTaskExecutor {
+    private final Queue<Runnable> pendingTasks = new ConcurrentLinkedQueue<>();
+
+    @Override
+    public void execute(Runnable task) {
+      pendingTasks.add(task);
+    }
+
+    void runPendingTasks() {
+      Runnable task;
+      while ((task = pendingTasks.poll()) != null) {
+        task.run();
+      }
+    }
   }
 
   @RestController
