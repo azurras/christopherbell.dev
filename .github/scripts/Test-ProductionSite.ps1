@@ -152,8 +152,10 @@ function ConvertTo-UtcTimestamp {
 
 function Test-DeploymentLag {
     <#
-    Fails only when main's head passed CI more than the threshold ago and is still not live;
-    a pending or failed CI run is the auto-deploy gate working as designed, not a stall.
+    Fails when main's head is not live and either passed CI more than the threshold ago (a stalled
+    deploy) or still has no finished CI run that long after its commit (a missed or stuck run).
+    A failed run is the auto-deploy gate refusing a red commit, which CI already reports.
+    Push and manual runs count, as they do for the auto-deploy gate.
     #>
     param(
         [Parameter(Mandatory)][string]$Repository,
@@ -162,17 +164,34 @@ function Test-DeploymentLag {
         [Parameter(Mandatory)][int]$ThresholdMinutes,
         [Parameter(Mandatory)][datetimeoffset]$Now
     )
-    $mainCommit = [string](Invoke-GitHubApi -Path "repos/$Repository/commits/main" -Token $Token).sha
-    $runs = @((Invoke-GitHubApi -Path "repos/$Repository/actions/workflows/ci.yml/runs?head_sha=$mainCommit&event=push&per_page=1" -Token $Token).workflow_runs)
+    $mainHead = Invoke-GitHubApi -Path "repos/$Repository/commits/main" -Token $Token
+    $mainCommit = [string]$mainHead.sha
+    $runPage = Invoke-GitHubApi -Token $Token `
+        -Path "repos/$Repository/actions/workflows/ci.yml/runs?head_sha=$mainCommit&branch=main&per_page=10"
+    $newestRun = @($runPage.workflow_runs) |
+        Where-Object { [string]$_.event -in @('push', 'workflow_dispatch') } |
+        Sort-Object -Property { [long]$_.run_number } -Descending |
+        Select-Object -First 1
     $shortMainCommit = $mainCommit.Substring(0, 7)
     if ($LiveCommit -eq $mainCommit) {
         return New-WatchCheck -Name 'Deployment lag' -Passed $true -Detail "main $shortMainCommit is live."
     }
-    if ($runs.Count -eq 0 -or [string]$runs[0].conclusion -ne 'success') {
-        return New-WatchCheck -Name 'Deployment lag' -Passed $true `
-            -Detail "main $shortMainCommit has not passed CI yet; auto-deploy waits for it."
+    if (-not $newestRun -or [string]$newestRun.status -ne 'completed') {
+        $committedAt = ConvertTo-UtcTimestamp -Timestamp $mainHead.commit.committer.date
+        $minutesSinceCommit = [math]::Floor(($Now - $committedAt).TotalMinutes)
+        if ($minutesSinceCommit -le $ThresholdMinutes) {
+            return New-WatchCheck -Name 'Deployment lag' -Passed $true `
+                -Detail "main $shortMainCommit has not passed CI yet; auto-deploy waits for it."
+        }
+        return New-WatchCheck -Name 'Deployment lag' -Passed $false `
+            -Detail ("main $shortMainCommit has had no passing CI run for $minutesSinceCommit minutes; " +
+                'auto-deploy is waiting for one. Run CI Build on main from the Actions tab.')
     }
-    $greenAt = ConvertTo-UtcTimestamp -Timestamp $runs[0].updated_at
+    if ([string]$newestRun.conclusion -ne 'success') {
+        return New-WatchCheck -Name 'Deployment lag' -Passed $true `
+            -Detail "main $shortMainCommit failed CI; auto-deploy refuses it."
+    }
+    $greenAt = ConvertTo-UtcTimestamp -Timestamp $newestRun.updated_at
     $minutesSinceGreen = [math]::Floor(($Now - $greenAt).TotalMinutes)
     $liveDescription = if ($LiveCommit) { $LiveCommit.Substring(0, 7) } else { 'an unknown commit' }
     if ($minutesSinceGreen -le $ThresholdMinutes) {

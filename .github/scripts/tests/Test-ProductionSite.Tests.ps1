@@ -14,13 +14,19 @@ BeforeAll {
     function Set-GitHubState {
         param(
             [string]$MainCommit = $script:liveCommit,
+            [string]$MainCommittedAt = '2026-10-05T14:40:00Z',
             [AllowNull()][string]$CiConclusion = 'success',
+            [string]$CiStatus = 'completed',
+            [string]$CiEvent = 'push',
             [string]$CiUpdatedAt = '2026-10-05T14:50:00Z',
             [AllowNull()][string]$DeploymentState = 'success'
         )
         $script:gitHubState = @{
             MainCommit = $MainCommit
+            MainCommittedAt = $MainCommittedAt
             CiConclusion = $CiConclusion
+            CiStatus = $CiStatus
+            CiEvent = $CiEvent
             CiUpdatedAt = $CiUpdatedAt
             DeploymentState = $DeploymentState
         }
@@ -28,10 +34,22 @@ BeforeAll {
             param([string]$Path, [string]$Token)
             $state = $script:gitHubState
             switch -Regex ($Path) {
-                '/commits/main$' { return [pscustomobject]@{ sha = $state.MainCommit } }
+                '/commits/main$' {
+                    return [pscustomobject]@{
+                        sha = $state.MainCommit
+                        commit = [pscustomobject]@{ committer = [pscustomobject]@{ date = $state.MainCommittedAt } }
+                    }
+                }
                 '/actions/workflows/ci\.yml/runs' {
-                    $runs = if ($state.CiConclusion) {
-                        @([pscustomobject]@{ conclusion = $state.CiConclusion; updated_at = $state.CiUpdatedAt })
+                    $script:requestedRunsPath = $Path
+                    $runs = if ($state.CiConclusion -or $state.CiStatus -ne 'completed') {
+                        @([pscustomobject]@{
+                            run_number = 12
+                            event = $state.CiEvent
+                            status = $state.CiStatus
+                            conclusion = $state.CiConclusion
+                            updated_at = $state.CiUpdatedAt
+                        })
                     } else { @() }
                     return [pscustomobject]@{ workflow_runs = $runs }
                 }
@@ -171,6 +189,45 @@ Describe 'Production Watch verdict' {
 
         $verdict.Healthy | Should -BeTrue
         $verdict.LiveCommit | Should -Be $script:liveCommit
+    }
+
+    It 'fails when main has had no CI run for longer than the threshold' {
+        Set-GitHubState -MainCommit $script:newerCommit -MainCommittedAt '2026-10-05T14:10:00Z' -CiConclusion $null
+
+        $verdict = Get-TestVerdict
+
+        Get-FailedCheckNames $verdict | Should -Be @('Deployment lag')
+        ($verdict.Checks | Where-Object Name -eq 'Deployment lag').Detail |
+            Should -Be ('main b126b64 has had no passing CI run for 50 minutes; auto-deploy is waiting for one. ' +
+                'Run CI Build on main from the Actions tab.')
+        $script:requestedRunsPath | Should -Match '\?head_sha=b126b64241737995d9127d0849dcf62c68f987c0&branch=main&per_page=10$'
+    }
+
+    It 'fails when the CI run for main has been unfinished for longer than the threshold' {
+        Set-GitHubState -MainCommit $script:newerCommit -MainCommittedAt '2026-10-05T14:10:00Z' `
+            -CiConclusion $null -CiStatus 'queued'
+
+        Get-FailedCheckNames (Get-TestVerdict) | Should -Be @('Deployment lag')
+    }
+
+    It 'accepts a manual CI run and ignores pull request runs for main' {
+        Set-GitHubState -MainCommit $script:newerCommit -CiEvent 'workflow_dispatch' -CiUpdatedAt '2026-10-05T14:10:00Z'
+        ((Get-TestVerdict).Checks | Where-Object Name -eq 'Deployment lag').Detail |
+            Should -Be 'main b126b64 passed CI 50 minutes ago but a9d2058 is still live.'
+
+        Set-GitHubState -MainCommit $script:newerCommit -MainCommittedAt '2026-10-05T14:10:00Z' -CiEvent 'pull_request'
+        ((Get-TestVerdict).Checks | Where-Object Name -eq 'Deployment lag').Detail |
+            Should -Match '^main b126b64 has had no passing CI run for 50 minutes'
+    }
+
+    It 'reports a red main as refused rather than stalled' {
+        Set-GitHubState -MainCommit $script:newerCommit -MainCommittedAt '2026-10-05T10:00:00Z' -CiConclusion 'failure'
+
+        $verdict = Get-TestVerdict
+
+        $verdict.Healthy | Should -BeTrue
+        ($verdict.Checks | Where-Object Name -eq 'Deployment lag').Detail |
+            Should -Be 'main b126b64 failed CI; auto-deploy refuses it.'
     }
 
     It 'fails build info that does not identify a release commit' {
