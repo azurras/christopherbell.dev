@@ -99,7 +99,13 @@ tasks.withType<Test>().configureEach {
 }
 
 springBoot {
-    buildInfo()
+    buildInfo {
+        properties {
+            // The release version lives on the root project; without this the website's build
+            // info says "unspecified" and /actuator/info cannot identify the running commit.
+            version.set(rootProject.version.toString())
+        }
+    }
 }
 
 val libreHardwareMonitorUri = URI(
