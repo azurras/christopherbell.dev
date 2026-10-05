@@ -57,6 +57,7 @@ public class ScheduledCollectorCoordinator {
 
     var guard = new RenewingLease(
         leases::renew, clock, collectorName, ownerToken, leaseDuration, startedOn);
+    InterruptedException interruption = null;
     try {
       run.setStatus(ScheduledCollectorRunStatus.RUNNING);
       runs.save(run);
@@ -68,6 +69,11 @@ public class ScheduledCollectorCoordinator {
       run.setStatus(ScheduledCollectorRunStatus.FAILED);
       run.setErrorCategory(safeCategory(failure));
       throw failure;
+    } catch (InterruptedException failure) {
+      run.setStatus(ScheduledCollectorRunStatus.FAILED);
+      run.setErrorCategory(safeCategory(failure));
+      interruption = failure;
+      throw new IllegalStateException("Scheduled collector failed.", failure);
     } catch (Exception failure) {
       run.setStatus(ScheduledCollectorRunStatus.FAILED);
       run.setErrorCategory(safeCategory(failure));
@@ -77,7 +83,13 @@ public class ScheduledCollectorCoordinator {
       try {
         runs.save(run);
       } finally {
-        leases.release(collectorName, ownerToken);
+        try {
+          leases.release(collectorName, ownerToken);
+        } finally {
+          if (interruption != null) {
+            Thread.currentThread().interrupt();
+          }
+        }
       }
     }
   }

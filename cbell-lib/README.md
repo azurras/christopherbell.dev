@@ -28,6 +28,10 @@ Stable cursor encoding lives under `dev.christopherbell.libs.pagination`, while
 the reusable Mongo lease and scheduled-collector coordination types live under
 `dev.christopherbell.libs.mongo.lease`.
 
+When scheduled collector work is interrupted, the coordinator records the run
+as failed, releases its lease, and restores the thread's interrupt flag after
+that cleanup completes.
+
 `TestUtil` is published only through the module's Gradle test-fixtures variant;
 it is not part of the production library artifact.
 
