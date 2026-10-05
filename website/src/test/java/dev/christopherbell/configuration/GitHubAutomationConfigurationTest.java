@@ -65,17 +65,20 @@ class GitHubAutomationConfigurationTest {
   }
 
   @Test
-  void ciBuildsEveryPlatformWithoutGeneratedDatabaseSources() throws IOException {
+  void ciBuildsOnlyOnWindowsWithoutGeneratedDatabaseSources() throws IOException {
     var workflow = readYaml(".github/workflows/ci.yml");
     var build = workflow.at("/jobs/build");
     var buildSteps = build.path("steps");
 
     assertThat(workflow.at("/jobs/jooq-codegen").isMissingNode()).isTrue();
     assertThat(build.path("needs").isMissingNode()).isTrue();
+    assertThat(build.path("runs-on").asText()).isEqualTo("windows-latest");
+    assertThat(build.path("strategy").isMissingNode()).isTrue();
     assertThat(stepNamed(buildSteps, "Build and Test").path("run").asText())
-        .isEqualTo("./gradlew build");
-    assertThat(stepNamed(buildSteps, "Build and Test on Windows").path("run").asText())
         .isEqualTo(".\\gradlew.bat build");
+    assertThat(stepNamed(buildSteps, "Build and Test on Windows").isMissingNode()).isTrue();
+    assertThat(stepNamed(buildSteps, "Grant execute permission for Gradle").isMissingNode())
+        .isTrue();
   }
 
   @Test
@@ -93,11 +96,11 @@ class GitHubAutomationConfigurationTest {
     var steps = workflow.at("/jobs/build/steps");
     var install = stepNamed(steps, "Install Pester 5.9.0");
 
-    assertThat(install.path("if").asText()).isEqualTo("runner.os == 'Windows'");
+    assertThat(install.path("if").isMissingNode()).isTrue();
     assertThat(install.path("timeout-minutes").asInt()).isEqualTo(5);
     assertThat(install.path("run").asText())
         .contains("Install-Module", "-RequiredVersion 5.9.0", "Import-Module Pester");
-    assertThat(stepNamed(steps, "Build and Test on Windows").path("run").asText())
+    assertThat(stepNamed(steps, "Build and Test").path("run").asText())
         .contains("gradlew.bat build");
     assertThat(stepUsing(steps, UPLOAD_ARTIFACT).at("/with/path").asText())
         .contains("**/build/test-results/shared-folder-pester/*.xml");
@@ -115,10 +118,7 @@ class GitHubAutomationConfigurationTest {
     assertThat(workflow.at("/concurrency/cancel-in-progress").asText())
         .isEqualTo("${{ github.event_name == 'pull_request' }}");
     assertThat(build.path("timeout-minutes").asInt()).isEqualTo(30);
-    assertThat(build.at("/strategy/fail-fast").asBoolean()).isFalse();
     assertThat(stepNamed(steps, "Build and Test").path("timeout-minutes").asInt()).isEqualTo(20);
-    assertThat(stepNamed(steps, "Build and Test on Windows")
-        .path("timeout-minutes").asInt()).isEqualTo(20);
     assertThat(stepNamed(steps, "Upload failed test reports")
         .path("timeout-minutes").asInt()).isEqualTo(5);
     assertThat(List.of("Checkout code", "Set up JDK", "Set up Node.js", "Set up Gradle"))

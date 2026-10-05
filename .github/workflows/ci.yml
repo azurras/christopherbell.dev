@@ -15,13 +15,8 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        java-version: [ 25 ]
-        os: [ ubuntu-latest, macos-latest, windows-latest ]
 
     steps:
       - name: Checkout code
@@ -33,7 +28,7 @@ jobs:
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: 'temurin'
-          java-version: ${{ matrix.java-version }}
+          java-version: 25
 
       - name: Set up Node.js
         timeout-minutes: 5
@@ -48,7 +43,6 @@ jobs:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
       - name: Install Pester 5.9.0
-        if: runner.os == 'Windows'
         shell: pwsh
         timeout-minutes: 5
         run: |
@@ -59,18 +53,7 @@ jobs:
             throw 'Required Pester 5.9.0 module failed to load.'
           }
 
-      - name: Grant execute permission for Gradle
-        if: runner.os != 'Windows'
-        timeout-minutes: 5
-        run: chmod +x gradlew
-
       - name: Build and Test
-        if: runner.os != 'Windows'
-        timeout-minutes: 20
-        run: ./gradlew build
-
-      - name: Build and Test on Windows
-        if: runner.os == 'Windows'
         timeout-minutes: 20
         run: .\gradlew.bat build
 
@@ -79,7 +62,7 @@ jobs:
         timeout-minutes: 5
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: test-reports-${{ matrix.os }}-java-${{ matrix.java-version }}
+          name: test-reports-windows-java-25
           if-no-files-found: warn
           retention-days: 14
           path: |
