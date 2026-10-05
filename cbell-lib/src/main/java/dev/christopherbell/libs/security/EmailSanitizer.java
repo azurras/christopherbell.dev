@@ -3,6 +3,7 @@ package dev.christopherbell.libs.security;
 import java.net.IDN;
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.text.Normalizer;
 import java.text.Normalizer.Form;
 import java.util.Locale;
@@ -47,50 +48,59 @@ public final class EmailSanitizer {
   public static String sanitize(String input) {
     if (input == null) throw new IllegalArgumentException("email is null");
 
-    String s = input.strip();
-    if (s.isEmpty()) throw new IllegalArgumentException("email is empty");
+    String strippedInput = input.strip();
+    if (strippedInput.isEmpty()) throw new IllegalArgumentException("email is empty");
 
     // Wrappers
-    if (s.regionMatches(true, 0, "mailto:", 0, 7)) {
-      s = s.substring(7).strip();
+    String emailWithoutMailtoPrefix = strippedInput;
+    if (emailWithoutMailtoPrefix.regionMatches(true, 0, "mailto:", 0, 7)) {
+      emailWithoutMailtoPrefix = emailWithoutMailtoPrefix.substring(7).strip();
     }
-    int lt = s.indexOf('<');
-    int gt = s.lastIndexOf('>');
-    if (lt >= 0 && gt > lt) {
-      s = s.substring(lt + 1, gt).strip();
+    int openingAngleBracketIndex = emailWithoutMailtoPrefix.indexOf('<');
+    int closingAngleBracketIndex = emailWithoutMailtoPrefix.lastIndexOf('>');
+    String emailWithoutDisplayName = emailWithoutMailtoPrefix;
+    if (openingAngleBracketIndex >= 0 && closingAngleBracketIndex > openingAngleBracketIndex) {
+      emailWithoutDisplayName = emailWithoutMailtoPrefix
+          .substring(openingAngleBracketIndex + 1, closingAngleBracketIndex)
+          .strip();
     }
 
     // Normalize
-    s = CONTROL_OR_FORMAT.matcher(s).replaceAll("");
-    s = Normalizer.normalize(s, Form.NFKC);
+    String emailWithoutControlOrFormatCharacters =
+        CONTROL_OR_FORMAT.matcher(emailWithoutDisplayName).replaceAll("");
+    String normalizedEmail = Normalizer.normalize(emailWithoutControlOrFormatCharacters, Form.NFKC);
 
     // No whitespace allowed going forward (no collapsing)
-    if (WHITESPACE.matcher(s).find()) {
+    if (WHITESPACE.matcher(normalizedEmail).find()) {
       throw new IllegalArgumentException("whitespace not allowed");
     }
 
     // Split
-    int at = s.lastIndexOf('@');
-    if (at <= 0 || at == s.length() - 1 || s.indexOf('@') != at) {
+    int atSignIndex = normalizedEmail.lastIndexOf('@');
+    if (atSignIndex <= 0 || atSignIndex == normalizedEmail.length() - 1
+        || normalizedEmail.indexOf('@') != atSignIndex) {
       throw new IllegalArgumentException("email must contain exactly one '@'");
     }
-    String local = s.substring(0, at).toLowerCase(Locale.ROOT);
-    String domain = s.substring(at + 1).toLowerCase(Locale.ROOT);
+    String lowercaseLocalPart = normalizedEmail.substring(0, atSignIndex).toLowerCase(Locale.ROOT);
+    String lowercaseDomain = normalizedEmail.substring(atSignIndex + 1).toLowerCase(Locale.ROOT);
 
     // Trim a trailing '.' (common typo)
-    if (domain.endsWith(".")) domain = domain.substring(0, domain.length() - 1);
+    String domainWithoutTrailingDot = lowercaseDomain;
+    if (domainWithoutTrailingDot.endsWith(".")) {
+      domainWithoutTrailingDot = domainWithoutTrailingDot.substring(0, domainWithoutTrailingDot.length() - 1);
+    }
 
     // Validate local
-    validateLocal(local);
+    validateLocal(lowercaseLocalPart);
 
     // Validate/normalize domain
-    domain = normalizeDomain(domain);
+    String normalizedDomain = normalizeDomain(domainWithoutTrailingDot);
 
     // Total length (local + '@' + domain)
-    int total = local.length() + 1 + domain.length();
-    if (total > MAX_EMAIL_LEN) throw new IllegalArgumentException("email too long");
+    int normalizedEmailLength = lowercaseLocalPart.length() + 1 + normalizedDomain.length();
+    if (normalizedEmailLength > MAX_EMAIL_LEN) throw new IllegalArgumentException("email too long");
 
-    return local + "@" + domain;
+    return lowercaseLocalPart + "@" + normalizedDomain;
   }
 
   private static void validateLocal(String local) {
@@ -105,50 +115,55 @@ public final class EmailSanitizer {
     }
   }
 
-  private static String normalizeDomain(String domain) {
+  private static String normalizeDomain(String domainName) {
     // localhost
-    if ("localhost".equals(domain)) return domain;
+    if ("localhost".equals(domainName)) return domainName;
 
     // IPv4 unbracketed
-    if (IPV4.matcher(domain).matches()) return domain;
+    if (IPV4.matcher(domainName).matches()) return domainName;
 
     // Bracketed IPv6 literal: [::1] or [IPv6::1]
-    if (domain.startsWith("[") && domain.endsWith("]")) {
-      String inside = domain.substring(1, domain.length() - 1);
+    if (domainName.startsWith("[") && domainName.endsWith("]")) {
+      String bracketedIpv6Literal = domainName.substring(1, domainName.length() - 1);
       // Allow optional "IPv6:" prefix (case-insensitive)
-      if (inside.regionMatches(true, 0, "IPv6:", 0, 5)) inside = inside.substring(5);
+      String ipv6Literal = bracketedIpv6Literal;
+      if (ipv6Literal.regionMatches(true, 0, "IPv6:", 0, 5)) {
+        ipv6Literal = ipv6Literal.substring(5);
+      }
       try {
-        InetAddress addr = InetAddress.getByName(inside);
-        if (!(addr instanceof Inet6Address)) throw new IllegalArgumentException("invalid IPv6 literal");
-        return "[" + inside + "]";
-      } catch (Exception e) {
-        throw new IllegalArgumentException("invalid IPv6 literal");
+        InetAddress ipv6Address = InetAddress.getByName(ipv6Literal);
+        if (!(ipv6Address instanceof Inet6Address)) {
+          throw new IllegalArgumentException("invalid IPv6 literal");
+        }
+        return "[" + ipv6Literal + "]";
+      } catch (UnknownHostException invalidIpv6Literal) {
+        throw new IllegalArgumentException("invalid IPv6 literal", invalidIpv6Literal);
       }
     }
 
     // IDN punycode (STD3 rules)
-    String ascii;
+    String asciiDomain;
     try {
-      ascii = IDN.toASCII(domain, IDN.USE_STD3_ASCII_RULES);
-    } catch (Exception e) {
-      throw new IllegalArgumentException("invalid idn domain");
+      asciiDomain = IDN.toASCII(domainName, IDN.USE_STD3_ASCII_RULES);
+    } catch (IllegalArgumentException invalidIdnDomain) {
+      throw new IllegalArgumentException("invalid idn domain", invalidIdnDomain);
     }
-    if (ascii.isEmpty() || ascii.length() > MAX_DOMAIN_LEN) {
+    if (asciiDomain.isEmpty() || asciiDomain.length() > MAX_DOMAIN_LEN) {
       throw new IllegalArgumentException("bad domain length");
     }
 
-    String[] labels = ascii.split("\\.");
-    if (labels.length < 2) throw new IllegalArgumentException("domain must contain a dot");
-    for (String label : labels) {
+    String[] asciiDomainLabels = asciiDomain.split("\\.");
+    if (asciiDomainLabels.length < 2) throw new IllegalArgumentException("domain must contain a dot");
+    for (String label : asciiDomainLabels) {
       if (label.isEmpty() || label.length() > 63) throw new IllegalArgumentException("bad domain label length");
       if (!LABEL_SAFE.matcher(label).matches()) throw new IllegalArgumentException("invalid domain label char");
       if (label.startsWith("-") || label.endsWith("-")) throw new IllegalArgumentException("hyphen placement");
     }
-    String tld = labels[labels.length - 1];
-    char c0 = tld.charAt(0);
-    if (!(c0 >= 'a' && c0 <= 'z')) {
+    String topLevelDomain = asciiDomainLabels[asciiDomainLabels.length - 1];
+    char topLevelDomainFirstCharacter = topLevelDomain.charAt(0);
+    if (!(topLevelDomainFirstCharacter >= 'a' && topLevelDomainFirstCharacter <= 'z')) {
       throw new IllegalArgumentException("tld must start with a letter");
     }
-    return ascii;
+    return asciiDomain;
   }
 }
