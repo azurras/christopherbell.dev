@@ -1,16 +1,21 @@
 package dev.christopherbell.admin.commandcenter.metrics;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.nio.file.Path;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.io.IOException;
+import java.util.concurrent.FutureTask;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class PowerShellCpuTemperatureProbeTest {
-  @TempDir Path tempDir;
+  @TempDir
+  Path tempDir;
+
   @Test
   void usesOnlyFixedPowerShellArgumentsAndParsesSaneTemperature() {
     var process = FakeManagedProcess.completed("64.25", "", 0);
@@ -45,6 +50,34 @@ class PowerShellCpuTemperatureProbeTest {
     assertThat(read(FakeManagedProcess.completed("64", "failure", 0))).isEmpty();
     assertThat(read(FakeManagedProcess.truncated("64"))).isEmpty();
     assertThat(read(FakeManagedProcess.completed("126", "", 0))).isEmpty();
+  }
+
+  @Test
+  void interruptionWhileCollectingOutputReachesTheProcessOwner() {
+    var outputTask = pendingOutputTask();
+    Thread.currentThread().interrupt();
+
+    try {
+      assertThatThrownBy(() -> PowerShellCpuTemperatureProbe.awaitOutput(outputTask))
+          .isInstanceOf(InterruptedException.class);
+      assertThat(outputTask.isCancelled()).isTrue();
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
+  @Test
+  void outputWaitFailuresKeepReturningEmptyTruncatedOutput() throws InterruptedException {
+    var failedOutputTask = new FutureTask<PowerShellCpuTemperatureProbe.BoundedOutput>(
+        () -> { throw new IOException("reader failed"); });
+    failedOutputTask.run();
+    assertEmptyTruncatedOutput(failedOutputTask);
+
+    assertEmptyTruncatedOutput(pendingOutputTask());
+
+    var cancelledOutputTask = pendingOutputTask();
+    cancelledOutputTask.cancel(true);
+    assertEmptyTruncatedOutput(cancelledOutputTask);
   }
 
   @Test
@@ -91,6 +124,19 @@ class PowerShellCpuTemperatureProbeTest {
     List<String> command() { return command; }
   }
 
+  private static FutureTask<PowerShellCpuTemperatureProbe.BoundedOutput> pendingOutputTask() {
+    return new FutureTask<>(
+        () -> new PowerShellCpuTemperatureProbe.BoundedOutput("output", false));
+  }
+
+  private static void assertEmptyTruncatedOutput(
+      FutureTask<PowerShellCpuTemperatureProbe.BoundedOutput> outputTask)
+      throws InterruptedException {
+    var output = PowerShellCpuTemperatureProbe.awaitOutput(outputTask);
+    assertThat(output.text()).isEmpty();
+    assertThat(output.truncated()).isTrue();
+  }
+
   private static final class FakeManagedProcess
       implements PowerShellCpuTemperatureProbe.ManagedProcess {
     private final PowerShellCpuTemperatureProbe.ProcessResult result;
@@ -117,6 +163,5 @@ class PowerShellCpuTemperatureProbeTest {
     @Override public void terminateTree() { terminateCalls++; }
     int terminateCalls() { return terminateCalls; }
     boolean forcefulTerminationRequested() { return result.timedOut(); }
-  }
-
+}
 }

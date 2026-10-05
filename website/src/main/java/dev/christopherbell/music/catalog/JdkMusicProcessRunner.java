@@ -6,9 +6,12 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** JDK process boundary that drains both streams and caps retained output. */
 public final class JdkMusicProcessRunner implements MusicProcessRunner {
@@ -52,8 +55,8 @@ public final class JdkMusicProcessRunner implements MusicProcessRunner {
           () -> readBounded(process.getErrorStream(), maxOutputBytes));
       boolean completed = process.waitFor(Math.max(1, timeout.toMillis()), TimeUnit.MILLISECONDS);
       if (!completed) terminate(process);
-      var out = result(stdout);
-      var err = result(stderr);
+      var out = awaitOutput(stdout);
+      var err = awaitOutput(stderr);
       return new MusicProcessResult(
           out.text(), err.text(), completed ? process.exitValue() : -1,
           !completed, out.truncated() || err.truncated());
@@ -64,11 +67,15 @@ public final class JdkMusicProcessRunner implements MusicProcessRunner {
     }
   }
 
-  private BoundedOutput result(Future<BoundedOutput> output) {
+  static BoundedOutput awaitOutput(Future<BoundedOutput> outputTask)
+      throws InterruptedException {
     try {
-      return output.get(TERMINATION_GRACE.toMillis(), TimeUnit.MILLISECONDS);
-    } catch (Exception failure) {
-      output.cancel(true);
+      return outputTask.get(TERMINATION_GRACE.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (InterruptedException failure) {
+      outputTask.cancel(true);
+      throw failure;
+    } catch (ExecutionException | TimeoutException | CancellationException failure) {
+      outputTask.cancel(true);
       return new BoundedOutput("", true);
     }
   }
@@ -99,6 +106,6 @@ public final class JdkMusicProcessRunner implements MusicProcessRunner {
     }
   }
 
-  private record BoundedOutput(String text, boolean truncated) {
+  record BoundedOutput(String text, boolean truncated) {
   }
 }
