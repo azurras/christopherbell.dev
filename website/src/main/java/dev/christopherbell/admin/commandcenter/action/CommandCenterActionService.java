@@ -15,6 +15,7 @@ import dev.christopherbell.permission.PermissionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -356,9 +357,9 @@ public class CommandCenterActionService {
       throws InvalidRequestException {
     try {
       commandExecutor.execute(action);
-    } catch (Exception exception) {
+    } catch (IOException exception) {
       auditSafely(actor, action, clientIp, "launch-failed");
-      throw new InvalidRequestException("The fixed host action could not be launched.");
+      throw new InvalidRequestException("The fixed host action could not be launched.", exception);
     }
     auditSafely(actor, action, clientIp, "launched");
   }
