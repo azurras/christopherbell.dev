@@ -208,6 +208,7 @@ public class RestaurantImportWorkflowService {
     }
 
     saveState(detail(RestaurantImportRunStatus.RUNNING, trigger, startedOn, null, null, null), actor);
+    InterruptedException interruption = null;
     try {
       var expectedChecksum = previewToken == null
           ? null
@@ -241,6 +242,9 @@ public class RestaurantImportWorkflowService {
       saveState(succeeded, actor);
       return succeeded;
     } catch (Exception failure) {
+      if (failure instanceof InterruptedException interruptedFailure) {
+        interruption = interruptedFailure;
+      }
       var failed = detail(
           RestaurantImportRunStatus.FAILED,
           trigger,
@@ -251,8 +255,14 @@ public class RestaurantImportWorkflowService {
       saveState(failed, actor);
       throw failure;
     } finally {
-      if (!leases.release(LEASE_NAME, ownerToken)) {
-        log.warn("OpenStreetMap import lease was not released by its owner. Trigger: {}.", trigger);
+      try {
+        if (!leases.release(LEASE_NAME, ownerToken)) {
+          log.warn("OpenStreetMap import lease was not released by its owner. Trigger: {}.", trigger);
+        }
+      } finally {
+        if (interruption != null) {
+          Thread.currentThread().interrupt();
+        }
       }
     }
   }
@@ -323,7 +333,6 @@ public class RestaurantImportWorkflowService {
       return "REMOTE_IO";
     }
     if (failure instanceof InterruptedException) {
-      Thread.currentThread().interrupt();
       return "INTERRUPTED";
     }
     return "IMPORT_FAILED";
