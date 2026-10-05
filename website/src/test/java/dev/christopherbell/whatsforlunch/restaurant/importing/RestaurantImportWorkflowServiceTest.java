@@ -354,6 +354,23 @@ class RestaurantImportWorkflowServiceTest {
   }
 
   @Test
+  void dailyRetryTreatsMalformedLegacyMonthAsMissingState() {
+    var now = Instant.parse("2026-09-16T09:00:00Z");
+    var failedState = RestaurantImportState.builder()
+        .id(RestaurantImportWorkflowService.STATE_ID)
+        .lastCompletedMonth("invalid-month")
+        .lastFailedOn(Instant.parse("2026-09-15T08:01:00Z"))
+        .build();
+    when(states.findById(RestaurantImportWorkflowService.STATE_ID)).thenReturn(Optional.of(failedState));
+    when(leases.tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(now), any()))
+        .thenReturn(false);
+
+    workflowAt(now, new WflProperties()).retryFailedMonthlyOpenStreetMapImport();
+
+    verify(leases).tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(now), any());
+  }
+
+  @Test
   void dailyRetryRespectsTheMonthlyImportEnabledFlag() {
     var disabledProperties = new WflProperties();
     disabledProperties.getRestaurantImport().getMonthly().setEnabled(false);

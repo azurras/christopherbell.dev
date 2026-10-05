@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.time.LocalTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -333,10 +334,12 @@ public class RestaurantImportWorkflowService {
     return YearMonth.now(clock.withZone(zone));
   }
 
-  private Optional<YearMonth> parseYearMonth(String value) {
+  private Optional<YearMonth> parseYearMonth(String persistedMonth) {
     try {
-      return value == null || value.isBlank() ? Optional.empty() : Optional.of(YearMonth.parse(value));
-    } catch (Exception ignored) {
+      return persistedMonth == null || persistedMonth.isBlank()
+          ? Optional.empty()
+          : Optional.of(YearMonth.parse(persistedMonth));
+    } catch (DateTimeParseException invalidPersistedMonth) {
       return Optional.empty();
     }
   }
