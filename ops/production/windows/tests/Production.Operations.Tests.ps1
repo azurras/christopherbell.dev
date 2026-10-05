@@ -1012,6 +1012,29 @@ Describe 'native Windows production operations' {
             { Assert-AutoDeployTaskContract -Task $task -Config $config } | Should -Throw '*repeating trigger*'
         }
 
+        It 'accepts the versioned tools bundle that tool refresh installs' {
+            $config = [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60 }
+            $task = New-ValidStartupTask
+            $task.Actions[0].Arguments = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass ' +
+                '-File "C:\ProgramData\christopherbell.dev\tools\versions\0123456789abcdef0123456789abcdef01234567\prod.ps1" auto-deploy'
+
+            { Assert-AutoDeployTaskContract -Task $task -Config $config } | Should -Not -Throw
+        }
+
+        It 'rejects a task script outside the installed or versioned tools (<Case>)' -ForEach @(
+            @{ Case = 'another root'; ScriptPath = 'C:\Temp\christopherbell.dev\tools\prod.ps1' }
+            @{ Case = 'a non-commit version folder'; ScriptPath = 'C:\ProgramData\christopherbell.dev\tools\versions\latest\prod.ps1' }
+            @{ Case = 'a nested path'; ScriptPath = 'C:\ProgramData\christopherbell.dev\tools\versions\0123456789abcdef0123456789abcdef01234567\x\prod.ps1' }
+            @{ Case = 'a different script'; ScriptPath = 'C:\ProgramData\christopherbell.dev\tools\other.ps1' }
+        ) {
+            $config = [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60 }
+            $task = New-ValidStartupTask
+            $task.Actions[0].Arguments = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass ' +
+                "-File `"$ScriptPath`" auto-deploy"
+
+            { Assert-AutoDeployTaskContract -Task $task -Config $config } | Should -Throw '*installed production auto-deploy command*'
+        }
+
         It 'rejects a visible or interactive automatic deployment task' {
             $task = New-ValidStartupTask
             $task.Settings.Hidden = $false

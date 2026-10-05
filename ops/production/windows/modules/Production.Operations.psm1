@@ -511,10 +511,18 @@ function Assert-AutoDeployTaskContract {
     if (-not [string]::Equals([string]$actions[0].Execute, $expectedPowerShell, [StringComparison]::OrdinalIgnoreCase)) {
         throw "ChristopherBellAutoDeploy must use the PowerShell 7 executable at $expectedPowerShell."
     }
-    $expectedArguments = "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden " +
-        "-ExecutionPolicy Bypass -File `"$($Config.programDataRoot)\tools\prod.ps1`" auto-deploy"
-    if ([string]$actions[0].Arguments -ne $expectedArguments) {
-        throw 'ChristopherBellAutoDeploy must run the installed production auto-deploy command hidden and noninteractive.'
+    # auto-install points the task at tools\prod.ps1; each tool refresh then repoints it at an
+    # immutable tools\versions\<tree sha>\prod.ps1 bundle. Both are the installed command.
+    $taskCommandMismatch = 'ChristopherBellAutoDeploy must run the installed production auto-deploy command hidden and noninteractive.'
+    $argumentPattern = '^-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "(?<script>[^"]+)" auto-deploy$'
+    if ([string]$actions[0].Arguments -cnotmatch $argumentPattern) { throw $taskCommandMismatch }
+    $taskScriptPath = $Matches.script
+    $toolsRoot = Join-Path $Config.programDataRoot 'tools'
+    $installedScriptPath = Join-Path $toolsRoot 'prod.ps1'
+    $versionedScriptPattern = '^' + [regex]::Escape((Join-Path $toolsRoot 'versions')) + '\\[0-9a-f]{40}\\prod\.ps1$'
+    $isInstalledScript = [string]::Equals($taskScriptPath, $installedScriptPath, [StringComparison]::OrdinalIgnoreCase)
+    if (-not $isInstalledScript -and $taskScriptPath -inotmatch $versionedScriptPattern) {
+        throw $taskCommandMismatch
     }
     if (-not $Task.Settings.Hidden -or -not $Task.Settings.StartWhenAvailable -or
         $Task.Settings.DisallowStartIfOnBatteries -or $Task.Settings.StopIfGoingOnBatteries) {
