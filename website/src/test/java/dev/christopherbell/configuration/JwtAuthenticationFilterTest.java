@@ -2,7 +2,9 @@ package dev.christopherbell.configuration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -48,6 +50,7 @@ import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 
 class JwtAuthenticationFilterTest {
 
@@ -74,6 +77,34 @@ class JwtAuthenticationFilterTest {
     assertEquals("account-1", authentication.getName());
     assertEquals("USER", authentication.getAuthorities().iterator().next().getAuthority());
     assertEquals(200, response.getStatus());
+  }
+
+  @Test
+  @DisplayName("A downstream failure on a protected request propagates once")
+  void doFilter_whenProtectedRequestChainFails_propagatesIOExceptionOnce()
+      throws ServletException, IOException {
+    assertDownstreamIOExceptionPropagatesOnce(List.of(), "/api/protected");
+  }
+
+  @Test
+  @DisplayName("A downstream failure on a public request propagates once")
+  void doFilter_whenPublicRequestChainFails_propagatesIOExceptionOnce()
+      throws ServletException, IOException {
+    assertDownstreamIOExceptionPropagatesOnce(List.of(request -> true), "/public");
+  }
+
+  @Test
+  @DisplayName("A downstream servlet failure on a protected request propagates once")
+  void doFilter_whenProtectedRequestChainFails_propagatesServletExceptionOnce()
+      throws ServletException, IOException {
+    assertDownstreamServletExceptionPropagatesOnce(List.of(), "/api/protected");
+  }
+
+  @Test
+  @DisplayName("A downstream servlet failure on a public request propagates once")
+  void doFilter_whenPublicRequestChainFails_propagatesServletExceptionOnce()
+      throws ServletException, IOException {
+    assertDownstreamServletExceptionPropagatesOnce(List.of(request -> true), "/public");
   }
 
   @Test
@@ -318,6 +349,54 @@ class JwtAuthenticationFilterTest {
 
   private String token(Role role) {
     return PermissionService.generateToken(account(role));
+  }
+
+  private void assertDownstreamIOExceptionPropagatesOnce(
+      List<RequestMatcher> skipMatchers, String requestPath) throws ServletException, IOException {
+    var account = account(Role.USER);
+    var accounts = mock(AccountRepository.class);
+    when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
+    var filter = new JwtAuthenticationFilter(skipMatchers, null, null, null, accounts);
+    var request = new MockHttpServletRequest("GET", requestPath);
+    request.addHeader("Authorization", "Bearer " + PermissionService.generateToken(account));
+    var response = new MockHttpServletResponse();
+    var expectedFailure = new IOException("downstream failure");
+    var chainCalls = new AtomicInteger();
+
+    var actualFailure = assertThrows(IOException.class, () -> filter.doFilter(
+        request,
+        response,
+        (chainRequest, chainResponse) -> {
+          chainCalls.incrementAndGet();
+          throw expectedFailure;
+        }));
+
+    assertSame(expectedFailure, actualFailure);
+    assertEquals(1, chainCalls.get());
+  }
+
+  private void assertDownstreamServletExceptionPropagatesOnce(
+      List<RequestMatcher> skipMatchers, String requestPath) throws ServletException, IOException {
+    var account = account(Role.USER);
+    var accounts = mock(AccountRepository.class);
+    when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
+    var filter = new JwtAuthenticationFilter(skipMatchers, null, null, null, accounts);
+    var request = new MockHttpServletRequest("GET", requestPath);
+    request.addHeader("Authorization", "Bearer " + PermissionService.generateToken(account));
+    var response = new MockHttpServletResponse();
+    var expectedFailure = new ServletException("downstream failure");
+    var chainCalls = new AtomicInteger();
+
+    var actualFailure = assertThrows(ServletException.class, () -> filter.doFilter(
+        request,
+        response,
+        (chainRequest, chainResponse) -> {
+          chainCalls.incrementAndGet();
+          throw expectedFailure;
+        }));
+
+    assertSame(expectedFailure, actualFailure);
+    assertEquals(1, chainCalls.get());
   }
 
   private Account account(Role role) {
