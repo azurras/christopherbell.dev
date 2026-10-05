@@ -46,12 +46,7 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
 
   @Override
   public Map<String, MetricReading> read(Instant sampledAt) {
-    ProbeResult result;
-    try {
-      result = probe.read();
-    } catch (RuntimeException failure) {
-      result = new ProbeResult(Optional.empty(), OptionalDouble.empty(), Optional.empty());
-    }
+    ProbeResult result = probe.read();
     var readings = new LinkedHashMap<String, MetricReading>();
     readings.put("production.port", available(
         "production.port", "Production port", properties.getProductionPort(), "port", sampledAt));
