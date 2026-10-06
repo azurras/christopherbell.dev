@@ -3,27 +3,23 @@ package dev.christopherbell.photo;
 import dev.christopherbell.photo.model.PhotoProperties;
 import dev.christopherbell.photo.model.PhotoResponse;
 import lombok.AllArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
- * Service layer for photo gallery operations.
+ * Lists the configuration-backed photo gallery.
  */
 @AllArgsConstructor
 @Service
-@Slf4j
 public class PhotoService {
 
-  private PhotoProperties photoProperties;
+  private final PhotoProperties photoProperties;
 
   /**
-   * Retrieves all configured photos.
+   * Lists every configured gallery photo in configuration order.
    *
-   * @return a {@link PhotoResponse} with all photos
+   * @return a {@link PhotoResponse} holding the gallery photos
    */
-  public PhotoResponse getAllImages() {
-    return PhotoResponse.builder()
-        .images(photoProperties.getPhotos())
-        .build();
+  public PhotoResponse listGalleryPhotos() {
+    return new PhotoResponse(photoProperties.photos());
   }
 }

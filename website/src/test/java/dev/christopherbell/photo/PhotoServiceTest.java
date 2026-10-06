@@ -1,34 +1,46 @@
 package dev.christopherbell.photo;
 
-import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
+import dev.christopherbell.photo.model.Photo;
 import dev.christopherbell.photo.model.PhotoProperties;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
+import dev.christopherbell.photo.model.PhotoResponse;
+import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
-@ExtendWith(MockitoExtension.class)
-public class PhotoServiceTest {
+class PhotoServiceTest {
 
-  private PhotoService photoService;
-  @Mock
-  private PhotoProperties photoProperties;
+  @Test
+  void listsConfiguredGalleryPhotosInConfigurationOrder() {
+    PhotoService photoService = new PhotoService(new PhotoProperties(PhotoStub.galleryPhotos()));
 
-  @BeforeEach
-  public void init() {
-    photoService = new PhotoService(photoProperties);
+    PhotoResponse galleryPhotos = photoService.listGalleryPhotos();
+
+    assertThat(galleryPhotos.images())
+        .containsExactly(PhotoStub.miataPhoto(), PhotoStub.skylinePhoto());
   }
 
   @Test
-  public void testGetAllImages_success() {
+  void listsNoPhotosWhenNoneAreConfigured() {
+    PhotoService photoService = new PhotoService(new PhotoProperties(null));
 
-    when(photoProperties.getPhotos()).thenReturn(PhotoStub.getPhotosStub());
+    assertThat(photoService.listGalleryPhotos().images()).isEmpty();
+  }
 
-    var images = photoService.getAllImages();
+  @Test
+  void rejectsAConfiguredPhotoWithoutAnImagePath() {
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> new Photo(null, "n/a", PhotoStub.MIATA_PHOTO_ID, "Little Red Miata", " "))
+        .withMessage("photo path is required");
+  }
 
-    Assertions.assertEquals(images.getImages().size(), photoProperties.getPhotos().size());
+  @Test
+  void galleryPhotosCannotBeChangedAfterBinding() {
+    PhotoProperties photoProperties = new PhotoProperties(PhotoStub.galleryPhotos());
+
+    List<Photo> boundPhotos = photoProperties.photos();
+
+    assertThat(boundPhotos).isUnmodifiable();
   }
 }

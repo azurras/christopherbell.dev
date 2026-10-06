@@ -6,29 +6,34 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-public class PhotoStub {
+/** Gallery photos with fixed values for photo tests. */
+final class PhotoStub {
 
-  public static String PHOTO_ID = "a6589389-fd29-47eb-b795-1d600862eab5";
-  public static String PHOTO_NAME = "Little Red Miata";
-  public static String PHOTO_DESCRIPTION = "The little red miata.";
-  public static Instant NOW = Instant.now();
+  static final UUID MIATA_PHOTO_ID = UUID.fromString("a6589389-fd29-47eb-b795-1d600862eab5");
+  static final UUID SKYLINE_PHOTO_ID = UUID.fromString("3a592438-de79-4842-a0b1-9aed06605486");
+  static final Instant PHOTO_ADDED_ON = Instant.parse("2021-08-31T00:00:00Z");
 
-  public static Photo getPhotoStub() {
-    return Photo.builder()
-        .id(UUID.fromString(PHOTO_ID))
-        .createdOn(NOW)
-        .name(PHOTO_NAME)
-        .description(PHOTO_DESCRIPTION)
-        .build();
+  private PhotoStub() {
   }
 
-  public static List<Photo> getPhotosStub() {
-    return List.of(getPhotoStub(), getPhotoStub(), getPhotoStub());
+  static Photo miataPhoto() {
+    return new Photo(
+        PHOTO_ADDED_ON,
+        "The little red miata.",
+        MIATA_PHOTO_ID,
+        "Little Red Miata",
+        "/images/photos/miata.jpeg");
   }
 
-  public static PhotoResponse getPhotoResponseStub() {
-    return PhotoResponse.builder()
-        .images(getPhotosStub())
-        .build();
+  static Photo skylinePhoto() {
+    return new Photo(null, "n/a", SKYLINE_PHOTO_ID, "The Skyline", "/images/photos/skyline.jpeg");
+  }
+
+  static List<Photo> galleryPhotos() {
+    return List.of(miataPhoto(), skylinePhoto());
+  }
+
+  static PhotoResponse galleryResponse() {
+    return new PhotoResponse(galleryPhotos());
   }
 }

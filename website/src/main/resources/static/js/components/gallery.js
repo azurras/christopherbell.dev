@@ -20,47 +20,42 @@ export function galleryAltText(image) {
 }
 
 class PhotoGallery extends HTMLElement {
-    constructor() {
-        super();
-        this.images = [];
-    }
-
     connectedCallback() {
-        this.render();
-        this.loadImages();
+        this.renderEmptyGallery();
+        this.loadGallery();
     }
 
-    async loadImages() {
+    async loadGallery() {
         try {
-            this.images = galleryImagesFromResponse(await fetchJson(API.photos.images));
-            this.update();
+            const galleryResponse = await fetchJson(API.photos.images);
+            this.renderGallery(galleryImagesFromResponse(galleryResponse));
         } catch (error) {
             console.error('Failed to load gallery images', error);
         }
     }
 
-    update() {
-        const row = this.querySelector('.gallery-row');
-        row.replaceChildren();
-        for (const image of this.images) {
-            const col = document.createElement('div');
-            col.className = 'col';
-            const img = document.createElement('img');
-            img.src = String(image?.path || '');
-            img.className = 'img-fluid rounded';
-            img.alt = galleryAltText(image);
-            col.appendChild(img);
-            row.appendChild(col);
+    renderGallery(galleryImages) {
+        const galleryRow = this.querySelector('.gallery-row');
+        galleryRow.replaceChildren();
+        for (const galleryImage of galleryImages) {
+            const imageColumn = document.createElement('div');
+            imageColumn.className = 'col';
+            const imageElement = document.createElement('img');
+            imageElement.src = String(galleryImage?.path || '');
+            imageElement.className = 'img-fluid rounded';
+            imageElement.alt = galleryAltText(galleryImage);
+            imageColumn.appendChild(imageElement);
+            galleryRow.appendChild(imageColumn);
         }
     }
 
-    render() {
-        const container = document.createElement('div');
-        container.className = 'container-fluid';
-        const row = document.createElement('div');
-        row.className = 'row row-cols-1 row-cols-sm-1 row-cols-md-2 g-2 gallery-row';
-        container.appendChild(row);
-        this.replaceChildren(container);
+    renderEmptyGallery() {
+        const galleryContainer = document.createElement('div');
+        galleryContainer.className = 'container-fluid';
+        const galleryRow = document.createElement('div');
+        galleryRow.className = 'row row-cols-1 row-cols-sm-1 row-cols-md-2 g-2 gallery-row';
+        galleryContainer.appendChild(galleryRow);
+        this.replaceChildren(galleryContainer);
     }
 }
 
