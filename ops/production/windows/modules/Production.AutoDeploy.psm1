@@ -2073,6 +2073,9 @@ function Invoke-AutoDeployPendingOpsRequests {
 $script:DiagnosticsFileName = 'diagnostics.json'
 $script:DiagnosticsMaximumBytes = 524288
 $script:DiagnosticsLogEntryLimit = 100
+$script:DiagnosticsProblemEntryLimit = 50
+$script:DiagnosticsProblemScanLineLimit = 10000
+$script:DiagnosticsStackFrameLimit = 3
 $script:DiagnosticsFreshnessSeconds = 180
 $script:DiagnosticsServiceNames = @('ChristopherBellDev','MongoDB','cloudflared')
 
@@ -2102,6 +2105,50 @@ function ConvertTo-AutoDeployRedactedText {
     return $redacted
 }
 
+function ConvertTo-AutoDeployLogEntry {
+    <#
+    Converts one structured log line to the allowlisted, redacted diagnostics shape, or returns nothing
+    for a line that is not a JSON object. errorStack keeps only the first few stack frames.
+    #>
+    param([AllowEmptyString()][string]$Line)
+    try { $record = $Line | ConvertFrom-Json -ErrorAction Stop } catch { return }
+    if ($record -isnot [pscustomobject]) { return }
+    $logField = $record.PSObject.Properties['log']
+    $errorField = $record.PSObject.Properties['error']
+    $timestampField = $record.PSObject.Properties['@timestamp']
+    $stackFrames = @(if ($errorField -and $errorField.Value.PSObject.Properties['stack_trace']) {
+        ([string]$errorField.Value.stack_trace) -split '\r?\n' |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_.StartsWith('at ') } |
+            Select-Object -First $script:DiagnosticsStackFrameLimit
+    })
+    [pscustomobject][ordered]@{
+        timestamp = if ($timestampField) {
+            $timestampValue = $timestampField.Value
+            if ($timestampValue -is [datetime]) { $timestampValue.ToUniversalTime().ToString('o') } else { [string]$timestampValue }
+        } else { $null }
+        level = if ($logField -and $logField.Value.PSObject.Properties['level']) { [string]$logField.Value.level } else { $null }
+        logger = if ($logField -and $logField.Value.PSObject.Properties['logger']) {
+            ConvertTo-AutoDeployRedactedText -Text ([string]$logField.Value.logger) -MaximumLength 120
+        } else { $null }
+        requestId = if ($record.PSObject.Properties['requestId']) {
+            ConvertTo-AutoDeployRedactedText -Text ([string]$record.requestId) -MaximumLength 64
+        } else { $null }
+        message = if ($record.PSObject.Properties['message']) {
+            ConvertTo-AutoDeployRedactedText -Text ([string]$record.message)
+        } else { '' }
+        errorType = if ($errorField -and $errorField.Value.PSObject.Properties['type']) {
+            ConvertTo-AutoDeployRedactedText -Text ([string]$errorField.Value.type) -MaximumLength 160
+        } else { $null }
+        errorMessage = if ($errorField -and $errorField.Value.PSObject.Properties['message']) {
+            ConvertTo-AutoDeployRedactedText -Text ((([string]$errorField.Value.message) -split '\r?\n')[0])
+        } else { $null }
+        errorStack = if ($stackFrames.Count -gt 0) {
+            ConvertTo-AutoDeployRedactedText -Text ($stackFrames -join ' | ') -MaximumLength 600
+        } else { $null }
+    }
+}
+
 function Read-AutoDeployRecentLogEntries {
     <# Returns the newest structured log entries with only allowlisted, redacted fields. #>
     param(
@@ -2110,33 +2157,27 @@ function Read-AutoDeployRecentLogEntries {
     )
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return @() }
     $entries = foreach ($line in Get-Content -LiteralPath $Path -Tail ($MaximumEntries * 4) -ErrorAction Stop) {
-        try { $record = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
-        if ($record -isnot [pscustomobject]) { continue }
-        $logField = $record.PSObject.Properties['log']
-        $errorField = $record.PSObject.Properties['error']
-        $timestampField = $record.PSObject.Properties['@timestamp']
-        [pscustomobject][ordered]@{
-            timestamp = if ($timestampField) {
-                $timestampValue = $timestampField.Value
-                if ($timestampValue -is [datetime]) { $timestampValue.ToUniversalTime().ToString('o') } else { [string]$timestampValue }
-            } else { $null }
-            level = if ($logField -and $logField.Value.PSObject.Properties['level']) { [string]$logField.Value.level } else { $null }
-            logger = if ($logField -and $logField.Value.PSObject.Properties['logger']) {
-                ConvertTo-AutoDeployRedactedText -Text ([string]$logField.Value.logger) -MaximumLength 120
-            } else { $null }
-            requestId = if ($record.PSObject.Properties['requestId']) {
-                ConvertTo-AutoDeployRedactedText -Text ([string]$record.requestId) -MaximumLength 64
-            } else { $null }
-            message = if ($record.PSObject.Properties['message']) {
-                ConvertTo-AutoDeployRedactedText -Text ([string]$record.message)
-            } else { '' }
-            errorType = if ($errorField -and $errorField.Value.PSObject.Properties['type']) {
-                ConvertTo-AutoDeployRedactedText -Text ([string]$errorField.Value.type) -MaximumLength 160
-            } else { $null }
-            errorMessage = if ($errorField -and $errorField.Value.PSObject.Properties['message']) {
-                ConvertTo-AutoDeployRedactedText -Text ((([string]$errorField.Value.message) -split '\r?\n')[0])
-            } else { $null }
-        }
+        ConvertTo-AutoDeployLogEntry -Line $line
+    }
+    return @($entries | Select-Object -Last $MaximumEntries)
+}
+
+function Read-AutoDeployRecentProblemEntries {
+    <#
+    Returns the newest WARN and ERROR entries from a much longer stretch of the log than the latest-entries
+    window, so a problem stays visible after routine INFO lines push it out of recentLogEntries. Lines are
+    filtered by text before any JSON parse, which keeps the scan cheap enough to run every poll.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [ValidateRange(1, 1000)][int]$MaximumEntries = $script:DiagnosticsProblemEntryLimit,
+        [ValidateRange(1, 100000)][int]$ScannedLineLimit = $script:DiagnosticsProblemScanLineLimit
+    )
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return @() }
+    $entries = foreach ($line in Get-Content -LiteralPath $Path -Tail $ScannedLineLimit -ErrorAction Stop) {
+        if ($line -notmatch '"level"\s*:\s*"(WARN|ERROR)"') { continue }
+        $entry = ConvertTo-AutoDeployLogEntry -Line $line
+        if ($entry -and $entry.level -in 'WARN', 'ERROR') { $entry }
     }
     return @($entries | Select-Object -Last $MaximumEntries)
 }
@@ -2188,8 +2229,9 @@ function Publish-AutoDeployDiagnostics {
         Write-AutoDeployState $Config $state
     }
     $schedulerEntry = Get-AutoDeployTaskSchedulerEntry
-    $logEntries = @(Read-AutoDeployRecentLogEntries `
-        -Path (Join-Path $Config.programDataRoot 'logs\application.json.log'))
+    $applicationLogPath = Join-Path $Config.programDataRoot 'logs\application.json.log'
+    $logEntries = @(Read-AutoDeployRecentLogEntries -Path $applicationLogPath)
+    $problemEntries = @(Read-AutoDeployRecentProblemEntries -Path $applicationLogPath)
     $record = [ordered]@{
         schemaVersion = 1
         generatedAt = (Get-Date).ToUniversalTime().ToString('o')
@@ -2204,13 +2246,18 @@ function Publish-AutoDeployDiagnostics {
         githubTokenExpiresAt = $state.githubTokenExpiresAt
         opsRequests = @(@($state.processedOpsRequests) | Select-Object -Last 20)
         recentLogEntries = $logEntries
+        recentProblems = $problemEntries
     }
     $json = $record | ConvertTo-Json -Depth 6
-    # Shed the oldest log entries until the record fits; everything else is small and bounded.
-    while ([Text.Encoding]::UTF8.GetByteCount($json) -gt $script:DiagnosticsMaximumBytes -and
-        $record.recentLogEntries.Count -gt 0) {
-        $record.recentLogEntries = @($record.recentLogEntries | Select-Object -Last ([math]::Floor($record.recentLogEntries.Count / 2)))
-        $json = $record | ConvertTo-Json -Depth 6
+    # Shed the oldest routine entries first, then the oldest problems, until the record fits;
+    # everything else is small and bounded.
+    foreach ($sheddableField in 'recentLogEntries', 'recentProblems') {
+        while ([Text.Encoding]::UTF8.GetByteCount($json) -gt $script:DiagnosticsMaximumBytes -and
+            $record[$sheddableField].Count -gt 0) {
+            $record[$sheddableField] = @($record[$sheddableField] |
+                Select-Object -Last ([math]::Floor($record[$sheddableField].Count / 2)))
+            $json = $record | ConvertTo-Json -Depth 6
+        }
     }
     $path = Join-Path $StatusRoot $script:DiagnosticsFileName
     if (Test-Path -LiteralPath $path) {
