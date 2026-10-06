@@ -9,10 +9,11 @@ const SCENE_LABELS = {
 };
 
 /** Render server-supplied text as text nodes, including names and public journal entries. */
-export function renderSurviveState(documentRoot, state, pending = false) {
+export function renderSurviveState(documentRoot, state, pending = false, mutationPending = pending) {
   const setText = (id, text) => { documentRoot.getElementById(id).textContent = String(text); };
   documentRoot.getElementById('surviveGame').hidden = false;
   setText('survivePlayerName', state.name);
+  setText('survivePublicId', `Camp ID: ${state.survivorId.slice(0, 8)}`);
   setText('surviveStatus', STATUS_LABELS[state.status] || state.status);
   setText('surviveScene', SCENE_LABELS[state.status] || 'The wilderness');
   const message = documentRoot.getElementById('surviveMessage');
@@ -44,6 +45,32 @@ export function renderSurviveState(documentRoot, state, pending = false) {
     });
     list.replaceChildren(...items);
   }
+  const recipientPicker = documentRoot.getElementById('surviveRecipient');
+  const previousRecipient = recipientPicker.value;
+  const recipientSignature = JSON.stringify(state.recipients);
+  // Preserve the native chooser and input focus when a poll has no recipient changes.
+  if (recipientPicker.dataset.recipientSignature !== recipientSignature) {
+    const chooseRecipient = documentRoot.createElement('option');
+    chooseRecipient.value = '';
+    chooseRecipient.textContent = 'Choose a survivor';
+    recipientPicker.replaceChildren(chooseRecipient, ...state.recipients.map(recipient => {
+      const option = documentRoot.createElement('option');
+      option.value = recipient.survivorId;
+      option.textContent = `${recipient.name} · ${recipient.survivorId.slice(0, 8)}`;
+      return option;
+    }));
+    recipientPicker.dataset.recipientSignature = recipientSignature;
+  }
+  recipientPicker.value = state.recipients.some(recipient => recipient.survivorId === previousRecipient)
+    ? previousRecipient : '';
+  const unavailable = !state.recipients.length || state.wood + state.food === 0;
+  for (const id of ['surviveRecipient', 'surviveGiftResource', 'surviveGiftQuantity']) {
+    documentRoot.getElementById(id).disabled = mutationPending || unavailable;
+  }
+  documentRoot.getElementById('surviveGive').disabled = pending || unavailable || !recipientPicker.value;
+  setText('surviveGiftHint', !state.recipients.length
+    ? 'You and another survivor must be at camp to share supplies.'
+    : 'Give supplies to help another survivor. Their inventory must have room.');
 }
 
 /** Serialize browser requests; failed mutations are never automatically repeated. */
@@ -52,17 +79,20 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   if (!joinForm) return null;
   let state = null;
   let pending = false;
+  let mutationPending = false;
   const errorBox = documentRoot.getElementById('surviveError');
   const restart = documentRoot.getElementById('surviveRestart');
   const refresh = documentRoot.getElementById('surviveRefresh');
   const cancel = documentRoot.getElementById('surviveCancel');
+  const giftForm = documentRoot.getElementById('surviveGift');
 
-  function setPending(isPending) {
+  function setPending(isPending, isMutation = false) {
     pending = isPending;
+    mutationPending = isPending && isMutation;
     for (const control of joinForm.querySelectorAll('input, button')) control.disabled = pending;
     restart.disabled = pending;
     refresh.disabled = pending;
-    if (state) renderSurviveState(documentRoot, state, pending);
+    if (state) renderSurviveState(documentRoot, state, pending, mutationPending);
   }
 
   function acceptState(serverState) {
@@ -70,12 +100,12 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     documentRoot.getElementById('surviveGame').hidden = !state;
     joinForm.hidden = Boolean(state);
     cancel.hidden = !state;
-    if (state) renderSurviveState(documentRoot, state, pending);
+    if (state) renderSurviveState(documentRoot, state, pending, mutationPending);
   }
 
   async function sendRequest(url, options = {}) {
     if (pending) return;
-    setPending(true);
+    setPending(true, options.method === 'POST');
     errorBox.hidden = true;
     try {
       acceptState(await requestJson(url, { redirectOnUnauthorized: false, ...options }));
@@ -113,6 +143,23 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   };
   const cancelJoin = () => { joinForm.hidden = true; };
   const readWorld = () => { void sendRequest(API.survive.game); };
+  const chooseRecipient = () => {
+    if (state) renderSurviveState(documentRoot, state, pending, mutationPending);
+  };
+  const give = event => {
+    event.preventDefault();
+    if (!state || pending || documentRoot.getElementById('surviveGive').disabled) return;
+    void sendRequest(API.survive.gifts, {
+      method: 'POST', body: JSON.stringify({
+        recipientId: documentRoot.getElementById('surviveRecipient').value,
+        resource: documentRoot.getElementById('surviveGiftResource').value,
+        quantity: Number(documentRoot.getElementById('surviveGiftQuantity').value),
+        revision: state.revision,
+      }),
+    });
+  };
+  giftForm.addEventListener('submit', give);
+  documentRoot.getElementById('surviveRecipient').addEventListener('change', chooseRecipient);
   joinForm.addEventListener('submit', join);
   documentRoot.getElementById('surviveActions').addEventListener('click', act);
   restart.addEventListener('click', showJoin);
@@ -132,6 +179,8 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       restart.removeEventListener('click', showJoin);
       cancel.removeEventListener('click', cancelJoin);
       refresh.removeEventListener('click', readWorld);
+      giftForm.removeEventListener('submit', give);
+      documentRoot.getElementById('surviveRecipient').removeEventListener('change', chooseRecipient);
     },
   };
 }

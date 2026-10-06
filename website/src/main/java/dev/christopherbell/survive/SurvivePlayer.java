@@ -2,9 +2,11 @@ package dev.christopherbell.survive;
 
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import java.time.Instant;
+import java.util.UUID;
 
 /** Private survivor state, owned and mutated only under the world service's monitor. */
 final class SurvivePlayer {
+  final String survivorId = UUID.randomUUID().toString();
   final String name;
   Instant lastSeen;
   int health = 10;

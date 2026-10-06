@@ -56,4 +56,14 @@ public class SurviveController {
     return ResponseEntity.ok().cacheControl(CacheControl.noStore())
         .body(survivors.act(token, request.action(), request.revision()));
   }
+
+  /** Transfers supplies between survivors in the same authoritative world. */
+  @PostMapping("/gifts")
+  public ResponseEntity<SurviveSnapshot> giveSupplies(
+      @CookieValue(name = COOKIE_NAME, required = false) String token,
+      @Valid @RequestBody SurviveRequests.Gift request) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(survivors.giveSupplies(token, request.recipientId(), request.resource(),
+            request.quantity(), request.revision()));
+  }
 }

@@ -17,7 +17,7 @@
 .survive-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .survive-page button { border: 1px solid #52664c; background: #243222; color: #eef4e8; border-radius: 9px; padding: 13px 16px; font: inherit; text-align: left; cursor: pointer; }
 .survive-page button:hover:not(:disabled) { background: #34482d; border-color: #9ba985; }
-.survive-page button:focus-visible, .survive-page input:focus-visible, .survive-guide summary:focus-visible { outline: 3px solid #f2b779; outline-offset: 3px; }
+.survive-page button:focus-visible, .survive-page input:focus-visible, .survive-page select:focus-visible, .survive-guide summary:focus-visible { outline: 3px solid #f2b779; outline-offset: 3px; }
 .survive-page button:disabled { opacity: .42; cursor: not-allowed; }
 .survive-actions small { display: block; font-size: .69rem; color: #b9c2ae; margin-top: 6px; line-height: 1.5; }
 .survive-secondary { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 26px; padding-top: 20px; border-top: 1px solid #344238; }
@@ -50,6 +50,11 @@
 .survive-muted, .survive-attribution { font-size: .73rem; color: #acb5a6; line-height: 1.7; }
 .survive-attribution { margin-top: 24px; }
 .survive-attribution a { color: #e7b582; }
+.survive-gift { display: grid; gap: 10px; border-top: 1px solid #344238; margin-top: 20px; padding-top: 4px; }
+.survive-gift label { display: block; font-size: .8rem; color: #c7d5c5; margin-bottom: 4px; }
+.survive-gift select, .survive-gift input { width: 100%; min-width: 0; padding: 10px; border: 1px solid #52664c; border-radius: 9px; background: #0f1712; color: #eef4e8; font: inherit; }
+.survive-gift select:disabled, .survive-gift input:disabled { opacity: .5; }
+.survive-gift-amount { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .survive-page [hidden] { display: none !important; }
 @media (max-width: 760px) {
   .survive-main { padding: 18px 16px 40px; }

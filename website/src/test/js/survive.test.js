@@ -8,6 +8,7 @@ const snapshot = {
   enemyHealth: 0, status: 'EXPLORING', revision: 7, worldRevision: 10,
   shelters: 1, boats: 0, survivors: ['Alice', 'Bob'], events: ['Earlier', '<script>bad</script>'],
   actions: ['GATHER', 'HUNT', 'EAT', 'REST'], message: 'You gathered one wood.',
+  survivorId: 'alice-public-id', recipients: [{ survivorId: 'bob-public-id', name: '<Bob>' }],
 };
 
 test('back/forward cache preserves mounted controls and final navigation releases them', () => {
@@ -48,6 +49,76 @@ function documentFixture() {
     createElement() { return element(); },
   };
 }
+
+test('giving targets a public identity, retains the selected recipient and uses text nodes', async () => {
+  const documentRoot = documentFixture();
+  const requests = [];
+  const mounted = mountSurvive(documentRoot, async (url, options) => {
+    requests.push({ url, options });
+    return snapshot;
+  });
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    const recipient = documentRoot.getElementById('surviveRecipient');
+    assert.equal(recipient.children[1].value, 'bob-public-id');
+    assert.match(recipient.children[1].textContent, /<Bob>/);
+    recipient.value = 'bob-public-id';
+    documentRoot.getElementById('surviveGiftResource').value = 'WOOD';
+    documentRoot.getElementById('surviveGiftQuantity').value = '2';
+    renderSurviveState(documentRoot, snapshot);
+    assert.equal(recipient.value, 'bob-public-id');
+    assert.equal(documentRoot.getElementById('surviveGiftQuantity').value, '2');
+    documentRoot.getElementById('surviveGift').listeners.get('submit')({ preventDefault() {} });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests[1].url, '/api/survive/v1/gifts');
+    assert.deepEqual(JSON.parse(requests[1].options.body), {
+      recipientId: 'bob-public-id', resource: 'WOOD', quantity: 2, revision: 7,
+    });
+    renderSurviveState(documentRoot, { ...snapshot, recipients: [] });
+    assert.equal(documentRoot.getElementById('surviveGive').disabled, true);
+  } finally { mounted.dispose(); }
+});
+
+test('background reads preserve gift input editing and unchanged recipient options', async () => {
+  const documentRoot = documentFixture();
+  let completeRead;
+  let reads = 0;
+  const mounted = mountSurvive(documentRoot, async () => {
+    if (++reads === 1) return snapshot;
+    return new Promise(resolve => { completeRead = resolve; });
+  });
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    const recipient = documentRoot.getElementById('surviveRecipient');
+    const option = recipient.children[0];
+    const amount = documentRoot.getElementById('surviveGiftQuantity');
+    amount.value = '3';
+    mounted.refresh();
+    assert.equal(amount.disabled, false);
+    assert.equal(recipient.disabled, false);
+    assert.equal(documentRoot.getElementById('surviveGive').disabled, true);
+    completeRead(snapshot);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(amount.value, '3');
+    assert.equal(recipient.children[0], option);
+  } finally { mounted.dispose(); }
+});
+
+test('a departing selected survivor never silently retargets the gift', () => {
+  const documentRoot = documentFixture();
+  renderSurviveState(documentRoot, snapshot);
+  documentRoot.getElementById('surviveRecipient').value = 'bob-public-id';
+  documentRoot.getElementById('surviveGiftQuantity').value = '2';
+  documentRoot.getElementById('surviveGiftResource').value = 'FOOD';
+  const remainingCamp = { ...snapshot, recipients: [{ survivorId: 'charlie-public-id', name: 'Charlie' }] };
+  renderSurviveState(documentRoot, remainingCamp);
+  assert.equal(documentRoot.getElementById('surviveRecipient').value, '');
+  assert.equal(documentRoot.getElementById('surviveGive').disabled, true);
+  renderSurviveState(documentRoot, remainingCamp);
+  assert.equal(documentRoot.getElementById('surviveRecipient').value, '');
+  assert.equal(documentRoot.getElementById('surviveGiftQuantity').value, '2');
+  assert.equal(documentRoot.getElementById('surviveGiftResource').value, 'FOOD');
+});
 
 test('renders survivor and shared camp using text nodes and server allowed actions', () => {
   const documentRoot = documentFixture();

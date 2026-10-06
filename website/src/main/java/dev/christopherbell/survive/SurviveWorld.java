@@ -3,6 +3,9 @@ package dev.christopherbell.survive;
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveSnapshot;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
+import dev.christopherbell.survive.model.SurviveSnapshot.Recipient;
+import dev.christopherbell.survive.model.SurviveResource;
+import java.util.Locale;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -36,7 +39,24 @@ final class SurviveWorld {
         player.experience, player.experienceToNextLevel, player.wood, player.food,
         INVENTORY_CAPACITY, player.enemyHealth, player.status, player.revision, revision,
         shelters, boats, players.values().stream().map(survivor -> survivor.name).toList(),
-        List.copyOf(events), actionsFor(player), player.message);
+        List.copyOf(events), actionsFor(player), player.message, player.survivorId,
+        player.status == Status.EXPLORING ? players.values().stream()
+            .filter(recipient -> recipient != player && recipient.status == Status.EXPLORING)
+            .map(recipient -> new Recipient(recipient.survivorId, recipient.name)).toList() : List.of());
+  }
+
+  /** Applies a previously validated gift while the service holds the world's monitor. */
+  void giveSupplies(SurvivePlayer sender, SurvivePlayer recipient, SurviveResource resource, int quantity) {
+    switch (resource) {
+      case WOOD -> { sender.wood -= quantity; recipient.wood += quantity; }
+      case FOOD -> { sender.food -= quantity; recipient.food += quantity; }
+    }
+    String supplies = quantity + " " + resource.name().toLowerCase(Locale.ROOT);
+    sender.message = "You gave " + supplies + " to " + recipient.name + ".";
+    recipient.message = sender.name + " gave you " + supplies + ".";
+    sender.revision++;
+    recipient.revision++;
+    recordEvent(sender.name + " gave " + supplies + " to " + recipient.name + ".");
   }
 
   void perform(SurviveAction action, SurvivePlayer player, IntSupplier rollPercent) {

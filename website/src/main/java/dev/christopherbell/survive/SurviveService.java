@@ -2,6 +2,8 @@ package dev.christopherbell.survive;
 
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveSnapshot;
+import dev.christopherbell.survive.model.SurviveSnapshot.Status;
+import dev.christopherbell.survive.model.SurviveResource;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Optional;
@@ -79,6 +81,34 @@ public class SurviveService {
     var idleDeadline = clock.instant().minus(IDLE_TIMEOUT);
     boolean removed = world.players.values().removeIf(player -> !player.lastSeen.isAfter(idleDeadline));
     if (removed) world.recordEvent("Inactive survivors left camp.");
+  }
+
+  /** Atomically gives supplies to a public recipient ID; the private cookie alone selects the sender. */
+  public synchronized SurviveSnapshot giveSupplies(String token, String recipientId,
+      SurviveResource resource, int quantity, long expectedRevision) {
+    expireInactivePlayers();
+    var sender = world.players.get(token);
+    if (sender == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Your survivor expired. Join the camp again.");
+    if (sender.revision != expectedRevision) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "Your survivor changed. Refresh before giving supplies.");
+    }
+    if (resource == null || quantity < 1 || quantity > SurviveWorld.INVENTORY_CAPACITY) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Give 1 to 10 wood or food.");
+    }
+    var recipient = world.players.values().stream()
+        .filter(player -> player.survivorId.equals(recipientId)).findFirst()
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "That survivor left the camp. Refresh the world."));
+    if (sender == recipient || sender.status != Status.EXPLORING || recipient.status != Status.EXPLORING) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Both survivors must be at camp to give supplies to each other.");
+    }
+    int available = switch (resource) { case WOOD -> sender.wood; case FOOD -> sender.food; };
+    if (available < quantity) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "You do not have enough supplies to give.");
+    if (recipient.wood + recipient.food + quantity > SurviveWorld.INVENTORY_CAPACITY) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That survivor's inventory has no room for this gift.");
+    }
+    sender.lastSeen = clock.instant();
+    world.giveSupplies(sender, recipient, resource, quantity);
+    return world.snapshotFor(sender);
   }
 
   /** Internal join result: the controller writes the credential only to a private cookie. */
