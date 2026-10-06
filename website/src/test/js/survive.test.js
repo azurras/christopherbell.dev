@@ -60,8 +60,8 @@ test('giving targets a public identity, retains the selected recipient and uses 
   try {
     await new Promise(resolve => setImmediate(resolve));
     const recipient = documentRoot.getElementById('surviveRecipient');
-    assert.equal(recipient.children[0].value, 'bob-public-id');
-    assert.match(recipient.children[0].textContent, /<Bob>/);
+    assert.equal(recipient.children[1].value, 'bob-public-id');
+    assert.match(recipient.children[1].textContent, /<Bob>/);
     recipient.value = 'bob-public-id';
     documentRoot.getElementById('surviveGiftResource').value = 'WOOD';
     documentRoot.getElementById('surviveGiftQuantity').value = '2';
@@ -102,6 +102,22 @@ test('background reads preserve gift input editing and unchanged recipient optio
     assert.equal(amount.value, '3');
     assert.equal(recipient.children[0], option);
   } finally { mounted.dispose(); }
+});
+
+test('a departing selected survivor never silently retargets the gift', () => {
+  const documentRoot = documentFixture();
+  renderSurviveState(documentRoot, snapshot);
+  documentRoot.getElementById('surviveRecipient').value = 'bob-public-id';
+  documentRoot.getElementById('surviveGiftQuantity').value = '2';
+  documentRoot.getElementById('surviveGiftResource').value = 'FOOD';
+  const remainingCamp = { ...snapshot, recipients: [{ survivorId: 'charlie-public-id', name: 'Charlie' }] };
+  renderSurviveState(documentRoot, remainingCamp);
+  assert.equal(documentRoot.getElementById('surviveRecipient').value, '');
+  assert.equal(documentRoot.getElementById('surviveGive').disabled, true);
+  renderSurviveState(documentRoot, remainingCamp);
+  assert.equal(documentRoot.getElementById('surviveRecipient').value, '');
+  assert.equal(documentRoot.getElementById('surviveGiftQuantity').value, '2');
+  assert.equal(documentRoot.getElementById('surviveGiftResource').value, 'FOOD');
 });
 
 test('renders survivor and shared camp using text nodes and server allowed actions', () => {
