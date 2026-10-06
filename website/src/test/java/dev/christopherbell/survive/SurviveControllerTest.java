@@ -30,6 +30,21 @@ class SurviveControllerTest {
   @MockitoBean private BrowserSessionService browserSessions;
 
   @Test
+  void anonymousGiftsKeepCsrfAndValidateTheRequestBeforeMutation() throws Exception {
+    String gift = "{\"recipientId\":\"missing\",\"resource\":\"WOOD\",\"quantity\":1,\"revision\":0}";
+    mvc.perform(post("/api/survive/v1/gifts").contentType("application/json").content(gift))
+        .andExpect(status().isForbidden());
+    mvc.perform(post("/api/survive/v1/gifts").with(csrf()).contentType("application/json").content(gift))
+        .andExpect(status().isNotFound());
+    for (var body : new String[] {"{}", gift.replace("WOOD", "STONE"),
+        gift.replace("\"quantity\":1", "\"quantity\":0"), gift.replace("\"quantity\":1", "\"quantity\":11"),
+        gift.replace("\"revision\":0", "\"revision\":-1")}) {
+      mvc.perform(post("/api/survive/v1/gifts").with(csrf()).contentType("application/json").content(body))
+          .andExpect(status().isBadRequest());
+    }
+  }
+
+  @Test
   void anonymousJoinNeedsCsrfAndUsesPrivateCookieWithoutExposingToken() throws Exception {
     mvc.perform(get("/api/survive/v1/game"))
         .andExpect(status().isNoContent()).andExpect(header().string("Cache-Control", "no-store"));

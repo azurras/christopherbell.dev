@@ -27,6 +27,17 @@ command serialization are required before scaling this feature across replicas.
 - `GET /api/survive/v1/game`: current survivor snapshot, or 204 before joining/after expiry.
 - `POST /api/survive/v1/game`: `{ "name": "Chris" }` joins or replaces this survivor.
 - `POST /api/survive/v1/actions`: `{ "action": "GATHER", "revision": 0 }` applies a command.
+- `POST /api/survive/v1/gifts`: `{ "recipientId": "public-uuid", "resource": "WOOD", "quantity": 2, "revision": 0 }` gives wood or food to another survivor.
+
+Each snapshot includes a public `survivorId` separate from the private cookie and
+eligible `recipients` with public ID and name. The existing `survivors` names list
+is retained. Public IDs cannot authorize actions. The giver and recipient must
+both be exploring at camp; gifts of 1–10 wood or food require sufficient supplies
+and recipient space. All validation precedes the atomic transfer under the world
+monitor. Both inventories and revisions change together, each player sees a
+message and the journal records the gift. Receiving never extends idle expiry.
+Replaced or expired IDs return 404; unavailable gifts return 400, stale sender
+revisions 409. The UI retains recipient and amount selections during polling.
 
 These exact method/path combinations are public; existing CSRF and rate limiting
 remain enabled. A random opaque HttpOnly, SameSite=Strict session cookie identifies

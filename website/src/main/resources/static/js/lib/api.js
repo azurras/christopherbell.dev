@@ -13,6 +13,7 @@ export const API = {
   survive: {
     game: '/api/survive/v1/game',
     actions: '/api/survive/v1/actions',
+    gifts: '/api/survive/v1/gifts',
   },
   siteMonitor: {
     workspace: '/api/site-monitor/v1',

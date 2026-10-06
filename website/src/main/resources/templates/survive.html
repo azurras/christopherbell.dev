@@ -53,6 +53,7 @@
       <aside class="survive-sidebar" aria-label="Survivor and camp">
         <section class="survive-panel" aria-labelledby="survivePlayerName">
           <p class="survive-eyebrow">Your survivor</p><h2 id="survivePlayerName"></h2>
+          <p id="survivePublicId" class="survive-muted"></p>
           <label class="survive-health-label" for="surviveHealth">Health <strong id="surviveHealthText"></strong></label>
           <meter id="surviveHealth" min="0" max="10" low="3" high="7" optimum="10" value="10"></meter>
           <dl class="survive-stats"><div><dt>Strength</dt><dd id="surviveStrength"></dd></div><div><dt>Stamina</dt><dd id="surviveStamina"></dd></div><div><dt>Gathering XP</dt><dd id="surviveExperience"></dd></div></dl>
@@ -63,6 +64,17 @@
           <p class="survive-eyebrow">One world, built together</p><h2 id="surviveCampTitle">Shared camp</h2>
           <dl class="survive-stats"><div><dt>Shelters</dt><dd id="surviveShelters"></dd></div><div><dt>Boats</dt><dd id="surviveBoats"></dd></div></dl>
           <h3>Survivors in camp <span id="survivePlayerCount"></span></h3><ul id="survivePlayers" class="survive-players"></ul>
+          <form id="surviveGift" class="survive-gift" aria-labelledby="surviveGiftTitle">
+            <h3 id="surviveGiftTitle">Share supplies</h3>
+            <label for="surviveRecipient">Give to</label>
+            <select id="surviveRecipient" name="recipientId" required></select>
+            <div class="survive-gift-amount">
+              <div><label for="surviveGiftResource">Supply</label><select id="surviveGiftResource" name="resource"><option value="WOOD">Wood</option><option value="FOOD">Food</option></select></div>
+              <div><label for="surviveGiftQuantity">Amount</label><input id="surviveGiftQuantity" name="quantity" type="number" min="1" max="10" step="1" value="1" required /></div>
+            </div>
+            <button id="surviveGive" type="submit">Give supplies</button>
+            <p id="surviveGiftHint" class="survive-muted"></p>
+          </form>
           <p class="survive-muted">Camp updates every 5 seconds while this page is visible.</p>
         </section>
       </aside>
@@ -73,6 +85,7 @@
     </div>
 
     <details class="survive-panel survive-guide"><summary>Field guide · How to play</summary>
+      <p>Share supplies chooses another survivor by name and camp ID. Give 1–10 wood or food while both of you are at camp. Gifts move items directly into their inventory, which must have room; both survivors and the camp journal receive an update.</p>
       <p>Gather wood to improve strength and stamina. Your inventory holds 10 items. Five wood builds a shelter everyone can rest in; ten wood builds a boat any survivor can use to escape.</p>
       <p>Hunt to find hogs with 5 health. Your attack deals 1 + strength damage, and each attack costs 1 health, even the final blow. Defend blocks damage; flee returns you to camp at a cost of 1 health. Defeating a hog gives 1 food if you have room. Eating consumes it and restores up to 5 health. A shared shelter restores 2 health per rest.</p>
       <p>Sail away to survive, or start again after death. New survivor replaces only your character. Shelters, boats, and other players remain in the shared world. Names and recent actions are visible to other players; use a nickname.</p>
