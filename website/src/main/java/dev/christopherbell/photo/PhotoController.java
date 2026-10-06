@@ -3,7 +3,6 @@ package dev.christopherbell.photo;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.photo.model.PhotoResponse;
 import lombok.AllArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,16 +20,17 @@ public class PhotoController {
   private final PhotoService photoService;
 
   /**
-   * Retrieves all images.
+   * Lists every configured gallery photo.
    *
-   * @return HTTP 200 with a {@link PhotoResponse} containing all images
+   * @return HTTP 200 with a {@link PhotoResponse} whose {@code images} are the gallery photos
    */
   @GetMapping(value = "/v1", produces = MediaType.APPLICATION_JSON_VALUE)
-  public ResponseEntity<Response<PhotoResponse>> getImages() {
-    return new ResponseEntity<>(
+  public ResponseEntity<Response<PhotoResponse>> listGalleryPhotos() {
+    PhotoResponse galleryPhotos = photoService.listGalleryPhotos();
+    return ResponseEntity.ok(
         Response.<PhotoResponse>builder()
-            .payload(photoService.getAllImages())
+            .payload(galleryPhotos)
             .success(true)
-            .build(), HttpStatus.OK);
+            .build());
   }
 }

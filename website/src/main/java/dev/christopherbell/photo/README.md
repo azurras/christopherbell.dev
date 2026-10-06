@@ -4,7 +4,8 @@ Owns photography/photo listing behavior.
 
 ## What Lives Here
 
-- Photo controllers and services.
+- `PhotoController` and `PhotoService`, which list the gallery.
+- `PhotoConfiguration`, which registers `PhotoProperties`.
 - Photo metadata models under `model`.
 - Read-side behavior for photography pages.
 - `GET /api/photo/v1` is an anonymous read API whose standard response envelope exposes photos as `payload.images`.

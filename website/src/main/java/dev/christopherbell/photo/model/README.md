@@ -10,7 +10,9 @@ Owns photography data shapes.
 
 ## Design Notes
 
-- Photo data is configuration-backed, not user-generated.
+- Photo data is configuration-backed, not user-generated. `Photo` is a record
+  that rejects a missing id, name or path, so a broken entry fails startup.
+- Configuration has no key for `createdOn`, so the API reports it as `null`.
 - Keep response fields close to what the gallery needs so the client does not
   infer paths or metadata from filenames.
 
