@@ -1,0 +1,66 @@
+.survive-main { max-width: 1180px; margin: 0 auto; padding: 40px 24px 64px; color: #e9ebe4; }
+.survive-hero { padding: 36px 0 40px; border-bottom: 1px solid #384139; margin-bottom: 28px; background: radial-gradient(ellipse at 80% 50%, #1b382940, transparent 65%); }
+.survive-eyebrow { color: #adc6a9; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .16em; margin: 0 0 14px; }
+.survive-hero h1 { font-family: Georgia, serif; font-size: clamp(3.5rem, 10vw, 6.5rem); letter-spacing: -.05em; line-height: 1; margin: 0 0 24px; }
+.survive-hero h1 span { color: #e9ad75; }
+.survive-hero > p:not(.survive-eyebrow) { color: #b8c0b6; font-size: 1.1rem; }
+.survive-intro { margin-top: 22px; color: #e9ad75; font-family: monospace; }
+.survive-intro > span { font-size: 1.6rem; margin-right: 12px; }
+.survive-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 20px; align-items: start; }
+.survive-panel { background: #141c18; border: 1px solid #344238; border-radius: 14px; padding: 26px; }
+.survive-panel h2 { font-family: Georgia, serif; font-size: 1.55rem; margin-bottom: 22px; }
+.survive-panel h3 { font-size: .87rem; color: #c7d5c5; margin: 22px 0 12px; }
+.survive-panel h3 span { float: right; font-family: monospace; }
+.survive-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.survive-badge { border: 1px solid #607659; color: #c7d9b4; font-size: .7rem; padding: 5px 9px; border-radius: 30px; }
+.survive-message { color: #ebd6bf; min-height: 88px; font-size: 1.1rem; line-height: 1.7; border-left: 2px solid #d39d6c; padding-left: 18px; }
+.survive-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.survive-page button { border: 1px solid #52664c; background: #243222; color: #eef4e8; border-radius: 9px; padding: 13px 16px; font: inherit; text-align: left; cursor: pointer; }
+.survive-page button:hover:not(:disabled) { background: #34482d; border-color: #9ba985; }
+.survive-page button:focus-visible, .survive-page input:focus-visible, .survive-guide summary:focus-visible { outline: 3px solid #f2b779; outline-offset: 3px; }
+.survive-page button:disabled { opacity: .42; cursor: not-allowed; }
+.survive-actions small { display: block; font-size: .69rem; color: #b9c2ae; margin-top: 6px; line-height: 1.5; }
+.survive-secondary { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 26px; padding-top: 20px; border-top: 1px solid #344238; }
+.survive-secondary button { padding: 8px 12px; background: transparent; color: #bfcab9; font-size: .8rem; }
+.survive-sidebar { display: grid; gap: 20px; }
+.survive-health-label { display: flex; justify-content: space-between; font-size: .8rem; margin-bottom: 8px; }
+.survive-page meter { width: 100%; height: 14px; accent-color: #a9c879; }
+.survive-stats { margin: 16px 0 0; }
+.survive-stats > div { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid #2d372f; font-size: .86rem; }
+.survive-stats dt { font-weight: 400; color: #b8c1b3; }
+.survive-stats dd { font-family: monospace; margin: 0; color: #f0dbc0; }
+.survive-players { list-style: none; padding: 0; display: flex; gap: 6px; flex-wrap: wrap; max-height: 140px; overflow-y: auto; }
+.survive-players li { font-size: .75rem; background: #273125; border-radius: 6px; padding: 5px 9px; overflow-wrap: anywhere; }
+.survive-journal { grid-column: 1 / -1; }
+.survive-journal ol { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow-y: auto; }
+.survive-journal li { padding: 12px 0; border-bottom: 1px solid #2d372f; color: #bfc9b7; font-size: .83rem; line-height: 1.7; overflow-wrap: anywhere; }
+.survive-journal li:first-child { color: #ead3b4; }
+.survive-join { display: flex; align-items: end; gap: 14px; flex-wrap: wrap; margin-bottom: 24px; }
+.survive-join > div { width: 100%; }
+.survive-join h2 { margin-bottom: 12px; }
+.survive-join p { color: #b8c1b3; margin: 0; }
+.survive-join label { align-self: center; font-size: .85rem; }
+.survive-join input { border: 1px solid #52664c; border-radius: 9px; color: #eef4e8; background: #0f1712; padding: 13px; min-width: 0; max-width: 100%; }
+.survive-page .survive-primary { background: #d4a075; color: #1b211a; border-color: #d4a075; font-weight: 700; }
+.survive-enemy { display: flex; justify-content: space-between; padding: 16px; margin-bottom: 24px; border: 1px solid #9d6156; border-radius: 8px; color: #f1b29f; }
+.survive-notice { color: #f1c0a4; border: 1px solid #946b58; padding: 18px; border-radius: 10px; }
+.survive-guide { margin-top: 24px; color: #bdc7b8; line-height: 1.8; font-size: .88rem; }
+.survive-guide summary { color: #e0ceb2; cursor: pointer; font-weight: 600; }
+.survive-guide p { margin: 18px 0 0; }
+.survive-muted, .survive-attribution { font-size: .73rem; color: #acb5a6; line-height: 1.7; }
+.survive-attribution { margin-top: 24px; }
+.survive-attribution a { color: #e7b582; }
+.survive-page [hidden] { display: none !important; }
+@media (max-width: 760px) {
+  .survive-main { padding: 18px 16px 40px; }
+  .survive-hero { padding: 24px 0; }
+  .survive-grid { grid-template-columns: 1fr; }
+  .survive-panel { padding: 20px; }
+  .survive-sidebar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .survive-section-heading { flex-wrap: wrap; }
+}
+@media (max-width: 500px) {
+  .survive-sidebar { grid-template-columns: 1fr; }
+  .survive-actions { grid-template-columns: 1fr; }
+  .survive-join input, .survive-join .survive-primary { width: 100%; }
+}

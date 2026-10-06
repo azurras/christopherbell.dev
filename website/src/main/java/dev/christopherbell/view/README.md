@@ -18,6 +18,7 @@ Owns server-side routing for HTML pages.
   visitors and obtains listing data only from the separately protected shared-folder read API after
   a fresh effective-read check.
 - `tools` serves Raising Canes Box Index, VIN Decoder, and ZIP Coordinates pages.
+- `tools` serves `/survive` and `/survive/`, the public interactive interface to the shared Java survival world.
 - `voidroutes` serves Void, profile, messages, notifications, public user feeds,
   post pages, the public `/void/explore` discovery page, and normalized public
   `/void/topic/{topic}` pages.

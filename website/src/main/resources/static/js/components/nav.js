@@ -58,6 +58,7 @@ export function toolsMenuItems({
         { href: '/canes-box-tracker', label: 'Raising Canes Box Index' },
         ...(hasSharedFolderRead ? [{ href: '/shared', label: 'Shared Folder' }] : []),
         { href: '/site-monitor', label: 'Website Monitor' },
+        { href: '/survive', label: 'Survive' },
         { href: '/vin-decoder', label: 'VIN Decoder' },
         { href: '/wfl', label: "What's For Lunch" },
         { href: '/zip-coordinates', label: 'ZIP Coordinates' },

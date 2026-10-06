@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Survive', 'Gather, craft, and survive in a shared text adventure world.', 'https://www.christopherbell.dev/survive', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'Survive on christopherbell.dev')}"></th:block>
+  <title>Survive | Christopher Bell</title>
+  <link rel="stylesheet" href="/css/main.css" th:href="@{/css/main.css}" />
+  <link rel="stylesheet" href="/css/survive.css" th:href="@{/css/survive.css}" />
+</head>
+<body class="site-page void-shell-page survive-page">
+  <div id="nav"></div>
+  <main class="site-main survive-main">
+    <header class="survive-hero">
+      <p class="survive-eyebrow">A shared world · A text adventure</p>
+      <h1>Survive<span aria-hidden="true">.</span></h1>
+      <p>The wilderness is unforgiving. You don't have to face it alone.</p>
+      <div class="survive-intro"><span aria-hidden="true">↟</span> Gather wood. Build a camp. Find your way out.</div>
+    </header>
+
+    <noscript><p class="survive-notice">Enable JavaScript for the controls. All gameplay runs on the Java server.</p></noscript>
+    <p id="surviveError" class="survive-notice" role="alert" hidden></p>
+    <form id="surviveJoin" class="survive-panel survive-join">
+      <div><h2 id="surviveJoinTitle">Enter the wilderness</h2><p>Your survivor is yours. The camp belongs to everyone.</p></div>
+      <label for="surviveName">Survivor name</label>
+      <input id="surviveName" name="name" required maxlength="32" autocomplete="nickname" value="Chris" />
+      <button type="submit" class="survive-primary">Join camp</button>
+      <button id="surviveCancel" type="button" hidden>Keep current survivor</button>
+    </form>
+
+    <div id="surviveGame" class="survive-grid" hidden>
+      <section class="survive-panel survive-adventure" aria-labelledby="surviveScene">
+        <div class="survive-section-heading"><p class="survive-eyebrow">Your adventure</p><span id="surviveStatus" class="survive-badge"></span></div>
+        <h2 id="surviveScene">At the edge of the wilderness</h2>
+        <p id="surviveMessage" class="survive-message" role="status" aria-live="polite" aria-atomic="true"></p>
+        <div id="surviveEnemy" class="survive-enemy" hidden><strong>Wild hog</strong><span id="surviveEnemyHealth"></span></div>
+        <p class="survive-eyebrow">Choose your next move</p>
+        <div id="surviveActions" class="survive-actions">
+          <button type="button" data-action="GATHER">Gather wood <small>50% chance · +1 wood</small></button>
+          <button type="button" data-action="HUNT">Hunt <small>Search for a wild hog</small></button>
+          <button type="button" data-action="BUILD_SHELTER">Build shelter <small>5 wood · Shared with camp</small></button>
+          <button type="button" data-action="BUILD_BOAT">Build boat <small>10 wood · One escape</small></button>
+          <button type="button" data-action="EAT">Eat food <small>1 food · Restore up to 5 health</small></button>
+          <button type="button" data-action="REST">Rest <small>Requires shelter · +2 health</small></button>
+          <button type="button" data-action="ESCAPE">Sail away <small>Use a shared boat · Survive</small></button>
+          <button type="button" data-action="ATTACK">Attack <small>Strike the hog · Take 1 damage</small></button>
+          <button type="button" data-action="DEFEND">Defend <small>Block the hog's bite</small></button>
+          <button type="button" data-action="FLEE">Flee <small>Return to camp · Take 1 damage</small></button>
+        </div>
+        <div class="survive-secondary"><button id="surviveRefresh" type="button">Refresh world</button><button id="surviveRestart" type="button">New survivor</button></div>
+      </section>
+
+      <aside class="survive-sidebar" aria-label="Survivor and camp">
+        <section class="survive-panel" aria-labelledby="survivePlayerName">
+          <p class="survive-eyebrow">Your survivor</p><h2 id="survivePlayerName"></h2>
+          <label class="survive-health-label" for="surviveHealth">Health <strong id="surviveHealthText"></strong></label>
+          <meter id="surviveHealth" min="0" max="10" low="3" high="7" optimum="10" value="10"></meter>
+          <dl class="survive-stats"><div><dt>Strength</dt><dd id="surviveStrength"></dd></div><div><dt>Stamina</dt><dd id="surviveStamina"></dd></div><div><dt>Gathering XP</dt><dd id="surviveExperience"></dd></div></dl>
+          <h3>Inventory <span id="surviveInventoryCount"></span></h3>
+          <dl class="survive-stats"><div><dt>Wood</dt><dd id="surviveWood"></dd></div><div><dt>Food</dt><dd id="surviveFood"></dd></div></dl>
+        </section>
+        <section class="survive-panel" aria-labelledby="surviveCampTitle">
+          <p class="survive-eyebrow">One world, built together</p><h2 id="surviveCampTitle">Shared camp</h2>
+          <dl class="survive-stats"><div><dt>Shelters</dt><dd id="surviveShelters"></dd></div><div><dt>Boats</dt><dd id="surviveBoats"></dd></div></dl>
+          <h3>Survivors in camp <span id="survivePlayerCount"></span></h3><ul id="survivePlayers" class="survive-players"></ul>
+          <p class="survive-muted">Camp updates every 5 seconds while this page is visible.</p>
+        </section>
+      </aside>
+      <section class="survive-panel survive-journal" aria-labelledby="surviveJournalTitle">
+        <div class="survive-section-heading"><h2 id="surviveJournalTitle">Camp journal</h2><span class="survive-eyebrow">The last 30 events</span></div>
+        <ol id="surviveEvents" reversed></ol>
+      </section>
+    </div>
+
+    <details class="survive-panel survive-guide"><summary>Field guide · How to play</summary>
+      <p>Gather wood to improve strength and stamina. Your inventory holds 10 items. Five wood builds a shelter everyone can rest in; ten wood builds a boat any survivor can use to escape.</p>
+      <p>Hunt to find hogs with 5 health. Your attack deals 1 + strength damage, and each attack costs 1 health, even the final blow. Defend blocks damage; flee returns you to camp at a cost of 1 health. Defeating a hog gives 1 food if you have room. Eating consumes it and restores up to 5 health. A shared shelter restores 2 health per rest.</p>
+      <p>Sail away to survive, or start again after death. New survivor replaces only your character. Shelters, boats, and other players remain in the shared world. Names and recent actions are visible to other players; use a nickname.</p>
+      <p>This world lives on one Java server. A server restart resets it; survivors expire after two hours without a game request. Closing the browser can end your survivor session. This version has no permanent saves, chat, or matchmaking.</p>
+    </details>
+    <p class="survive-attribution">Adapted from <a href="https://github.com/azurras/survive">azurras/Survive</a> · Java game engine · <a href="/licenses/survive-GPL-3.0.txt">GPL-3.0 license</a>. Browser adaptation completes the original's unfinished combat and food actions.</p>
+  </main>
+  <footer id="footer"></footer>
+  <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
+  <script type="module" src="/js/survive.js" th:src="@{/js/survive.js}"></script>
+</body>
+</html>

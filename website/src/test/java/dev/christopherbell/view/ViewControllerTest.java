@@ -49,6 +49,16 @@ public class ViewControllerTest {
   @MockitoBean private FederationConsentService federationConsent;
 
   @Test
+  void surviveIsAnInteractiveJavaGameWithInstructionsAndAttribution() throws Exception {
+    mockMvc.perform(get("/survive"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("id=\"surviveJoin\"")))
+        .andExpect(content().string(containsString("Shared camp")))
+        .andExpect(content().string(containsString("/js/survive.js")))
+        .andExpect(content().string(containsString("github.com/azurras/survive")));
+  }
+
+  @Test
   void siteMonitorPilotExplainsRecurringChecksAndHonestCoverage() throws Exception {
     mockMvc.perform(get("/site-monitor"))
         .andExpect(status().isOk())

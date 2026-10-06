@@ -76,6 +76,7 @@ class PublicSitemapServiceTest {
     assertThat(combined)
         .contains("https://www.christopherbell.dev/")
         .contains("https://www.christopherbell.dev/photos/usage")
+        .contains("https://www.christopherbell.dev/survive")
         .doesNotContain("https://www.christopherbell.dev/software-handoff-kit")
         .doesNotContain("https://www.christopherbell.dev/software-handoff-kit/preview")
         .contains("https://www.christopherbell.dev/thebell/tony")

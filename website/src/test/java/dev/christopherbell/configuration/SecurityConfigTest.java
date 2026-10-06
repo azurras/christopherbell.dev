@@ -15,6 +15,22 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
  * Unit tests for public route rules that should not require authentication.
  */
 class SecurityConfigTest {
+  @Test
+  void surviveExposesOnlyItsPageAndExactGameCommands() throws Exception {
+    var matchers = publicMatchers();
+    for (var path : List.of("/survive", "/survive/", "/api/survive/v1/game",
+        "/licenses/survive-GPL-3.0.txt")) {
+      assertTrue(matchers.stream().anyMatch(matcher -> matcher.matches(request("GET", path))));
+    }
+    for (var path : List.of("/api/survive/v1/game", "/api/survive/v1/actions")) {
+      assertTrue(matchers.stream().anyMatch(matcher -> matcher.matches(request("POST", path))));
+      assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("DELETE", path))));
+    }
+    assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("POST", "/survive"))));
+    assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("GET", "/api/survive/v1/actions"))));
+    assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("POST", "/api/survive/v1/reset-world"))));
+  }
+
   @Test void headCanReadVersionedAssetsWithoutOpeningPrivateRoutes() throws Exception {
     var matchers = publicMatchers();
     for (var path : List.of("/fingerprint/js/app.js", "/fingerprint/css/main.css",

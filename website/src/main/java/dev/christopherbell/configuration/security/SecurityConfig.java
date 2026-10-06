@@ -80,6 +80,12 @@ public class SecurityConfig {
       // Former offer URLs stay readable only to return empty410 Gone.
       "GET:/software-handoff-kit",
       "GET:/site-monitor",
+      "GET:/survive",
+      "GET:/survive/",
+      "GET:/licenses/survive-GPL-3.0.txt",
+      "GET:/api/survive/v1/game",
+      "POST:/api/survive/v1/game",
+      "POST:/api/survive/v1/actions",
       "GET:/software-handoff-kit/preview",
       "GET:/sitemap.xml",
       "GET:/sitemap-*.xml",

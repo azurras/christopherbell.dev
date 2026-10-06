@@ -9,6 +9,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 @Controller
 public class ToolsViewController {
 
+  /** Serves the public browser interface for the shared Java survival world. */
+  @GetMapping({"/survive", "/survive/"})
+  public String getSurvivePage() {
+    return "survive.html";
+  }
+
   /** Serves the public, data-free monitor pilot shell; customer APIs stay protected. */
   @GetMapping("/site-monitor")
   public String getSiteMonitorPage() {

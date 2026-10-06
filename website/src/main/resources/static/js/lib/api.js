@@ -10,6 +10,10 @@ function discoveryPageUrl(path, cursor, size) {
  * Keep endpoints here to avoid repetition and make upgrades simple.
  */
 export const API = {
+  survive: {
+    game: '/api/survive/v1/game',
+    actions: '/api/survive/v1/actions',
+  },
   siteMonitor: {
     workspace: '/api/site-monitor/v1',
     sites: '/api/site-monitor/v1/sites',
