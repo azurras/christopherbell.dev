@@ -5,6 +5,7 @@ Owns Spring Security wiring and request authentication infrastructure.
 ## What Lives Here
 
 - `SecurityConfig` defines public routes, method security, the filter chain, and security-related beans.
+- Survive exposes only GET `/survive` and `/survive/`, GET/POST `/api/survive/v1/game`, POST `/api/survive/v1/actions`, and its GPL license GET. Mutations retain CSRF protection; private survivor cookies authorize commands within the shared world without website login.
 - `JwtAuthenticationFilter` reads bearer tokens, validates them, and populates the Spring Security context.
 - Browser-session activity is coalesced to at most one conditional Mongo update per five-minute
   window. Due credential rotation is an atomic compare-and-set. A rare race loser reloads once

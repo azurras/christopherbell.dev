@@ -4,6 +4,8 @@ Owns site styling for server-rendered pages and frontend components.
 
 ## What Lives Here
 
+- `survive.css` owns the responsive shared-world adventure, survivor stats, camp and journal.
+
 - `main.css` is the primary shared stylesheet for the current site, Void feed,
   tools, auth, profile, messages, post cards, and responsive layout.
 - `void-discovery.css` owns the public Void Explore and topic discovery surfaces.
