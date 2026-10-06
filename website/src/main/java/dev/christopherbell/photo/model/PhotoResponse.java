@@ -1,19 +1,15 @@
 package dev.christopherbell.photo.model;
 
 import java.util.List;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 /**
- * Response DTO containing a collection of photos.
+ * Gallery API payload.
+ *
+ * @param images the gallery photos in display order; the name is the published JSON property
  */
-@AllArgsConstructor
-@NoArgsConstructor
-@Builder
-@Data
-public class PhotoResponse {
+public record PhotoResponse(List<Photo> images) {
 
-  private List<Photo> images;
+  public PhotoResponse {
+    images = List.copyOf(images);
+  }
 }

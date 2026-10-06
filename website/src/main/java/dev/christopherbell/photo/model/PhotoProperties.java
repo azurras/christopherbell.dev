@@ -1,24 +1,17 @@
 package dev.christopherbell.photo.model;
 
 import java.util.List;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
 
 /**
- * Configuration properties holding photo gallery items.
+ * Gallery photos bound from the {@code photo-properties} configuration prefix.
  *
- * <p>Bound from application configuration using prefix {@code photo-properties}.</p>
+ * @param photos the gallery photos in display order
  */
-@AllArgsConstructor
-@Builder
-@Configuration
-@ConfigurationProperties(prefix = "photo-properties")
-@Data
-public class PhotoProperties {
+@ConfigurationProperties("photo-properties")
+public record PhotoProperties(List<Photo> photos) {
 
-  private final List<Photo> photos;
+  public PhotoProperties {
+    photos = photos == null ? List.of() : List.copyOf(photos);
+  }
 }
