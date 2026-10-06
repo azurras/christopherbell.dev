@@ -6,6 +6,8 @@ import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveSnapshot.Recipient;
 import dev.christopherbell.survive.model.SurviveResource;
 import java.util.Locale;
+import java.time.Instant;
+import dev.christopherbell.survive.model.SurviveSavedWorld;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -34,15 +36,47 @@ final class SurviveWorld {
     revision++;
   }
 
+  static SurviveWorld restore(SurviveSavedWorld saved) {
+    var world = new SurviveWorld();
+    world.shelters = saved.shelters();
+    world.boats = saved.boats();
+    world.revision = saved.revision();
+    world.events.addAll(saved.events());
+    for (var stored : saved.players()) {
+      var player = new SurvivePlayer(stored.name(), stored.lastSeen(), stored.accountId(), stored.survivorId());
+      player.health = stored.health(); player.strength = stored.strength(); player.stamina = stored.stamina();
+      player.experience = stored.experience(); player.experienceToNextLevel = stored.experienceToNextLevel();
+      player.wood = stored.wood(); player.food = stored.food(); player.enemyHealth = stored.enemyHealth();
+      player.status = stored.status(); player.revision = stored.revision(); player.message = stored.message();
+      world.players.put(stored.accountId() == null ? stored.token() : "account:" + stored.accountId(), player);
+    }
+    return world;
+  }
+
+  SurviveSavedWorld saveState(Long storageVersion) {
+    var storedPlayers = players.entrySet().stream().map(entry -> {
+      var player = entry.getValue();
+      return new SurviveSavedWorld.Player(player.accountId, player.accountId == null ? entry.getKey() : null,
+          player.survivorId, player.name, player.lastSeen, player.health, player.strength, player.stamina,
+          player.experience, player.experienceToNextLevel, player.wood, player.food, player.enemyHealth,
+          player.status, player.revision, player.message);
+    }).toList();
+    return new SurviveSavedWorld("shared", storageVersion, revision, shelters, boats, List.copyOf(events), storedPlayers);
+  }
+
   SurviveSnapshot snapshotFor(SurvivePlayer player) {
+    return snapshotFor(player, Instant.MIN);
+  }
+
+  SurviveSnapshot snapshotFor(SurvivePlayer player, Instant activeDeadline) {
     return new SurviveSnapshot(player.name, player.health, player.strength, player.stamina,
         player.experience, player.experienceToNextLevel, player.wood, player.food,
         INVENTORY_CAPACITY, player.enemyHealth, player.status, player.revision, revision,
-        shelters, boats, players.values().stream().map(survivor -> survivor.name).toList(),
+        shelters, boats, players.values().stream().filter(survivor -> survivor.lastSeen.isAfter(activeDeadline)).map(survivor -> survivor.name).toList(),
         List.copyOf(events), actionsFor(player), player.message, player.survivorId,
         player.status == Status.EXPLORING ? players.values().stream()
-            .filter(recipient -> recipient != player && recipient.status == Status.EXPLORING)
-            .map(recipient -> new Recipient(recipient.survivorId, recipient.name)).toList() : List.of());
+            .filter(recipient -> recipient != player && recipient.status == Status.EXPLORING && recipient.lastSeen.isAfter(activeDeadline))
+            .map(recipient -> new Recipient(recipient.survivorId, recipient.name)).toList() : List.of(), player.accountId != null);
   }
 
   /** Applies a previously validated gift while the service holds the world's monitor. */

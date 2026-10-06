@@ -13,6 +13,11 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   const setText = (id, text) => { documentRoot.getElementById(id).textContent = String(text); };
   documentRoot.getElementById('surviveGame').hidden = false;
   setText('survivePlayerName', state.name);
+  setText('surviveSaveStatus', state.saved
+    ? 'Saved to your account - Resume when you log in again.'
+    : 'Temporary guest - Log in for a separate saved survivor.');
+  documentRoot.getElementById('surviveRestart').disabled = pending
+    || Boolean(state.saved && !['DEAD', 'ESCAPED'].includes(state.status));
   setText('survivePublicId', `Camp ID: ${state.survivorId.slice(0, 8)}`);
   setText('surviveStatus', STATUS_LABELS[state.status] || state.status);
   setText('surviveScene', SCENE_LABELS[state.status] || 'The wilderness');

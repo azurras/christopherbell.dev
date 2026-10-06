@@ -10,6 +10,7 @@ import org.springframework.data.mongodb.core.query.Update;
 public final class DomainAccountDeletionStore {
   private static final Pattern SAFE_MAP_KEY = Pattern.compile("[A-Za-z0-9_-]{1,128}");
 
+  private final KindScopedMongoOperations<?> surviveWorlds;
   private final KindScopedMongoOperations<?> posts;
   private final KindScopedMongoOperations<?> sessions;
   private final KindScopedMongoOperations<?> monitorWorkspaces;
@@ -33,6 +34,7 @@ public final class DomainAccountDeletionStore {
   private final KindScopedMongoOperations<?> recycleItems;
 
   public DomainAccountDeletionStore(DomainMongoOperationsFactory factory) {
+    surviveWorlds = factory.forExactKind("survive_world");
     posts = factory.forExactKind("post");
     sessions = factory.forExactKind("browser_session");
     monitorWorkspaces = factory.forExactKind("site_monitor_workspace");
@@ -64,6 +66,8 @@ public final class DomainAccountDeletionStore {
   }
 
   public void removePrivateData(String accountId) {
+    surviveWorlds.updateMulti(exact("players.accountId", accountId),
+        new Update().pull("players", new org.bson.Document("accountId", accountId)));
     for (int slot = 0; slot < 10; slot++) {
       var query = exact("id", "pilot-" + slot);
       query.addCriteria(Criteria.where("accountId").is(accountId));

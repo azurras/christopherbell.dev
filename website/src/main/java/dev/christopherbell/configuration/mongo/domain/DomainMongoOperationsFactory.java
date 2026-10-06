@@ -29,6 +29,10 @@ public final class DomainMongoOperationsFactory {
 
   /** Returns a new stateless operations boundary for one exact approved domain type. */
   public <T> KindScopedMongoOperations<T> forType(Class<T> javaType) {
+    if (javaType.getName().equals(SURVIVE_WORLD_TYPE)) {
+      return new MongoKindScopedOperations<>(mongo, SURVIVE_KINDS.require(
+          "survive_world", 1, javaType), callbacks);
+    }
     if (javaType.getName().equals(MONITOR_WORKSPACE_TYPE)) {
       return new MongoKindScopedOperations<>(mongo, MONITOR_KINDS.require(
           "site_monitor_workspace", 1, javaType), callbacks);
@@ -42,6 +46,9 @@ public final class DomainMongoOperationsFactory {
   }
 
   // Additive runtime approval is deliberately separate from the immutable cutover manifest.
+  private static final String SURVIVE_WORLD_TYPE = "dev.christopherbell.survive.model.SurviveSavedWorld";
+  private static final DomainDocumentKindRegistry SURVIVE_KINDS = DomainDocumentKindRegistry.of(
+      java.util.Map.of("survive_world", "application_runtime"));
   private static final String MONITOR_WORKSPACE_TYPE =
       "dev.christopherbell.sitemonitor.model.MonitorWorkspace";
   private static final String MONITOR_SCHEDULE_TYPE =
@@ -51,11 +58,11 @@ public final class DomainMongoOperationsFactory {
           "site_monitor_schedule", "application_runtime"));
 
   KindScopedMongoOperations<?> forExactKind(String kind) {
-    if ("site_monitor_workspace".equals(kind)) {
+    if ("site_monitor_workspace".equals(kind) || "survive_world".equals(kind)) {
       try {
-        return forUnknownType(Class.forName(MONITOR_WORKSPACE_TYPE));
+        return forUnknownType(Class.forName("survive_world".equals(kind) ? SURVIVE_WORLD_TYPE : MONITOR_WORKSPACE_TYPE));
       } catch (ClassNotFoundException failure) {
-        throw new IllegalStateException("Monitor workspace owner type is unavailable.", failure);
+        throw new IllegalStateException("Additive runtime owner type is unavailable.", failure);
       }
     }
     var definition = DomainCollectionManifest.forKind(kind)
