@@ -2435,6 +2435,67 @@ Describe 'operator diagnostics' {
         }
     }
 
+    It 'keeps an older error visible after newer INFO lines push it out of the latest entries' {
+        InModuleScope Production.AutoDeploy {
+            $logPath = Join-Path $TestDrive 'problems.json.log'
+            $errorLine = '{"@timestamp":"2026-10-05T09:00:00Z","log":{"level":"ERROR","logger":"dev.Feed"},"message":"feed query failed","requestId":"r-000000009","error":{"type":"MongoTimeoutException","message":"timed out"}}'
+            $warnLine = '{"@timestamp":"2026-10-05T09:01:00Z","log":{"level":"WARN","logger":"dev.Auth"},"message":"INVALID_TOKEN status=401"}'
+            $infoLine = '{"@timestamp":"2026-10-05T10:00:00Z","log":{"level":"INFO","logger":"dev.Http"},"message":"GET / 200"}'
+            Set-Content -LiteralPath $logPath -Value (@($errorLine, $warnLine) + (@($infoLine) * 200))
+
+            $latest = @(Read-AutoDeployRecentLogEntries -Path $logPath -MaximumEntries 20)
+            $problems = @(Read-AutoDeployRecentProblemEntries -Path $logPath)
+
+            $latest.level | Should -Not -Contain 'ERROR'
+            $problems | Should -HaveCount 2
+            $problems[0].level | Should -Be 'ERROR'
+            $problems[0].errorType | Should -Be 'MongoTimeoutException'
+            $problems[1].level | Should -Be 'WARN'
+        }
+    }
+
+    It 'returns only the newest problems within the scanned lines' {
+        InModuleScope Production.AutoDeploy {
+            $logPath = Join-Path $TestDrive 'many-problems.json.log'
+            $lines = foreach ($number in 1..30) {
+                '{"@timestamp":"2026-10-05T09:00:00Z","log":{"level":"WARN","logger":"x"},"message":"warning ' + $number + '"}'
+            }
+            Set-Content -LiteralPath $logPath -Value $lines
+
+            $problems = @(Read-AutoDeployRecentProblemEntries -Path $logPath -MaximumEntries 5 -ScannedLineLimit 20)
+
+            $problems | Should -HaveCount 5
+            $problems[-1].message | Should -Be 'warning 30'
+            $problems[0].message | Should -Be 'warning 26'
+        }
+    }
+
+    It 'keeps the first redacted stack frames of an error' {
+        InModuleScope Production.AutoDeploy {
+            $stackTrace = "com.mongodb.MongoTimeoutException: timed out`n" +
+                "`tat com.mongodb.Cluster.select(Cluster.java:10)`n" +
+                "`tat dev.christopherbell.Feed.load(Feed.java:42) token=abc123secret`n" +
+                "`tat dev.christopherbell.FeedController.get(FeedController.java:7)`n" +
+                "`tat org.springframework.Dispatcher.handle(Dispatcher.java:99)"
+            $line = [ordered]@{
+                '@timestamp' = '2026-10-05T09:00:00Z'
+                log = @{ level = 'ERROR'; logger = 'dev.Feed' }
+                message = 'feed query failed'
+                error = @{ type = 'MongoTimeoutException'; message = 'timed out'; stack_trace = $stackTrace }
+            } | ConvertTo-Json -Compress
+
+            $entry = ConvertTo-AutoDeployLogEntry -Line $line
+            $frames = $entry.errorStack -split ' \| '
+
+            $frames | Should -HaveCount 3
+            $frames[0] | Should -Be 'at com.mongodb.Cluster.select(Cluster.java:10)'
+            $entry.errorStack | Should -Not -Match 'abc123secret'
+            $entry.errorStack | Should -Not -Match 'Dispatcher'
+            (ConvertTo-AutoDeployLogEntry -Line '{"log":{"level":"INFO"},"message":"ok"}').errorStack | Should -BeNullOrEmpty
+            ConvertTo-AutoDeployLogEntry -Line 'not json' | Should -BeNullOrEmpty
+        }
+    }
+
     It 'publishes a bounded record that standard users read back' {
         InModuleScope Production.AutoDeploy {
             $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
@@ -2445,7 +2506,8 @@ Describe 'operator diagnostics' {
             $state.heldRemoteSha = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
             Write-AutoDeployState $config $state
             $bigLine = '{"@timestamp":"2026-10-05T15:01:00Z","log":{"level":"INFO","logger":"x"},"message":"' + ('y' * 390) + '"}'
-            Set-Content -LiteralPath (Join-Path $root 'logs\application.json.log') -Value (@($bigLine) * 3000)
+            $bigProblem = '{"@timestamp":"2026-10-05T15:00:00Z","log":{"level":"ERROR","logger":"x"},"message":"' + ('z' * 390) + '"}'
+            Set-Content -LiteralPath (Join-Path $root 'logs\application.json.log') -Value ((@($bigProblem) * 10) + (@($bigLine) * 3000))
             Mock Assert-AutoDeployStatusDirectory {}
             Mock Assert-AutoDeployStatusFile {}
             Mock Get-AutoDeployTaskSchedulerEntry { [pscustomobject]@{ registered = $true; state = 4; reason = 'NONE' } }
@@ -2465,6 +2527,37 @@ Describe 'operator diagnostics' {
             $record.heldRemoteSha | Should -Be 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
             @($record.recentLogEntries).Count | Should -BeGreaterThan 0
             @($record.recentLogEntries).Count | Should -BeLessThan 100
+            @($record.recentProblems) | Should -HaveCount 10
+            @($record.recentProblems).level | Should -Not -Contain 'INFO'
+            $record.schemaVersion | Should -Be 1
+        }
+    }
+
+    It 'sheds routine entries before problems when the record is too large' {
+        InModuleScope Production.AutoDeploy {
+            $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            $statusRoot = Join-Path $root 'status'
+            New-Item -ItemType Directory -Path $statusRoot, (Join-Path $root 'logs') -Force | Out-Null
+            $config = [pscustomobject]@{ programDataRoot = $root }
+            Write-AutoDeployState $config (New-AutoDeployState)
+            $bigLine = '{"@timestamp":"2026-10-05T15:01:00Z","log":{"level":"INFO","logger":"x"},"message":"' + ('y' * 390) + '"}'
+            $bigProblem = '{"@timestamp":"2026-10-05T15:00:00Z","log":{"level":"ERROR","logger":"x"},"message":"' + ('z' * 390) + '"}'
+            Set-Content -LiteralPath (Join-Path $root 'logs\application.json.log') -Value ((@($bigProblem) * 50) + (@($bigLine) * 400))
+            Mock Assert-AutoDeployStatusDirectory {}
+            Mock Assert-AutoDeployStatusFile {}
+            Mock Get-AutoDeployTaskSchedulerEntry { [pscustomobject]@{ registered = $true; state = 4; reason = 'NONE' } }
+            Mock Get-Service { [pscustomobject]@{ Status = 'Running'; StartType = 'Automatic' } }
+            $script:DiagnosticsMaximumBytes = 20000
+            try {
+                Publish-AutoDeployDiagnostics -Config $config -StatusRoot $statusRoot
+            } finally {
+                $script:DiagnosticsMaximumBytes = 524288
+            }
+
+            $record = Get-AutoDeployDiagnostics -StatusRoot $statusRoot
+            (Get-Item -LiteralPath (Join-Path $statusRoot 'diagnostics.json')).Length | Should -BeLessOrEqual 20000
+            @($record.recentLogEntries) | Should -HaveCount 0
+            @($record.recentProblems).Count | Should -BeGreaterThan 0
         }
     }
 

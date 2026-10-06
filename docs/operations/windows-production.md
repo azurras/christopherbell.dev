@@ -414,8 +414,13 @@ Every poll, the poller publishes `diagnostics.json` beside the status record.
 That folder is writable only by SYSTEM and Administrators and readable by
 standard users. The record holds the scheduler state as SYSTEM sees it, service
 states, retained releases, any rollback hold, the last 20 request results, the
-token expiry, and up to 100 recent log entries. Log entries keep only the
-timestamp, level, logger, request ID, message and error summary. Tokens, bearer
+token expiry, up to 100 recent log entries (`recentLogEntries`), and up to 50
+recent warnings and errors found in the last 10,000 log lines
+(`recentProblems`), so a problem stays visible after routine INFO lines push it
+out of the latest entries. Log entries keep only the timestamp, level, logger,
+request ID, message, error summary and the first three stack frames
+(`errorStack`). When the record would exceed 512 KB, the oldest latest entries
+are dropped before any problems. Tokens, bearer
 values, JWTs, connection-string passwords, `password=`/`secret=` values and
 email addresses are masked, and the record never includes `config`. When a
 standard user cannot query the SYSTEM task, `auto-status` reports the
