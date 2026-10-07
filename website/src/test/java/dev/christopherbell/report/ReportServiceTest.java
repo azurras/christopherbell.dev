@@ -23,6 +23,7 @@ import dev.christopherbell.report.model.ReportResolution;
 import dev.christopherbell.report.model.ReportResolveRequest;
 import dev.christopherbell.report.model.ReportStatus;
 import dev.christopherbell.report.submission.ReportSubmissionService;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -56,7 +57,8 @@ class ReportServiceTest {
             adminActivityService,
             permissionService,
             reportRepository,
-            sessionRevoker));
+            sessionRevoker,
+            Clock.systemUTC()));
 
     ReportCreateRequest request = new ReportCreateRequest("post-1", "spam", "details");
     Post post = Post.builder()
@@ -125,7 +127,8 @@ class ReportServiceTest {
             Mockito.mock(AdminActivityService.class),
             Mockito.mock(PermissionService.class),
             reportRepository,
-            Mockito.mock(AccountSessionRevoker.class)));
+            Mockito.mock(AccountSessionRevoker.class),
+            Clock.systemUTC()));
     var report = dev.christopherbell.report.model.PostReport.builder()
         .id("r1")
         .reportedAccountId("reported-1")
@@ -136,7 +139,7 @@ class ReportServiceTest {
     when(reportRepository.countByReportedAccountIdAndStatus("reported-1", ReportStatus.OPEN)).thenReturn(2L);
     when(reportRepository.countByReportedAccountIdAndStatus("reported-1", ReportStatus.RESOLVED)).thenReturn(3L);
 
-    var reports = service.getReports();
+    var reports = service.listReportsForReview();
 
     assertEquals(2L, reports.get(0).getOpenReportsForAccount());
     assertEquals(3L, reports.get(0).getResolvedReportsForAccount());
@@ -160,7 +163,8 @@ class ReportServiceTest {
             adminActivityService,
             permissionService,
             reportRepository,
-            sessionRevoker));
+            sessionRevoker,
+            Clock.systemUTC()));
 
     var report = dev.christopherbell.report.model.PostReport.builder()
         .id("r1")

@@ -7,27 +7,27 @@ import { renderAlert } from './lib/status-message.js';
 import { appendTextWithMentionLinks, authHeaders, fetchJson, isLoggedIn, loginRedirectUrl } from './lib/util.js';
 
 const alertBox = document.getElementById('reportAlert');
-const postTextEl = document.getElementById('reportPostText');
-const postAuthorEl = document.getElementById('reportPostAuthor');
-const form = document.getElementById('reportForm');
+const postTextElement = document.getElementById('reportPostText');
+const postAuthorElement = document.getElementById('reportPostAuthor');
+const reportForm = document.getElementById('reportForm');
 
 function showAlert(message) {
   renderAlert(alertBox, message);
 }
 
-function getPostId() {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('postId');
+function reportedPostIdFromUrl() {
+  const queryParameters = new URLSearchParams(window.location.search);
+  return queryParameters.get('postId');
 }
 
-async function loadPost(postId) {
-  const post = await fetchJson(API.posts.byId(postId), { headers: authHeaders() });
-  appendTextWithMentionLinks(postTextEl, post.text || '');
-  if (postAuthorEl) {
-    if (post.username) {
-      appendTextWithMentionLinks(postAuthorEl, `@${post.username}`);
+async function showReportedPost(postId) {
+  const reportedPost = await fetchJson(API.posts.byId(postId), { headers: authHeaders() });
+  appendTextWithMentionLinks(postTextElement, reportedPost.text || '');
+  if (postAuthorElement) {
+    if (reportedPost.username) {
+      appendTextWithMentionLinks(postAuthorElement, `@${reportedPost.username}`);
     } else {
-      postAuthorEl.textContent = '-';
+      postAuthorElement.textContent = '-';
     }
   }
 }
@@ -37,22 +37,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.location.replace(loginRedirectUrl());
     return;
   }
-  const postId = getPostId();
+  const postId = reportedPostIdFromUrl();
   if (!postId) {
     showAlert('Missing post id.');
     return;
   }
   try {
-    await loadPost(postId);
-  } catch (err) {
-    showAlert(err.message || 'Unable to load post.');
+    await showReportedPost(postId);
+  } catch (loadFailure) {
+    showAlert(loadFailure.message || 'Unable to load post.');
   }
 });
 
-form?.addEventListener('submit', async (e) => {
-  e.preventDefault();
+reportForm?.addEventListener('submit', async (submitEvent) => {
+  submitEvent.preventDefault();
   if (alertBox) alertBox.classList.add('d-none');
-  const postId = getPostId();
+  const postId = reportedPostIdFromUrl();
   const reason = document.getElementById('reportReason')?.value;
   const details = document.getElementById('reportDetails')?.value?.trim() || null;
   if (!postId || !reason) {
@@ -67,7 +67,7 @@ form?.addEventListener('submit', async (e) => {
       body: JSON.stringify({ postId, reason, details })
     });
     window.location.replace('/void');
-  } catch (err) {
-    showAlert(err.message || 'Failed to submit report.');
+  } catch (submitFailure) {
+    showAlert(submitFailure.message || 'Failed to submit report.');
   }
 });

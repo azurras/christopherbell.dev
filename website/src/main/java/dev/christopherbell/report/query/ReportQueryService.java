@@ -4,11 +4,15 @@ import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFacto
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
-import dev.christopherbell.report.model.PostReport;
 import dev.christopherbell.report.ReportRepository;
+import dev.christopherbell.report.model.PostReport;
 import dev.christopherbell.report.model.ReportStatus;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -28,63 +32,84 @@ public class ReportQueryService implements ReportQueryPort {
 
   /** Returns a page ordered by immutable creation time and id tie-breaker. */
   @Override
-  public ReportPage query(ReportQuery request) throws InvalidRequestException {
-    validate(request);
-    var filters = new ArrayList<Criteria>();
-    if (request.status() != null) filters.add(Criteria.where("status").is(request.status()));
-    if (request.reportType() != null) {
-      filters.add(Criteria.where("reportType").is(request.reportType()));
+  public ReportPage query(ReportQuery reportQuery) throws InvalidRequestException {
+    validate(reportQuery);
+    Criteria matchingReports = criteriaFor(reportQuery);
+    long totalElements = mongo.count(new Query(matchingReports));
+    Query pageQuery = new Query(matchingReports)
+        .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
+        .skip((long) reportQuery.page() * reportQuery.size())
+        .limit(reportQuery.size());
+    List<PostReport> pageItems = mongo.find(pageQuery, Pageable.unpaged());
+    includeRepeatReportCounts(pageItems);
+    int totalPages = totalElements == 0
+        ? 0
+        : (int) Math.ceil((double) totalElements / reportQuery.size());
+    return new ReportPage(
+        pageItems, reportQuery.page(), reportQuery.size(), totalElements, totalPages);
+  }
+
+  private static Criteria criteriaFor(ReportQuery reportQuery) {
+    List<Criteria> filters = new ArrayList<>();
+    if (reportQuery.status() != null) {
+      filters.add(Criteria.where("status").is(reportQuery.status()));
     }
-    if (request.targetType() != null) {
-      filters.add(Criteria.where("targetType").is(request.targetType()));
+    if (reportQuery.reportType() != null) {
+      filters.add(Criteria.where("reportType").is(reportQuery.reportType()));
     }
-    if (request.reporter() != null && !request.reporter().isBlank()) {
-      filters.add(Criteria.where("reporterUsername")
-          .regex(Pattern.compile(Pattern.quote(request.reporter().strip()), Pattern.CASE_INSENSITIVE)));
+    if (reportQuery.targetType() != null) {
+      filters.add(Criteria.where("targetType").is(reportQuery.targetType()));
     }
-    if (request.from() != null) {
-      filters.add(Criteria.where("createdOn").gte(request.from()).lte(request.to()));
+    if (reportQuery.reporter() != null && !reportQuery.reporter().isBlank()) {
+      Pattern reporterSubstring = Pattern.compile(
+          Pattern.quote(reportQuery.reporter().strip()), Pattern.CASE_INSENSITIVE);
+      filters.add(Criteria.where("reporterUsername").regex(reporterSubstring));
     }
-    Criteria criteria = filters.isEmpty()
+    if (reportQuery.from() != null) {
+      filters.add(Criteria.where("createdOn").gte(reportQuery.from()).lte(reportQuery.to()));
+    }
+    return filters.isEmpty()
         ? new Criteria()
         : new Criteria().andOperator(filters.toArray(Criteria[]::new));
-    var countQuery = new Query(criteria);
-    long total = mongo.count(countQuery);
-    var pageQuery = new Query(criteria)
-        .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
-        .skip((long) request.page() * request.size())
-        .limit(request.size());
-    var items = mongo.find(pageQuery, org.springframework.data.domain.Pageable.unpaged());
-    includeRepeatReportContext(items);
-    int totalPages = total == 0 ? 0 : (int) Math.ceil((double) total / request.size());
-    return new ReportPage(items, request.page(), request.size(), total, totalPages);
   }
 
-  private void includeRepeatReportContext(java.util.List<PostReport> items) {
-    var counts = new java.util.HashMap<String, long[]>();
-    for (var report : items) {
-      var accountId = report.getReportedAccountId();
-      if (accountId == null || accountId.isBlank()) continue;
-      var values = counts.computeIfAbsent(accountId, id -> new long[] {
-          reports.countByReportedAccountIdAndStatus(id, ReportStatus.OPEN),
-          reports.countByReportedAccountIdAndStatus(id, ReportStatus.RESOLVED)
-      });
-      report.setOpenReportsForAccount(values[0]);
-      report.setResolvedReportsForAccount(values[1]);
+  /** Adds each reported account's open and resolved counts, counting each account once. */
+  private void includeRepeatReportCounts(List<PostReport> pageItems) {
+    Map<String, RepeatReportCounts> countsByReportedAccountId = new HashMap<>();
+    for (PostReport report : pageItems) {
+      String reportedAccountId = report.getReportedAccountId();
+      if (reportedAccountId == null || reportedAccountId.isBlank()) {
+        continue;
+      }
+      RepeatReportCounts repeatReportCounts =
+          countsByReportedAccountId.computeIfAbsent(reportedAccountId, this::repeatReportCountsFor);
+      report.setOpenReportsForAccount(repeatReportCounts.openCount());
+      report.setResolvedReportsForAccount(repeatReportCounts.resolvedCount());
     }
   }
 
-  private void validate(ReportQuery request) throws InvalidRequestException {
-    if (request == null || request.page() < 0 || request.size() < 1
-        || request.size() > MAX_PAGE_SIZE) {
+  private RepeatReportCounts repeatReportCountsFor(String reportedAccountId) {
+    return new RepeatReportCounts(
+        reports.countByReportedAccountIdAndStatus(reportedAccountId, ReportStatus.OPEN),
+        reports.countByReportedAccountIdAndStatus(reportedAccountId, ReportStatus.RESOLVED));
+  }
+
+  private static void validate(ReportQuery reportQuery) throws InvalidRequestException {
+    if (reportQuery == null || reportQuery.page() < 0 || reportQuery.size() < 1
+        || reportQuery.size() > MAX_PAGE_SIZE) {
       throw new InvalidRequestException("Invalid report page bounds.");
     }
-    if (request.reporter() != null && request.reporter().strip().length() > MAX_REPORTER_LENGTH) {
+    if (reportQuery.reporter() != null
+        && reportQuery.reporter().strip().length() > MAX_REPORTER_LENGTH) {
       throw new InvalidRequestException("Invalid report reporter filter.");
     }
-    if ((request.from() == null) != (request.to() == null)
-        || (request.from() != null && request.from().isAfter(request.to()))) {
+    boolean hasOnlyOneDateBound = (reportQuery.from() == null) != (reportQuery.to() == null);
+    if (hasOnlyOneDateBound
+        || (reportQuery.from() != null && reportQuery.from().isAfter(reportQuery.to()))) {
       throw new InvalidRequestException("Invalid report date range.");
     }
+  }
+
+  private record RepeatReportCounts(long openCount, long resolvedCount) {
   }
 }

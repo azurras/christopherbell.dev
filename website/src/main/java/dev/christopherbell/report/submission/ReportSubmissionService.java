@@ -14,6 +14,7 @@ import dev.christopherbell.report.model.ReportCreateRequest;
 import dev.christopherbell.report.model.ReportStatus;
 import dev.christopherbell.report.model.ReportTargetType;
 import dev.christopherbell.report.model.ReportType;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.dao.DuplicateKeyException;
@@ -31,57 +32,67 @@ public class ReportSubmissionService {
   private final ReportRepository reportRepository;
 
   /**
-   * Validates a report request and stores an open report with post and account
-   * metadata captured at submission time.
+   * Stores the signed-in user's report on a post, capturing the post text and both usernames at
+   * submission time.
+   *
+   * <p>A reporter has at most one open report per post: an existing one is returned instead of
+   * creating another, including when a concurrent submission wins the unique index.</p>
+   *
+   * @param createRequest the reported post id, reason code and optional details
+   * @return the new or existing open report
+   * @throws InvalidRequestException if the post id or reason is missing
+   * @throws ResourceNotFoundException if the reporter, the post or its author does not exist
    */
-  public PostReport submitReport(ReportCreateRequest request)
+  public PostReport submitReport(ReportCreateRequest createRequest)
       throws InvalidRequestException, ResourceNotFoundException {
-    validateRequest(request);
+    validateRequest(createRequest);
 
-    String reporterId = permissionService.getSelfId();
-    Account reporter = accountRepository.findById(reporterId)
+    String reporterAccountId = permissionService.getSelfId();
+    Account reporter = accountRepository.findById(reporterAccountId)
         .orElseThrow(() -> new ResourceNotFoundException("Reporter not found."));
-    Post post = postRepository.findById(request.postId())
+    Post reportedPost = postRepository.findById(createRequest.postId())
         .orElseThrow(() -> new ResourceNotFoundException("Reported post not found."));
-    Account reported = accountRepository.findById(post.getAccountId())
+    Account reportedAccount = accountRepository.findById(reportedPost.getAccountId())
         .orElseThrow(() -> new ResourceNotFoundException("Reported user not found."));
 
-    var targetType = ReportTargetType.POST;
-    var openKey = ReportOpenDedupeKey.forTarget(reporter.getId(), targetType, post.getId());
-    var existing = reportRepository.findByOpenDedupeKey(openKey)
+    String openDedupeKey =
+        ReportOpenDedupeKey.forTarget(reporter.getId(), ReportTargetType.POST, reportedPost.getId());
+    Optional<PostReport> existingOpenReport = reportRepository.findByOpenDedupeKey(openDedupeKey)
         .or(() -> reportRepository.findFirstByReporterAccountIdAndPostIdAndStatus(
-            reporter.getId(), post.getId(), ReportStatus.OPEN));
-    if (existing.isPresent()) {
-      return existing.get();
+            reporter.getId(), reportedPost.getId(), ReportStatus.OPEN));
+    if (existingOpenReport.isPresent()) {
+      return existingOpenReport.get();
     }
 
-    PostReport report = PostReport.builder()
-        .postId(post.getId())
-        .postText(post.getText())
-        .reportedAccountId(reported.getId())
-        .reportedUsername(reported.getUsername())
+    PostReport newReport = PostReport.builder()
+        .postId(reportedPost.getId())
+        .postText(reportedPost.getText())
+        .reportedAccountId(reportedAccount.getId())
+        .reportedUsername(reportedAccount.getUsername())
         .reporterAccountId(reporter.getId())
         .reporterUsername(reporter.getUsername())
-        .openDedupeKey(openKey)
-        .reportType(ReportType.fromReason(request.reason()))
-        .targetType(targetType)
-        .reason(request.reason())
-        .details(request.details())
+        .openDedupeKey(openDedupeKey)
+        .reportType(ReportType.fromReason(createRequest.reason()))
+        .targetType(ReportTargetType.POST)
+        .reason(createRequest.reason())
+        .details(createRequest.details())
         .status(ReportStatus.OPEN)
         .build();
 
     try {
-      return reportRepository.save(report);
-    } catch (DuplicateKeyException race) {
-      return reportRepository.findByOpenDedupeKey(openKey).orElseThrow(() -> race);
+      return reportRepository.save(newReport);
+    } catch (DuplicateKeyException concurrentSubmission) {
+      return reportRepository.findByOpenDedupeKey(openDedupeKey)
+          .orElseThrow(() -> concurrentSubmission);
     }
   }
 
-  private void validateRequest(ReportCreateRequest request) throws InvalidRequestException {
-    if (request == null || request.postId() == null || request.postId().isBlank()) {
+  private static void validateRequest(ReportCreateRequest createRequest)
+      throws InvalidRequestException {
+    if (createRequest == null || createRequest.postId() == null || createRequest.postId().isBlank()) {
       throw new InvalidRequestException("Post id is required.");
     }
-    if (request.reason() == null || request.reason().isBlank()) {
+    if (createRequest.reason() == null || createRequest.reason().isBlank()) {
       throw new InvalidRequestException("Report reason is required.");
     }
   }
