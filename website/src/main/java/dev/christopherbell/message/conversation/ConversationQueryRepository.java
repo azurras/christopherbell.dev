@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.bson.Document;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class ConversationQueryRepository implements ConversationQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
+  private static final int MAX_CONVERSATIONS = 50;
   private final KindScopedMongoOperations<Message> messages;
   private final StableCursorCodec cursorCodec;
 
@@ -36,8 +38,9 @@ public class ConversationQueryRepository implements ConversationQueryPort {
   }
 
   /** Returns the newest message from each distinct conversation that is visible to the owner. */
+  @Override
   public List<Message> latestDistinctVisible(String ownerAccountId, int requestedLimit) {
-    int limit = Math.max(1, Math.min(requestedLimit, 50));
+    int conversationLimit = Math.max(1, Math.min(requestedLimit, MAX_CONVERSATIONS));
     AggregationOperation archiveLookup = context -> new Document("$lookup", new Document()
         .append("from", "sessions")
         .append("let", new Document("conversationKey", "$conversationKey"))
@@ -55,7 +58,7 @@ public class ConversationQueryRepository implements ConversationQueryPort {
                 "$_id",
                 new Document("$arrayElemAt", List.of(
                     "$ownerArchive.payload.archivedThroughMessageId", 0))))))));
-    var aggregation = Aggregation.newAggregation(
+    Aggregation latestVisiblePerConversation = Aggregation.newAggregation(
         Aggregation.match(Criteria.where("participantIds").is(ownerAccountId)),
         Aggregation.sort(Sort.by(Sort.Direction.DESC, "createdOn", "_id")),
         Aggregation.group("conversationKey").first(Aggregation.ROOT).as("latest"),
@@ -63,14 +66,15 @@ public class ConversationQueryRepository implements ConversationQueryPort {
         archiveLookup,
         visibleAfterArchive,
         Aggregation.sort(Sort.by(Sort.Direction.DESC, "createdOn", "_id")),
-        Aggregation.limit(limit));
+        Aggregation.limit(conversationLimit));
     return messages.aggregate(
         KindScopedAggregation.withForeignKinds(
-            aggregation, KindScopedAggregation.ForeignKind.CONVERSATION_ARCHIVE_STATE),
+            latestVisiblePerConversation, KindScopedAggregation.ForeignKind.CONVERSATION_ARCHIVE_STATE),
         Message.class);
   }
 
   /** Counts unread incoming messages for all returned conversation peers in one query. */
+  @Override
   public Map<String, Long> unreadCounts(
       String recipientAccountId,
       Collection<String> senderAccountIds
@@ -78,47 +82,51 @@ public class ConversationQueryRepository implements ConversationQueryPort {
     if (senderAccountIds.isEmpty()) {
       return Map.of();
     }
-    var criteria = new Criteria().andOperator(
+    Criteria unreadFromSenders = new Criteria().andOperator(
         Criteria.where("recipientAccountId").is(recipientAccountId),
         Criteria.where("senderAccountId").in(senderAccountIds),
         Criteria.where("read").is(false));
-    var aggregation = Aggregation.newAggregation(
-        Aggregation.match(criteria),
+    Aggregation countBySender = Aggregation.newAggregation(
+        Aggregation.match(unreadFromSenders),
         Aggregation.group("senderAccountId").count().as("count"));
-    return messages.aggregate(KindScopedAggregation.local(aggregation), ConversationUnreadCount.class).stream()
+    return messages.aggregate(KindScopedAggregation.local(countBySender), ConversationUnreadCount.class).stream()
         .collect(Collectors.toUnmodifiableMap(
             ConversationUnreadCount::id,
             ConversationUnreadCount::count));
   }
 
   /** Reads one newest-to-oldest stable slice; callers choose the presentation order. */
+  @Override
   public ConversationMessageSlice page(
-      String conversationKey,
-      Optional<StableCursor> cursor,
-      int requestedSize
-  ) {
-    int size = Math.max(1, Math.min(requestedSize, MAX_PAGE_SIZE));
-    var criteria = Criteria.where("conversationKey").is(conversationKey);
-    if (cursor.isPresent()) {
-      var boundary = cursor.get();
-      var before = new Criteria().orOperator(
-          Criteria.where("createdOn").lt(boundary.timestamp()),
-          new Criteria().andOperator(
-              Criteria.where("createdOn").is(boundary.timestamp()),
-              Criteria.where("id").lt(boundary.id())));
-      criteria = new Criteria().andOperator(criteria, before);
-    }
-    var query = new Query(criteria)
+      String conversationKey, Optional<StableCursor> olderThan, int requestedSize) {
+    Criteria inConversation = Criteria.where("conversationKey").is(conversationKey);
+    Criteria matchingMessages = olderThan
+        .map(cursor -> new Criteria().andOperator(inConversation, olderThanCursor(cursor)))
+        .orElse(inConversation);
+    return newestFirstSlice(matchingMessages, requestedSize);
+  }
+
+  private static Criteria olderThanCursor(StableCursor cursor) {
+    return new Criteria().orOperator(
+        Criteria.where("createdOn").lt(cursor.timestamp()),
+        new Criteria().andOperator(
+            Criteria.where("createdOn").is(cursor.timestamp()),
+            Criteria.where("id").lt(cursor.id())));
+  }
+
+  private ConversationMessageSlice newestFirstSlice(Criteria matchingMessages, int requestedSize) {
+    int pageSize = Math.max(1, Math.min(requestedSize, MAX_PAGE_SIZE));
+    Query oneExtraMessage = new Query(matchingMessages)
         .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
-        .limit(size + 1);
-    var loaded = messages.find(query, org.springframework.data.domain.Pageable.unpaged());
-    boolean hasNext = loaded.size() > size;
-    var items = loaded.stream().limit(size).toList();
+        .limit(pageSize + 1);
+    List<Message> loadedMessages = messages.find(oneExtraMessage, Pageable.unpaged());
+    boolean hasOlderMessages = loadedMessages.size() > pageSize;
+    List<Message> pageMessages = loadedMessages.stream().limit(pageSize).toList();
     String nextCursor = null;
-    if (hasNext && !items.isEmpty()) {
-      var boundary = items.get(items.size() - 1);
-      nextCursor = cursorCodec.encode(new StableCursor(boundary.getCreatedOn(), boundary.getId()));
+    if (hasOlderMessages && !pageMessages.isEmpty()) {
+      Message oldestOnPage = pageMessages.getLast();
+      nextCursor = cursorCodec.encode(new StableCursor(oldestOnPage.getCreatedOn(), oldestOnPage.getId()));
     }
-    return new ConversationMessageSlice(items, nextCursor);
+    return new ConversationMessageSlice(pageMessages, nextCursor);
   }
 }

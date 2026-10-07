@@ -29,8 +29,8 @@ export function conversationRowMarkup(conversation, activeUsername) {
       </button>`;
 }
 
-export function shouldFetchMessageSuggestions(value) {
-  return String(value || '').trim().length > 0;
+export function shouldFetchMessageSuggestions(enteredHandle) {
+  return String(enteredHandle || '').trim().length > 0;
 }
 
 export function parseConversationPage(payload) {
@@ -105,13 +105,13 @@ function getInitialTarget() {
 }
 
 function updateCounter() {
-  const text = document.getElementById('messageText')?.value || '';
-  const count = document.getElementById('messageCount');
-  if (count) count.textContent = `${text.length} / 1000`;
+  const draftText = document.getElementById('messageText')?.value || '';
+  const characterCount = document.getElementById('messageCount');
+  if (characterCount) characterCount.textContent = `${draftText.length} / 1000`;
 }
 
-async function loadRecipientSuggestions(value) {
-  const prefix = String(value || '').trim();
+async function loadRecipientSuggestions(enteredHandle) {
+  const prefix = String(enteredHandle || '').trim();
   if (!shouldFetchMessageSuggestions(prefix)) {
     clearRecipientSuggestions();
     return;
@@ -126,15 +126,15 @@ async function loadRecipientSuggestions(value) {
       signal: suggestionRequest.signal,
     });
     renderRecipientSuggestions(suggestions || []);
-  } catch (err) {
-    if (err.name !== 'AbortError') clearRecipientSuggestions();
+  } catch (suggestionFailure) {
+    if (suggestionFailure.name !== 'AbortError') clearRecipientSuggestions();
   }
 }
 
-function scheduleRecipientSuggestionLoad(value) {
+function scheduleRecipientSuggestionLoad(enteredHandle) {
   window.clearTimeout(suggestionTimer);
   suggestionTimer = window.setTimeout(
-      () => loadRecipientSuggestions(value),
+      () => loadRecipientSuggestions(enteredHandle),
       MESSAGE_SUGGESTION_DEBOUNCE_MS);
 }
 
@@ -264,9 +264,9 @@ async function loadOlderMessages() {
     renderMessages(THREAD_STATE.items, false);
     if (list) list.scrollTop = Math.max(0, list.scrollHeight - priorHeight);
     renderConversationActions();
-  } catch (err) {
+  } catch (olderMessagesFailure) {
     if (isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) {
-      showAlert(err?.message || 'Failed to load older messages.');
+      showAlert(olderMessagesFailure?.message || 'Failed to load older messages.');
     }
   } finally {
     if (isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)
@@ -297,8 +297,8 @@ async function archiveActiveConversation() {
     const url = new URL(window.location.href);
     url.searchParams.delete('with');
     window.history.replaceState({}, '', url.toString());
-  } catch (err) {
-    showAlert(err?.message || 'Failed to archive conversation.');
+  } catch (archiveFailure) {
+    showAlert(archiveFailure?.message || 'Failed to archive conversation.');
   } finally {
     if (button) button.disabled = false;
   }
@@ -321,8 +321,8 @@ async function sendActiveMessage() {
     if (textarea) textarea.value = '';
     updateCounter();
     await openConversation(ACTIVE_USERNAME);
-  } catch (err) {
-    showAlert(err.message);
+  } catch (sendFailure) {
+    showAlert(sendFailure.message);
   } finally {
     if (button) button.disabled = false;
   }
@@ -359,7 +359,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (input) input.value = target.replace(/^@/, '');
       await openConversation(target);
     }
-  } catch (err) {
-    showAlert(err.message);
+  } catch (startupFailure) {
+    showAlert(startupFailure.message);
   }
 });

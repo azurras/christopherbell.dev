@@ -83,8 +83,8 @@ public class MessageControllerTest {
   @Test
   @DisplayName("Get conversation: USER -> 200 messages")
   @WithMockUser(authorities = {"USER"})
-  public void getConversation_whenUser_ReturnsMessages() throws Exception {
-    when(messageService.getConversation(eq("alex"), eq(50)))
+  public void openConversation_whenUser_ReturnsMessages() throws Exception {
+    when(messageService.openConversation(eq("alex"), eq(50)))
         .thenReturn(List.of(MessageDetail.builder().id("m1").text("hello").build()));
 
     mockMvc.perform(get("/api/messages" + APIVersion.V20250914 + "/conversation/{username}", "alex")
@@ -97,8 +97,8 @@ public class MessageControllerTest {
   @Test
   @DisplayName("Get conversations: USER -> 200 summaries")
   @WithMockUser(authorities = {"USER"})
-  public void getConversations_whenUser_ReturnsSummaries() throws Exception {
-    when(messageService.getConversations(eq(20)))
+  public void listConversations_whenUser_ReturnsSummaries() throws Exception {
+    when(messageService.listConversations(eq(20)))
         .thenReturn(List.of(ConversationSummary.builder()
             .username("alex")
             .latestText("hello")
@@ -116,8 +116,8 @@ public class MessageControllerTest {
   @Test
   @DisplayName("Stable conversation page: USER -> 200 page and continuation cursor")
   @WithMockUser(authorities = {"USER"})
-  void getConversationPage_whenUser_returnsPage() throws Exception {
-    when(messageService.getConversationPage("alex", null, 2)).thenReturn(new ConversationPage(
+  void openConversationPage_whenUser_returnsPage() throws Exception {
+    when(messageService.openConversationPage("alex", null, 2)).thenReturn(new ConversationPage(
         List.of(MessageDetail.builder().id("m2").text("newest").build()), "next-cursor"));
 
     mockMvc.perform(get("/api/messages/2026-07-26/conversation/{username}", "alex")
@@ -133,7 +133,7 @@ public class MessageControllerTest {
   @WithMockUser(authorities = {"USER"})
   void archiveConversation_whenUser_returnsArchiveResult() throws Exception {
     var archivedAt = Instant.parse("2026-07-26T12:00:00Z");
-    when(messageService.archiveConversation("alex"))
+    when(messageService.archiveConversationWith("alex"))
         .thenReturn(new ConversationArchiveResult("alex:self", archivedAt));
 
     mockMvc.perform(post("/api/messages/2026-07-26/conversation/{username}/archive", "alex")
