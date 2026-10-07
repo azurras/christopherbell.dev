@@ -8,7 +8,9 @@ import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.notification.model.NotificationDetail;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
+import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -29,61 +31,44 @@ public class NotificationQueryRepository implements NotificationQueryPort {
     this.cursorCodec = cursorCodec;
   }
 
-  /** Reads one stable newest-first page for one recipient. */
-  public NotificationPage page(
-      String accountId,
-      Optional<StableCursor> cursor,
-      int requestedSize
-  ) {
-    int size = Math.max(1, Math.min(requestedSize, MAX_PAGE_SIZE));
-    var criteria = Criteria.where("accountId").is(accountId);
-    if (cursor.isPresent()) {
-      var boundary = cursor.get();
-      var before = new Criteria().orOperator(
-          Criteria.where("createdOn").lt(boundary.timestamp()),
-          new Criteria().andOperator(
-              Criteria.where("createdOn").is(boundary.timestamp()),
-              Criteria.where("id").lt(boundary.id())));
-      criteria = new Criteria().andOperator(criteria, before);
-    }
-    var query = new Query(criteria)
+  /** Reads one stable newest-first page for one recipient, after the cursor when present. */
+  @Override
+  public NotificationPage page(String accountId, Optional<StableCursor> olderThan, int requestedSize) {
+    int pageSize = Math.max(1, Math.min(requestedSize, MAX_PAGE_SIZE));
+    Criteria forRecipient = Criteria.where("accountId").is(accountId);
+    Criteria matchingNotifications = olderThan
+        .map(cursor -> new Criteria().andOperator(forRecipient, olderThanCursor(cursor)))
+        .orElse(forRecipient);
+    Query oneExtraNotification = new Query(matchingNotifications)
         .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
-        .limit(size + 1);
-    var loaded = mongo.find(query, org.springframework.data.domain.Pageable.unpaged());
-    boolean hasNext = loaded.size() > size;
-    var notifications = loaded.stream().limit(size).toList();
+        .limit(pageSize + 1);
+    List<Notification> loadedNotifications = mongo.find(oneExtraNotification, Pageable.unpaged());
+    boolean hasOlderNotifications = loadedNotifications.size() > pageSize;
+    List<Notification> pageNotifications = loadedNotifications.stream().limit(pageSize).toList();
     String nextCursor = null;
-    if (hasNext && !notifications.isEmpty()) {
-      var boundary = notifications.get(notifications.size() - 1);
-      nextCursor = cursorCodec.encode(new StableCursor(boundary.getCreatedOn(), boundary.getId()));
+    if (hasOlderNotifications && !pageNotifications.isEmpty()) {
+      Notification oldestOnPage = pageNotifications.getLast();
+      nextCursor = cursorCodec.encode(new StableCursor(oldestOnPage.getCreatedOn(), oldestOnPage.getId()));
     }
-    return new NotificationPage(notifications.stream().map(this::toDetail).toList(), nextCursor);
+    return new NotificationPage(
+        pageNotifications.stream().map(NotificationDetail::from).toList(), nextCursor);
   }
 
   /** Atomically marks every unread notification for one recipient as read. */
+  @Override
   public NotificationReadResult markAllRead(String accountId) {
-    var query = Query.query(new Criteria().andOperator(
+    Query unreadForRecipient = Query.query(new Criteria().andOperator(
         Criteria.where("accountId").is(accountId),
         Criteria.where("read").ne(true)));
-    var result = mongo.updateMulti(query, Update.update("read", true));
-    return new NotificationReadResult(result.getModifiedCount());
+    long markedCount = mongo.updateMulti(unreadForRecipient, Update.update("read", true)).getModifiedCount();
+    return new NotificationReadResult(markedCount);
   }
 
-  private NotificationDetail toDetail(Notification notification) {
-    return NotificationDetail.builder()
-        .id(notification.getId())
-        .accountId(notification.getAccountId())
-        .actorAccountId(notification.getActorAccountId())
-        .actorUsername(notification.getActorUsername())
-        .postId(notification.getPostId())
-        .postText(notification.getPostText())
-        .messageId(notification.getMessageId())
-        .messageText(notification.getMessageText())
-        .whatsForLunchSessionId(notification.getWhatsForLunchSessionId())
-        .whatsForLunchSessionText(notification.getWhatsForLunchSessionText())
-        .notificationType(notification.getNotificationType())
-        .read(Boolean.TRUE.equals(notification.getRead()))
-        .createdOn(notification.getCreatedOn())
-        .build();
+  private static Criteria olderThanCursor(StableCursor cursor) {
+    return new Criteria().orOperator(
+        Criteria.where("createdOn").lt(cursor.timestamp()),
+        new Criteria().andOperator(
+            Criteria.where("createdOn").is(cursor.timestamp()),
+            Criteria.where("id").lt(cursor.id())));
   }
 }

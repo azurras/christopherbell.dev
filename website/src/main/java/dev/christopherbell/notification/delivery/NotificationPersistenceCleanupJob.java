@@ -1,7 +1,6 @@
 package dev.christopherbell.notification.delivery;
 
 import java.time.Clock;
-import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,24 +19,24 @@ public final class NotificationPersistenceCleanupJob {
   private final int batchLimit;
 
   @Autowired
-  public NotificationPersistenceCleanupJob(NotificationFanoutPort fanout) {
-    this(fanout, Clock.systemUTC(), DEFAULT_BATCH_LIMIT);
+  public NotificationPersistenceCleanupJob(NotificationFanoutPort fanout, Clock clock) {
+    this(fanout, clock, DEFAULT_BATCH_LIMIT);
   }
 
-  NotificationPersistenceCleanupJob(
-      NotificationFanoutPort fanout, Clock clock, int batchLimit) {
+  NotificationPersistenceCleanupJob(NotificationFanoutPort fanout, Clock clock, int batchLimit) {
     this.fanout = fanout;
     this.clock = clock;
     this.batchLimit = batchLimit;
   }
 
+  /** Deletes up to one batch of expired dedupe claims and rate counters, logging when any go. */
   @Scheduled(fixedDelayString = "${app.persistence.cleanup-delay:PT5M}")
   public NotificationCleanupResult cleanup() {
-    var result = fanout.deleteExpired(Instant.now(clock), batchLimit);
-    if (result.totalDeleted() > 0) {
+    NotificationCleanupResult cleanupResult = fanout.deleteExpired(clock.instant(), batchLimit);
+    if (cleanupResult.totalDeleted() > 0) {
       log.info("Deleted {} notification guards and {} notification rate rows",
-          result.guardsDeleted(), result.ratesDeleted());
+          cleanupResult.guardsDeleted(), cleanupResult.ratesDeleted());
     }
-    return result;
+    return cleanupResult;
   }
 }

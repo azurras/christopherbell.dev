@@ -11,19 +11,28 @@ import dev.christopherbell.notification.preference.NotificationPreferenceService
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.LinkedHashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-/** Creates user notifications from feature events. */
+/**
+ * Creates user notifications from feature events.
+ *
+ * <p>Every delivery respects the recipient's preferences and passes the fanout guard, which
+ * drops duplicates and rate-limited events. Missing inputs make an event a no-op.</p>
+ */
 @RequiredArgsConstructor
 @Service
 public class NotificationDeliveryService {
   private static final Pattern MENTION_PATTERN =
       Pattern.compile("(?<![A-Za-z0-9._-])@([A-Za-z0-9._-]{3,32})");
+  private static final String WFL_SESSION_INVITE_TEXT = "Vote on today's lunch picks.";
 
   private final NotificationRepository notificationRepository;
   private final AccountRepository accountRepository;
@@ -31,28 +40,29 @@ public class NotificationDeliveryService {
   private final NotificationFanoutPort fanoutGuard;
   private final Clock clock;
 
-  /** Creates mention notifications for valid mentioned usernames in a post. */
+  /** Notifies each valid, existing account mentioned in a post, except the author. */
   public void createMentionNotifications(Post post, Account actor) {
     if (post == null || actor == null || post.getText() == null) {
       return;
     }
-
-    for (var username : extractMentionUsernames(post.getText())) {
-      accountRepository.findByUsernameIgnoreCase(username)
-          .filter(account -> !account.getId().equals(actor.getId()))
-          .ifPresent(account -> deliver(Notification.builder()
-              .accountId(account.getId())
-              .actorAccountId(actor.getId())
-              .actorUsername(actor.getUsername())
-              .postId(post.getId())
-              .postText(post.getText())
-              .notificationType(NotificationType.MENTION)
-              .read(false)
-              .build(), post.getId()));
+    for (String mentionedUsername : extractMentionUsernames(post.getText())) {
+      Optional<Account> mentionedAccount = accountRepository.findByUsernameIgnoreCase(mentionedUsername)
+          .filter(account -> !account.getId().equals(actor.getId()));
+      if (mentionedAccount.isPresent()) {
+        deliver(Notification.builder()
+            .accountId(mentionedAccount.get().getId())
+            .actorAccountId(actor.getId())
+            .actorUsername(actor.getUsername())
+            .postId(post.getId())
+            .postText(post.getText())
+            .notificationType(NotificationType.MENTION)
+            .read(false)
+            .build(), post.getId());
+      }
     }
   }
 
-  /** Creates a direct-message notification for the message recipient. */
+  /** Notifies the recipient of a direct message. */
   public void createMessageNotification(Message message, Account actor, Account recipient) {
     if (message == null || actor == null || recipient == null) {
       return;
@@ -68,22 +78,19 @@ public class NotificationDeliveryService {
         .build(), message.getId());
   }
 
-  /** Creates a notification when another user likes a post. */
+  /** Notifies a post's author when another user likes it. */
   public void createPostLikeNotification(Post post, Account actor, Account recipient) {
     createPostNotification(post, actor, recipient, NotificationType.LIKE);
   }
 
-  /** Creates a notification when another user comments on a post. */
+  /** Notifies a post's author when another user replies. */
   public void createPostCommentNotification(Post reply, Account actor, Account recipient) {
     createPostNotification(reply, actor, recipient, NotificationType.COMMENT);
   }
 
-  /** Creates a notification that links a recipient into a shared WFL session. */
+  /** Invites a recipient into a shared What's For Lunch session. */
   public void createWhatsForLunchSessionInvite(
-      WhatsForLunchSession session,
-      Account actor,
-      Account recipient
-  ) {
+      WhatsForLunchSession session, Account actor, Account recipient) {
     if (session == null || actor == null || recipient == null) {
       return;
     }
@@ -92,39 +99,36 @@ public class NotificationDeliveryService {
         .actorAccountId(actor.getId())
         .actorUsername(actor.getUsername())
         .whatsForLunchSessionId(session.getId())
-        .whatsForLunchSessionText("Vote on today's lunch picks.")
+        .whatsForLunchSessionText(WFL_SESSION_INVITE_TEXT)
         .notificationType(NotificationType.WFL_SESSION)
         .read(false)
         .build(), session.getId());
   }
 
+  /** Returns the distinct, sanitized usernames mentioned as {@code @name}, in order. */
   static Set<String> extractMentionUsernames(String text) {
-    var usernames = new LinkedHashSet<String>();
+    Set<String> mentionedUsernames = new LinkedHashSet<>();
     if (text == null || text.isBlank()) {
-      return usernames;
+      return mentionedUsernames;
     }
-
-    var matcher = MENTION_PATTERN.matcher(text);
-    while (matcher.find()) {
+    Matcher mentionMatcher = MENTION_PATTERN.matcher(text);
+    while (mentionMatcher.find()) {
       try {
-        usernames.add(UsernameSanitizer.sanitize(matcher.group(1)));
-      } catch (IllegalArgumentException ignored) {
-        // Ignore invalid mention-like tokens.
+        mentionedUsernames.add(UsernameSanitizer.sanitize(mentionMatcher.group(1)));
+      } catch (IllegalArgumentException notAUsername) {
+        // A mention-like token that is not a valid username is plain text, not a mention.
       }
     }
-    return usernames;
+    return mentionedUsernames;
   }
 
   private void createPostNotification(
-      Post post,
-      Account actor,
-      Account recipient,
-      NotificationType notificationType
-  ) {
+      Post post, Account actor, Account recipient, NotificationType notificationType) {
     if (post == null || actor == null || recipient == null || notificationType == null) {
       return;
     }
-    if (actor.getId() != null && actor.getId().equals(recipient.getId())) {
+    boolean actorIsRecipient = actor.getId() != null && actor.getId().equals(recipient.getId());
+    if (actorIsRecipient) {
       return;
     }
     deliver(Notification.builder()
@@ -138,10 +142,11 @@ public class NotificationDeliveryService {
         .build(), post.getId());
   }
 
-  private boolean shouldDeliver(String accountId, NotificationType notificationType) {
-    return notificationPreferenceService.shouldDeliver(accountId, notificationType);
-  }
-
+  /**
+   * Saves the notification when the recipient wants this type and the fanout guard grants a
+   * permit. If the save fails, the permit is released and the save failure is rethrown with any
+   * release failure suppressed.
+   */
   private void deliver(Notification notification, String targetId) {
     if (notification.getAccountId() == null
         || notification.getActorAccountId() == null
@@ -149,28 +154,31 @@ public class NotificationDeliveryService {
         || targetId == null) {
       return;
     }
-    if (!shouldDeliver(notification.getAccountId(), notification.getNotificationType())) {
+    if (!notificationPreferenceService.shouldDeliver(
+        notification.getAccountId(), notification.getNotificationType())) {
       return;
     }
-    var identity = new NotificationEventIdentity(
+    NotificationEventIdentity eventIdentity = new NotificationEventIdentity(
         notification.getAccountId(),
         notification.getActorAccountId(),
         notification.getNotificationType(),
         targetId);
-    var now = clock.instant();
-    fanoutGuard.tryAcquire(identity, now).ifPresent(permit -> {
-      notification.setId(UUID.randomUUID().toString());
-      notification.setCreatedOn(now);
+    Instant now = clock.instant();
+    Optional<NotificationDeliveryPermit> deliveryPermit = fanoutGuard.tryAcquire(eventIdentity, now);
+    if (deliveryPermit.isEmpty()) {
+      return;
+    }
+    notification.setId(UUID.randomUUID().toString());
+    notification.setCreatedOn(now);
+    try {
+      notificationRepository.save(notification);
+    } catch (RuntimeException saveFailure) {
       try {
-        notificationRepository.save(notification);
-      } catch (RuntimeException failure) {
-        try {
-          fanoutGuard.release(permit);
-        } catch (RuntimeException releaseFailure) {
-          failure.addSuppressed(releaseFailure);
-        }
-        throw failure;
+        fanoutGuard.release(deliveryPermit.get());
+      } catch (RuntimeException releaseFailure) {
+        saveFailure.addSuppressed(releaseFailure);
       }
-    });
+      throw saveFailure;
+    }
   }
 }

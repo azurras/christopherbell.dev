@@ -21,15 +21,23 @@ class MongoNotificationRepository extends KindScopedRepositorySupport<Notificati
     super(factory, Notification.class);
   }
 
-  @Override public Notification save(Notification value) { return saveValue(value); }
-  @Override public Optional<Notification> findById(String id) { return findValueById(id); }
+  @Override
+  public Notification save(Notification notification) {
+    return saveValue(notification);
+  }
+
+  @Override
+  public Optional<Notification> findById(String notificationId) {
+    return findValueById(notificationId);
+  }
   @Override
   public List<Notification> findByAccountIdOrderByCreatedOnDesc(
       String accountId, Pageable pageable) {
     return find(Query.query(Criteria.where("accountId").is(accountId))
         .with(Sort.by(Sort.Direction.DESC, "createdOn")), pageable);
   }
-  @Override public long countByAccountIdAndReadFalse(String accountId) {
+  @Override
+  public long countByAccountIdAndReadFalse(String accountId) {
     return mongo.count(Query.query(Criteria.where("accountId").is(accountId)
         .and("read").is(false)));
   }
