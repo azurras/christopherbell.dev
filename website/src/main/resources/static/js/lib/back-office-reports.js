@@ -11,31 +11,32 @@ export function parseReportPage(payload) {
 }
 
 /** Derive exact navigation state from authoritative report totals. */
-export function reportPageNavigation(page) {
-  const totalPages = Math.max(0, Number(page?.totalPages || 0));
-  const current = Math.max(0, Number(page?.page || 0));
+export function reportPageNavigation(reportPage) {
+  const totalPages = Math.max(0, Number(reportPage?.totalPages || 0));
+  const currentPageIndex = Math.max(0, Number(reportPage?.page || 0));
   return {
-    previousDisabled: current <= 0,
-    nextDisabled: totalPages === 0 || current + 1 >= totalPages,
-    label: totalPages === 0 ? 'Page 0 of 0' : `Page ${current + 1} of ${totalPages}`,
+    previousDisabled: currentPageIndex <= 0,
+    nextDisabled: totalPages === 0 || currentPageIndex + 1 >= totalPages,
+    label: totalPages === 0 ? 'Page 0 of 0' : `Page ${currentPageIndex + 1} of ${totalPages}`,
   };
 }
 
 /** Convert local date controls to the inclusive Instant query contract. */
-export function reportFilterValue(form) {
-  const values = new FormData(form);
+export function reportFilterValue(filterForm) {
+  const filterValues = new FormData(filterForm);
   return {
-    status: String(values.get('status') || ''),
-    reportType: String(values.get('reportType') || ''),
-    targetType: String(values.get('targetType') || ''),
-    reporter: String(values.get('reporter') || '').trim(),
-    from: toInstant(values.get('from')),
-    to: toInstant(values.get('to')),
+    status: String(filterValues.get('status') || ''),
+    reportType: String(filterValues.get('reportType') || ''),
+    targetType: String(filterValues.get('targetType') || ''),
+    reporter: String(filterValues.get('reporter') || '').trim(),
+    from: isoInstantFromLocalDateTime(filterValues.get('from')),
+    to: isoInstantFromLocalDateTime(filterValues.get('to')),
   };
 }
 
-function toInstant(value) {
-  if (!value) return '';
-  const parsed = new Date(String(value));
-  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : '';
+/** Returns the ISO instant for a local date-time control value, or '' when empty or invalid. */
+function isoInstantFromLocalDateTime(localDateTimeText) {
+  if (!localDateTimeText) return '';
+  const localDateTime = new Date(String(localDateTimeText));
+  return Number.isFinite(localDateTime.getTime()) ? localDateTime.toISOString() : '';
 }
