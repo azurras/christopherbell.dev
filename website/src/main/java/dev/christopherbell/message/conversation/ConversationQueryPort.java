@@ -9,11 +9,17 @@ import java.util.Optional;
 
 /** Persistence-neutral conversation summary, unread-count, and history query boundary. */
 public interface ConversationQueryPort {
+
+  /** The newest message of each conversation the owner can see, newest first. */
   List<Message> latestDistinctVisible(String ownerAccountId, int requestedLimit);
 
-  Map<String, Long> unreadCounts(
-      String recipientAccountId, Collection<String> senderAccountIds);
+  /** Unread incoming message counts for the recipient, keyed by sender account id. */
+  Map<String, Long> unreadCounts(String recipientAccountId, Collection<String> senderAccountIds);
 
+  /**
+   * One stable newest-first slice of a conversation, starting after the cursor when present.
+   * Matches the federation outbox and notification query ports.
+   */
   ConversationMessageSlice page(
-      String conversationKey, Optional<StableCursor> cursor, int requestedSize);
+      String conversationKey, Optional<StableCursor> olderThan, int requestedSize);
 }

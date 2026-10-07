@@ -2,24 +2,29 @@ package dev.christopherbell.message.conversation;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
-import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.libs.pagination.StableCursor;
+import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.libs.security.UsernameSanitizer;
 import dev.christopherbell.message.MessageRepository;
+import dev.christopherbell.message.model.ConversationKeys;
 import dev.christopherbell.message.model.ConversationSummary;
 import dev.christopherbell.message.model.Message;
 import dev.christopherbell.message.model.MessageDetail;
 import dev.christopherbell.permission.PermissionService;
-import dev.christopherbell.libs.pagination.StableCursorCodec;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-/** Handles conversation reads, summaries, and read-state updates. */
+/** Handles conversation reads, summaries, read-state updates and per-account archiving. */
 @RequiredArgsConstructor
 @Service
 public class ConversationService {
@@ -31,151 +36,155 @@ public class ConversationService {
   private final StableCursorCodec cursorCodec;
 
   /**
-   * Loads a conversation with another user and marks incoming unread messages as read.
+   * Opens the newest messages of the conversation with another user, oldest first, and marks the
+   * incoming ones read.
    */
-  public List<MessageDetail> getConversation(String username, int limit)
+  public List<MessageDetail> openConversation(String otherUsername, int limit)
       throws ResourceNotFoundException {
     try {
-      return getConversationPage(username, null, limit).items();
+      return openConversationPage(otherUsername, null, limit).items();
     } catch (InvalidRequestException impossibleBlankCursor) {
       throw new IllegalStateException("Blank conversation cursor was rejected", impossibleBlankCursor);
     }
   }
 
-  /** Loads one stable page of the newest remaining messages and marks page-contained reads. */
-  public ConversationPage getConversationPage(String username, String cursor, int size)
+  /**
+   * Opens one stable page of the conversation with another user, oldest first, and marks the
+   * incoming unread messages on that page as read.
+   *
+   * @param cursor the page boundary from a previous page, or blank for the newest messages
+   * @throws InvalidRequestException if the cursor is malformed
+   * @throws ResourceNotFoundException if either account does not exist
+   */
+  public ConversationPage openConversationPage(String otherUsername, String cursor, int size)
       throws InvalidRequestException, ResourceNotFoundException {
-    var participants = resolveParticipants(username);
-    var slice = conversationQueries.page(
-        participants.conversationKey(), cursorCodec.decode(cursor), size);
-    var messages = slice.items();
+    ConversationParticipants participants = resolveParticipants(otherUsername);
+    Optional<StableCursor> olderThan = cursorCodec.decode(cursor);
+    ConversationMessageSlice newestFirstSlice =
+        conversationQueries.page(participants.conversationKey(), olderThan, size);
+    markIncomingMessagesRead(newestFirstSlice.items(), participants.self().getId());
 
-    var changed = messages.stream()
-        .filter(message -> participants.self().getId().equals(message.getRecipientAccountId()))
-        .filter(message -> !Boolean.TRUE.equals(message.getRead()))
-        .peek(message -> message.setRead(true))
-        .toList();
-    if (!changed.isEmpty()) {
-      messageRepository.saveAll(changed);
+    List<MessageDetail> oldestFirstDetails = new ArrayList<>();
+    for (Message message : newestFirstSlice.items()) {
+      oldestFirstDetails.addFirst(detailFor(message, participants));
     }
+    return new ConversationPage(oldestFirstDetails, newestFirstSlice.nextCursor());
+  }
 
-    var details = new ArrayList<>(messages.stream()
-        .map(message -> toDetail(
-            message,
-            participants.self().getId(),
-            Map.of(
-                participants.self().getId(), participants.self(),
-                participants.other().getId(), participants.other())))
-        .toList());
-    Collections.reverse(details);
-    return new ConversationPage(details, slice.nextCursor());
+  /** Lists the signed-in account's latest visible conversations with unread counts. */
+  public List<ConversationSummary> listConversations(int limit) throws ResourceNotFoundException {
+    Account self = signedInAccount();
+    Map<String, Message> latestMessageByOtherAccountId = new LinkedHashMap<>();
+    for (Message latestMessage : conversationQueries.latestDistinctVisible(self.getId(), limit)) {
+      String otherAccountId = self.getId().equals(latestMessage.getSenderAccountId())
+          ? latestMessage.getRecipientAccountId()
+          : latestMessage.getSenderAccountId();
+      latestMessageByOtherAccountId.put(otherAccountId, latestMessage);
+    }
+    Map<String, Account> otherAccountsById = new HashMap<>();
+    for (Account otherAccount : accountRepository.findAllById(latestMessageByOtherAccountId.keySet())) {
+      otherAccountsById.put(otherAccount.getId(), otherAccount);
+    }
+    Map<String, Long> unreadCountBySenderId =
+        conversationQueries.unreadCounts(self.getId(), latestMessageByOtherAccountId.keySet());
+    return latestMessageByOtherAccountId.entrySet().stream()
+        .map(latestByOther -> summaryOf(
+            latestByOther.getKey(),
+            latestByOther.getValue(),
+            otherAccountsById.get(latestByOther.getKey()),
+            unreadCountBySenderId.getOrDefault(latestByOther.getKey(), 0L)))
+        .toList();
   }
 
   /**
-   * Lists the current user's latest conversations with unread counts.
+   * Archives the conversation with another user for the signed-in account only; the other
+   * participant and the messages are unchanged.
    */
-  public List<ConversationSummary> getConversations(int limit) throws ResourceNotFoundException {
-    var self = getSelfAccount();
-    var latestByOtherId = new java.util.LinkedHashMap<String, Message>();
-    for (var message : conversationQueries.latestDistinctVisible(self.getId(), limit)) {
-      var otherId = self.getId().equals(message.getSenderAccountId())
-          ? message.getRecipientAccountId()
-          : message.getSenderAccountId();
-      latestByOtherId.put(otherId, message);
-    }
-
-    var accounts = accountRepository.findAllById(latestByOtherId.keySet());
-    var accountById = new HashMap<String, Account>();
-    accounts.forEach(account -> accountById.put(account.getId(), account));
-    var unreadBySender = conversationQueries.unreadCounts(
-        self.getId(), latestByOtherId.keySet());
-    return latestByOtherId.entrySet().stream()
-        .map(entry -> summary(
-            entry.getKey(),
-            entry.getValue(),
-            accountById.get(entry.getKey()),
-            unreadBySender.getOrDefault(entry.getKey(), 0L)))
-        .toList();
-  }
-
-  /** Archives only the current account's view of a resolved conversation. */
-  public ConversationArchiveResult archive(String username) throws ResourceNotFoundException {
-    var participants = resolveParticipants(username);
+  public ConversationArchiveResult archiveConversationWith(String otherUsername)
+      throws ResourceNotFoundException {
+    ConversationParticipants participants = resolveParticipants(otherUsername);
     return conversationArchives.archive(
         participants.self().getId(),
         participants.conversationKey(),
-        java.util.Set.of(participants.self().getId(), participants.other().getId()));
+        Set.of(participants.self().getId(), participants.other().getId()));
   }
 
-  private ConversationSummary summary(
-      String otherId,
-      Message message,
-      Account other,
-      long unreadCount
-  ) {
+  /** Sets {@code read} on the viewer's unread incoming messages and saves those that changed. */
+  private void markIncomingMessagesRead(List<Message> messages, String viewerAccountId) {
+    List<Message> newlyReadMessages = new ArrayList<>();
+    for (Message message : messages) {
+      boolean isUnreadIncoming = viewerAccountId.equals(message.getRecipientAccountId())
+          && !Boolean.TRUE.equals(message.getRead());
+      if (isUnreadIncoming) {
+        message.setRead(true);
+        newlyReadMessages.add(message);
+      }
+    }
+    if (!newlyReadMessages.isEmpty()) {
+      messageRepository.saveAll(newlyReadMessages);
+    }
+  }
+
+  private static MessageDetail detailFor(Message message, ConversationParticipants participants) {
+    return MessageDetail.from(
+        message,
+        participants.self().getId(),
+        participants.usernameOf(message.getSenderAccountId()),
+        participants.usernameOf(message.getRecipientAccountId()));
+  }
+
+  private static ConversationSummary summaryOf(
+      String otherAccountId, Message latestMessage, Account otherAccount, long unreadCount) {
     return ConversationSummary.builder()
-        .accountId(otherId)
-        .username(other == null ? null : other.getUsername())
-        .displayName(displayName(other))
-        .latestText(message.getText())
-        .lastMessageOn(message.getCreatedOn())
+        .accountId(otherAccountId)
+        .username(otherAccount == null ? null : otherAccount.getUsername())
+        .displayName(displayNameOf(otherAccount))
+        .latestText(latestMessage.getText())
+        .lastMessageOn(latestMessage.getCreatedOn())
         .unreadCount(unreadCount)
         .build();
   }
 
-  private Account getSelfAccount() throws ResourceNotFoundException {
-    var selfId = permissionService.getSelfId();
+  private Account signedInAccount() throws ResourceNotFoundException {
+    String signedInAccountId = permissionService.getSelfId();
     return accountRepository
-        .findById(selfId)
-        .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", selfId)));
-  }
-
-  private ConversationParticipants resolveParticipants(String username)
-      throws ResourceNotFoundException {
-    var self = getSelfAccount();
-    var other = accountRepository
-        .findByUsername(UsernameSanitizer.sanitize(username))
+        .findById(signedInAccountId)
         .orElseThrow(() -> new ResourceNotFoundException(
-            String.format("Account with username %s not found.", username)));
-    return new ConversationParticipants(
-        self, other, conversationKey(self.getId(), other.getId()));
+            String.format("Account with id %s not found.", signedInAccountId)));
   }
 
-  private static String conversationKey(String firstAccountId, String secondAccountId) {
-    return firstAccountId.compareTo(secondAccountId) < 0
-        ? firstAccountId + ":" + secondAccountId
-        : secondAccountId + ":" + firstAccountId;
+  private ConversationParticipants resolveParticipants(String otherUsername)
+      throws ResourceNotFoundException {
+    Account self = signedInAccount();
+    Account other = accountRepository
+        .findByUsername(UsernameSanitizer.sanitize(otherUsername))
+        .orElseThrow(() -> new ResourceNotFoundException(
+            String.format("Account with username %s not found.", otherUsername)));
+    return new ConversationParticipants(self, other, ConversationKeys.between(self.getId(), other.getId()));
   }
 
-  private static MessageDetail toDetail(Message message, String selfId, Map<String, Account> accounts) {
-    var sender = accounts.get(message.getSenderAccountId());
-    var recipient = accounts.get(message.getRecipientAccountId());
-    return MessageDetail.builder()
-        .id(message.getId())
-        .senderAccountId(message.getSenderAccountId())
-        .senderUsername(sender == null ? null : sender.getUsername())
-        .recipientAccountId(message.getRecipientAccountId())
-        .recipientUsername(recipient == null ? null : recipient.getUsername())
-        .text(message.getText())
-        .read(Boolean.TRUE.equals(message.getRead()))
-        .mine(selfId.equals(message.getSenderAccountId()))
-        .createdOn(message.getCreatedOn())
-        .build();
-  }
-
-  private static String displayName(Account account) {
+  /** First and last name when either is present, otherwise the username. */
+  private static String displayNameOf(Account account) {
     if (account == null) {
       return null;
     }
-    return java.util.stream.Stream.of(account.getFirstName(), account.getLastName())
-        .filter(part -> part != null && !part.isBlank())
-        .reduce((first, second) -> first + " " + second)
+    return Stream.of(account.getFirstName(), account.getLastName())
+        .filter(namePart -> namePart != null && !namePart.isBlank())
+        .reduce((firstPart, secondPart) -> firstPart + " " + secondPart)
         .orElse(account.getUsername());
   }
 
-  private record ConversationParticipants(
-      Account self,
-      Account other,
-      String conversationKey
-  ) {}
+  private record ConversationParticipants(Account self, Account other, String conversationKey) {
+
+    /** The username of whichever participant has the id, or {@code null} for anyone else. */
+    String usernameOf(String accountId) {
+      if (self.getId().equals(accountId)) {
+        return self.getUsername();
+      }
+      if (other.getId().equals(accountId)) {
+        return other.getUsername();
+      }
+      return null;
+    }
+  }
 }
