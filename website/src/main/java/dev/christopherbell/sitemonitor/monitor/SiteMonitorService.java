@@ -7,18 +7,26 @@ import dev.christopherbell.sitemonitor.api.MonitorProblem;
 import dev.christopherbell.sitemonitor.fetch.MonitorFetchException;
 import dev.christopherbell.sitemonitor.fetch.MonitorUrls;
 import dev.christopherbell.sitemonitor.fetch.SiteMonitorDestinationPolicy;
+import dev.christopherbell.sitemonitor.model.CreateMonitorSite;
 import dev.christopherbell.sitemonitor.model.MonitorWorkspace;
+import dev.christopherbell.sitemonitor.model.MonitorWorkspace.Finding;
+import dev.christopherbell.sitemonitor.model.MonitorWorkspace.FindingSeverity;
+import dev.christopherbell.sitemonitor.model.MonitorWorkspace.Page;
 import dev.christopherbell.sitemonitor.model.MonitorWorkspace.Report;
+import dev.christopherbell.sitemonitor.model.MonitorWorkspace.ReportStatus;
 import dev.christopherbell.sitemonitor.model.MonitorWorkspace.Site;
 import dev.christopherbell.sitemonitor.persistence.MonitorWorkspaceRepository;
 import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 
 /** Owns tenant isolation, bounded pilot capacity, explicit baselines and leased mutations. */
@@ -26,6 +34,15 @@ import org.springframework.stereotype.Service;
 public class SiteMonitorService {
   private static final Duration LEASE_DURATION = Duration.ofMinutes(3);
   private static final String LEASE_NAME = "site-monitor-pilot";
+  private static final int MAX_SITES_PER_WORKSPACE = 5;
+  private static final int MAX_PILOT_WORKSPACES = 10;
+  private static final int MAX_LABEL_LENGTH = 80;
+  private static final int MAX_REPORTS_PER_SITE = 10;
+  private static final Duration MANUAL_CHECK_INTERVAL = Duration.ofMinutes(15);
+  private static final Duration SCHEDULED_CHECK_INTERVAL = Duration.ofDays(1);
+  private static final Duration ORIGIN_RESOLUTION_TIMEOUT = Duration.ofSeconds(3);
+  private static final String DEMO_LABEL = "Demonstration website";
+
   private final MonitorWorkspaceRepository workspaces;
   private final MonitorAccountAccess accounts;
   private final LeaseStore leases;
@@ -36,180 +53,316 @@ public class SiteMonitorService {
   public SiteMonitorService(MonitorWorkspaceRepository workspaces, MonitorAccountAccess accounts,
       LeaseStore leases, SiteMonitorDestinationPolicy destinations, MonitorScanner scanner,
       Clock clock) {
-    this.workspaces = workspaces; this.accounts = accounts; this.leases = leases;
-    this.destinations = destinations; this.scanner = scanner; this.clock = clock;
+    this.workspaces = workspaces;
+    this.accounts = accounts;
+    this.leases = leases;
+    this.destinations = destinations;
+    this.scanner = scanner;
+    this.clock = clock;
   }
 
+  /** Returns the signed-in account's workspace, empty when it has no sites. */
   public MonitorWorkspace currentWorkspace() {
-    String owner = accounts.requireCurrentActiveAccount();
-    return workspaces.find(owner).orElse(new MonitorWorkspace(null, null, owner, List.of()));
+    String ownerAccountId = accounts.requireCurrentActiveAccount();
+    return workspaces.findByAccountId(ownerAccountId)
+        .orElse(MonitorWorkspace.emptyFor(ownerAccountId));
   }
 
-  public MonitorWorkspace addSite(String label, String origin, List<String> paths, boolean demo) {
-    String owner = accounts.requireCurrentActiveAccount();
-    return exclusively(grant -> {
-      var workspace = workspaces.find(owner).orElse(new MonitorWorkspace(null, null, owner, List.of()));
-      if (workspace.sites().size() >= 5) throw new MonitorProblem(409, "The pilot allows five sites.");
-      if (workspace.version() == null && workspaces.count() >= 10) {
+  /**
+   * Adds a site to the signed-in account's workspace, or the fixed demonstration site.
+   *
+   * @throws MonitorProblem 409 when the workspace or the pilot is full or the origin is already
+   *     added; 400 for an origin that is not public HTTPS, invalid paths or an invalid label
+   */
+  public MonitorWorkspace addSite(CreateMonitorSite siteRequest) {
+    String ownerAccountId = accounts.requireCurrentActiveAccount();
+    return exclusively(lease -> {
+      MonitorWorkspace workspace = workspaces.findByAccountId(ownerAccountId)
+          .orElse(MonitorWorkspace.emptyFor(ownerAccountId));
+      if (workspace.sites().size() >= MAX_SITES_PER_WORKSPACE) {
+        throw new MonitorProblem(409, "The pilot allows five sites.");
+      }
+      boolean isNewWorkspace = workspace.version() == null;
+      if (isNewWorkspace && workspaces.count() >= MAX_PILOT_WORKSPACES) {
         throw new MonitorProblem(409, "The pilot is currently full.");
       }
-      final URI siteOrigin;
-      final List<String> pagePaths;
-      try {
-        siteOrigin = MonitorUrls.origin(demo ? MonitorUrls.DEMO_ORIGIN : origin);
-        pagePaths = demo ? MonitorUrls.DEMO_PATHS : MonitorUrls.paths(siteOrigin, paths);
-        destinations.resolveApproved(siteOrigin, Duration.ofSeconds(3));
-      } catch (IllegalArgumentException | MonitorFetchException invalid) {
-        throw new MonitorProblem(400, "Use a publicly reachable HTTPS origin and valid page paths.");
-      }
-      if (workspace.sites().stream().anyMatch(site -> site.origin().equals(siteOrigin.toString()))) {
-        throw new MonitorProblem(409, "This site is already in your workspace.");
-      }
-      String siteLabel = MonitorScanner.text(demo ? "Demonstration website" : label);
-      if (siteLabel.isBlank() || siteLabel.length() > 80) {
-        throw new MonitorProblem(400, "Use a site label between one and 80 characters.");
-      }
-      var site = new Site(UUID.randomUUID().toString(), siteLabel, siteOrigin.toString(), pagePaths,
-          UUID.randomUUID() + "-" + UUID.randomUUID(), demo, null, null, null, List.of(), List.of());
-      List<Site> sites = new ArrayList<>(workspace.sites()); sites.add(site);
-      return save(grant, new MonitorWorkspace(workspace.id(), workspace.version(), owner, workspace.generation(), sites));
+      Site newSite = validatedNewSite(siteRequest, workspace);
+      List<Site> sites = new ArrayList<>(workspace.sites());
+      sites.add(newSite);
+      return save(lease, new MonitorWorkspace(
+          workspace.id(), workspace.version(), ownerAccountId, workspace.generation(), sites));
     });
   }
 
-  public MonitorWorkspace run(String siteId, boolean acceptBaseline) {
-    String owner = accounts.requireCurrentActiveAccount();
-    return exclusively(grant -> runForOwner(grant, owner, siteId, acceptBaseline));
+  /**
+   * Verifies ownership, captures the configured pages, and accepts them as the new baseline only
+   * when every page is healthy; otherwise the previous baseline stays.
+   */
+  public MonitorWorkspace captureBaseline(String siteId) {
+    String ownerAccountId = accounts.requireCurrentActiveAccount();
+    return exclusively(lease -> runCheck(lease, ownerAccountId, siteId, CheckMode.CAPTURE_BASELINE));
   }
 
-  private MonitorWorkspace runForOwner(LeaseGrant grant, String owner, String siteId,
-      boolean acceptBaseline) {
-    if (!accounts.isActive(owner)) throw new MonitorProblem(403, "Active account required.");
-    var workspace = workspaces.find(owner).orElseThrow(() -> missing());
-    Site site = requireSite(workspace, siteId);
-    long deadline = MonitorScanner.newDeadline();
-    Runnable guard = () -> { requireHeld(grant); requireActive(owner); };
-    if (site.lastAttempt() != null
-        && site.lastAttempt().plus(Duration.ofMinutes(15)).isAfter(clock.instant())) {
-      throw new MonitorProblem(429, "Checks are available once every 15 minutes per site.");
-    }
-    if (!acceptBaseline && site.baseline().isEmpty()) {
-      throw new MonitorProblem(409, "Capture a healthy baseline before running comparisons.");
-    }
-    Site attempted = new Site(site.id(), site.label(), site.origin(), site.paths(), site.token(),
-        site.demo(), site.verifiedOn(), clock.instant(), site.baselineOn(), site.baseline(), site.reports());
-    var reservedWorkspace = save(grant, replace(workspace, attempted));
-    boolean verified;
-    String verificationProblem = "OWNERSHIP_NOT_VERIFIED";
-    try { verified = scanner.verify(attempted, deadline, guard); }
-    catch (MonitorFetchException failure) { verified = false; verificationProblem = failure.category(); }
-    if (!verified) {
-      var report = new Report(UUID.randomUUID().toString(), clock.instant(), site.baselineOn(), "INCOMPLETE",
-          List.of(new MonitorWorkspace.Finding("INCOMPLETE", "/", "ownership", "", verificationProblem)),
-          List.of());
-      return save(grant, replace(reservedWorkspace, withReport(attempted, report, null, false)));
-    }
-    var pages = scanner.capture(attempted, deadline, guard);
-    var report = MonitorComparison.compare(attempted.baseline(), pages, clock.instant(), site.baselineOn());
-    boolean healthyCapture = pages.size() == site.paths().size() && pages.stream().allMatch(p -> p.healthy());
-    if (acceptBaseline && !healthyCapture) {
-      report = new Report(report.id(), report.checkedOn(), site.baselineOn(), "INCOMPLETE", report.findings(), pages);
-    } else if (acceptBaseline) {
-      report = new Report(report.id(), report.checkedOn(), report.checkedOn(), "BASELINE", report.findings(), pages);
-    }
-    return save(grant, replace(reservedWorkspace, withReport(attempted, report,
-        acceptBaseline && healthyCapture ? pages : null, true)));
+  /** Verifies ownership and compares the configured pages with the accepted baseline. */
+  public MonitorWorkspace checkAgainstBaseline(String siteId) {
+    String ownerAccountId = accounts.requireCurrentActiveAccount();
+    return exclusively(lease -> runCheck(lease, ownerAccountId, siteId, CheckMode.COMPARE_WITH_BASELINE));
   }
 
+  /** Removes a site with its baseline and reports; the last site removes the workspace. */
   public MonitorWorkspace removeSite(String siteId) {
-    String owner = accounts.requireCurrentActiveAccount();
-    return exclusively(grant -> {
-      var workspace = workspaces.find(owner).orElseThrow(() -> missing());
+    String ownerAccountId = accounts.requireCurrentActiveAccount();
+    return exclusively(lease -> {
+      MonitorWorkspace workspace = workspaces.findByAccountId(ownerAccountId)
+          .orElseThrow(SiteMonitorService::siteOrReportNotFound);
       requireSite(workspace, siteId);
-      var remaining = workspace.sites().stream().filter(site -> !site.id().equals(siteId)).toList();
-      if (remaining.isEmpty()) {
-        requireHeld(grant); requireActive(owner); workspaces.delete(workspace);
-        return new MonitorWorkspace(null, null, owner, List.of());
+      List<Site> remainingSites = workspace.sites().stream()
+          .filter(site -> !site.id().equals(siteId))
+          .toList();
+      if (remainingSites.isEmpty()) {
+        requireLeaseHeld(lease);
+        requireActiveAccount(ownerAccountId);
+        workspaces.delete(workspace);
+        return MonitorWorkspace.emptyFor(ownerAccountId);
       }
-      return save(grant, new MonitorWorkspace(workspace.id(), workspace.version(), owner, workspace.generation(), remaining));
+      return save(lease, new MonitorWorkspace(workspace.id(), workspace.version(), ownerAccountId,
+          workspace.generation(), remainingSites));
     });
   }
 
-  public String report(String siteId, String reportId) {
+  /** Renders one of the signed-in account's reports as client-ready text. */
+  public String renderReport(String siteId, String reportId) {
     Site site = requireSite(currentWorkspace(), siteId);
-    Report report = site.reports().stream().filter(value -> value.id().equals(reportId))
-        .findFirst().orElseThrow(() -> missing());
+    Report report = site.reports().stream()
+        .filter(candidate -> candidate.id().equals(reportId))
+        .findFirst()
+        .orElseThrow(SiteMonitorService::siteOrReportNotFound);
     return MonitorComparison.renderReport(site.label(), site.origin(), report);
   }
 
-  /** At most one due site per minute; failed attempts also wait a day rather than hammer origins. */
+  /**
+   * Runs the scheduled comparison for at most one due site per minute across the pilot.
+   *
+   * <p>Workspaces of inactive accounts are deleted first. A site is due when it has a baseline
+   * and no attempt in the last day; failed attempts also wait a day rather than hammer origins.
+   * Another instance holding the lease is not an error.</p>
+   */
   public void checkNextDueSite() {
     try {
-      exclusively(grant -> {
-        var available = workspaces.list();
-        for (var workspace : available) {
-          if (!accounts.isActive(workspace.accountId())) {
-            requireHeld(grant); workspaces.delete(workspace);
+      exclusively(lease -> {
+        List<MonitorWorkspace> pilotWorkspaces = workspaces.listAll();
+        deleteWorkspacesOfInactiveAccounts(lease, pilotWorkspaces);
+        Optional<DueSite> nextDueSite = nextDueSite(pilotWorkspaces);
+        if (nextDueSite.isPresent()) {
+          requireLeaseHeld(lease);
+          if (workspaces.claimScheduledMinute(clock.instant())) {
+            DueSite dueSite = nextDueSite.get();
+            runCheck(lease, dueSite.ownerAccountId(), dueSite.site().id(), CheckMode.COMPARE_WITH_BASELINE);
           }
         }
-        var due = available.stream().filter(workspace -> accounts.isActive(workspace.accountId()))
-            .flatMap(workspace -> workspace.sites().stream()
-                .filter(site -> !site.baseline().isEmpty() && (site.lastAttempt() == null
-                    || !site.lastAttempt().plus(Duration.ofDays(1)).isAfter(clock.instant())))
-                .map(site -> new Due(workspace.accountId(), site)))
-            .min(Comparator.comparing(value -> value.site().lastAttempt(),
-                Comparator.nullsFirst(Comparator.naturalOrder())));
-        due.ifPresent(value -> {
-          requireHeld(grant);
-          if (workspaces.claimScheduledMinute(clock.instant())) {
-            runForOwner(grant, value.owner(), value.site().id(), false);
-          }
-        });
         return null;
       });
-    } catch (MonitorProblem failure) {
-      if (failure.status() != 409) throw failure;
+    } catch (MonitorProblem problem) {
+      if (problem.status() != 409) {
+        throw problem;
+      }
     }
   }
 
-  private MonitorWorkspace save(LeaseGrant grant, MonitorWorkspace workspace) {
-    requireHeld(grant);
-    requireActive(workspace.accountId());
+  private Site validatedNewSite(CreateMonitorSite siteRequest, MonitorWorkspace workspace) {
+    URI siteOrigin;
+    List<String> pagePaths;
+    try {
+      siteOrigin = MonitorUrls.origin(siteRequest.demo() ? MonitorUrls.DEMO_ORIGIN : siteRequest.origin());
+      pagePaths = siteRequest.demo()
+          ? MonitorUrls.DEMO_PATHS
+          : MonitorUrls.paths(siteOrigin, siteRequest.paths());
+      destinations.resolveApproved(siteOrigin, ORIGIN_RESOLUTION_TIMEOUT);
+    } catch (IllegalArgumentException | MonitorFetchException invalidSite) {
+      throw new MonitorProblem(400, "Use a publicly reachable HTTPS origin and valid page paths.");
+    }
+    boolean originAlreadyAdded = workspace.sites().stream()
+        .anyMatch(site -> site.origin().equals(siteOrigin.toString()));
+    if (originAlreadyAdded) {
+      throw new MonitorProblem(409, "This site is already in your workspace.");
+    }
+    String siteLabel = MonitorScanner.boundedText(siteRequest.demo() ? DEMO_LABEL : siteRequest.label());
+    if (siteLabel.isBlank() || siteLabel.length() > MAX_LABEL_LENGTH) {
+      throw new MonitorProblem(400, "Use a site label between one and 80 characters.");
+    }
+    String ownershipToken = UUID.randomUUID() + "-" + UUID.randomUUID();
+    return new Site(UUID.randomUUID().toString(), siteLabel, siteOrigin.toString(), pagePaths,
+        ownershipToken, siteRequest.demo(), null, null, null, List.of(), List.of());
+  }
+
+  /**
+   * Runs one check while holding the lease. The attempt time is saved before any fetch, so the
+   * cooldown applies even when the run fails part-way.
+   */
+  private MonitorWorkspace runCheck(
+      LeaseGrant lease, String ownerAccountId, String siteId, CheckMode checkMode) {
+    requireActiveAccount(ownerAccountId);
+    MonitorWorkspace workspace = workspaces.findByAccountId(ownerAccountId)
+        .orElseThrow(SiteMonitorService::siteOrReportNotFound);
+    Site site = requireSite(workspace, siteId);
+    long deadlineNanos = MonitorScanner.newRunDeadlineNanos();
+    Runnable stopUnlessStillAuthorized = () -> {
+      requireLeaseHeld(lease);
+      requireActiveAccount(ownerAccountId);
+    };
+    boolean checkedRecently = site.lastAttempt() != null
+        && site.lastAttempt().plus(MANUAL_CHECK_INTERVAL).isAfter(clock.instant());
+    if (checkedRecently) {
+      throw new MonitorProblem(429, "Checks are available once every 15 minutes per site.");
+    }
+    if (checkMode == CheckMode.COMPARE_WITH_BASELINE && !site.hasBaseline()) {
+      throw new MonitorProblem(409, "Capture a healthy baseline before running comparisons.");
+    }
+
+    Site attemptedSite = withLastAttempt(site, clock.instant());
+    MonitorWorkspace reservedWorkspace = save(lease, withSite(workspace, attemptedSite));
+    String verificationProblem = "OWNERSHIP_NOT_VERIFIED";
+    boolean ownershipVerified;
+    try {
+      ownershipVerified =
+          scanner.isOwnershipVerified(attemptedSite, deadlineNanos, stopUnlessStillAuthorized);
+    } catch (MonitorFetchException verificationFailure) {
+      ownershipVerified = false;
+      verificationProblem = verificationFailure.category();
+    }
+    if (!ownershipVerified) {
+      Report unverifiedReport = new Report(UUID.randomUUID().toString(), clock.instant(),
+          site.baselineOn(), ReportStatus.INCOMPLETE,
+          List.of(new Finding(FindingSeverity.INCOMPLETE, "/", "ownership", "", verificationProblem)),
+          List.of());
+      return save(lease, withSite(reservedWorkspace,
+          withReport(attemptedSite, unverifiedReport, false)));
+    }
+
+    List<Page> capturedPages =
+        scanner.capturePages(attemptedSite, deadlineNanos, stopUnlessStillAuthorized);
+    Report comparisonReport = MonitorComparison.compare(
+        attemptedSite.baseline(), capturedPages, clock.instant(), site.baselineOn());
+    boolean healthyCapture = capturedPages.size() == site.paths().size()
+        && capturedPages.stream().allMatch(Page::healthy);
+    if (checkMode == CheckMode.COMPARE_WITH_BASELINE) {
+      return save(lease, withSite(reservedWorkspace,
+          withReport(attemptedSite, comparisonReport, true)));
+    }
+    if (!healthyCapture) {
+      Report rejectedBaselineReport = new Report(comparisonReport.id(), comparisonReport.checkedOn(),
+          site.baselineOn(), ReportStatus.INCOMPLETE, comparisonReport.findings(), capturedPages);
+      return save(lease, withSite(reservedWorkspace,
+          withReport(attemptedSite, rejectedBaselineReport, true)));
+    }
+    Report acceptedBaselineReport = new Report(comparisonReport.id(), comparisonReport.checkedOn(),
+        comparisonReport.checkedOn(), ReportStatus.BASELINE, comparisonReport.findings(), capturedPages);
+    Site siteWithNewBaseline =
+        withAcceptedBaseline(attemptedSite, capturedPages, acceptedBaselineReport.checkedOn());
+    return save(lease, withSite(reservedWorkspace,
+        withReport(siteWithNewBaseline, acceptedBaselineReport, true)));
+  }
+
+  private void deleteWorkspacesOfInactiveAccounts(LeaseGrant lease, List<MonitorWorkspace> pilotWorkspaces) {
+    for (MonitorWorkspace workspace : pilotWorkspaces) {
+      if (!accounts.isActive(workspace.accountId())) {
+        requireLeaseHeld(lease);
+        workspaces.delete(workspace);
+      }
+    }
+  }
+
+  private Optional<DueSite> nextDueSite(List<MonitorWorkspace> pilotWorkspaces) {
+    Instant now = clock.instant();
+    return pilotWorkspaces.stream()
+        .filter(workspace -> accounts.isActive(workspace.accountId()))
+        .flatMap(workspace -> workspace.sites().stream()
+            .filter(site -> isDueForScheduledCheck(site, now))
+            .map(site -> new DueSite(workspace.accountId(), site)))
+        .min(Comparator.comparing(dueSite -> dueSite.site().lastAttempt(),
+            Comparator.nullsFirst(Comparator.naturalOrder())));
+  }
+
+  private static boolean isDueForScheduledCheck(Site site, Instant now) {
+    return site.hasBaseline()
+        && (site.lastAttempt() == null || !site.lastAttempt().plus(SCHEDULED_CHECK_INTERVAL).isAfter(now));
+  }
+
+  private MonitorWorkspace save(LeaseGrant lease, MonitorWorkspace workspace) {
+    requireLeaseHeld(lease);
+    requireActiveAccount(workspace.accountId());
     return workspaces.save(workspace);
   }
-  private void requireActive(String owner) {
-    if (!accounts.isActive(owner)) throw new MonitorProblem(403, "Active account required.");
+
+  private void requireActiveAccount(String accountId) {
+    if (!accounts.isActive(accountId)) {
+      throw new MonitorProblem(403, "Active account required.");
+    }
   }
-  private void requireHeld(LeaseGrant grant) {
-    if (leases.renew(grant, LEASE_DURATION).isEmpty()) {
+
+  private void requireLeaseHeld(LeaseGrant lease) {
+    if (leases.renew(lease, LEASE_DURATION).isEmpty()) {
       throw new MonitorProblem(409, "Another operation took ownership. Please retry.");
     }
   }
-  private <T> T exclusively(Function<LeaseGrant, T> work) {
-    var grant = leases.tryAcquire(LEASE_NAME, UUID.randomUUID().toString(), LEASE_DURATION)
+
+  /** Runs pilot work while holding the single pilot lease, releasing it on every exit. */
+  private <T> T exclusively(Function<LeaseGrant, T> leasedWork) {
+    LeaseGrant lease = leases.tryAcquire(LEASE_NAME, UUID.randomUUID().toString(), LEASE_DURATION)
         .orElseThrow(() -> new MonitorProblem(409, "A website check is running. Please retry shortly."));
-    try { return work.apply(grant); }
-    catch (org.springframework.dao.OptimisticLockingFailureException changed) {
+    try {
+      return leasedWork.apply(lease);
+    } catch (OptimisticLockingFailureException concurrentChange) {
       throw new MonitorProblem(409, "Your workspace changed. Reload it and retry.");
+    } finally {
+      leases.release(lease);
     }
-    finally { leases.release(grant); }
   }
+
   private static Site requireSite(MonitorWorkspace workspace, String siteId) {
-    return workspace.sites().stream().filter(site -> site.id().equals(siteId)).findFirst()
-        .orElseThrow(() -> missing());
+    return workspace.sites().stream()
+        .filter(site -> site.id().equals(siteId))
+        .findFirst()
+        .orElseThrow(SiteMonitorService::siteOrReportNotFound);
   }
-  private static MonitorProblem missing() { return new MonitorProblem(404, "Site or report not found."); }
-  private static MonitorWorkspace replace(MonitorWorkspace workspace, Site updated) {
-    return new MonitorWorkspace(workspace.id(), workspace.version(), workspace.accountId(), workspace.generation(), workspace.sites().stream()
-        .map(site -> site.id().equals(updated.id()) ? updated : site).toList());
+
+  private static MonitorProblem siteOrReportNotFound() {
+    return new MonitorProblem(404, "Site or report not found.");
   }
-  private Site withReport(Site site, Report report, List<MonitorWorkspace.Page> baseline,
-      boolean verified) {
-    List<Report> reports = new ArrayList<>(); reports.add(report);
-    reports.addAll(site.reports().stream().limit(9).toList());
+
+  private static MonitorWorkspace withSite(MonitorWorkspace workspace, Site updatedSite) {
+    List<Site> sites = workspace.sites().stream()
+        .map(site -> site.id().equals(updatedSite.id()) ? updatedSite : site)
+        .toList();
+    return new MonitorWorkspace(
+        workspace.id(), workspace.version(), workspace.accountId(), workspace.generation(), sites);
+  }
+
+  private static Site withLastAttempt(Site site, Instant attemptedOn) {
     return new Site(site.id(), site.label(), site.origin(), site.paths(), site.token(), site.demo(),
-        verified ? report.checkedOn() : null, site.lastAttempt(),
-        baseline == null ? site.baselineOn() : report.checkedOn(),
-        baseline == null ? site.baseline() : baseline, reports);
+        site.verifiedOn(), attemptedOn, site.baselineOn(), site.baseline(), site.reports());
   }
-  private record Due(String owner, Site site) {}
+
+  /** Prepends a report, keeping the newest ten, and records whether ownership was verified. */
+  private static Site withReport(Site site, Report report, boolean ownershipVerified) {
+    List<Report> newestReports = new ArrayList<>();
+    newestReports.add(report);
+    newestReports.addAll(site.reports().stream().limit(MAX_REPORTS_PER_SITE - 1).toList());
+    Instant verifiedOn = ownershipVerified ? report.checkedOn() : null;
+    return new Site(site.id(), site.label(), site.origin(), site.paths(), site.token(), site.demo(),
+        verifiedOn, site.lastAttempt(), site.baselineOn(), site.baseline(), newestReports);
+  }
+
+  private static Site withAcceptedBaseline(Site site, List<Page> baselinePages, Instant acceptedOn) {
+    return new Site(site.id(), site.label(), site.origin(), site.paths(), site.token(), site.demo(),
+        site.verifiedOn(), site.lastAttempt(), acceptedOn, baselinePages, site.reports());
+  }
+
+  private enum CheckMode {
+    CAPTURE_BASELINE,
+    COMPARE_WITH_BASELINE
+  }
+
+  private record DueSite(String ownerAccountId, Site site) {
+  }
 }

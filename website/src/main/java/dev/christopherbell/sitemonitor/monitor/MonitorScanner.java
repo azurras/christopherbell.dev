@@ -5,118 +5,201 @@ import dev.christopherbell.sitemonitor.fetch.MonitorGateway;
 import dev.christopherbell.sitemonitor.fetch.MonitorUrls;
 import dev.christopherbell.sitemonitor.model.MonitorWorkspace.Page;
 import dev.christopherbell.sitemonitor.model.MonitorWorkspace.Site;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 import org.springframework.stereotype.Component;
 
 /** Captures only configured HTML pages and at most ten same-origin assets in one 45s run. */
 @Component
 public class MonitorScanner {
+  private static final Duration RUN_TIME_BUDGET = Duration.ofSeconds(45);
+  private static final int MAX_ASSETS_PER_RUN = 10;
+  private static final int MAX_ASSET_URL_LENGTH = 600;
+  private static final int MAX_STORED_TEXT_LENGTH = 400;
+  private static final String OWNERSHIP_PROOF_PATH = "/.well-known/christopherbell-site-monitor.txt";
+  private static final String ASSET_SELECTOR = "script[src], link[rel=stylesheet][href], img[src]";
+  private static final String ASSET_CHECK_INCOMPLETE = "ASSET_CHECK_INCOMPLETE";
+
   private final MonitorGateway gateway;
-  public MonitorScanner(MonitorGateway gateway) { this.gateway = gateway; }
 
-  public boolean verify(Site site, long deadline) {
-    return verify(site, deadline, () -> {});
+  public MonitorScanner(MonitorGateway gateway) {
+    this.gateway = gateway;
   }
-  public boolean verify(Site site, long deadline, Runnable guard) {
+
+  /** Returns the monotonic deadline, in {@link System#nanoTime()} units, for a run starting now. */
+  public static long newRunDeadlineNanos() {
+    return System.nanoTime() + RUN_TIME_BUDGET.toNanos();
+  }
+
+  /** Bounds remote metadata and removes control characters before persistence and text export. */
+  public static String boundedText(String remoteText) {
+    String printableText = remoteText == null ? "" : remoteText.replaceAll("[\\p{Cntrl}]", " ").strip();
+    return printableText.substring(0, Math.min(MAX_STORED_TEXT_LENGTH, printableText.length()));
+  }
+
+  public boolean isOwnershipVerified(Site site, long deadlineNanos) {
+    return isOwnershipVerified(site, deadlineNanos, () -> {});
+  }
+
+  /**
+   * Whether the site's owner published its exact token at the well-known proof path, without a
+   * redirect. The demonstration site is verified by its fixed origin and paths instead.
+   *
+   * @param guard runs before any fetch and throws to stop the run, for example on lease loss
+   */
+  public boolean isOwnershipVerified(Site site, long deadlineNanos, Runnable guard) {
     guard.run();
-    if (site.demo()) return site.origin().equals(MonitorUrls.DEMO_ORIGIN)
-        && site.paths().equals(MonitorUrls.DEMO_PATHS);
-    URI origin = URI.create(site.origin());
-    URI proof = origin.resolve("/.well-known/christopherbell-site-monitor.txt");
-    var response = gateway.fetch(proof, origin, deadline, false, guard);
-    return response.status() == 200 && response.finalUri().equals(proof)
-        && new String(response.body(), StandardCharsets.UTF_8).strip().equals(site.token());
-  }
-
-  public List<Page> capture(Site site, long deadline) {
-    return capture(site, deadline, () -> {});
-  }
-  public List<Page> capture(Site site, long deadline, Runnable guard) {
-    URI origin = URI.create(site.origin());
-    List<Page> pages = new ArrayList<>();
-    int availableAssets = 10;
-    for (String path : site.paths()) {
-      Page page = capturePage(origin, path, deadline, availableAssets, guard);
-      pages.add(page);
-      availableAssets -= page.checkedAssets();
+    if (site.demo()) {
+      return site.origin().equals(MonitorUrls.DEMO_ORIGIN) && site.paths().equals(MonitorUrls.DEMO_PATHS);
     }
-    return List.copyOf(pages);
+    URI siteOrigin = URI.create(site.origin());
+    URI proofUri = siteOrigin.resolve(OWNERSHIP_PROOF_PATH);
+    MonitorGateway.Result proofResponse = gateway.fetch(proofUri, siteOrigin, deadlineNanos, false, guard);
+    String publishedToken = new String(proofResponse.body(), StandardCharsets.UTF_8).strip();
+    return proofResponse.status() == 200
+        && proofResponse.finalUri().equals(proofUri)
+        && publishedToken.equals(site.token());
   }
 
-  private Page capturePage(URI origin, String path, long deadline, int availableAssets, Runnable guard) {
-    URI pageUri = origin.resolve(path);
+  public List<Page> capturePages(Site site, long deadlineNanos) {
+    return capturePages(site, deadlineNanos, () -> {});
+  }
+
+  /**
+   * Captures each configured page in order, sharing one budget of ten asset checks.
+   *
+   * @param guard runs before each fetch and throws to stop the run
+   */
+  public List<Page> capturePages(Site site, long deadlineNanos, Runnable guard) {
+    URI siteOrigin = URI.create(site.origin());
+    List<Page> capturedPages = new ArrayList<>();
+    int remainingAssetChecks = MAX_ASSETS_PER_RUN;
+    for (String pagePath : site.paths()) {
+      Page capturedPage = capturePage(siteOrigin, pagePath, deadlineNanos, remainingAssetChecks, guard);
+      capturedPages.add(capturedPage);
+      remainingAssetChecks -= capturedPage.checkedAssets();
+    }
+    return List.copyOf(capturedPages);
+  }
+
+  private Page capturePage(URI siteOrigin, String pagePath, long deadlineNanos,
+      int remainingAssetChecks, Runnable guard) {
+    URI pageUri = siteOrigin.resolve(pagePath);
     try {
-      var response = gateway.fetch(pageUri, origin, deadline, false, guard);
-      if (response.status() != 200) {
-        var confirmation = gateway.fetch(pageUri, origin, deadline, false, guard);
-        return emptyPage(path, confirmation.status(), confirmation.finalUri().toString(),
-            response.status() == confirmation.status() ? "" : "HTTP_STATUS_CHANGED_DURING_CHECK",
-            response.status() == confirmation.status() && confirmation.status() != 200);
+      MonitorGateway.Result pageResponse = gateway.fetch(pageUri, siteOrigin, deadlineNanos, false, guard);
+      if (pageResponse.status() != 200) {
+        return pageAfterConfirmingStatus(pageUri, siteOrigin, pagePath, pageResponse, deadlineNanos, guard);
       }
-      if (response.contentType() == null || !(response.contentType().toLowerCase(Locale.ROOT)
-          .startsWith("text/html") || response.contentType().toLowerCase(Locale.ROOT)
-          .startsWith("application/xhtml+xml"))) {
+      if (!isHtml(pageResponse.contentType())) {
         throw new MonitorFetchException("PAGE_NOT_HTML");
       }
-      var document = Jsoup.parse(new java.io.ByteArrayInputStream(response.body()), null,
-          response.finalUri().toString());
-      List<String> failedAssets = new ArrayList<>();
-      int checkedAssets = 0;
-      int omittedAssets = 0;
-      String problem = "";
-      var assets = document.select("script[src], link[rel=stylesheet][href], img[src]");
-      var seenAssets = new java.util.HashSet<String>();
-      for (var element : assets) {
-        String attribute = element.hasAttr("src") ? "src" : "href";
-        String assetUrl = element.absUrl(attribute);
-        if (assetUrl.length() > 600 || !seenAssets.add(assetUrl)) continue;
-        URI asset;
-        try { asset = URI.create(assetUrl); }
-        catch (IllegalArgumentException invalid) { omittedAssets++; continue; }
-        if (checkedAssets >= availableAssets || !MonitorUrls.sameOrigin(origin, asset)
-            || asset.getRawQuery() != null) { omittedAssets++; continue; }
-        checkedAssets++;
-        try {
-          int status = gateway.fetch(asset, origin, deadline, true, guard).status();
-          if (status >= 400 && status != 405) {
-            int confirmation = gateway.fetch(asset, origin, deadline, true, guard).status();
-            if (confirmation == status) failedAssets.add(text(asset.getRawPath()) + " (" + status + ")");
-            else problem = "ASSET_CHECK_INCOMPLETE";
-          } else if (status < 200 || status >= 300) problem = "ASSET_CHECK_INCOMPLETE";
-        } catch (MonitorFetchException failure) { problem = "ASSET_CHECK_INCOMPLETE"; }
-      }
-      return new Page(path, 200, text(response.finalUri().toString()), text(document.title()),
-          text(document.select("meta[name=description]").attr("content")),
-          text(document.select("link[rel=canonical]").attr("href")),
-          text("meta: " + document.select("meta[name=robots]").attr("content")
-              + "; header: " + (response.robotsHeader() == null ? "" : response.robotsHeader())), failedAssets,
-          checkedAssets, omittedAssets, problem, false);
-    } catch (MonitorFetchException failure) {
-      return emptyPage(path, 0, pageUri.toString(), failure.category(), false);
-    } catch (java.io.IOException failure) {
-      return emptyPage(path, 0, pageUri.toString(), "HTML_PARSE_FAILED", false);
+      Document pageDocument = Jsoup.parse(new ByteArrayInputStream(pageResponse.body()), null,
+          pageResponse.finalUri().toString());
+      AssetCheck assetCheck =
+          checkSameOriginAssets(pageDocument, siteOrigin, deadlineNanos, remainingAssetChecks, guard);
+      String robotsDirectives = "meta: " + pageDocument.select("meta[name=robots]").attr("content")
+          + "; header: " + (pageResponse.robotsHeader() == null ? "" : pageResponse.robotsHeader());
+      return new Page(pagePath, 200, boundedText(pageResponse.finalUri().toString()),
+          boundedText(pageDocument.title()),
+          boundedText(pageDocument.select("meta[name=description]").attr("content")),
+          boundedText(pageDocument.select("link[rel=canonical]").attr("href")),
+          boundedText(robotsDirectives), assetCheck.failedAssets(),
+          assetCheck.checkedCount(), assetCheck.omittedCount(), assetCheck.problem(), false);
+    } catch (MonitorFetchException fetchFailure) {
+      return pageWithoutContent(pagePath, 0, pageUri.toString(), fetchFailure.category(), false);
+    } catch (IOException parseFailure) {
+      return pageWithoutContent(pagePath, 0, pageUri.toString(), "HTML_PARSE_FAILED", false);
     }
   }
 
-  private static Page emptyPage(String path, int status, String finalUrl, String problem,
-      boolean repeatedFailure) {
-    return new Page(path, status, text(finalUrl), "", "", "", "", List.of(), 0, 0,
+  /** Refetches a non-200 page so one transient status is reported as incomplete, not failed. */
+  private Page pageAfterConfirmingStatus(URI pageUri, URI siteOrigin, String pagePath,
+      MonitorGateway.Result firstResponse, long deadlineNanos, Runnable guard) {
+    MonitorGateway.Result confirmation = gateway.fetch(pageUri, siteOrigin, deadlineNanos, false, guard);
+    boolean statusRepeated = firstResponse.status() == confirmation.status();
+    String problem = statusRepeated ? "" : "HTTP_STATUS_CHANGED_DURING_CHECK";
+    boolean repeatedFailure = statusRepeated && confirmation.status() != 200;
+    return pageWithoutContent(
+        pagePath, confirmation.status(), confirmation.finalUri().toString(), problem, repeatedFailure);
+  }
+
+  /**
+   * HEAD-checks same-origin, query-free assets up to the remaining budget. A failing status is
+   * confirmed by a second request; anything else that cannot be confirmed marks the page
+   * incomplete.
+   */
+  private AssetCheck checkSameOriginAssets(Document pageDocument, URI siteOrigin, long deadlineNanos,
+      int remainingAssetChecks, Runnable guard) {
+    List<String> failedAssets = new ArrayList<>();
+    Set<String> seenAssetUrls = new HashSet<>();
+    int checkedCount = 0;
+    int omittedCount = 0;
+    String problem = "";
+    for (Element assetElement : pageDocument.select(ASSET_SELECTOR)) {
+      String urlAttribute = assetElement.hasAttr("src") ? "src" : "href";
+      String assetUrl = assetElement.absUrl(urlAttribute);
+      if (assetUrl.length() > MAX_ASSET_URL_LENGTH || !seenAssetUrls.add(assetUrl)) {
+        continue;
+      }
+      URI assetUri;
+      try {
+        assetUri = URI.create(assetUrl);
+      } catch (IllegalArgumentException invalidAssetUrl) {
+        omittedCount++;
+        continue;
+      }
+      if (checkedCount >= remainingAssetChecks || !MonitorUrls.sameOrigin(siteOrigin, assetUri)
+          || assetUri.getRawQuery() != null) {
+        omittedCount++;
+        continue;
+      }
+      checkedCount++;
+      try {
+        int assetStatus = gateway.fetch(assetUri, siteOrigin, deadlineNanos, true, guard).status();
+        if (assetStatus >= 400 && assetStatus != 405) {
+          int confirmedStatus = gateway.fetch(assetUri, siteOrigin, deadlineNanos, true, guard).status();
+          if (confirmedStatus == assetStatus) {
+            failedAssets.add(boundedText(assetUri.getRawPath()) + " (" + assetStatus + ")");
+          } else {
+            problem = ASSET_CHECK_INCOMPLETE;
+          }
+        } else if (assetStatus < 200 || assetStatus >= 300) {
+          problem = ASSET_CHECK_INCOMPLETE;
+        }
+      } catch (MonitorFetchException assetFetchFailure) {
+        problem = ASSET_CHECK_INCOMPLETE;
+      }
+    }
+    return new AssetCheck(failedAssets, checkedCount, omittedCount, problem);
+  }
+
+  private static boolean isHtml(String contentType) {
+    if (contentType == null) {
+      return false;
+    }
+    String normalizedContentType = contentType.toLowerCase(Locale.ROOT);
+    return normalizedContentType.startsWith("text/html")
+        || normalizedContentType.startsWith("application/xhtml+xml");
+  }
+
+  private static Page pageWithoutContent(String pagePath, int status, String finalUrl,
+      String problem, boolean repeatedFailure) {
+    return new Page(pagePath, status, boundedText(finalUrl), "", "", "", "", List.of(), 0, 0,
         problem, repeatedFailure);
   }
 
-  /** Bound remote metadata and remove control characters before persistence and text export. */
-  public static String text(String value) {
-    String clean = value == null ? "" : value.replaceAll("[\\p{Cntrl}]", " ").strip();
-    return clean.substring(0, Math.min(400, clean.length()));
-  }
-
-  public static long newDeadline() {
-    return System.nanoTime() + Duration.ofSeconds(45).toNanos();
+  private record AssetCheck(
+      List<String> failedAssets, int checkedCount, int omittedCount, String problem) {
   }
 }

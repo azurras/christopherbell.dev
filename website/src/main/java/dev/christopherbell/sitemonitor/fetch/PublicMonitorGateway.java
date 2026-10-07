@@ -4,6 +4,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** GET/HEAD only, no proxy/cookies, pinned DNS, verified TLS and same-origin manual redirects. */
@@ -11,7 +12,7 @@ import org.springframework.stereotype.Component;
 public class PublicMonitorGateway implements MonitorGateway {
   private final SiteMonitorDestinationPolicy destinations;
   private final MonitorHttpTransport transport;
-  @org.springframework.beans.factory.annotation.Autowired
+  @Autowired
   public PublicMonitorGateway(SiteMonitorDestinationPolicy destinations) {
     this(destinations, new MonitorHttpTransport(Duration.ofSeconds(2)));
   }
