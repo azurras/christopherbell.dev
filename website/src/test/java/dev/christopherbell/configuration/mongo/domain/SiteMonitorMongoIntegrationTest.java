@@ -23,7 +23,7 @@ class SiteMonitorMongoIntegrationTest {
     try (var client = com.mongodb.client.MongoClients.create(uri)) {
       var factory = new DomainMongoOperationsFactory(new MongoTemplate(client, "test"));
       var repository = new MongoMonitorWorkspaceRepository(factory);
-      assertThat(repository.list()).isEmpty();
+      assertThat(repository.listAll()).isEmpty();
       var accounts = org.mockito.Mockito.mock(dev.christopherbell.account.api.MonitorAccountAccess.class);
       org.mockito.Mockito.when(accounts.requireCurrentActiveAccount()).thenReturn("monitor-test-lifecycle");
       org.mockito.Mockito.when(accounts.isActive("monitor-test-lifecycle")).thenReturn(true);
@@ -37,7 +37,7 @@ class SiteMonitorMongoIntegrationTest {
       var title = new java.util.concurrent.atomic.AtomicReference<>("Accepted");
       var scanner = new dev.christopherbell.sitemonitor.monitor.MonitorScanner((target, origin, deadline, head) -> {
         String body = target.getPath().contains("well-known")
-            ? repository.find("monitor-test-lifecycle").orElseThrow().sites().getFirst().token()
+            ? repository.findByAccountId("monitor-test-lifecycle").orElseThrow().sites().getFirst().token()
             : "<title>" + title.get() + "</title>";
         return new dev.christopherbell.sitemonitor.fetch.MonitorGateway.Result(
             target.getPath().contains("well-known") ? 200 : status.get(), target,
@@ -48,24 +48,24 @@ class SiteMonitorMongoIntegrationTest {
           new dev.christopherbell.sitemonitor.fetch.SiteMonitorDestinationPolicy(
               host -> List.of(java.net.InetAddress.getByName("8.8.8.8"))), scanner, clock);
       try {
-        String id = service.addSite("Client", "https://client.example", List.of("/"), false).sites().getFirst().id();
-        var baseline = service.run(id, true).sites().getFirst();
+        String id = service.addSite(new dev.christopherbell.sitemonitor.model.CreateMonitorSite("Client", "https://client.example", List.of("/"), false)).sites().getFirst().id();
+        var baseline = service.captureBaseline(id).sites().getFirst();
         title.set("Changed"); now.set(now.get().plusSeconds(24 * 60 * 60));
         service.checkNextDueSite();
-        var changed = new MongoMonitorWorkspaceRepository(factory).find("monitor-test-lifecycle").orElseThrow().sites().getFirst();
-        assertThat(changed.reports().getFirst().status()).isEqualTo("CHANGES");
+        var changed = new MongoMonitorWorkspaceRepository(factory).findByAccountId("monitor-test-lifecycle").orElseThrow().sites().getFirst();
+        assertThat(changed.reports().getFirst().status()).isEqualTo(dev.christopherbell.sitemonitor.model.MonitorWorkspace.ReportStatus.CHANGES);
         assertThat(changed.reports().getFirst().baselineOn()).isEqualTo(baseline.baselineOn());
-        assertThat(service.report(id, changed.reports().getFirst().id())).contains("Accepted", "Changed");
+        assertThat(service.renderReport(id, changed.reports().getFirst().id())).contains("Accepted", "Changed");
         service.checkNextDueSite();
         assertThat(service.currentWorkspace().sites().getFirst().reports()).hasSize(2);
         now.set(now.get().plusSeconds(16 * 60)); status.set(500);
-        var failedCapture = service.run(id, true).sites().getFirst();
-        assertThat(failedCapture.reports().getFirst().status()).isEqualTo("INCOMPLETE");
+        var failedCapture = service.captureBaseline(id).sites().getFirst();
+        assertThat(failedCapture.reports().getFirst().status()).isEqualTo(dev.christopherbell.sitemonitor.model.MonitorWorkspace.ReportStatus.INCOMPLETE);
         assertThat(failedCapture.baseline()).isEqualTo(baseline.baseline());
         service.removeSite(id);
-        assertThat(repository.find("monitor-test-lifecycle")).isEmpty();
+        assertThat(repository.findByAccountId("monitor-test-lifecycle")).isEmpty();
       } finally {
-        repository.find("monitor-test-lifecycle").ifPresent(repository::delete);
+        repository.findByAccountId("monitor-test-lifecycle").ifPresent(repository::delete);
         factory.forType(dev.christopherbell.sitemonitor.model.MonitorSchedule.class)
             .remove(org.springframework.data.mongodb.core.query.Query.query(
                 org.springframework.data.mongodb.core.query.Criteria.where("id").is("daily")));
@@ -82,7 +82,7 @@ class SiteMonitorMongoIntegrationTest {
       var mongo = new MongoTemplate(client, "test");
       var factory = new DomainMongoOperationsFactory(mongo);
       var repository = new MongoMonitorWorkspaceRepository(factory);
-      assertThat(repository.list()).isEmpty();
+      assertThat(repository.listAll()).isEmpty();
       var indexesBefore = mongo.getCollection("application_runtime").listIndexes()
           .into(new java.util.ArrayList<>()).stream().map(document -> document.getString("name")).toList();
       try {
@@ -103,25 +103,25 @@ class SiteMonitorMongoIntegrationTest {
         assertThat(new MongoMonitorWorkspaceRepository(factory).claimScheduledMinute(now.plusSeconds(30))).isFalse();
         assertThat(repository.claimScheduledMinute(now.plusSeconds(60))).isTrue();
         new DomainAccountDeletionStore(factory).removePrivateData("monitor-test-0");
-        assertThat(repository.find("monitor-test-0")).isEmpty();
-        assertThat(repository.find("monitor-test-1")).isPresent();
+        assertThat(repository.findByAccountId("monitor-test-0")).isEmpty();
+        assertThat(repository.findByAccountId("monitor-test-1")).isPresent();
         assertThatThrownBy(() -> repository.save(updated)).isInstanceOf(OptimisticLockingFailureException.class);
         var reused = repository.save(new MonitorWorkspace(null, null, "monitor-test-bob", List.of()));
         assertThat(reused.id()).isEqualTo(first.id());
         assertThat(reused.version()).isZero();
         assertThatThrownBy(() -> repository.save(first)).isInstanceOf(OptimisticLockingFailureException.class);
         assertThatThrownBy(() -> repository.delete(first)).isInstanceOf(OptimisticLockingFailureException.class);
-        assertThat(repository.find("monitor-test-bob")).contains(reused);
+        assertThat(repository.findByAccountId("monitor-test-bob")).contains(reused);
         repository.delete(reused);
         var sameOwnerNewGeneration = repository.save(new MonitorWorkspace(null, null, "monitor-test-bob", List.of()));
         assertThatThrownBy(() -> repository.save(reused)).isInstanceOf(OptimisticLockingFailureException.class);
         assertThatThrownBy(() -> repository.delete(reused)).isInstanceOf(OptimisticLockingFailureException.class);
-        assertThat(repository.find("monitor-test-bob")).contains(sameOwnerNewGeneration);
+        assertThat(repository.findByAccountId("monitor-test-bob")).contains(sameOwnerNewGeneration);
         assertThat(mongo.getCollection("application_runtime").listIndexes().into(new java.util.ArrayList<>()))
             .extracting(document -> document.getString("name")).containsExactlyElementsOf(indexesBefore);
       } finally {
-        for (int i = 0; i < 10; i++) repository.find("monitor-test-" + i).ifPresent(repository::delete);
-        repository.find("monitor-test-bob").ifPresent(repository::delete);
+        for (int i = 0; i < 10; i++) repository.findByAccountId("monitor-test-" + i).ifPresent(repository::delete);
+        repository.findByAccountId("monitor-test-bob").ifPresent(repository::delete);
         factory.forType(dev.christopherbell.sitemonitor.model.MonitorSchedule.class)
             .remove(org.springframework.data.mongodb.core.query.Query.query(
                 org.springframework.data.mongodb.core.query.Criteria.where("id").is("daily")));

@@ -3,9 +3,12 @@ package dev.christopherbell.sitemonitor.fetch;
 import dev.christopherbell.sitemonitor.fetch.SiteMonitorDestinationPolicy.ApprovedDestination;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.timeout.ReadTimeoutException;
 import java.io.ByteArrayOutputStream;
 import java.net.SocketTimeoutException;
+import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -17,6 +20,7 @@ import java.util.concurrent.TimeoutException;
 import javax.net.ssl.SNIHostName;
 import reactor.core.Exceptions;
 import reactor.core.publisher.Mono;
+import reactor.netty.ByteBufFlux;
 import reactor.netty.http.Http11SslContextSpec;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.http.client.HttpClientSecurityUtils;
@@ -79,8 +83,7 @@ final class MonitorHttpTransport {
             requestHeaders.forEach(headers::set);
             headers.set(HttpHeaderNames.HOST, hostHeader(destination));
           })
-          .request(headersOnly ? io.netty.handler.codec.http.HttpMethod.HEAD
-              : io.netty.handler.codec.http.HttpMethod.GET)
+          .request(headersOnly ? HttpMethod.HEAD : HttpMethod.GET)
           .uri(requestTarget(destination.uri()))
           .response((inbound, body) -> {
             var metadata = new Response(
@@ -126,7 +129,7 @@ final class MonitorHttpTransport {
     }
   }
 
-  private Mono<byte[]> boundedBody(reactor.netty.ByteBufFlux body, int maxBodyBytes) {
+  private Mono<byte[]> boundedBody(ByteBufFlux body, int maxBodyBytes) {
     var output = new ByteArrayOutputStream(Math.min(maxBodyBytes, 8192));
     return body.handle((buffer, sink) -> {
       var readable = buffer.readableBytes();
@@ -156,7 +159,7 @@ final class MonitorHttpTransport {
         .anyMatch(contentType::equals);
   }
 
-  private static Map<String, List<String>> copyHeaders(io.netty.handler.codec.http.HttpHeaders source) {
+  private static Map<String, List<String>> copyHeaders(HttpHeaders source) {
     var copied = new LinkedHashMap<String, List<String>>();
     source.forEach(entry -> copied
         .computeIfAbsent(entry.getKey().toLowerCase(Locale.ROOT), ignored -> new ArrayList<>())
@@ -174,7 +177,7 @@ final class MonitorHttpTransport {
     return port == defaultPort ? host : host + ":" + port;
   }
 
-  private static String requestTarget(java.net.URI uri) {
+  private static String requestTarget(URI uri) {
     var path = uri.getRawPath();
     var target = path == null || path.isBlank() ? "/" : path;
     return uri.getRawQuery() == null ? target : target + "?" + uri.getRawQuery();

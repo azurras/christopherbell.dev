@@ -40,7 +40,7 @@ class SiteMonitorControllerTest {
     mvc.perform(get("/api/site-monitor/v1")).andExpect(status().isOk())
         .andExpect(header().string("Cache-Control", "no-store"))
         .andExpect(jsonPath("$.success").value(true));
-    when(service.report("site", "report")).thenReturn("Website Monitor report");
+    when(service.renderReport("site", "report")).thenReturn("Website Monitor report");
     mvc.perform(get("/api/site-monitor/v1/sites/site/reports/report")).andExpect(status().isOk())
         .andExpect(header().string("Content-Type", "text/plain; charset=UTF-8"))
         .andExpect(header().string("Cache-Control", "no-store"))
@@ -48,7 +48,7 @@ class SiteMonitorControllerTest {
         .andExpect(header().string("Content-Disposition", "attachment; filename=website-monitor-report.txt"));
   }
   @Test @WithMockUser void cooldownIsCategorizedAndInvalidInputNeverCallsService() throws Exception {
-    when(service.run("site", false)).thenThrow(new MonitorProblem(429, "Wait before checking again."));
+    when(service.checkAgainstBaseline("site")).thenThrow(new MonitorProblem(429, "Wait before checking again."));
     mvc.perform(post("/api/site-monitor/v1/sites/site/check").with(csrf()))
         .andExpect(status().isTooManyRequests()).andExpect(header().string("Retry-After", "900"))
         .andExpect(jsonPath("$.success").value(false));
