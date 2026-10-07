@@ -21,7 +21,7 @@ class ZipCoordinateGazetteerReaderTest {
 
   @Test
   void readsCensusZipCoordinates() {
-    var coordinates = reader.read(resource(GAZETTEER_SAMPLE));
+    var coordinates = reader.readCoordinatesFrom(resource(GAZETTEER_SAMPLE));
 
     assertEquals(2, coordinates.size());
     assertEquals("78701", coordinates.getFirst().getZipCode());
@@ -35,7 +35,7 @@ class ZipCoordinateGazetteerReaderTest {
   void rejectsMalformedRowsBeforeImport() {
     assertThrows(
         IllegalStateException.class,
-        () -> reader.read(resource("""
+        () -> reader.readCoordinatesFrom(resource("""
             GEOID|GEOIDFQ|ALAND|AWATER|ALAND_SQMI|AWATER_SQMI|INTPTLAT|INTPTLONG
             78701|860Z200US78701|1|0|1|0|not-a-latitude|-97.743699
             """)));
@@ -45,7 +45,7 @@ class ZipCoordinateGazetteerReaderTest {
   void rejectsInvalidZipCodeRows() {
     assertThrows(
         IllegalStateException.class,
-        () -> reader.read(resource("""
+        () -> reader.readCoordinatesFrom(resource("""
             GEOID|GEOIDFQ|ALAND|AWATER|ALAND_SQMI|AWATER_SQMI|INTPTLAT|INTPTLONG
             7870|860Z200US7870|1|0|1|0|30.271128|-97.743699
             """)));
@@ -55,7 +55,7 @@ class ZipCoordinateGazetteerReaderTest {
   void rejectsEmptyGazetteerDatasets() {
     assertThrows(
         IllegalStateException.class,
-        () -> reader.read(resource("""
+        () -> reader.readCoordinatesFrom(resource("""
             GEOID|GEOIDFQ|ALAND|AWATER|ALAND_SQMI|AWATER_SQMI|INTPTLAT|INTPTLONG
             """)));
   }

@@ -6,7 +6,6 @@ import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.location.model.ZipCoordinateImportResult;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -26,35 +25,38 @@ public class LocationController {
   private final ZipCoordinateService zipCoordinateService;
 
   /**
-   * Gets a ZIP coordinate origin from imported Location data.
+   * Finds the imported coordinate origin for a ZIP code.
    *
-   * @param zipCode five-digit ZIP or ZIP+4 input
+   * @param requestedZipCode five-digit ZIP or ZIP+4 input from the path
    * @return HTTP 200 with coordinate detail
+   * @throws InvalidRequestException if the input is not a ZIP or ZIP+4 code
+   * @throws ResourceNotFoundException if no imported coordinate exists for the ZIP code
    */
   @GetMapping(value = "/zip/{zipCode}", produces = MediaType.APPLICATION_JSON_VALUE)
-  public ResponseEntity<Response<ZipCoordinateDetail>> getZipCoordinate(@PathVariable String zipCode)
+  public ResponseEntity<Response<ZipCoordinateDetail>> findZipCoordinate(
+      @PathVariable("zipCode") String requestedZipCode)
       throws InvalidRequestException, ResourceNotFoundException {
-    return new ResponseEntity<>(
+    ZipCoordinateDetail coordinate = zipCoordinateService.findCoordinateForZip(requestedZipCode);
+    return ResponseEntity.ok(
         Response.<ZipCoordinateDetail>builder()
-            .payload(zipCoordinateService.getZipCoordinate(zipCode))
+            .payload(coordinate)
             .success(true)
-            .build(),
-        HttpStatus.OK);
+            .build());
   }
 
   /**
-   * Imports or refreshes bundled Census ZIP coordinates.
+   * Imports or refreshes the bundled Census ZIP coordinates.
    *
    * @return HTTP 200 with import counts
    */
   @PostMapping(value = "/zip/import/census", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<ZipCoordinateImportResult>> importCensusZipCoordinates() {
-    return new ResponseEntity<>(
+    ZipCoordinateImportResult importResult = zipCoordinateService.importCensusZipCoordinates();
+    return ResponseEntity.ok(
         Response.<ZipCoordinateImportResult>builder()
-            .payload(zipCoordinateService.importCensusZipCoordinates())
+            .payload(importResult)
             .success(true)
-            .build(),
-        HttpStatus.OK);
+            .build());
   }
 }
