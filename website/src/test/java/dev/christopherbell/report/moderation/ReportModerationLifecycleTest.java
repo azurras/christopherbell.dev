@@ -20,6 +20,7 @@ import dev.christopherbell.report.model.PostReport;
 import dev.christopherbell.report.model.ReportResolution;
 import dev.christopherbell.report.model.ReportResolveRequest;
 import dev.christopherbell.report.model.ReportStatus;
+import java.time.Clock;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,7 +42,8 @@ class ReportModerationLifecycleTest {
 
   @BeforeEach
   void setUp() {
-    service = new ReportModerationService(posts, accounts, activity, permissions, reports, sessionRevoker);
+    service = new ReportModerationService(
+        posts, accounts, activity, permissions, reports, sessionRevoker, Clock.systemUTC());
   }
 
   @Test
