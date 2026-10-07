@@ -5,7 +5,7 @@ import dev.christopherbell.account.auth.AccountSecurityFingerprint;
 import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
-import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.account.api.LoginTokens;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -31,6 +31,7 @@ public class BrowserSessionService implements AccountSessionRevoker {
   private final BrowserSessionActivityStore activity;
   private final BrowserSessionAuthenticationStore authentications;
   private final AccountRepository accounts;
+  private final LoginTokens loginTokens;
   private final Clock clock;
   private final SecureRandom random = new SecureRandom();
 
@@ -39,17 +40,19 @@ public class BrowserSessionService implements AccountSessionRevoker {
       BrowserSessionActivityStore activity,
       BrowserSessionAuthenticationStore authentications,
       AccountRepository accounts,
+      LoginTokens loginTokens,
       Clock clock) {
     this.sessions = sessions;
     this.activity = activity;
     this.authentications = authentications;
     this.accounts = accounts;
+    this.loginTokens = loginTokens;
     this.clock = clock;
   }
 
   /** Exchanges a short-lived login JWT for a persisted opaque browser session. */
   public String create(String loginJwt) {
-    var claims = PermissionService.validateToken(loginJwt);
+    var claims = loginTokens.verifiedClaimsOf(loginJwt);
     var accountId = claims.getSubject();
     var presentedFingerprint = claims.get(AccountSecurityFingerprint.CLAIM, String.class);
     var account = accounts.findById(accountId)

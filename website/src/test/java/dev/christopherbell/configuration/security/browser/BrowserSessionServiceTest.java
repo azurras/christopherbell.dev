@@ -24,6 +24,8 @@ import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.admin.activity.AdminActivityService;
+import dev.christopherbell.account.api.LoginTokens;
+import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.permission.PermissionService;
 import java.time.Clock;
 import java.time.Duration;
@@ -36,6 +38,8 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 class BrowserSessionServiceTest {
+  private static final LoginTokens LOGIN_TOKENS =
+      LoginTokensFixture.localDevelopmentLoginTokens();
   private static final Instant START = Instant.parse("2026-07-28T12:00:00Z");
 
   @Test
@@ -428,7 +432,7 @@ class BrowserSessionServiceTest {
   void rolelessAccountCannotCreateAnIncompleteBrowserSession() {
     var fixture = new Fixture(START);
     fixture.account.setRole(null);
-    String loginJwt = PermissionService.generateToken(fixture.account);
+    String loginJwt = LOGIN_TOKENS.issueFor(fixture.account);
 
     assertThrows(IllegalArgumentException.class, () -> fixture.service().create(loginJwt));
 
@@ -449,7 +453,7 @@ class BrowserSessionServiceTest {
   @Test
   void passwordResetBetweenJwtMintAndSessionExchangeIsRejected() {
     var fixture = new Fixture(START);
-    String staleLoginJwt = PermissionService.generateToken(fixture.account);
+    String staleLoginJwt = LOGIN_TOKENS.issueFor(fixture.account);
     fixture.account.setPasswordHash("reset-password-hash");
 
     assertThrows(IllegalArgumentException.class, () -> fixture.service().create(staleLoginJwt));
@@ -541,7 +545,7 @@ class BrowserSessionServiceTest {
     }
 
     private String create() {
-      return service().create(PermissionService.generateToken(account));
+      return service().create(LOGIN_TOKENS.issueFor(account));
     }
 
     private Optional<AuthenticatedBrowserSession> authenticate(String token, boolean interactive) {
@@ -559,7 +563,7 @@ class BrowserSessionServiceTest {
 
     private BrowserSessionService service() {
       return new BrowserSessionService(
-          sessions, activity, authentications, accounts, Clock.fixed(now, ZoneOffset.UTC));
+          sessions, activity, authentications, accounts, LOGIN_TOKENS, Clock.fixed(now, ZoneOffset.UTC));
     }
   }
 }

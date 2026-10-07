@@ -29,7 +29,6 @@ configuration -> account | dev.christopherbell.configuration.mongo.migration.V00
 configuration -> account | dev.christopherbell.configuration.security.JwtAuthenticationFilter -> dev.christopherbell.account.AccountRepository
 configuration -> account | dev.christopherbell.configuration.security.JwtAuthenticationFilter -> dev.christopherbell.account.auth.AccountSecurityFingerprint
 configuration -> account | dev.christopherbell.configuration.security.JwtAuthenticationFilter -> dev.christopherbell.account.model.Account
-configuration -> account | dev.christopherbell.configuration.security.JwtAuthenticationFilter -> dev.christopherbell.permission.PermissionService
 configuration -> account | dev.christopherbell.configuration.security.SecurityConfig -> dev.christopherbell.account.AccountRepository
 configuration -> account | dev.christopherbell.configuration.security.browser.BrowserSessionAccount -> dev.christopherbell.account.auth.AccountSecurityFingerprint
 configuration -> account | dev.christopherbell.configuration.security.browser.BrowserSessionAccount -> dev.christopherbell.account.model.Account
@@ -38,7 +37,6 @@ configuration -> account | dev.christopherbell.configuration.security.browser.Br
 configuration -> account | dev.christopherbell.configuration.security.browser.BrowserSessionService -> dev.christopherbell.account.auth.AccountSecurityFingerprint
 configuration -> account | dev.christopherbell.configuration.security.browser.BrowserSessionService -> dev.christopherbell.account.auth.AccountSessionRevoker
 configuration -> account | dev.christopherbell.configuration.security.browser.BrowserSessionService -> dev.christopherbell.account.model.Account
-configuration -> account | dev.christopherbell.configuration.security.browser.BrowserSessionService -> dev.christopherbell.permission.PermissionService
 configuration -> federation | dev.christopherbell.configuration.security.SecurityConfig -> dev.christopherbell.federation.discovery.FederationNoStoreFilter
 configuration -> music | dev.christopherbell.configuration.security.SecurityConfig -> dev.christopherbell.music.web.MusicNoStoreFilter
 configuration -> post | dev.christopherbell.configuration.PublicSitemapService -> dev.christopherbell.post.PostRepository

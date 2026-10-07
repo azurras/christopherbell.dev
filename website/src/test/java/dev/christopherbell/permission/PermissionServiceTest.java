@@ -1,181 +1,100 @@
 package dev.christopherbell.permission;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
-import dev.christopherbell.account.model.Account;
-import dev.christopherbell.account.model.AccountLoginRequest;
-import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
-import dev.christopherbell.libs.api.exception.InvalidTokenException;
-import dev.christopherbell.libs.security.PasswordUtil;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 class PermissionServiceTest {
 
+  private final PermissionService permissionService = new PermissionService();
+
   @AfterEach
   void clearSecurityContext() {
     SecurityContextHolder.clearContext();
-    PermissionService.configureSigningKey(null);
+  }
+
+  @ParameterizedTest(name = "{0} satisfies {1}: {2}")
+  @CsvSource({
+      "USER, USER, true",
+      "USER, MOD, false",
+      "USER, ADMIN, false",
+      "MOD, USER, true",
+      "MOD, MOD, true",
+      "MOD, ADMIN, false",
+      "ADMIN, USER, true",
+      "ADMIN, MOD, true",
+      "ADMIN, ADMIN, true",
+  })
+  void heldRoleSatisfiesEveryRequiredRoleAtOrBelowItsRank(
+      Role heldRole, String requiredRoleName, boolean expectedDecision) {
+    signInAs("account-1", heldRole.name());
+
+    assertThat(permissionService.hasAuthority(requiredRoleName)).isEqualTo(expectedDecision);
   }
 
   @Test
-  @DisplayName("Has authority allows higher roles to satisfy lower requirements")
-  void hasAuthority_whenRoleLevelIsHighEnough_returnsTrue() {
-    setTokenForRole(Role.ADMIN);
-
-    assertTrue(new PermissionService().hasAuthority("USER"));
-    assertTrue(new PermissionService().hasAuthority("MOD"));
-    assertTrue(new PermissionService().hasAuthority("ADMIN"));
+  void deniesARequestWithoutAuthentication() {
+    assertThat(permissionService.hasAuthority("USER")).isFalse();
   }
 
   @Test
-  @DisplayName("Has authority denies lower roles for higher requirements")
-  void hasAuthority_whenRoleLevelIsTooLow_returnsFalse() {
-    setTokenForRole(Role.USER);
+  void deniesAnUnauthenticatedAnonymousToken() {
+    SecurityContextHolder.getContext().setAuthentication(new AnonymousAuthenticationToken(
+        "anonymous-key", "anonymousUser", List.of(new SimpleGrantedAuthority("ADMIN"))));
+    SecurityContextHolder.getContext().getAuthentication().setAuthenticated(false);
 
-    assertFalse(new PermissionService().hasAuthority("MOD"));
-    assertFalse(new PermissionService().hasAuthority("ADMIN"));
+    assertThat(permissionService.hasAuthority("USER")).isFalse();
   }
 
   @Test
-  @DisplayName("Has authority denies missing authentication and invalid role names")
-  void hasAuthority_whenAuthenticationOrRoleInvalid_returnsFalse() {
-    var service = new PermissionService();
+  void deniesAMissingOrUnknownRequiredRole() {
+    signInAs("account-1", Role.ADMIN.name());
 
-    assertFalse(service.hasAuthority("USER"));
-
-    setTokenForRole(Role.USER);
-    assertFalse(service.hasAuthority(null));
-    assertFalse(service.hasAuthority("OWNER"));
+    assertThat(permissionService.hasAuthority(null)).isFalse();
+    assertThat(permissionService.hasAuthority("OWNER")).isFalse();
+    assertThat(permissionService.hasAuthority("admin")).isFalse();
   }
 
   @Test
-  void opaqueBrowserAuthenticationUsesItsFreshPrincipalAndAuthorities() {
+  void ignoresAuthoritiesThatAreNotRoleNames() {
+    signInAs("account-1", "SCOPE_read", "ROLE_ADMIN");
+
+    assertThat(permissionService.hasAuthority("USER")).isFalse();
+  }
+
+  @Test
+  void opaqueBrowserAuthenticationUsesItsPrincipalAndAuthorities() {
+    signInAs("account-42", Role.MOD.name());
+
+    assertThat(permissionService.getSelfId()).isEqualTo("account-42");
+    assertThat(PermissionService.getSelf()).isEqualTo("account-42");
+    assertThat(permissionService.hasAuthority("MOD")).isTrue();
+    assertThat(permissionService.hasAuthority("ADMIN")).isFalse();
+  }
+
+  @Test
+  void reportsAMissingAccountIdAsUnavailable() {
+    assertThatIllegalStateException()
+        .isThrownBy(permissionService::getSelfId)
+        .withMessage("Authenticated account id is unavailable.");
+  }
+
+  private static void signInAs(String accountId, String... authorityNames) {
+    List<SimpleGrantedAuthority> authorities = Arrays.stream(authorityNames)
+        .map(SimpleGrantedAuthority::new)
+        .toList();
     SecurityContextHolder.getContext().setAuthentication(
-        new UsernamePasswordAuthenticationToken(
-            "account-42",
-            null,
-            List.of(new SimpleGrantedAuthority(Role.MOD.name()))));
-
-    assertEquals("account-42", PermissionService.getSelf());
-    assertTrue(new PermissionService().hasAuthority("USER"));
-    assertTrue(new PermissionService().hasAuthority("MOD"));
-    assertFalse(new PermissionService().hasAuthority("ADMIN"));
-  }
-
-  @Test
-  @DisplayName("Configured JWT secret signs and validates tokens")
-  void configuredSecret_isUsedForTokenSigningAndValidation() {
-    PermissionService.configureSigningKey("test-jwt-secret-that-is-long-enough-for-hs256");
-
-    var token = PermissionService.generateToken(Account.builder()
-        .id("account-1")
-        .role(Role.USER)
-        .build());
-
-    assertEquals("account-1", PermissionService.validateToken(token).getSubject());
-  }
-
-  @Test
-  @DisplayName("Production profile requires a configured JWT secret")
-  void resolveSecret_whenProductionAndSecretMissing_throws() {
-    assertThrows(
-        IllegalStateException.class,
-        () -> PermissionService.resolveSecret("", true, Map.of()));
-  }
-
-  @Test
-  @DisplayName("Production profile accepts APP_JWT_SECRET from environment")
-  void resolveSecret_whenProductionAndEnvironmentSecretPresent_returnsEnvironmentSecret() {
-    var secret = "prod-jwt-secret-that-is-long-enough-for-hs256";
-
-    assertEquals(secret, PermissionService.resolveSecret("", true, Map.of("APP_JWT_SECRET", secret)));
-  }
-
-  @Test
-  @DisplayName("Local profile keeps the development JWT fallback")
-  void resolveSecret_whenLocalAndSecretMissing_returnsLocalFallback() {
-    assertEquals(
-        "local-development-jwt-secret-change-me-at-least-32-bytes",
-        PermissionService.resolveSecret("", false, Map.of()));
-  }
-
-  @Test
-  @DisplayName("Weak production JWT secrets fail key creation")
-  void configureSigningKey_whenProductionSecretTooShort_throws() {
-    assertThrows(
-        IllegalStateException.class,
-        () -> PermissionService.configureSigningKey("too-short", true));
-  }
-
-  @Test
-  @DisplayName("Generated login tokens expire after seven days")
-  void generateToken_setsSevenDayExpiration() {
-    var token = PermissionService.generateToken(Account.builder()
-        .id("account-1")
-        .role(Role.USER)
-        .build());
-
-    var claims = PermissionService.validateToken(token);
-    var tokenLifetimeMillis = claims.getExpiration().getTime() - claims.getIssuedAt().getTime();
-
-    assertEquals(604_800_000L, tokenLifetimeMillis);
-  }
-
-  @Test
-  @DisplayName("Active status is required for active-account checks")
-  void isAccountActive_requiresActiveStatus() throws Exception {
-    assertTrue(PermissionService.isAccountActive(AccountStatus.ACTIVE));
-    assertFalse(PermissionService.isAccountActive(AccountStatus.INACTIVE));
-    assertFalse(PermissionService.isAccountActive(AccountStatus.SUSPENDED));
-  }
-
-  @Test
-  @DisplayName("Credential-free tombstones always fail authentication")
-  void isAuthenticated_whenCredentialsAreAbsent_returnsFalse() throws Exception {
-    var tombstone = Account.builder()
-        .id("deleted-user")
-        .email("deleted-user@invalid.local")
-        .status(AccountStatus.INACTIVE)
-        .build();
-
-    assertFalse(PermissionService.isAuthenticated(
-        new AccountLoginRequest("deleted-user@invalid.local", "any-password"), tombstone));
-  }
-
-  @Test
-  @DisplayName("Current self-describing password hashes authenticate without a legacy salt")
-  void isAuthenticated_whenPasswordUsesCurrentFormat_returnsTrue() throws Exception {
-    var password = "current-password";
-    var account = Account.builder()
-        .id("current-user")
-        .passwordHash(PasswordUtil.hashPassword(password))
-        .passwordSalt(null)
-        .build();
-
-    assertTrue(PermissionService.isAuthenticated(
-        new AccountLoginRequest("current@example.com", password), account));
-  }
-
-  private void setTokenForRole(Role role) {
-    var token = PermissionService.generateToken(Account.builder()
-        .id("account-1")
-        .role(role)
-        .build());
-    SecurityContextHolder.getContext()
-        .setAuthentication(new UsernamePasswordAuthenticationToken(
-            "account-1",
-            token,
-            List.of(new SimpleGrantedAuthority(role.name()))));
+        new UsernamePasswordAuthenticationToken(accountId, null, authorities));
   }
 }

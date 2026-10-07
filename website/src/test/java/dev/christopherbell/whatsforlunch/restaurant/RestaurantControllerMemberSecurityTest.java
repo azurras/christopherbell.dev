@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import dev.christopherbell.account.api.LoginTokensFixture;
 import tools.jackson.databind.ObjectMapper;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.AccountRepository;
@@ -438,6 +439,6 @@ class RestaurantControllerMemberSecurityTest {
         .status(AccountStatus.ACTIVE)
         .build();
     when(accountRepository.findById("account-1")).thenReturn(Optional.of(account));
-    return "Bearer " + PermissionService.generateToken(account);
+    return "Bearer " + LoginTokensFixture.localDevelopmentLoginTokens().issueFor(account);
   }
 }

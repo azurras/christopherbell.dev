@@ -26,7 +26,8 @@ import dev.christopherbell.configuration.security.browser.BrowserSessionAuthenti
 import dev.christopherbell.configuration.security.browser.BrowserSessionRepository;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
 import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
-import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.account.api.LoginTokens;
+import dev.christopherbell.account.api.LoginTokensFixture;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
@@ -53,6 +54,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
 class JwtAuthenticationFilterTest {
+  private static final LoginTokens LOGIN_TOKENS =
+      LoginTokensFixture.localDevelopmentLoginTokens();
 
   @AfterEach
   void clearSecurityContext() {
@@ -65,9 +68,9 @@ class JwtAuthenticationFilterTest {
     var account = account(Role.USER);
     var accounts = mock(AccountRepository.class);
     when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
-    var filter = new JwtAuthenticationFilter(List.of(), null, null, null, accounts);
+    var filter = new JwtAuthenticationFilter(List.of(), null, null, null, accounts, LOGIN_TOKENS);
     var request = new MockHttpServletRequest("GET", "/api/protected");
-    request.addHeader("Authorization", "Bearer " + PermissionService.generateToken(account));
+    request.addHeader("Authorization", "Bearer " + LOGIN_TOKENS.issueFor(account));
     var response = new MockHttpServletResponse();
 
     filter.doFilter(request, response, new MockFilterChain());
@@ -112,11 +115,11 @@ class JwtAuthenticationFilterTest {
   void doFilter_whenAccountSecurityStateChanges_returnsUnauthorized()
       throws ServletException, IOException {
     var account = account(Role.USER);
-    var token = PermissionService.generateToken(account);
+    var token = LOGIN_TOKENS.issueFor(account);
     account.setPermissions(Set.of(AccountPermission.SHARED_FOLDER_READ));
     var accounts = mock(AccountRepository.class);
     when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
-    var filter = new JwtAuthenticationFilter(List.of(), null, null, null, accounts);
+    var filter = new JwtAuthenticationFilter(List.of(), null, null, null, accounts, LOGIN_TOKENS);
     var request = new MockHttpServletRequest("GET", "/api/protected");
     request.addHeader("Authorization", "Bearer " + token);
     var response = new MockHttpServletResponse();
@@ -216,8 +219,8 @@ class JwtAuthenticationFilterTest {
     when(authentications.findById(org.mockito.ArgumentMatchers.anyString()))
         .thenThrow(new DataAccessResourceFailureException("mongo"));
     var sessions = new BrowserSessionService(
-        sessionRepository, activity, authentications, accounts, Clock.systemUTC());
-    String token = sessions.create(PermissionService.generateToken(account));
+        sessionRepository, activity, authentications, accounts, LOGIN_TOKENS, Clock.systemUTC());
+    String token = sessions.create(LOGIN_TOKENS.issueFor(account));
     var filter = new JwtAuthenticationFilter(
         List.of(), sessions, new InteractiveBrowserRequest(), cookies());
     var request = new MockHttpServletRequest("GET", "/api/protected");
@@ -335,10 +338,10 @@ class JwtAuthenticationFilterTest {
     var accounts = mock(AccountRepository.class);
     var account = account(Role.USER);
     var filter = new JwtAuthenticationFilter(
-        List.of(request -> true), null, null, null, accounts);
+        List.of(request -> true), null, null, null, accounts, LOGIN_TOKENS);
     var request = new MockHttpServletRequest(
         "GET", "/0123456789abcdef0123456789abcdef01234567/css/main.css");
-    request.addHeader("Authorization", "Bearer " + PermissionService.generateToken(account));
+    request.addHeader("Authorization", "Bearer " + LOGIN_TOKENS.issueFor(account));
     var response = new MockHttpServletResponse();
 
     filter.doFilter(request, response, new MockFilterChain());
@@ -348,7 +351,7 @@ class JwtAuthenticationFilterTest {
   }
 
   private String token(Role role) {
-    return PermissionService.generateToken(account(role));
+    return LOGIN_TOKENS.issueFor(account(role));
   }
 
   private void assertDownstreamIOExceptionPropagatesOnce(
@@ -356,9 +359,9 @@ class JwtAuthenticationFilterTest {
     var account = account(Role.USER);
     var accounts = mock(AccountRepository.class);
     when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
-    var filter = new JwtAuthenticationFilter(skipMatchers, null, null, null, accounts);
+    var filter = new JwtAuthenticationFilter(skipMatchers, null, null, null, accounts, LOGIN_TOKENS);
     var request = new MockHttpServletRequest("GET", requestPath);
-    request.addHeader("Authorization", "Bearer " + PermissionService.generateToken(account));
+    request.addHeader("Authorization", "Bearer " + LOGIN_TOKENS.issueFor(account));
     var response = new MockHttpServletResponse();
     var expectedFailure = new IOException("downstream failure");
     var chainCalls = new AtomicInteger();
@@ -380,9 +383,9 @@ class JwtAuthenticationFilterTest {
     var account = account(Role.USER);
     var accounts = mock(AccountRepository.class);
     when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
-    var filter = new JwtAuthenticationFilter(skipMatchers, null, null, null, accounts);
+    var filter = new JwtAuthenticationFilter(skipMatchers, null, null, null, accounts, LOGIN_TOKENS);
     var request = new MockHttpServletRequest("GET", requestPath);
-    request.addHeader("Authorization", "Bearer " + PermissionService.generateToken(account));
+    request.addHeader("Authorization", "Bearer " + LOGIN_TOKENS.issueFor(account));
     var response = new MockHttpServletResponse();
     var expectedFailure = new ServletException("downstream failure");
     var chainCalls = new AtomicInteger();
@@ -497,8 +500,8 @@ class JwtAuthenticationFilterTest {
             return invocation.getArgument(0);
           });
       var creator = new BrowserSessionService(
-          sessions, activity, authentications, accounts, Clock.fixed(CREATED_ON, ZoneOffset.UTC));
-      originalToken = creator.create(PermissionService.generateToken(account));
+          sessions, activity, authentications, accounts, LOGIN_TOKENS, Clock.fixed(CREATED_ON, ZoneOffset.UTC));
+      originalToken = creator.create(LOGIN_TOKENS.issueFor(account));
       staleSnapshot = copy(persisted);
       when(authentications.findById(org.mockito.ArgumentMatchers.anyString()))
           .thenAnswer(invocation -> {
@@ -533,7 +536,7 @@ class JwtAuthenticationFilterTest {
             return Optional.of(copy(persisted));
           });
       var browserSessions = new BrowserSessionService(
-          sessions, activity, authentications, accounts, Clock.fixed(ROTATED_ON, ZoneOffset.UTC));
+          sessions, activity, authentications, accounts, LOGIN_TOKENS, Clock.fixed(ROTATED_ON, ZoneOffset.UTC));
       filter = new JwtAuthenticationFilter(
           List.of(), browserSessions, new InteractiveBrowserRequest(), cookies());
     }
