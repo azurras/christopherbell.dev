@@ -37,34 +37,33 @@ globalThis.document = {
 await import('../../main/resources/static/js/components/blog.js');
 const BlogPosts = customElements.get('blog-posts');
 
-function render(posts) {
-  const container = new TestElement('div');
+function renderPosts(blogPosts) {
+  const postsContainer = new TestElement('div');
   const component = new BlogPosts();
-  component.posts = posts;
   component.querySelector = selector => {
     assert.equal(selector, '.blogPosts');
-    return container;
+    return postsContainer;
   };
-  component.updatePosts();
-  return container;
+  component.renderPosts(blogPosts);
+  return postsContainer;
 }
 
 test('empty post list renders an explicit Blog empty state', () => {
-  const container = render([]);
+  const postsContainer = renderPosts([]);
 
-  assert.equal(container.children.length, 1);
-  assert.equal(container.children[0].tagName, 'p');
-  assert.equal(container.children[0].className, 'text-center blog-empty-state');
-  assert.equal(container.children[0].textContent, 'No posts have been published yet.');
+  assert.equal(postsContainer.children.length, 1);
+  assert.equal(postsContainer.children[0].tagName, 'p');
+  assert.equal(postsContainer.children[0].className, 'text-center blog-empty-state');
+  assert.equal(postsContainer.children[0].textContent, 'No posts have been published yet.');
 });
 
 test('configured post content continues to render as literal text', () => {
-  const container = render([{
+  const postsContainer = renderPosts([{
     author: 'Christopher',
     contentText: '<em>literal text</em>',
     title: 'A real post',
   }]);
-  const article = container.children[0];
+  const article = postsContainer.children[0];
   const content = article.children.find(child => child.tagName === 'pre');
 
   assert.equal(article.tagName, 'article');

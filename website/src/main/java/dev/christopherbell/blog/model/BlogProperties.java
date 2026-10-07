@@ -1,21 +1,17 @@
 package dev.christopherbell.blog.model;
 
 import java.util.List;
-import lombok.AllArgsConstructor;
-import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
 
 /**
- * Configuration properties holding static blog content.
+ * Blog posts bound from the {@code blog-properties} configuration prefix.
  *
- * <p>Bound from application configuration using prefix {@code blog-properties}.</p>
+ * @param posts the configured posts in display order
  */
-@AllArgsConstructor
-@Configuration
-@ConfigurationProperties(prefix = "blog-properties")
-@Data
-public class BlogProperties {
+@ConfigurationProperties("blog-properties")
+public record BlogProperties(List<Post> posts) {
 
-  private final List<Post> posts;
+  public BlogProperties {
+    posts = posts == null ? List.of() : List.copyOf(posts);
+  }
 }
