@@ -4,7 +4,8 @@ Owns read-only blog post serving.
 
 ## What Lives Here
 
-- Blog controllers and services for retrieving configured blog posts.
+- `BlogController` and `BlogService`, which list configured posts and find one by ID.
+- `BlogConfiguration`, which registers `BlogProperties`.
 - Blog DTO/model classes under `model`.
 - Blog content is configured from application properties rather than authored through an admin UI.
 - An empty configured post list renders a clear public empty state instead of placeholder content.
