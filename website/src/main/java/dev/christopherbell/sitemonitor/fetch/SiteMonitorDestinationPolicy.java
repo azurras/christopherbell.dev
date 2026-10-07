@@ -69,19 +69,16 @@ public class SiteMonitorDestinationPolicy {
 
   private ApprovedDestination validateAndResolve(URI uri) {
     if (uri == null
-        || uri.getScheme() == null
-        || !("http".equalsIgnoreCase(uri.getScheme())
-            || "https".equalsIgnoreCase(uri.getScheme()))
+        || !"https".equals(uri.getScheme())
         || uri.getHost() == null
         || uri.getHost().isBlank()
         || isUnsupportedHostIdentity(uri.getHost())
         || uri.getUserInfo() != null
-        || !"https".equals(uri.getScheme())
         || (uri.getPort() != -1 && uri.getPort() != 443)
         || uri.getRawQuery() != null
         || uri.getRawFragment() != null
         || "localhost".equalsIgnoreCase(uri.getHost())) {
-      throw new IllegalArgumentException("Site monitor destination must be a public HTTP(S) URL.");
+      throw new IllegalArgumentException("Site monitor destination must be a public HTTPS URL.");
     }
 
     final List<InetAddress> addresses;
@@ -100,11 +97,7 @@ public class SiteMonitorDestinationPolicy {
             .thenComparing(SiteMonitorDestinationPolicy::addressKey))
         .findFirst()
         .orElseThrow();
-    var scheme = uri.getScheme().toLowerCase(Locale.ROOT);
-    var port = uri.getPort() == -1 ? ("https".equals(scheme) ? 443 : 80) : uri.getPort();
-    if (port < 1 || port > 65_535) {
-      throw new IllegalArgumentException("Site monitor destination port is invalid.");
-    }
+    var port = uri.getPort() == -1 ? 443 : uri.getPort();
     return new ApprovedDestination(
         uri,
         uri.getHost().toLowerCase(Locale.ROOT),

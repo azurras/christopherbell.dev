@@ -1,6 +1,7 @@
 package dev.christopherbell.sitemonitor.fetch;
 
 import java.net.URI;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
@@ -36,7 +37,7 @@ public final class MonitorUrls {
       URI page = origin.resolve(value);
       if (!sameOrigin(origin, page) || page.getRawQuery() != null || page.getRawFragment() != null
           || !page.normalize().equals(page)
-          || java.util.Arrays.stream(page.getPath().split("/"))
+          || Arrays.stream(page.getPath().split("/"))
               .anyMatch(segment -> segment.equals(".") || segment.equals(".."))
           || page.getPath().contains("\\")) {
         throw new IllegalArgumentException("Page paths cannot contain queries, fragments or traversal.");
