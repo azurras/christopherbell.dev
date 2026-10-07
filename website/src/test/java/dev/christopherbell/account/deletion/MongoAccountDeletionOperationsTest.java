@@ -35,6 +35,18 @@ class MongoAccountDeletionOperationsTest {
   }
 
   @Test
+  void deletingAnAccountRemovesOnlyItsSavedSurvivorAndAdvancesWorldVersion() {
+    operations.removePrivateData("account-1");
+    var query = ArgumentCaptor.forClass(Query.class);
+    var update = ArgumentCaptor.forClass(UpdateDefinition.class);
+    verify(mongo).updateMulti(query.capture(), update.capture(), eq(Document.class), eq("application_runtime"));
+    assertThat(query.getValue().getQueryObject().toString())
+        .contains("survive_world", "payload.players.accountId=account-1");
+    assertThat(update.getValue().getUpdateObject().toString())
+        .contains("$pull", "payload.players", "accountId=account-1", "payload.version=1");
+  }
+
+  @Test
   @DisplayName("Private-data cleanup deletes owned WFL sessions but preserves shared sessions")
   void removePrivateData_coversCompleteCollectionInventory() {
     operations.removePrivateData("account-1");

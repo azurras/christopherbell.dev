@@ -22,7 +22,7 @@ class SurviveServiceTest {
 
   @Test
   void givesSuppliesToTheChosenSurvivorWithoutExposingCredentials() {
-    var service = new SurviveService(clock, () -> 50, 10);
+    var service = new SurviveService(clock, () -> 50, 10, new InMemorySurviveWorldRepository());
     var alice = service.join(null, "Same name");
     var bob = service.join(null, "Same name");
     var charlie = service.join(null, "Charlie");
@@ -51,7 +51,7 @@ class SurviveServiceTest {
 
   @Test
   void rejectedGiftsDoNotChangeEitherInventoryOrRevision() {
-    var service = new SurviveService(clock, () -> 50, 10);
+    var service = new SurviveService(clock, () -> 50, 10, new InMemorySurviveWorldRepository());
     var alice = service.join(null, "Alice");
     var bob = service.join(null, "Bob");
     act(service, alice.token(), SurviveAction.GATHER);
@@ -80,7 +80,7 @@ class SurviveServiceTest {
 
   @Test
   void competingGiftsCannotOverfillTheRecipient() throws Exception {
-    var service = new SurviveService(clock, () -> 2, 10);
+    var service = new SurviveService(clock, () -> 2, 10, new InMemorySurviveWorldRepository());
     var alice = service.join(null, "Alice");
     var bob = service.join(null, "Bob");
     var recipient = service.join(null, "Recipient");
@@ -114,7 +114,7 @@ class SurviveServiceTest {
   void combatAndExpiredSurvivorsCannotReceiveGifts() {
     var mutableClock = mock(Clock.class);
     when(mutableClock.instant()).thenReturn(clock.instant());
-    var service = new SurviveService(mutableClock, () -> 50, 10);
+    var service = new SurviveService(mutableClock, () -> 50, 10, new InMemorySurviveWorldRepository());
     var alice = service.join(null, "Alice");
     var bob = service.join(null, "Bob");
     act(service, alice.token(), SurviveAction.GATHER);
@@ -132,7 +132,7 @@ class SurviveServiceTest {
 
   @Test
   void survivorsShareCampButKeepSeparateInventoryAndRestartDoesNotResetWorld() {
-    var service = new SurviveService(clock, () -> 2, 10);
+    var service = new SurviveService(clock, () -> 2, 10, new InMemorySurviveWorldRepository());
     var alice = service.join(null, "Alice");
     var bob = service.join(null, "Bob");
     for (int count = 0; count < 5; count++) act(service, alice.token(), SurviveAction.GATHER);
@@ -156,7 +156,7 @@ class SurviveServiceTest {
   void capacityAndIdleExpiryAreBoundedWithoutResettingTheCamp() {
     var mutableClock = mock(Clock.class);
     when(mutableClock.instant()).thenReturn(clock.instant());
-    var service = new SurviveService(mutableClock, () -> 2, 1);
+    var service = new SurviveService(mutableClock, () -> 2, 1, new InMemorySurviveWorldRepository());
     var player = service.join(null, "Chris");
     assertEquals(503, assertThrows(ResponseStatusException.class,
         () -> service.join(null, "Extra")).getStatusCode().value());
@@ -171,7 +171,7 @@ class SurviveServiceTest {
 
   @Test
   void twoSurvivorsCannotConsumeTheSameSharedBoat() throws Exception {
-    var service = new SurviveService(clock, () -> 2, 10);
+    var service = new SurviveService(clock, () -> 2, 10, new InMemorySurviveWorldRepository());
     var alice = service.join(null, "Alice");
     var bob = service.join(null, "Bob");
     for (int count = 0; count < 10; count++) act(service, alice.token(), SurviveAction.GATHER);
@@ -201,7 +201,7 @@ class SurviveServiceTest {
 
   @Test
   void staleActionsAreRejectedWithoutApplyingThemAgain() {
-    var service = new SurviveService(clock, () -> 2, 10);
+    var service = new SurviveService(clock, () -> 2, 10, new InMemorySurviveWorldRepository());
     var player = service.join(null, "Chris");
     service.act(player.token(), SurviveAction.GATHER, 0);
     assertEquals(409, assertThrows(ResponseStatusException.class,
@@ -213,7 +213,7 @@ class SurviveServiceTest {
 
   @Test
   void rejectsInvalidNamesBeforeCreatingPlayers() {
-    var service = new SurviveService(clock, () -> 2, 10);
+    var service = new SurviveService(clock, () -> 2, 10, new InMemorySurviveWorldRepository());
     for (var name : new String[] {"", " ", "a".repeat(33), "bad\nname"}) {
       assertEquals(400, assertThrows(ResponseStatusException.class,
           () -> service.join(null, name)).getStatusCode().value());

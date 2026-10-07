@@ -6,7 +6,8 @@ import java.util.UUID;
 
 /** Private survivor state, owned and mutated only under the world service's monitor. */
 final class SurvivePlayer {
-  final String survivorId = UUID.randomUUID().toString();
+  final String survivorId;
+  final String accountId;
   final String name;
   Instant lastSeen;
   int health = 10;
@@ -22,6 +23,12 @@ final class SurvivePlayer {
   String message = "You arrive at the camp. Gather wood, build together, and survive.";
 
   SurvivePlayer(String name, Instant joinedAt) {
+    this(name, joinedAt, null, UUID.randomUUID().toString());
+  }
+
+  SurvivePlayer(String name, Instant joinedAt, String accountId, String survivorId) {
+    this.accountId = accountId;
+    this.survivorId = survivorId;
     this.name = name;
     lastSeen = joinedAt;
   }

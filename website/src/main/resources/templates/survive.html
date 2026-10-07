@@ -21,7 +21,7 @@
     <noscript><p class="survive-notice">Enable JavaScript for the controls. All gameplay runs on the Java server.</p></noscript>
     <p id="surviveError" class="survive-notice" role="alert" hidden></p>
     <form id="surviveJoin" class="survive-panel survive-join">
-      <div><h2 id="surviveJoinTitle">Enter the wilderness</h2><p>Your survivor is yours. The camp belongs to everyone.</p></div>
+      <div><h2 id="surviveJoinTitle">Enter the wilderness</h2><p>Your survivor is yours. The camp belongs to everyone. Log in for one saved character, or play as a temporary guest.</p></div>
       <label for="surviveName">Survivor name</label>
       <input id="surviveName" name="name" required maxlength="32" autocomplete="nickname" value="Chris" />
       <button type="submit" class="survive-primary">Join camp</button>
@@ -53,6 +53,7 @@
       <aside class="survive-sidebar" aria-label="Survivor and camp">
         <section class="survive-panel" aria-labelledby="survivePlayerName">
           <p class="survive-eyebrow">Your survivor</p><h2 id="survivePlayerName"></h2>
+          <p id="surviveSaveStatus" class="survive-muted" role="status"></p>
           <p id="survivePublicId" class="survive-muted"></p>
           <label class="survive-health-label" for="surviveHealth">Health <strong id="surviveHealthText"></strong></label>
           <meter id="surviveHealth" min="0" max="10" low="3" high="7" optimum="10" value="10"></meter>
@@ -88,8 +89,8 @@
       <p>Share supplies chooses another survivor by name and camp ID. Give 1–10 wood or food while both of you are at camp. Gifts move items directly into their inventory, which must have room; both survivors and the camp journal receive an update.</p>
       <p>Gather wood to improve strength and stamina. Your inventory holds 10 items. Five wood builds a shelter everyone can rest in; ten wood builds a boat any survivor can use to escape.</p>
       <p>Hunt to find hogs with 5 health. Your attack deals 1 + strength damage, and each attack costs 1 health, even the final blow. Defend blocks damage; flee returns you to camp at a cost of 1 health. Defeating a hog gives 1 food if you have room. Eating consumes it and restores up to 5 health. A shared shelter restores 2 health per rest.</p>
-      <p>Sail away to survive, or start again after death. New survivor replaces only your character. Shelters, boats, and other players remain in the shared world. Names and recent actions are visible to other players; use a nickname.</p>
-      <p>This world lives on one Java server. A server restart resets it; survivors expire after two hours without a game request. Closing the browser can end your survivor session. This version has no permanent saves, chat, or matchmaking.</p>
+      <p>Sail away to survive, or start again after death. New survivor replaces only your character. Saved account characters can start again after death or escape; joining again resumes a living character. Shelters, boats, and other players remain in the shared world. Names and recent actions are visible to other players; use a nickname.</p>
+      <p>Your logged-in account has one saved survivor. Moves, supplies, combat and the shared camp are saved after each successful command and survive server restarts. Log in again to resume. Guests use a temporary browser session and expire after two idle hours. Saved survivors keep their progress while inactive and return to the active camp when resumed. Guest progress stays separate from your account character. This version has no chat or matchmaking.</p>
     </details>
     <p class="survive-attribution">Adapted from <a href="https://github.com/azurras/survive">azurras/Survive</a> · Java game engine · <a href="/licenses/survive-GPL-3.0.txt">GPL-3.0 license</a>. Browser adaptation completes the original's unfinished combat and food actions.</p>
   </main>

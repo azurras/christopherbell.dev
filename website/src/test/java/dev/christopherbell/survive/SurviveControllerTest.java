@@ -24,10 +24,45 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 @Import({SurviveService.class, SecurityConfig.class, BrowserAuthenticationCookies.class,
     InteractiveBrowserRequest.class, ControllerExceptionHandler.class})
 class SurviveControllerTest {
+  @org.springframework.boot.test.context.TestConfiguration
+  static class Storage {
+    @org.springframework.context.annotation.Bean
+    dev.christopherbell.survive.persistence.SurviveWorldRepository worlds() {
+      return new InMemorySurviveWorldRepository();
+    }
+  }
   @Autowired private MockMvc mvc;
+  @Autowired private org.springframework.web.context.WebApplicationContext context;
+
+  @org.junit.jupiter.api.BeforeEach
+  void useTheSecurityChainWithoutRegisteringItsFilterBeansTwice() {
+    mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(context)
+        .apply(org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity()).build();
+  }
   @MockitoBean(name = "permissionService") private PermissionService permissionService;
   @MockitoBean private AccountRepository accounts;
   @MockitoBean private BrowserSessionService browserSessions;
+
+  @Test
+  void accountSurvivorResumesWithoutGuestCookieAndRepeatedJoinCannotReplaceIt() throws Exception {
+    var account = dev.christopherbell.account.model.Account.builder().id("saved-owner")
+        .role(dev.christopherbell.account.model.Role.USER).status(dev.christopherbell.account.model.AccountStatus.ACTIVE)
+        .permissions(java.util.Set.of()).build();
+    org.mockito.Mockito.when(accounts.findById("saved-owner")).thenReturn(java.util.Optional.of(account));
+    String credential = "Bearer " + PermissionService.generateToken(account);
+    var joined = mvc.perform(post("/api/survive/v1/game").header("Authorization", credential).with(csrf())
+        .contentType("application/json").content("{\"name\":\"Saved survivor\"}"))
+        .andExpect(status().isOk()).andReturn();
+    org.mockito.Mockito.verify(accounts).findById("saved-owner");
+    org.junit.jupiter.api.Assertions.assertTrue(joined.getResponse().getContentAsString().contains("\"saved\":true"));
+    var json = new com.fasterxml.jackson.databind.ObjectMapper().readTree(joined.getResponse().getContentAsString());
+    mvc.perform(get("/api/survive/v1/game").header("Authorization", credential))
+        .andExpect(status().isOk()).andExpect(jsonPath("$.survivorId").value(json.get("survivorId").asText()))
+        .andExpect(jsonPath("$.saved").value(true));
+    mvc.perform(post("/api/survive/v1/game").header("Authorization", credential).with(csrf())
+        .contentType("application/json").content("{\"name\":\"Replacement attempt\"}"))
+        .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Saved survivor"));
+  }
 
   @Test
   void anonymousGiftsKeepCsrfAndValidateTheRequestBeforeMutation() throws Exception {

@@ -5,6 +5,8 @@ import dev.christopherbell.survive.model.SurviveSnapshot;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.CacheControl;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -30,7 +32,7 @@ public class SurviveController {
   @GetMapping("/game")
   public ResponseEntity<SurviveSnapshot> getGame(
       @CookieValue(name = COOKIE_NAME, required = false) String token) {
-    var state = survivors.find(token);
+    var state = survivors.findForOwner(token, accountId());
     return state.map(snapshot -> ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(snapshot))
         .orElseGet(() -> ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build());
   }
@@ -40,7 +42,10 @@ public class SurviveController {
   public ResponseEntity<SurviveSnapshot> joinGame(
       @CookieValue(name = COOKIE_NAME, required = false) String previousToken,
       @Valid @RequestBody SurviveRequests.Join request, HttpServletRequest httpRequest) {
-    var joined = survivors.join(previousToken, request.name());
+    var joined = survivors.joinForOwner(previousToken, request.name(), accountId());
+    if (joined.token() == null) {
+      return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(joined.state());
+    }
     // A session cookie survives page refresh; the server enforces sliding idle expiry.
     var cookie = ResponseCookie.from(COOKIE_NAME, joined.token()).httpOnly(true)
         .secure(httpRequest.isSecure()).sameSite("Strict").path("/api/survive/v1").build();
@@ -54,7 +59,7 @@ public class SurviveController {
       @CookieValue(name = COOKIE_NAME, required = false) String token,
       @Valid @RequestBody SurviveRequests.Act request) {
     return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-        .body(survivors.act(token, request.action(), request.revision()));
+        .body(survivors.actForOwner(token, accountId(), request.action(), request.revision()));
   }
 
   /** Transfers supplies between survivors in the same authoritative world. */
@@ -63,7 +68,12 @@ public class SurviveController {
       @CookieValue(name = COOKIE_NAME, required = false) String token,
       @Valid @RequestBody SurviveRequests.Gift request) {
     return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-        .body(survivors.giveSupplies(token, request.recipientId(), request.resource(),
+        .body(survivors.giveSuppliesForOwner(token, accountId(), request.recipientId(), request.resource(),
             request.quantity(), request.revision()));
+  }
+  private static String accountId() {
+    var authentication = SecurityContextHolder.getContext().getAuthentication();
+    return authentication == null || !authentication.isAuthenticated()
+        || authentication instanceof AnonymousAuthenticationToken ? null : authentication.getName();
   }
 }
