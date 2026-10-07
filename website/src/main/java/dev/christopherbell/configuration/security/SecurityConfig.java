@@ -7,6 +7,7 @@ import dev.christopherbell.configuration.RequestSizeProperties;
 import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.configuration.security.browser.BrowserSessionRepository;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
+import dev.christopherbell.account.api.LoginTokens;
 import dev.christopherbell.configuration.security.browser.BrowserSessionActivityStore;
 import dev.christopherbell.configuration.security.browser.BrowserSessionAuthenticationStore;
 import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
@@ -253,9 +254,15 @@ public class SecurityConfig {
       BrowserSessionService browserSessions,
       InteractiveBrowserRequest interactiveRequests,
       BrowserAuthenticationCookies browserCookies,
-      AccountRepository accounts) {
+      AccountRepository accounts,
+      LoginTokens loginTokens) {
     return new JwtAuthenticationFilter(
-        publicMatchersList(), browserSessions, interactiveRequests, browserCookies, accounts);
+        publicMatchersList(),
+        browserSessions,
+        interactiveRequests,
+        browserCookies,
+        accounts,
+        loginTokens);
   }
 
   @Bean
@@ -263,9 +270,10 @@ public class SecurityConfig {
       BrowserSessionRepository browserSessions,
       BrowserSessionActivityStore activity,
       BrowserSessionAuthenticationStore authentications,
-      AccountRepository accounts) {
+      AccountRepository accounts,
+      LoginTokens loginTokens) {
     return new BrowserSessionService(
-        browserSessions, activity, authentications, accounts, Clock.systemUTC());
+        browserSessions, activity, authentications, accounts, loginTokens, Clock.systemUTC());
   }
 
   public static boolean hasExplicitBearerToken(jakarta.servlet.http.HttpServletRequest request) {

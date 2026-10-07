@@ -6,7 +6,7 @@ import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import dev.christopherbell.libs.security.EmailSanitizer;
 import dev.christopherbell.libs.security.PasswordUtil;
-import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.account.api.LoginTokens;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
 import java.time.Instant;
@@ -27,6 +27,7 @@ public class AccountAuthenticationService {
   private final AccountRepository accountRepository;
   private final AccountLoginStore accountLoginStore;
   private final AccountSessionRevoker sessionRevoker;
+  private final LoginTokens loginTokens;
 
   /**
    * Validates login information and returns a signed JWT for active accounts.
@@ -61,7 +62,7 @@ public class AccountAuthenticationService {
         sessionRevoker.revokeAll(current.getId());
       }
       log.info("Successful login for account with id: {}", current.getId());
-      return PermissionService.generateToken(current);
+      return loginTokens.issueFor(current);
     } catch (NoSuchAlgorithmException | InvalidKeySpecException | IllegalArgumentException
         | IncorrectResultSizeDataAccessException failure) {
       log.warn("Rejected account login because credential verification failed safely.");

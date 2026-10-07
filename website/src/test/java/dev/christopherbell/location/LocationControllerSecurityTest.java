@@ -1,5 +1,6 @@
 package dev.christopherbell.location;
 
+import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.configuration.security.SecurityConfig;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
@@ -28,6 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Import({
     ControllerExceptionHandler.class,
     SecurityConfig.class,
+    LoginTokensFixture.TestConfigurationWithLoginTokens.class,
     BrowserAuthenticationCookies.class,
     InteractiveBrowserRequest.class
 })

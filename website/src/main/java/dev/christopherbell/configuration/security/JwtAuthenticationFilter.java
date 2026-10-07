@@ -7,7 +7,7 @@ import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.configuration.security.browser.AuthenticatedBrowserSession;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
 import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
-import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.account.api.LoginTokens;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -41,9 +41,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   private final InteractiveBrowserRequest interactiveRequests;
   private final BrowserAuthenticationCookies browserCookies;
   private final AccountRepository accounts;
+  private final LoginTokens loginTokens;
 
   public JwtAuthenticationFilter(List<RequestMatcher> skipMatchers) {
-    this(skipMatchers, null, null, null, null);
+    this(skipMatchers, null, null, null, null, null);
   }
 
   public JwtAuthenticationFilter(
@@ -51,7 +52,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       BrowserSessionService browserSessions,
       InteractiveBrowserRequest interactiveRequests,
       BrowserAuthenticationCookies browserCookies) {
-    this(skipMatchers, browserSessions, interactiveRequests, browserCookies, null);
+    this(skipMatchers, browserSessions, interactiveRequests, browserCookies, null, null);
   }
 
   public JwtAuthenticationFilter(
@@ -59,12 +60,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       BrowserSessionService browserSessions,
       InteractiveBrowserRequest interactiveRequests,
       BrowserAuthenticationCookies browserCookies,
-      AccountRepository accounts) {
+      AccountRepository accounts,
+      LoginTokens loginTokens) {
     this.skipMatchers.addAll(skipMatchers);
     this.browserSessions = browserSessions;
     this.interactiveRequests = interactiveRequests;
     this.browserCookies = browserCookies;
     this.accounts = accounts;
+    this.loginTokens = loginTokens;
   }
 
   /**
@@ -98,8 +101,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     Account authenticatedAccount = null;
     AuthenticatedBrowserSession authenticatedBrowserSession = null;
     try {
-      if (bearerToken != null && accounts != null) {
-        var claims = PermissionService.validateToken(bearerToken);
+      if (bearerToken != null && accounts != null && loginTokens != null) {
+        var claims = loginTokens.verifiedClaimsOf(bearerToken);
         authenticatedAccount = accounts.findById(claims.getSubject())
             .filter(candidate -> candidate.getStatus() == AccountStatus.ACTIVE)
             .filter(candidate -> AccountSecurityFingerprint.matches(

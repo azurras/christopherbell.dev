@@ -4,9 +4,11 @@ Owns shared permission checks.
 
 ## What Lives Here
 
-- Authority checks used by controller `@PreAuthorize` expressions.
-- JWT login token creation and validation. Generated login tokens expire one day
-  after issue so users can stay signed in for the day without reauthenticating.
+- `PermissionService`: authority checks used by controller `@PreAuthorize`
+  expressions, and the current request's account id.
+- Login JWTs are not here: `account.api.LoginTokens` issues and verifies them,
+  so the security configuration reaches them through the account area's
+  published API.
 - Production JWT signing requires a strong configured `app.jwt.secret` or
   `APP_JWT_SECRET`; the local development fallback is not allowed when the
   `prod` profile is active.
@@ -14,9 +16,8 @@ Owns shared permission checks.
 
 ## Package Shape
 
-This package stays flat while `PermissionService` owns the complete auth helper
-surface. Split into `jwt` and `authority` only if token creation/validation or
-role checks grow into separate collaborators.
+This package stays flat while `PermissionService` owns only role checks and the
+current account id.
 
 ## Update This Doc
 

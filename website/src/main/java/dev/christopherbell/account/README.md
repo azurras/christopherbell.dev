@@ -10,7 +10,11 @@ subfeature services own the larger account workflows.
 - Account creation returns `201 Created` with a `Location` header for the
   canonical account resource. Synchronous updates and deletes return `200 OK`,
   and bodyless delete routes do not require a request `Content-Type` header.
-- `auth` owns login validation and JWT creation for active accounts.
+- `auth` owns login validation for active accounts and builds the `LoginTokens`
+  bean (`LoginTokensConfiguration`).
+- `api` is the area's published API for other areas: `LoginTokens` issues and
+  verifies seven-day login JWTs, and `MonitorAccountAccess` serves the site
+  monitor.
 - Login returns one public rejection for unknown, invalid-password, and inactive
   accounts. Legacy PBKDF2 verification is padded to the current work factor and
   successful upgrades reuse the verified salt, so concurrent upgrades produce

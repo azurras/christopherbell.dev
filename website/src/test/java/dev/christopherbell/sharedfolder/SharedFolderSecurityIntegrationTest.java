@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountPermission;
@@ -75,6 +76,7 @@ import org.springframework.web.context.WebApplicationContext;
 })
 @Import({
     SecurityConfig.class,
+    LoginTokensFixture.TestConfigurationWithLoginTokens.class,
     ControllerExceptionHandler.class,
     PermissionService.class,
     BrowserAuthenticationCookies.class,
@@ -347,7 +349,7 @@ class SharedFolderSecurityIntegrationTest {
   }
 
   private String tokenForCurrentAccount() {
-    return "Bearer " + PermissionService.generateToken(persistedAccount.get());
+    return "Bearer " + LoginTokensFixture.localDevelopmentLoginTokens().issueFor(persistedAccount.get());
   }
 
   private static Path temporaryDirectory() {

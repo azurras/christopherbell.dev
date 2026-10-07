@@ -5,6 +5,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.configuration.security.SecurityConfig;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
@@ -21,7 +22,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @WebMvcTest(SurviveController.class)
-@Import({SurviveService.class, SecurityConfig.class, BrowserAuthenticationCookies.class,
+@Import({SurviveService.class, SecurityConfig.class,
+    LoginTokensFixture.TestConfigurationWithLoginTokens.class, BrowserAuthenticationCookies.class,
     InteractiveBrowserRequest.class, ControllerExceptionHandler.class})
 class SurviveControllerTest {
   @org.springframework.boot.test.context.TestConfiguration
@@ -49,7 +51,7 @@ class SurviveControllerTest {
         .role(dev.christopherbell.account.model.Role.USER).status(dev.christopherbell.account.model.AccountStatus.ACTIVE)
         .permissions(java.util.Set.of()).build();
     org.mockito.Mockito.when(accounts.findById("saved-owner")).thenReturn(java.util.Optional.of(account));
-    String credential = "Bearer " + PermissionService.generateToken(account);
+    String credential = "Bearer " + LoginTokensFixture.localDevelopmentLoginTokens().issueFor(account);
     var joined = mvc.perform(post("/api/survive/v1/game").header("Authorization", credential).with(csrf())
         .contentType("application/json").content("{\"name\":\"Saved survivor\"}"))
         .andExpect(status().isOk()).andReturn();
