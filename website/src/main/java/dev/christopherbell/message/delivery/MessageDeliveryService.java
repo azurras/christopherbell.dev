@@ -8,15 +8,15 @@ import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.UsernameSanitizer;
 import dev.christopherbell.message.MessageRepository;
+import dev.christopherbell.message.model.ConversationKeys;
 import dev.christopherbell.message.model.Message;
 import dev.christopherbell.message.model.MessageCreateRequest;
 import dev.christopherbell.message.model.MessageDetail;
 import dev.christopherbell.notification.delivery.NotificationDeliveryService;
 import dev.christopherbell.permission.PermissionService;
-import java.time.Instant;
+import java.time.Clock;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -26,26 +26,32 @@ import org.springframework.stereotype.Service;
 @Service
 public class MessageDeliveryService {
   private static final int MAX_MESSAGE_LENGTH = 1000;
-
   private final MessageRepository messageRepository;
   private final AccountRepository accountRepository;
   private final NotificationDeliveryService notificationDeliveryService;
   private final PermissionService permissionService;
   private final AccountTrustService accountTrustService;
+  private final Clock clock;
 
   /**
-   * Sends one direct message from the current account to another account.
+   * Sends one direct message from the signed-in account and notifies the recipient.
+   *
+   * @param createRequest the recipient's username and the message text
+   * @return the stored message as the sender sees it
+   * @throws InvalidRequestException if the recipient or text is missing, the text is longer than
+   *     1000 characters, the sender is suspended, the recipient is the sender, or either account
+   *     blocks the other
+   * @throws ResourceNotFoundException if the sender or recipient account does not exist
    */
-  public MessageDetail sendMessage(MessageCreateRequest request)
+  public MessageDetail sendMessage(MessageCreateRequest createRequest)
       throws InvalidRequestException, ResourceNotFoundException {
-    validateRequest(request);
-
-    var sender = getSelfAccount();
-    ensureActiveSender(sender);
-    var recipient = accountRepository
-        .findByUsername(UsernameSanitizer.sanitize(request.recipientUsername()))
+    validateRequest(createRequest);
+    Account sender = signedInAccount();
+    rejectSuspendedSender(sender);
+    Account recipient = accountRepository
+        .findByUsername(UsernameSanitizer.sanitize(createRequest.recipientUsername()))
         .orElseThrow(() -> new ResourceNotFoundException(
-            String.format("Account with username %s not found.", request.recipientUsername())));
+            String.format("Account with username %s not found.", createRequest.recipientUsername())));
     if (sender.getId().equals(recipient.getId())) {
       throw new InvalidRequestException("You cannot message yourself.");
     }
@@ -53,65 +59,47 @@ public class MessageDeliveryService {
       throw new InvalidRequestException("Messages are not available between these accounts.");
     }
 
-    var message = Message.builder()
+    Message newMessage = Message.builder()
         .id(UUID.randomUUID().toString())
-        .conversationKey(conversationKey(sender.getId(), recipient.getId()))
+        .conversationKey(ConversationKeys.between(sender.getId(), recipient.getId()))
         .participantIds(new HashSet<>(List.of(sender.getId(), recipient.getId())))
         .senderAccountId(sender.getId())
         .recipientAccountId(recipient.getId())
-        .text(request.text().trim())
+        .text(createRequest.text().trim())
         .read(false)
-        .createdOn(Instant.now())
+        .createdOn(clock.instant())
         .build();
-    var saved = messageRepository.save(message);
-    notificationDeliveryService.createMessageNotification(saved, sender, recipient);
-    return toDetail(saved, sender.getId(), Map.of(sender.getId(), sender, recipient.getId(), recipient));
+    Message storedMessage = messageRepository.save(newMessage);
+    notificationDeliveryService.createMessageNotification(storedMessage, sender, recipient);
+    return MessageDetail.from(
+        storedMessage, sender.getId(), sender.getUsername(), recipient.getUsername());
   }
 
-  private static void validateRequest(MessageCreateRequest request) throws InvalidRequestException {
-    if (request == null || request.recipientUsername() == null || request.recipientUsername().isBlank()) {
+  private static void validateRequest(MessageCreateRequest createRequest)
+      throws InvalidRequestException {
+    if (createRequest == null || createRequest.recipientUsername() == null
+        || createRequest.recipientUsername().isBlank()) {
       throw new InvalidRequestException("Recipient username cannot be null or blank.");
     }
-    if (request.text() == null || request.text().isBlank()) {
+    if (createRequest.text() == null || createRequest.text().isBlank()) {
       throw new InvalidRequestException("Message text cannot be null or blank.");
     }
-    if (request.text().trim().length() > MAX_MESSAGE_LENGTH) {
+    if (createRequest.text().trim().length() > MAX_MESSAGE_LENGTH) {
       throw new InvalidRequestException("Message text exceeds 1000 characters.");
     }
   }
 
-  private Account getSelfAccount() throws ResourceNotFoundException {
-    var selfId = permissionService.getSelfId();
+  private Account signedInAccount() throws ResourceNotFoundException {
+    String signedInAccountId = permissionService.getSelfId();
     return accountRepository
-        .findById(selfId)
-        .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", selfId)));
+        .findById(signedInAccountId)
+        .orElseThrow(() -> new ResourceNotFoundException(
+            String.format("Account with id %s not found.", signedInAccountId)));
   }
 
-  private static void ensureActiveSender(Account sender) throws InvalidRequestException {
+  private static void rejectSuspendedSender(Account sender) throws InvalidRequestException {
     if (sender.getStatus() == AccountStatus.SUSPENDED) {
       throw new InvalidRequestException("Suspended accounts cannot send messages.");
     }
-  }
-
-  private static String conversationKey(String firstAccountId, String secondAccountId) {
-    return firstAccountId.compareTo(secondAccountId) < 0
-        ? firstAccountId + ":" + secondAccountId
-        : secondAccountId + ":" + firstAccountId;
-  }
-
-  private static MessageDetail toDetail(Message message, String selfId, Map<String, Account> accounts) {
-    var sender = accounts.get(message.getSenderAccountId());
-    var recipient = accounts.get(message.getRecipientAccountId());
-    return MessageDetail.builder()
-        .id(message.getId())
-        .senderAccountId(message.getSenderAccountId())
-        .senderUsername(sender == null ? null : sender.getUsername())
-        .recipientAccountId(message.getRecipientAccountId())
-        .recipientUsername(recipient == null ? null : recipient.getUsername())
-        .text(message.getText())
-        .read(Boolean.TRUE.equals(message.getRead()))
-        .mine(selfId.equals(message.getSenderAccountId()))
-        .createdOn(message.getCreatedOn())
-        .build();
   }
 }

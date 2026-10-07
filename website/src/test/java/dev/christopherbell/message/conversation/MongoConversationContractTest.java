@@ -1,5 +1,6 @@
 package dev.christopherbell.message.conversation;
 
+import java.time.Clock;
 import com.mongodb.ConnectionString;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
@@ -36,7 +37,7 @@ class MongoConversationContractTest implements ConversationParityContract {
     messages = MongoMessageRepositoryTestFactory.create(factory);
     cursors = new StableCursorCodec();
     queries = new ConversationQueryRepository(factory, cursors);
-    archives = new ConversationArchiveService(factory);
+    archives = new ConversationArchiveService(factory, Clock.systemUTC());
   }
 
   @AfterAll static void disconnect() { if (client != null) client.close(); }

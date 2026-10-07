@@ -35,53 +35,55 @@ public class MessageController {
       produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<MessageDetail>> sendMessage(
-      @RequestBody MessageCreateRequest request
+      @RequestBody MessageCreateRequest createRequest
   ) throws Exception {
-    return new ResponseEntity<>(
+    MessageDetail sentMessage = messageService.sendMessage(createRequest);
+    return ResponseEntity.status(HttpStatus.CREATED).body(
         Response.<MessageDetail>builder()
-            .payload(messageService.sendMessage(request))
+            .payload(sentMessage)
             .success(true)
-            .build(),
-        HttpStatus.CREATED);
+            .build());
   }
 
   @GetMapping(value = V20250914 + "/conversations", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
-  public ResponseEntity<Response<List<ConversationSummary>>> getConversations(
+  public ResponseEntity<Response<List<ConversationSummary>>> listConversations(
       @RequestParam(value = "limit", required = false, defaultValue = "20") int limit
   ) throws Exception {
-    return new ResponseEntity<>(
+    List<ConversationSummary> conversations = messageService.listConversations(limit);
+    return ResponseEntity.ok(
         Response.<List<ConversationSummary>>builder()
-            .payload(messageService.getConversations(limit))
+            .payload(conversations)
             .success(true)
-            .build(),
-        HttpStatus.OK);
+            .build());
   }
 
   @GetMapping(value = V20250914 + "/conversation/{username}", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
-  public ResponseEntity<Response<List<MessageDetail>>> getConversation(
-      @PathVariable String username,
+  public ResponseEntity<Response<List<MessageDetail>>> openConversation(
+      @PathVariable("username") String otherUsername,
       @RequestParam(value = "limit", required = false, defaultValue = "50") int limit
   ) throws Exception {
-    return new ResponseEntity<>(
+    List<MessageDetail> messages = messageService.openConversation(otherUsername, limit);
+    return ResponseEntity.ok(
         Response.<List<MessageDetail>>builder()
-            .payload(messageService.getConversation(username, limit))
+            .payload(messages)
             .success(true)
-            .build(),
-        HttpStatus.OK);
+            .build());
   }
 
   @GetMapping(value = V20260726 + "/conversation/{username}",
       produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
-  public ResponseEntity<Response<ConversationPage>> getConversationPage(
-      @PathVariable String username,
+  public ResponseEntity<Response<ConversationPage>> openConversationPage(
+      @PathVariable("username") String otherUsername,
       @RequestParam(value = "cursor", required = false) String cursor,
       @RequestParam(value = "size", required = false, defaultValue = "50") int size
   ) throws Exception {
+    ConversationPage conversationPage =
+        messageService.openConversationPage(otherUsername, cursor, size);
     return ResponseEntity.ok(Response.<ConversationPage>builder()
-        .payload(messageService.getConversationPage(username, cursor, size))
+        .payload(conversationPage)
         .success(true)
         .build());
   }
@@ -90,10 +92,11 @@ public class MessageController {
       produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<ConversationArchiveResult>> archiveConversation(
-      @PathVariable String username
+      @PathVariable("username") String otherUsername
   ) throws Exception {
+    ConversationArchiveResult archiveResult = messageService.archiveConversationWith(otherUsername);
     return ResponseEntity.ok(Response.<ConversationArchiveResult>builder()
-        .payload(messageService.archiveConversation(username))
+        .payload(archiveResult)
         .success(true)
         .build());
   }

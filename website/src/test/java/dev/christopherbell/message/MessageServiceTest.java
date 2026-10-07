@@ -27,6 +27,7 @@ import dev.christopherbell.message.model.Message;
 import dev.christopherbell.message.model.MessageCreateRequest;
 import dev.christopherbell.notification.delivery.NotificationDeliveryService;
 import dev.christopherbell.permission.PermissionService;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -129,7 +130,7 @@ public class MessageServiceTest {
   }
 
   @Test
-  public void getConversation_marksIncomingMessagesRead() throws Exception {
+  public void openConversation_marksIncomingMessagesRead() throws Exception {
     var self = Account.builder().id("self").username("self").build();
     var other = Account.builder().id("other").username("alex").build();
     var incoming = Message.builder()
@@ -150,7 +151,7 @@ public class MessageServiceTest {
     when(conversationQueries.page(eq("other:self"), eq(Optional.empty()), eq(50)))
         .thenReturn(new ConversationMessageSlice(List.of(incoming), null));
 
-    var result = service.getConversation("alex", 50);
+    var result = service.openConversation("alex", 50);
 
     assertEquals(1, result.size());
     assertEquals(true, incoming.getRead());
@@ -159,7 +160,7 @@ public class MessageServiceTest {
 
   @ParameterizedTest(name = "{0} conversation summaries use one unread-count query")
   @ValueSource(ints = {1, 50})
-  void getConversations_batchesUnreadCountsForEveryReturnedConversation(int conversationCount)
+  void listConversations_batchesUnreadCountsForEveryReturnedConversation(int conversationCount)
       throws Exception {
     var self = Account.builder().id("self").username("self").build();
     var messages = IntStream.range(0, conversationCount)
@@ -181,7 +182,7 @@ public class MessageServiceTest {
             id -> id,
             id -> 7L)));
 
-    var summaries = service().getConversations(conversationCount);
+    var summaries = service().listConversations(conversationCount);
 
     assertThat(summaries)
         .extracting(ConversationSummary::accountId)
@@ -194,7 +195,7 @@ public class MessageServiceTest {
   }
 
   @Test
-  void getConversations_preservesOrderDisplayNamesAndMissingUnreadDefaults() throws Exception {
+  void listConversations_preservesOrderDisplayNamesAndMissingUnreadDefaults() throws Exception {
     var self = Account.builder().id("self").username("self").build();
     var newest = message("m-new", "self", "outgoing", "sent", "2026-07-29T12:00:00Z");
     var middle = message("m-middle", "missing", "self", "unknown", "2026-07-29T11:00:00Z");
@@ -216,7 +217,7 @@ public class MessageServiceTest {
     when(conversationQueries.unreadCounts(self.getId(), requestedIds))
         .thenReturn(Map.of("outgoing", 2L, "known", 4L));
 
-    assertThat(service().getConversations(3)).containsExactly(
+    assertThat(service().listConversations(3)).containsExactly(
         ConversationSummary.builder()
             .accountId("outgoing")
             .username("ada")
@@ -253,7 +254,7 @@ public class MessageServiceTest {
     when(conversationArchives.archive("self", "other:self", java.util.Set.of("self", "other")))
         .thenReturn(archived);
 
-    assertEquals(archived, service().archiveConversation("alex"));
+    assertEquals(archived, service().archiveConversationWith("alex"));
 
     verify(conversationArchives).archive(
         "self", "other:self", java.util.Set.of("self", "other"));
@@ -266,7 +267,8 @@ public class MessageServiceTest {
             accountRepository,
             notificationDeliveryService,
             permissionService,
-            accountTrustService),
+            accountTrustService,
+            Clock.systemUTC()),
         new ConversationService(
             messageRepository,
             accountRepository,

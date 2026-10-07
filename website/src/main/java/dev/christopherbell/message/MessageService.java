@@ -21,31 +21,31 @@ public class MessageService {
   private final ConversationService conversationService;
 
   /** Delegates direct-message sending to the delivery subfeature. */
-  public MessageDetail sendMessage(MessageCreateRequest request)
+  public MessageDetail sendMessage(MessageCreateRequest createRequest)
       throws InvalidRequestException, ResourceNotFoundException {
-    return messageDeliveryService.sendMessage(request);
+    return messageDeliveryService.sendMessage(createRequest);
   }
 
-  /** Delegates thread reads and read-state updates to the conversation subfeature. */
-  public List<MessageDetail> getConversation(String username, int limit)
+  /** Opens a conversation and marks its incoming messages read. */
+  public List<MessageDetail> openConversation(String otherUsername, int limit)
       throws ResourceNotFoundException {
-    return conversationService.getConversation(username, limit);
+    return conversationService.openConversation(otherUsername, limit);
   }
 
-  /** Delegates conversation summary reads to the conversation subfeature. */
-  public List<ConversationSummary> getConversations(int limit) throws ResourceNotFoundException {
-    return conversationService.getConversations(limit);
+  /** Lists the signed-in account's latest conversations. */
+  public List<ConversationSummary> listConversations(int limit) throws ResourceNotFoundException {
+    return conversationService.listConversations(limit);
   }
 
-  /** Delegates stable cursor-based conversation paging. */
-  public ConversationPage getConversationPage(String username, String cursor, int size)
+  /** Opens one stable page of a conversation and marks its incoming messages read. */
+  public ConversationPage openConversationPage(String otherUsername, String cursor, int size)
       throws InvalidRequestException, ResourceNotFoundException {
-    return conversationService.getConversationPage(username, cursor, size);
+    return conversationService.openConversationPage(otherUsername, cursor, size);
   }
 
   /** Archives only the current account's view of a conversation. */
-  public ConversationArchiveResult archiveConversation(String username)
+  public ConversationArchiveResult archiveConversationWith(String otherUsername)
       throws ResourceNotFoundException {
-    return conversationService.archive(username);
+    return conversationService.archiveConversationWith(otherUsername);
   }
 }
