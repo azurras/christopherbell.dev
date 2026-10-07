@@ -2,8 +2,8 @@ package dev.christopherbell.view.voidroutes;
 
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.post.model.PostTopic;
+import dev.christopherbell.view.PublicSiteUrls;
 import dev.christopherbell.view.ViewIndexingPolicy;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +21,6 @@ import org.springframework.web.util.UriUtils;
 @Controller
 @RequiredArgsConstructor
 public class VoidViewController {
-  private static final String PUBLIC_ROOT = "https://www.christopherbell.dev";
   private final VoidPostSocialPreviewService postPreviews;
   private final VoidUserSocialPreviewService userPreviews;
 
@@ -31,7 +30,7 @@ public class VoidViewController {
    * @return {@code void/index.html}
    */
   @GetMapping(value = "/void")
-  public String getVoidHomePage(HttpServletRequest request) {
+  public String getVoidHomePage() {
     return "void/index.html";
   }
 
@@ -48,8 +47,8 @@ public class VoidViewController {
       @PathVariable String topic, HttpServletResponse response, Model model) {
     try {
       model.addAttribute("topic", PostTopic.canonicalizeRoute(topic));
-    } catch (IllegalArgumentException exception) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid topic.");
+    } catch (IllegalArgumentException invalidTopic) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid topic.", invalidTopic);
     }
     response.setHeader("Cache-Control", "no-store, max-age=0");
     return "void/topic.html";
@@ -61,7 +60,7 @@ public class VoidViewController {
    * @return {@code profile.html}
    */
   @GetMapping(value = "/profile")
-  public String getProfilePage(HttpServletRequest request, Model model) {
+  public String getProfilePage(Model model) {
     ViewIndexingPolicy.noIndex(model);
     return "profile.html";
   }
@@ -72,7 +71,7 @@ public class VoidViewController {
    * @return {@code messages.html}
    */
   @GetMapping(value = "/messages")
-  public String getMessagesPage(HttpServletRequest request, Model model) {
+  public String getMessagesPage(Model model) {
     ViewIndexingPolicy.noIndex(model);
     return "messages.html";
   }
@@ -83,7 +82,7 @@ public class VoidViewController {
    * @return {@code notifications.html}
    */
   @GetMapping(value = "/notifications")
-  public String getNotificationsPage(HttpServletRequest request, Model model) {
+  public String getNotificationsPage(Model model) {
     ViewIndexingPolicy.noIndex(model);
     return "notifications.html";
   }
@@ -94,20 +93,19 @@ public class VoidViewController {
   @GetMapping(value = "/u/{username}")
   public String getPublicUserPage(
       @PathVariable String username,
-      HttpServletRequest request,
       HttpServletResponse response,
       Model model) {
     try {
       var preview = userPreviews.preview(username);
       var encodedUsername = UriUtils.encodePathSegment(
           preview.username(), StandardCharsets.UTF_8);
-      model.addAttribute("socialUrl", PUBLIC_ROOT + "/u/" + encodedUsername);
+      model.addAttribute("socialUrl", PublicSiteUrls.ROOT + "/u/" + encodedUsername);
       model.addAttribute("socialTitle", preview.title());
       model.addAttribute("socialDescription", preview.description());
       model.addAttribute("profileUsername", preview.username());
       model.addAttribute("profileHeroMetadata", preview.heroMetadata());
       return "user.html";
-    } catch (ResourceNotFoundException | IllegalArgumentException exception) {
+    } catch (ResourceNotFoundException | IllegalArgumentException unavailableProfile) {
       response.setStatus(HttpServletResponse.SC_NOT_FOUND);
       return "error/404";
     }
@@ -119,18 +117,17 @@ public class VoidViewController {
   @GetMapping(value = "/p/{postId}")
   public String getPostPage(
       @PathVariable String postId,
-      HttpServletRequest request,
       HttpServletResponse response,
       Model model) {
     response.setHeader("Cache-Control", "no-store, max-age=0");
     String encodedPostId = UriUtils.encodePathSegment(postId, StandardCharsets.UTF_8);
-    model.addAttribute("socialUrl", PUBLIC_ROOT + "/p/" + encodedPostId);
+    model.addAttribute("socialUrl", PublicSiteUrls.ROOT + "/p/" + encodedPostId);
     try {
       VoidPostSocialPreview preview = postPreviews.preview(postId);
       model.addAttribute("postSocialTitle", preview.title());
       model.addAttribute("postSocialDescription", preview.description());
       return "post.html";
-    } catch (ResourceNotFoundException exception) {
+    } catch (ResourceNotFoundException vanishedPost) {
       response.setStatus(HttpServletResponse.SC_NOT_FOUND);
       return "post-vanished.html";
     }

@@ -2,6 +2,7 @@ package dev.christopherbell.view.wfl;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.view.PublicSiteUrls;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantService;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantWebsiteUrlPolicy;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
@@ -22,26 +23,29 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 @Service
 public class RestaurantProfilePageService {
-  private static final String PUBLIC_ROOT = "https://www.christopherbell.dev";
   private static final String MAPS_ROOT = "https://www.google.com/maps/search/";
 
   private final RestaurantService restaurants;
   private final ObjectMapper objectMapper;
 
-  /** Looks up and maps one restaurant without exposing member or audit fields. */
-  public RestaurantProfilePage profile(String restaurantId) throws ResourceNotFoundException {
+  /**
+   * Builds the public profile page for one restaurant without exposing member or audit fields.
+   *
+   * @throws ResourceNotFoundException if the id is invalid or no restaurant has it
+   */
+  public RestaurantProfilePage pageFor(String restaurantId) throws ResourceNotFoundException {
     try {
-      return build(restaurants.getRestaurantById(restaurantId));
-    } catch (InvalidRequestException invalid) {
+      return pageFrom(restaurants.getRestaurantById(restaurantId));
+    } catch (InvalidRequestException invalidRestaurantId) {
       throw new ResourceNotFoundException("Restaurant not found.");
     }
   }
 
-  private RestaurantProfilePage build(RestaurantDetail detail) {
+  private RestaurantProfilePage pageFrom(RestaurantDetail detail) {
     var id = requiredValue(detail.getId(), "Restaurant id");
     var path = "/wfl/restaurants/"
         + UriUtils.encodePathSegment(id, StandardCharsets.UTF_8);
-    var canonicalUrl = PUBLIC_ROOT + path;
+    var canonicalUrl = PublicSiteUrls.ROOT + path;
     var name = valueOrFallback(detail.getName(), "Restaurant");
     var publicCuisine = valueOrNull(detail.getCuisine());
     var cuisine = publicCuisine == null ? "Restaurant" : publicCuisine;
@@ -49,8 +53,8 @@ public class RestaurantProfilePageService {
     var location = joinPresent(
         address == null ? null : address.city(),
         address == null ? null : address.state());
-    var hero = location.isEmpty() ? cuisine : cuisine + " restaurant in " + location;
-    var description = hero + ". Details and member approval from What's For Lunch.";
+    var heroText = location.isEmpty() ? cuisine : cuisine + " restaurant in " + location;
+    var description = heroText + ". Details and member approval from What's For Lunch.";
     var votes = publicVotes(detail.getUpVotes(), detail.getDownVotes(), detail.getVoteCount());
     var website = RestaurantWebsiteUrlPolicy.safeOrNull(detail.getWebsite());
     var phone = valueOrNull(detail.getPhoneNumber());
@@ -67,7 +71,7 @@ public class RestaurantProfilePageService {
         description,
         name,
         cuisine,
-        hero + ".",
+        heroText + ".",
         address,
         votes,
         phone,
@@ -77,21 +81,18 @@ public class RestaurantProfilePageService {
         serializeForHtml(structuredData));
   }
 
+  /** Keeps only public address fields; a half-present or out-of-range coordinate pair is dropped. */
   private static RestaurantProfilePage.Address publicAddress(
       dev.christopherbell.whatsforlunch.restaurant.model.Address address
   ) {
     if (address == null) {
       return null;
     }
-    var latitude = validCoordinate(address.getLatitude(), -90.0, 90.0)
-        ? address.getLatitude() : null;
-    var longitude = validCoordinate(address.getLongitude(), -180.0, 180.0)
-        ? address.getLongitude() : null;
-    if (latitude == null || longitude == null) {
-      latitude = null;
-      longitude = null;
-    }
-    var result = new RestaurantProfilePage.Address(
+    boolean hasValidCoordinatePair = validCoordinate(address.getLatitude(), -90.0, 90.0)
+        && validCoordinate(address.getLongitude(), -180.0, 180.0);
+    Double latitude = hasValidCoordinatePair ? address.getLatitude() : null;
+    Double longitude = hasValidCoordinatePair ? address.getLongitude() : null;
+    var publicAddress = new RestaurantProfilePage.Address(
         valueOrNull(address.getStreet1()),
         valueOrNull(address.getStreet2()),
         valueOrNull(address.getCity()),
@@ -100,10 +101,10 @@ public class RestaurantProfilePageService {
         valueOrNull(address.getCountry()),
         latitude,
         longitude);
-    return result.displayLine().isEmpty()
-            && !result.hasCoordinates()
-            && result.country() == null
-        ? null : result;
+    boolean hasNothingPublic = publicAddress.displayLine().isEmpty()
+        && !publicAddress.hasCoordinates()
+        && publicAddress.country() == null;
+    return hasNothingPublic ? null : publicAddress;
   }
 
   private static RestaurantProfilePage.VoteSummary publicVotes(

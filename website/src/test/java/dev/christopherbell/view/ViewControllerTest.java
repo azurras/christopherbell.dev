@@ -209,7 +209,7 @@ public class ViewControllerTest {
   @Test
   @DisplayName("WFL restaurant page renders complete public indexable content")
   void getWhatsForLunchRestaurantPageRendersPublicProfile() throws Exception {
-    when(restaurantProfiles.profile("restaurant-123")).thenReturn(profilePage());
+    when(restaurantProfiles.pageFor("restaurant-123")).thenReturn(profilePage());
 
     mockMvc.perform(get("/wfl/restaurants/restaurant-123"))
         .andExpect(status().isOk())
@@ -237,7 +237,7 @@ public class ViewControllerTest {
   @Test
   @DisplayName("WFL restaurant page renders the zero-vote public profile without an aggregate")
   void getWhatsForLunchRestaurantPageRendersNoVotesWithoutApprovalSummaryOrAggregate() throws Exception {
-    when(restaurantProfiles.profile("restaurant-without-votes"))
+    when(restaurantProfiles.pageFor("restaurant-without-votes"))
         .thenReturn(profilePageWithoutVotes());
 
     mockMvc.perform(get("/wfl/restaurants/restaurant-without-votes"))
@@ -293,7 +293,7 @@ public class ViewControllerTest {
   @Test
   void getWhatsForLunchRestaurantPageEscapesHtmlAndPreservesSafeJsonLd() throws Exception {
     var base = profilePage();
-    when(restaurantProfiles.profile("hostile")).thenReturn(new RestaurantProfilePage(
+    when(restaurantProfiles.pageFor("hostile")).thenReturn(new RestaurantProfilePage(
         "hostile",
         "/wfl/restaurants/hostile",
         "https://www.christopherbell.dev/wfl/restaurants/hostile",
@@ -339,7 +339,7 @@ public class ViewControllerTest {
 
   @Test
   void getWhatsForLunchRestaurantPage_whenMissing_returnsNoIndex404() throws Exception {
-    when(restaurantProfiles.profile("missing-restaurant"))
+    when(restaurantProfiles.pageFor("missing-restaurant"))
         .thenThrow(new ResourceNotFoundException("SECRET_RESTAURANT"));
 
     mockMvc.perform(get("/wfl/restaurants/missing-restaurant"))

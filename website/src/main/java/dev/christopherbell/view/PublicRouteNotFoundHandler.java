@@ -21,9 +21,9 @@ public class PublicRouteNotFoundHandler {
 
   /** Renders browser routes as HTML while retaining a structured API response. */
   @ExceptionHandler(NoResourceFoundException.class)
-  public Object handleNoResource(NoResourceFoundException exception, HttpServletRequest request) {
+  public Object notFound(NoResourceFoundException missingResource, HttpServletRequest request) {
     if (request.getRequestURI().startsWith("/api/")) {
-      var body = Response.builder()
+      Response<Object> notFoundEnvelope = Response.builder()
           .messages(List.of(Message.builder()
               .code("RESOURCE_NOT_FOUND")
               .description("The requested API resource was not found.")
@@ -32,11 +32,11 @@ public class PublicRouteNotFoundHandler {
           .build();
       return ResponseEntity.status(HttpStatus.NOT_FOUND)
           .contentType(MediaType.APPLICATION_JSON)
-          .body(body);
+          .body(notFoundEnvelope);
     }
 
-    var page = new ModelAndView("error/404");
-    page.setStatus(HttpStatus.NOT_FOUND);
-    return page;
+    ModelAndView notFoundPage = new ModelAndView("error/404");
+    notFoundPage.setStatus(HttpStatus.NOT_FOUND);
+    return notFoundPage;
   }
 }
