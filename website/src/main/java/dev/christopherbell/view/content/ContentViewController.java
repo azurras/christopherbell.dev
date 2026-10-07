@@ -1,7 +1,6 @@
 package dev.christopherbell.view.content;
 
 import dev.christopherbell.view.ViewIndexingPolicy;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -123,7 +122,7 @@ public class ContentViewController {
    * @return {@code thebell/index.html}
    */
   @GetMapping(value = "/thebell")
-  public String getTheBellHomePage(HttpServletRequest request) {
+  public String getTheBellHomePage() {
     return "thebell/index.html";
   }
 
@@ -133,7 +132,7 @@ public class ContentViewController {
    * @return {@code thebell/tony.html}
    */
   @GetMapping(value = "/thebell/tony")
-  public String getTheBellTonyPage(HttpServletRequest request) {
+  public String getTheBellTonyPage() {
     return "thebell/tony.html";
   }
 }
