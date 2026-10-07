@@ -21,18 +21,18 @@ public class NotificationPreferenceService {
   }
 
   /** Saves the current user's requested notification category preferences. */
-  public NotificationPreferenceDetail updateMyPreferences(NotificationPreferenceUpdateRequest request)
+  public NotificationPreferenceDetail updateMyPreferences(NotificationPreferenceUpdateRequest preferenceUpdate)
       throws InvalidRequestException {
-    validateCompleteRequest(request);
+    validateCompleteRequest(preferenceUpdate);
     var accountId = permissionService.getSelfId();
     var preferences = notificationPreferenceRepository.findByAccountId(accountId)
         .orElseGet(() -> defaultsFor(accountId));
 
-    preferences.setMentions(request.mentions());
-    preferences.setLikes(request.likes());
-    preferences.setComments(request.comments());
-    preferences.setMessages(request.messages());
-    preferences.setWflSessions(request.wflSessions());
+    preferences.setMentions(preferenceUpdate.mentions());
+    preferences.setLikes(preferenceUpdate.likes());
+    preferences.setComments(preferenceUpdate.comments());
+    preferences.setMessages(preferenceUpdate.messages());
+    preferences.setWflSessions(preferenceUpdate.wflSessions());
 
     return toDetail(notificationPreferenceRepository.save(preferences));
   }
@@ -42,7 +42,7 @@ public class NotificationPreferenceService {
     if (accountId == null || accountId.isBlank() || type == null) {
       return false;
     }
-    return enabled(preferencesFor(accountId), type);
+    return isEnabledFor(preferencesFor(accountId), type);
   }
 
   private NotificationPreference preferencesFor(String accountId) {
@@ -73,7 +73,7 @@ public class NotificationPreferenceService {
         .build();
   }
 
-  private boolean enabled(NotificationPreference preferences, NotificationType type) {
+  private static boolean isEnabledFor(NotificationPreference preferences, NotificationType type) {
     return switch (type) {
       case MENTION -> preferences.isMentions();
       case LIKE -> preferences.isLikes();

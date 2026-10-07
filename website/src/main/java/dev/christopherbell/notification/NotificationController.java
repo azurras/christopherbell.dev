@@ -36,12 +36,12 @@ public class NotificationController {
 
   @GetMapping(value = V20250914, produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
-  public ResponseEntity<Response<List<NotificationDetail>>> getMyNotifications(
+  public ResponseEntity<Response<List<NotificationDetail>>> listMyNotifications(
       @RequestParam(value = "limit", required = false, defaultValue = "20") int limit
   ) {
     return new ResponseEntity<>(
         Response.<List<NotificationDetail>>builder()
-            .payload(notificationInboxService.getMyNotifications(limit))
+            .payload(notificationInboxService.listMyNotifications(limit))
             .success(true)
             .build(),
         HttpStatus.OK);
@@ -49,13 +49,13 @@ public class NotificationController {
 
   @GetMapping(value = V20260726, produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
-  public ResponseEntity<Response<NotificationPage>> getMyNotificationPage(
+  public ResponseEntity<Response<NotificationPage>> myNotificationPage(
       @RequestParam(value = "cursor", required = false) String cursor,
       @RequestParam(value = "size", required = false, defaultValue = "25") int size
   ) throws InvalidRequestException {
     return new ResponseEntity<>(
         Response.<NotificationPage>builder()
-            .payload(notificationInboxService.getMyNotifications(cursor, size))
+            .payload(notificationInboxService.myNotificationPage(cursor, size))
             .success(true)
             .build(),
         HttpStatus.OK);
@@ -101,11 +101,11 @@ public class NotificationController {
   )
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<NotificationPreferenceDetail>> updateNotificationPreferences(
-      @RequestBody NotificationPreferenceUpdateRequest request
+      @RequestBody NotificationPreferenceUpdateRequest preferenceUpdate
   ) throws InvalidRequestException {
     return new ResponseEntity<>(
         Response.<NotificationPreferenceDetail>builder()
-            .payload(notificationPreferenceService.updateMyPreferences(request))
+            .payload(notificationPreferenceService.updateMyPreferences(preferenceUpdate))
             .success(true)
             .build(),
         HttpStatus.OK);

@@ -18,10 +18,13 @@ class MongoNotificationPreferenceRepository
     super(factory, NotificationPreference.class);
   }
 
-  @Override public NotificationPreference save(NotificationPreference value) {
-    return saveValue(value);
+  @Override
+  public NotificationPreference save(NotificationPreference preference) {
+    return saveValue(preference);
   }
-  @Override public Optional<NotificationPreference> findByAccountId(String accountId) {
+
+  @Override
+  public Optional<NotificationPreference> findByAccountId(String accountId) {
     return findOne(Query.query(Criteria.where("accountId").is(accountId)));
   }
 }
