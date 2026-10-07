@@ -1,11 +1,12 @@
 package dev.christopherbell.canesboxtracker;
 
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 import dev.christopherbell.canesboxtracker.model.CanesBoxMetroPrice;
+import dev.christopherbell.canesboxtracker.model.CanesBoxPriceSource;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
-import dev.christopherbell.libs.http.BoundedResponseBodyReader;
 import dev.christopherbell.libs.http.BoundedResponseBodyHandlers;
+import dev.christopherbell.libs.http.BoundedResponseBodyReader;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -15,15 +16,18 @@ import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Official Raising Canes ordering API client used by the Box Index collector.
@@ -33,20 +37,25 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
   private static final long MAXIMUM_JSON_RESPONSE_BYTES = 4L * 1024 * 1024;
   private static final long MAXIMUM_FALLBACK_RESPONSE_BYTES = 8L * 1024 * 1024;
   private static final String OFFICIAL_ORDER_BASE_URL = "https://order.raisingcanes.com";
-
+  private static final int PUBLIC_MENU_PRICE_SEARCH_WINDOW = 2000;
+  private static final Pattern PUBLIC_MENU_PRICE =
+      Pattern.compile("(?i)\"(?:price|Price)\"\\s*:\\s*\"?\\$?([0-9]+(?:\\.[0-9]{1,2})?)");
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
   private final CanesBoxTrackerProperties properties;
+  private final Clock clock;
 
   /**
    * Creates the official Cane's client.
    */
   public OfficialCanesBoxPriceClient(
       ObjectMapper objectMapper,
-      CanesBoxTrackerProperties properties
+      CanesBoxTrackerProperties properties,
+      Clock clock
   ) {
     this.objectMapper = objectMapper;
     this.properties = properties;
+    this.clock = clock;
     this.httpClient = HttpClient.newBuilder()
         .connectTimeout(properties.getConnectTimeout())
         .build();
@@ -63,20 +72,22 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
       if (graphQlPrice.isPresent()) {
         return graphQlPrice.get();
       }
-    } catch (InterruptedException e) {
+    } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
-      return CanesBoxMetroPrice.failure(target, "Official Cane's GraphQL API request was interrupted.");
-    } catch (Exception e) {
-      officialFailures.add("Official Cane's GraphQL API failed: " + describeFailure(e));
+      return CanesBoxMetroPrice.failure(
+          target, "Official Cane's GraphQL API request was interrupted.", clock.instant());
+    } catch (IOException | RuntimeException graphQlFailure) {
+      officialFailures.add("Official Cane's GraphQL API failed: " + describeFailure(graphQlFailure));
     }
 
     try {
       return fetchRestaurantByRefPrice(target);
-    } catch (InterruptedException e) {
+    } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
-      return CanesBoxMetroPrice.failure(target, "Official Cane's API request was interrupted.");
-    } catch (Exception e) {
-      officialFailures.add(describeFailure(e));
+      return CanesBoxMetroPrice.failure(
+          target, "Official Cane's API request was interrupted.", clock.instant());
+    } catch (IOException | RuntimeException restaurantByRefFailure) {
+      officialFailures.add(describeFailure(restaurantByRefFailure));
       return fetchFallbackPrice(target, String.join("; ", officialFailures));
     }
   }
@@ -90,7 +101,7 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
 
   private Optional<CanesBoxMetroPrice> fetchGraphQlMenuPrice(
       CanesBoxTrackerProperties.MetroTarget target
-  ) throws Exception {
+  ) throws IOException, InterruptedException {
     if (!hasCoordinates(target) || properties.getGraphQlUrl() == null || properties.getGraphQlUrl().isBlank()) {
       return Optional.empty();
     }
@@ -102,8 +113,8 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
     var result = CanesBoxMetroPrice.success(
         target,
         price,
-        Instant.now(),
-        "OFFICIAL_API",
+        clock.instant(),
+        CanesBoxPriceSource.OFFICIAL_API,
         officialMenuUrl(restaurant));
     result.setRestaurantRef(restaurant.slug());
     result.setRestaurantName(restaurant.name());
@@ -114,7 +125,7 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
 
   private Optional<OfficialRestaurant> findNearestRestaurant(
       CanesBoxTrackerProperties.MetroTarget target
-  ) throws Exception {
+  ) throws IOException, InterruptedException {
     var variables = objectMapper.createObjectNode();
     variables.put("latitude", target.getLatitude());
     variables.put("longitude", target.getLongitude());
@@ -167,13 +178,15 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
         || markerSource.contains("test");
   }
 
-  private String fetchRestaurantMenu(OfficialRestaurant restaurant) throws Exception {
+  private String fetchRestaurantMenu(OfficialRestaurant restaurant)
+      throws IOException, InterruptedException {
     var variables = objectMapper.createObjectNode();
     variables.put("id", restaurant.id());
     return postGraphQl("Restaurant", restaurantQuery(), variables);
   }
 
-  private String postGraphQl(String operationName, String query, JsonNode variables) throws Exception {
+  private String postGraphQl(String operationName, String query, JsonNode variables)
+      throws IOException, InterruptedException {
     var payload = objectMapper.createObjectNode();
     payload.put("query", query);
     payload.set("variables", variables);
@@ -212,37 +225,38 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
 
   private CanesBoxMetroPrice fetchRestaurantByRefPrice(
       CanesBoxTrackerProperties.MetroTarget target
-  ) throws Exception {
+  ) throws IOException, InterruptedException {
     var request = HttpRequest.newBuilder(restaurantUri(target))
-          .GET()
-          .timeout(properties.getRequestTimeout())
-          .header("Accept", "application/json")
-          .header("User-Agent", officialUserAgent())
-          .header("Origin", OFFICIAL_ORDER_BASE_URL)
-          .header("Referer", OFFICIAL_ORDER_BASE_URL + "/")
-          .header("clientid", "raisingcanes")
-          .header("ui-transformer", "restaurantByRef")
-          .header("ui-cache-ttl", "300")
-          .build();
-      var response = BoundedResponseBodyHandlers.send(
-          httpClient,
-          request,
-          BoundedResponseBodyHandlers.ofString(
-              MAXIMUM_JSON_RESPONSE_BYTES,
-              StandardCharsets.UTF_8,
-              status -> status >= 200 && status < 300));
-      if (response.statusCode() < 200 || response.statusCode() >= 300) {
-        throw new IllegalStateException("Official Cane's API returned HTTP " + response.statusCode());
-      }
-      var body = response.body();
-      var price = findBoxComboPrice(body)
-          .orElseThrow(() -> new IllegalStateException("The Box Combo price was not found."));
-      var result = CanesBoxMetroPrice.success(target, price, Instant.now(), "OFFICIAL_API", restaurantUri(target).toString());
-      applyAuditMetadata(result, body);
-      return result;
+        .GET()
+        .timeout(properties.getRequestTimeout())
+        .header("Accept", "application/json")
+        .header("User-Agent", officialUserAgent())
+        .header("Origin", OFFICIAL_ORDER_BASE_URL)
+        .header("Referer", OFFICIAL_ORDER_BASE_URL + "/")
+        .header("clientid", "raisingcanes")
+        .header("ui-transformer", "restaurantByRef")
+        .header("ui-cache-ttl", "300")
+        .build();
+    var response = BoundedResponseBodyHandlers.send(
+        httpClient,
+        request,
+        BoundedResponseBodyHandlers.ofString(
+            MAXIMUM_JSON_RESPONSE_BYTES,
+            StandardCharsets.UTF_8,
+            status -> status >= 200 && status < 300));
+    if (response.statusCode() < 200 || response.statusCode() >= 300) {
+      throw new IllegalStateException("Official Cane's API returned HTTP " + response.statusCode());
+    }
+    var body = response.body();
+    var price = findBoxComboPrice(body)
+        .orElseThrow(() -> new IllegalStateException("The Box Combo price was not found."));
+    var result = CanesBoxMetroPrice.success(
+        target, price, clock.instant(), CanesBoxPriceSource.OFFICIAL_API, restaurantUri(target).toString());
+    applyAuditMetadata(result, body);
+    return result;
   }
 
-  Optional<BigDecimal> findBoxComboPrice(String body) throws Exception {
+  Optional<BigDecimal> findBoxComboPrice(String body) {
     return findBoxComboPrice(objectMapper.readTree(body));
   }
 
@@ -255,11 +269,9 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
     }
     var originalIndex = body.toLowerCase(Locale.ROOT).indexOf(properties.getItemName().toLowerCase(Locale.ROOT));
     var searchStart = Math.max(0, originalIndex);
-    var searchEnd = Math.min(body.length(), searchStart + 2000);
+    var searchEnd = Math.min(body.length(), searchStart + PUBLIC_MENU_PRICE_SEARCH_WINDOW);
     var snippet = body.substring(searchStart, searchEnd);
-    var matcher = java.util.regex.Pattern
-        .compile("(?i)\"(?:price|Price)\"\\s*:\\s*\"?\\$?([0-9]+(?:\\.[0-9]{1,2})?)")
-        .matcher(snippet);
+    var matcher = PUBLIC_MENU_PRICE.matcher(snippet);
     if (matcher.find()) {
       return Optional.of(new BigDecimal(matcher.group(1)).setScale(2));
     }
@@ -350,11 +362,10 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
   ) {
     if (!properties.isPublicMenuFallbackEnabled()) {
       return CanesBoxMetroPrice.failure(
-          target,
-          officialFailure + "; public menu fallback is disabled.");
+          target, officialFailure + "; public menu fallback is disabled.", clock.instant());
     }
     if (target.getFallbackMenuUrl() == null || target.getFallbackMenuUrl().isBlank()) {
-      return CanesBoxMetroPrice.failure(target, officialFailure);
+      return CanesBoxMetroPrice.failure(target, officialFailure, clock.instant());
     }
     try {
       var request = HttpRequest.newBuilder(URI.create(target.getFallbackMenuUrl()))
@@ -371,8 +382,7 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
               status -> status >= 200 && status < 300));
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
         return CanesBoxMetroPrice.failure(
-            target,
-            officialFailure + "; fallback menu returned HTTP " + response.statusCode());
+            target, officialFailure + "; fallback menu returned HTTP " + response.statusCode(), clock.instant());
       }
       var body = responseBody(response.body(), response.headers());
       var price = findPublicMenuBoxComboPrice(body)
@@ -383,21 +393,24 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
             officialFailure + "; fallback menu price was implausibly low: " + price,
             body);
       }
-      var result = CanesBoxMetroPrice.success(target, price, Instant.now(), "PUBLIC_MENU", target.getFallbackMenuUrl());
+      var result = CanesBoxMetroPrice.success(
+          target, price, clock.instant(), CanesBoxPriceSource.PUBLIC_MENU, target.getFallbackMenuUrl());
       applyAuditMetadata(result, body);
       return result;
-    } catch (InterruptedException e) {
+    } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
-      return CanesBoxMetroPrice.failure(target, officialFailure + "; fallback menu request was interrupted.");
-    } catch (Exception e) {
-      return CanesBoxMetroPrice.failure(target, officialFailure + "; fallback menu failed: " + e.getMessage());
+      return CanesBoxMetroPrice.failure(
+          target, officialFailure + "; fallback menu request was interrupted.", clock.instant());
+    } catch (IOException | RuntimeException fallbackFailure) {
+      return CanesBoxMetroPrice.failure(
+          target, officialFailure + "; fallback menu failed: " + fallbackFailure.getMessage(), clock.instant());
     }
   }
 
-  private String responseBody(byte[] bytes, HttpHeaders headers) throws Exception {
+  private String responseBody(byte[] bytes, HttpHeaders headers) throws IOException {
     var encoding = headers.firstValue("Content-Encoding").orElse("");
     if ("gzip".equalsIgnoreCase(encoding) || (bytes.length > 2 && bytes[0] == 0x1f && bytes[1] == (byte) 0x8b)) {
-      try (var input = new GZIPInputStream(new java.io.ByteArrayInputStream(bytes))) {
+      try (var input = new GZIPInputStream(new ByteArrayInputStream(bytes))) {
         return BoundedResponseBodyReader.readString(
             input, MAXIMUM_FALLBACK_RESPONSE_BYTES, StandardCharsets.UTF_8);
       }
@@ -416,8 +429,8 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
       String reason,
       String body
   ) {
-    var result = CanesBoxMetroPrice.failure(target, reason);
-    result.setSourceName("PUBLIC_MENU");
+    var result = CanesBoxMetroPrice.failure(target, reason, clock.instant());
+    result.setSourceName(CanesBoxPriceSource.PUBLIC_MENU.name());
     result.setSourceUrl(target.getFallbackMenuUrl());
     applyAuditMetadata(result, body);
     return result;
@@ -427,9 +440,9 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
     try {
       var digest = MessageDigest.getInstance("SHA-256");
       return HexFormat.of().formatHex(digest.digest(String.valueOf(value).getBytes(StandardCharsets.UTF_8)));
-    } catch (NoSuchAlgorithmException exception) {
+    } catch (NoSuchAlgorithmException impossible) {
       throw new IllegalStateException(
-          "Unable to hash Raising Canes Box Index source response.", exception);
+          "Unable to hash Raising Canes Box Index source response.", impossible);
     }
   }
 

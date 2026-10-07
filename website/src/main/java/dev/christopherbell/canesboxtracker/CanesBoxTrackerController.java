@@ -62,11 +62,11 @@ public class CanesBoxTrackerController {
   public ResponseEntity<Response<CanesBoxWeeklyPriceDetail>> approveMetroPrice(
       @PathVariable String weekStartDate,
       @PathVariable String metroName,
-      @RequestBody CanesBoxPriceReviewRequest request
+      @RequestBody CanesBoxPriceReviewRequest reviewRequest
   ) {
     return new ResponseEntity<>(
         Response.<CanesBoxWeeklyPriceDetail>builder()
-            .payload(service.approveMetroPrice(weekStartDate, metroName, request.note()))
+            .payload(service.approveMetroPrice(weekStartDate, metroName, reviewRequest.note()))
             .success(true)
             .build(),
         HttpStatus.OK);
@@ -80,11 +80,11 @@ public class CanesBoxTrackerController {
   public ResponseEntity<Response<CanesBoxWeeklyPriceDetail>> rejectMetroPrice(
       @PathVariable String weekStartDate,
       @PathVariable String metroName,
-      @RequestBody CanesBoxPriceReviewRequest request
+      @RequestBody CanesBoxPriceReviewRequest reviewRequest
   ) {
     return new ResponseEntity<>(
         Response.<CanesBoxWeeklyPriceDetail>builder()
-            .payload(service.rejectMetroPrice(weekStartDate, metroName, request.note()))
+            .payload(service.rejectMetroPrice(weekStartDate, metroName, reviewRequest.note()))
             .success(true)
             .build(),
         HttpStatus.OK);
@@ -96,15 +96,15 @@ public class CanesBoxTrackerController {
   @PostMapping(value = "/manual-prices", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<CanesBoxWeeklyPriceDetail>> recordManualVerifiedPrice(
-      @RequestBody CanesBoxManualPriceRequest request
+      @RequestBody CanesBoxManualPriceRequest manualPrice
   ) {
     return new ResponseEntity<>(
         Response.<CanesBoxWeeklyPriceDetail>builder()
             .payload(service.recordManualVerifiedPrice(
-                request.metroName(),
-                request.price(),
-                request.sourceUrl(),
-                request.note()))
+                manualPrice.metroName(),
+                manualPrice.price(),
+                manualPrice.sourceUrl(),
+                manualPrice.note()))
             .success(true)
             .build(),
         HttpStatus.OK);

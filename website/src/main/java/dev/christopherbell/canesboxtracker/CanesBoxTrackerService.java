@@ -1,7 +1,9 @@
 package dev.christopherbell.canesboxtracker;
 
 import dev.christopherbell.canesboxtracker.model.CanesBoxMetroPrice;
+import dev.christopherbell.canesboxtracker.model.CanesBoxPriceQuality;
 import dev.christopherbell.canesboxtracker.model.CanesBoxPriceSnapshot;
+import dev.christopherbell.canesboxtracker.model.CanesBoxPriceSource;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerHistory;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
 import dev.christopherbell.canesboxtracker.model.CanesBoxWeeklyPriceDetail;
@@ -15,11 +17,13 @@ import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -37,6 +41,9 @@ import org.springframework.web.server.ResponseStatusException;
 @Slf4j
 public class CanesBoxTrackerService {
   public static final String LEASE_NAME = "canes-box-price-collection";
+  private static final int AVERAGE_PRICE_SCALE = 2;
+  private static final String PUBLIC_MISSING_DETAIL = "details unavailable";
+
   private final CanesBoxPriceSnapshotRepository repository;
   private final CanesBoxPriceClient priceClient;
   private final CanesBoxTrackerProperties properties;
@@ -44,7 +51,7 @@ public class CanesBoxTrackerService {
   private final ScheduledCollectorCoordinator coordinator;
 
   /**
-   * Creates the Raising Canes Box Index service.
+   * Creates the service without a collector lease, for tests that run collection directly.
    */
   public CanesBoxTrackerService(
       CanesBoxPriceSnapshotRepository repository,
@@ -71,7 +78,7 @@ public class CanesBoxTrackerService {
   }
 
   /**
-   * Runs the configured weekly Raising Canes Box Index collection job.
+   * Runs the configured weekly collection, under the collector lease when one is configured.
    */
   @Scheduled(
       cron = "${canes-box-tracker.collection.cron}",
@@ -81,15 +88,15 @@ public class CanesBoxTrackerService {
     if (!properties.isEnabled()) {
       return;
     }
-    var weekStart = currentWeekStart();
+    LocalDate weekStart = currentWeekStart();
     if (coordinator != null) {
-      coordinator.run(LEASE_NAME, properties.getLeaseDuration(), guard -> {
-        collectCurrentWeek(weekStart, guard);
+      coordinator.run(LEASE_NAME, properties.getLeaseDuration(), leaseGuard -> {
+        collectAndLogWeek(weekStart, leaseGuard);
         return null;
       });
       return;
     }
-    collectCurrentWeek(weekStart, CollectorLeaseGuard.NONE);
+    collectAndLogWeek(weekStart, CollectorLeaseGuard.NONE);
   }
 
   /** Runs one startup catch-up when the last complete metro snapshot predates a due schedule. */
@@ -100,45 +107,126 @@ public class CanesBoxTrackerService {
     if (!properties.isEnabled()) {
       return;
     }
-    var latestCompleteSnapshot = repository.findTop60ByOrderByWeekStartDateDesc().stream()
-        .filter(this::hasAllConfiguredMetroPrices)
-        .findFirst()
-        .orElse(null);
-    if (latestCompleteSnapshot == null
-        || isWeeklyCollectionOverdue(latestCompleteSnapshot, Instant.now(clock))) {
-      try {
-        collectCurrentWeek();
-      } catch (RuntimeException failure) {
-        log.warn(
-            "Raising Canes Box Index startup catch-up failed; the next scheduled run will retry.",
-            failure);
-      }
+    Optional<CanesBoxPriceSnapshot> latestCompleteSnapshot =
+        repository.findTop60ByOrderByWeekStartDateDesc().stream()
+            .filter(this::hasAllConfiguredMetroPrices)
+            .findFirst();
+    boolean collectionIsDue = latestCompleteSnapshot
+        .map(snapshot -> isWeeklyCollectionOverdue(snapshot, clock.instant()))
+        .orElse(true);
+    if (!collectionIsDue) {
+      return;
+    }
+    try {
+      collectCurrentWeek();
+    } catch (RuntimeException catchUpFailure) {
+      log.warn(
+          "Raising Canes Box Index startup catch-up failed; the next scheduled run will retry.",
+          catchUpFailure);
     }
   }
 
+  /**
+   * Forces a current-week collection for an admin Back Office operation.
+   *
+   * @return chart/API detail for the saved snapshot
+   * @throws ResponseStatusException 409 when another collection holds the lease
+   */
+  public CanesBoxWeeklyPriceDetail collectCurrentWeekForAdmin() {
+    LocalDate weekStart = currentWeekStart();
+    if (coordinator == null) {
+      return detailOf(collectAndLogWeek(weekStart, CollectorLeaseGuard.NONE));
+    }
+    ScheduledCollectorCoordinator.Outcome<CanesBoxPriceSnapshot> leasedRun = coordinator.run(
+        LEASE_NAME, properties.getLeaseDuration(), leaseGuard -> collectAndLogWeek(weekStart, leaseGuard));
+    if (leasedRun.status() == ScheduledCollectorRunStatus.SKIPPED_LOCKED) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "Price collection is already running");
+    }
+    return detailOf(leasedRun.value());
+  }
+
+  /**
+   * Collects and saves one weekly snapshot without a lease.
+   *
+   * @param weekStartDate Monday date represented by this snapshot
+   * @return saved snapshot
+   */
+  CanesBoxPriceSnapshot collectWeek(LocalDate weekStartDate) {
+    return collectWeek(weekStartDate, CollectorLeaseGuard.NONE);
+  }
+
+  /** Approves one provisional metro price so it can count toward the public index. */
+  public CanesBoxWeeklyPriceDetail approveMetroPrice(String weekStartDate, String metroName, String reviewNote) {
+    CanesBoxPriceSnapshot snapshot = findSnapshot(weekStartDate);
+    findMetroPrice(snapshot, metroName).verify(reviewNote, clock.instant());
+    recalculateSnapshot(snapshot);
+    return detailOf(repository.save(snapshot));
+  }
+
+  /** Rejects one metro price so it shows as excluded and is never averaged. */
+  public CanesBoxWeeklyPriceDetail rejectMetroPrice(String weekStartDate, String metroName, String reviewNote) {
+    CanesBoxPriceSnapshot snapshot = findSnapshot(weekStartDate);
+    findMetroPrice(snapshot, metroName).exclude(reviewNote, clock.instant());
+    recalculateSnapshot(snapshot);
+    return detailOf(repository.save(snapshot));
+  }
+
+  /**
+   * Records an admin-verified current-week price from a manually checked source, replacing any
+   * existing price for the metro.
+   *
+   * @throws IllegalArgumentException if the metro is not configured
+   */
+  public CanesBoxWeeklyPriceDetail recordManualVerifiedPrice(
+      String metroName, BigDecimal price, String sourceUrl, String reviewNote) {
+    LocalDate weekStart = currentWeekStart();
+    CanesBoxPriceSnapshot snapshot =
+        repository.findById(weekStart.toString()).orElseGet(() -> newSnapshot(weekStart));
+    CanesBoxTrackerProperties.MetroTarget target = properties.getMetros().stream()
+        .filter(candidate -> metroMatches(candidate.getMetroName(), metroName))
+        .findFirst()
+        .orElseThrow(() -> new IllegalArgumentException("Metro is not configured: " + metroName));
+    Instant recordedOn = clock.instant();
+    CanesBoxMetroPrice manualPrice = CanesBoxMetroPrice.success(
+        target, price, recordedOn, CanesBoxPriceSource.MANUAL_VERIFIED, sourceUrl);
+    manualPrice.verify(reviewNote, recordedOn);
+    List<CanesBoxMetroPrice> metroPrices = new ArrayList<>(snapshot.getMetroPrices());
+    metroPrices.removeIf(existing -> metroMatches(existing.getMetroName(), target.getMetroName()));
+    metroPrices.add(manualPrice);
+    snapshot.setMetroPrices(metroPrices);
+    recalculateSnapshot(snapshot);
+    return detailOf(repository.save(snapshot));
+  }
+
+  /** Returns chart-ready weekly history, oldest to newest, with the newest week as latest. */
+  public CanesBoxTrackerHistory getHistory() {
+    List<CanesBoxWeeklyPriceDetail> weeks = repository.findTop60ByOrderByWeekStartDateDesc().stream()
+        .map(this::detailOf)
+        .sorted(Comparator.comparing(CanesBoxWeeklyPriceDetail::weekStartDate))
+        .toList();
+    CanesBoxWeeklyPriceDetail latestWeek = weeks.isEmpty() ? null : weeks.getLast();
+    return new CanesBoxTrackerHistory(latestWeek, weeks);
+  }
+
   private boolean hasAllConfiguredMetroPrices(CanesBoxPriceSnapshot snapshot) {
-    var prices = snapshot.getMetroPrices();
-    return prices != null && properties.getMetros().stream().allMatch(target ->
-        prices.stream().anyMatch(price -> price != null
-            && target.getMetroName().equals(price.getMetroName())));
+    List<CanesBoxMetroPrice> metroPrices = snapshot.getMetroPrices();
+    return metroPrices != null && properties.getMetros().stream().allMatch(target ->
+        metroPrices.stream().anyMatch(metroPrice -> metroPrice != null
+            && target.getMetroName().equals(metroPrice.getMetroName())));
   }
 
   private boolean isWeeklyCollectionOverdue(CanesBoxPriceSnapshot snapshot, Instant now) {
     if (snapshot.getCollectedOn() == null) {
       return true;
     }
-    var cron = CronExpression.parse(properties.getCollection().getCron());
-    var zone = ZoneId.of(properties.getCollection().getZone());
-    var nextScheduledOn = cron.next(snapshot.getCollectedOn().atZone(zone));
+    CronExpression collectionSchedule = CronExpression.parse(properties.getCollection().getCron());
+    ZonedDateTime nextScheduledOn = collectionSchedule.next(snapshot.getCollectedOn().atZone(collectionZone()));
     return nextScheduledOn != null && !nextScheduledOn.toInstant().isAfter(now);
   }
 
-  private CanesBoxPriceSnapshot collectCurrentWeek(
-      LocalDate weekStart,
-      CollectorLeaseGuard leaseGuard
-  ) {
+  private CanesBoxPriceSnapshot collectAndLogWeek(LocalDate weekStart, CollectorLeaseGuard leaseGuard) {
     log.info("Raising Canes Box Index weekly collection started. Week: {}.", weekStart);
-    var snapshot = collectWeek(weekStart, leaseGuard);
+    CanesBoxPriceSnapshot snapshot = collectWeek(weekStart, leaseGuard);
     log.info(
         "Raising Canes Box Index weekly collection completed. Week: {}, successful metros: {}/{}, average price: {}.",
         snapshot.getWeekStartDate(),
@@ -148,144 +236,61 @@ public class CanesBoxTrackerService {
     return snapshot;
   }
 
-  /**
-   * Forces a current-week collection for an admin Back Office operation.
-   *
-   * @return chart/API detail for the saved snapshot
-   */
-  public CanesBoxWeeklyPriceDetail collectCurrentWeekForAdmin() {
-    var weekStart = currentWeekStart();
-    if (coordinator != null) {
-      var outcome = coordinator.run(
-          LEASE_NAME, properties.getLeaseDuration(), guard -> collectCurrentWeek(weekStart, guard));
-      if (outcome.status() == ScheduledCollectorRunStatus.SKIPPED_LOCKED) {
-        throw new ResponseStatusException(HttpStatus.CONFLICT, "Price collection is already running");
-      }
-      return toDetail(outcome.value());
-    }
-    return toDetail(collectCurrentWeek(weekStart, CollectorLeaseGuard.NONE));
-  }
-
-  /**
-   * Collects one weekly snapshot.
-   *
-   * @param weekStartDate Monday date represented by this snapshot
-   * @return saved snapshot
-   */
-  CanesBoxPriceSnapshot collectWeek(LocalDate weekStartDate) {
-    return collectWeek(weekStartDate, CollectorLeaseGuard.NONE);
-  }
-
-  private CanesBoxPriceSnapshot collectWeek(
-      LocalDate weekStartDate,
-      CollectorLeaseGuard leaseGuard
-  ) {
-    var prices = new ArrayList<CanesBoxMetroPrice>();
-    for (var target : properties.getMetros()) {
+  /** Fetches every configured metro, checking the lease before each fetch and before saving. */
+  private CanesBoxPriceSnapshot collectWeek(LocalDate weekStartDate, CollectorLeaseGuard leaseGuard) {
+    List<CanesBoxMetroPrice> metroPrices = new ArrayList<>();
+    for (CanesBoxTrackerProperties.MetroTarget target : properties.getMetros()) {
       leaseGuard.verifyHeld();
-      prices.add(fetchMetroPrice(target));
+      metroPrices.add(fetchMetroPrice(target));
     }
-    var snapshot = new CanesBoxPriceSnapshot();
+    CanesBoxPriceSnapshot snapshot = new CanesBoxPriceSnapshot();
     snapshot.setId(weekStartDate.toString());
     snapshot.setWeekStartDate(weekStartDate.toString());
-    snapshot.setCollectedOn(Instant.now(clock));
-    snapshot.setMetroPrices(prices);
-    recalculateSnapshot(snapshot, prices.size());
+    snapshot.setCollectedOn(clock.instant());
+    snapshot.setMetroPrices(metroPrices);
+    recalculateSnapshot(snapshot, metroPrices.size());
     leaseGuard.verifyHeld();
     return repository.save(snapshot);
   }
 
-  /**
-   * Approves one provisional metro datapoint so it can participate in the public index.
-   */
-  public CanesBoxWeeklyPriceDetail approveMetroPrice(String weekStartDate, String metroName, String reviewNote) {
-    var snapshot = findSnapshot(weekStartDate);
-    var metroPrice = findMetroPrice(snapshot, metroName);
-    metroPrice.verify(reviewNote);
-    metroPrice.setReviewedOn(Instant.now(clock));
-    recalculateSnapshot(snapshot);
-    return toDetail(repository.save(snapshot));
+  /** Records any client failure as a failed metro price so one metro cannot stop the week. */
+  private CanesBoxMetroPrice fetchMetroPrice(CanesBoxTrackerProperties.MetroTarget target) {
+    try {
+      return priceClient.fetchBoxComboPrice(target);
+    } catch (RuntimeException fetchFailure) {
+      log.warn("Raising Canes Box Index price fetch failed for {}.", target.getMetroName(), fetchFailure);
+      return CanesBoxMetroPrice.failure(target, fetchFailure.getMessage(), clock.instant());
+    }
   }
 
-  /**
-   * Rejects one metro datapoint and excludes it from index calculations.
-   */
-  public CanesBoxWeeklyPriceDetail rejectMetroPrice(String weekStartDate, String metroName, String reviewNote) {
-    var snapshot = findSnapshot(weekStartDate);
-    var metroPrice = findMetroPrice(snapshot, metroName);
-    metroPrice.exclude(reviewNote);
-    metroPrice.setReviewedOn(Instant.now(clock));
-    recalculateSnapshot(snapshot);
-    return toDetail(repository.save(snapshot));
-  }
-
-  /**
-   * Records an admin-verified current-week price from a manually checked source.
-   */
-  public CanesBoxWeeklyPriceDetail recordManualVerifiedPrice(
-      String metroName,
-      BigDecimal price,
-      String sourceUrl,
-      String reviewNote
-  ) {
-    var weekStart = currentWeekStart();
-    var snapshot = repository.findById(weekStart.toString()).orElseGet(() -> newSnapshot(weekStart));
-    var target = properties.getMetros().stream()
-        .filter(candidate -> metroMatches(candidate.getMetroName(), metroName))
-        .findFirst()
-        .orElseThrow(() -> new IllegalArgumentException("Metro is not configured: " + metroName));
-    var collectedOn = Instant.now(clock);
-    var metroPrice = CanesBoxMetroPrice.success(target, price, collectedOn, "MANUAL_VERIFIED", sourceUrl);
-    metroPrice.verify(reviewNote);
-    metroPrice.setReviewedOn(collectedOn);
-
-    var metroPrices = new ArrayList<>(snapshot.getMetroPrices());
-    metroPrices.removeIf(existing -> metroMatches(existing.getMetroName(), target.getMetroName()));
-    metroPrices.add(metroPrice);
-    snapshot.setMetroPrices(metroPrices);
-    recalculateSnapshot(snapshot);
-    return toDetail(repository.save(snapshot));
-  }
-
-  /**
-   * Gets chart-ready weekly history sorted from oldest to newest.
-   */
-  public CanesBoxTrackerHistory getHistory() {
-    var weeks = repository.findTop60ByOrderByWeekStartDateDesc().stream()
-        .map(this::toDetail)
-        .sorted(Comparator.comparing(CanesBoxWeeklyPriceDetail::weekStartDate))
-        .toList();
-    var latest = weeks.isEmpty() ? null : weeks.get(weeks.size() - 1);
-    return new CanesBoxTrackerHistory(latest, weeks);
-  }
-
-  private BigDecimal average(List<CanesBoxMetroPrice> successes) {
-    if (successes.isEmpty()) {
+  private BigDecimal averagePriceOf(List<CanesBoxMetroPrice> verifiedPrices) {
+    if (verifiedPrices.isEmpty()) {
       return null;
     }
-    var total = successes.stream()
+    BigDecimal total = verifiedPrices.stream()
         .map(CanesBoxMetroPrice::getPrice)
         .reduce(BigDecimal.ZERO, BigDecimal::add);
-    return total.divide(BigDecimal.valueOf(successes.size()), 2, RoundingMode.HALF_UP);
+    return total.divide(BigDecimal.valueOf(verifiedPrices.size()), AVERAGE_PRICE_SCALE, RoundingMode.HALF_UP);
   }
 
   private CanesBoxPriceSnapshot findSnapshot(String weekStartDate) {
     return repository.findById(weekStartDate)
-        .orElseThrow(() -> new IllegalArgumentException("Raising Canes Box Index week was not found: " + weekStartDate));
+        .orElseThrow(() -> new IllegalArgumentException(
+            "Raising Canes Box Index week was not found: " + weekStartDate));
   }
 
   private CanesBoxMetroPrice findMetroPrice(CanesBoxPriceSnapshot snapshot, String metroName) {
     return snapshot.getMetroPrices().stream()
-        .filter(price -> metroMatches(price.getMetroName(), metroName))
+        .filter(metroPrice -> metroMatches(metroPrice.getMetroName(), metroName))
         .findFirst()
         .orElseThrow(() -> new IllegalArgumentException("Metro was not found in snapshot: " + metroName));
   }
 
   private CanesBoxPriceSnapshot newSnapshot(LocalDate weekStart) {
-    var snapshot = new CanesBoxPriceSnapshot();
+    CanesBoxPriceSnapshot snapshot = new CanesBoxPriceSnapshot();
     snapshot.setId(weekStart.toString());
     snapshot.setWeekStartDate(weekStart.toString());
-    snapshot.setCollectedOn(Instant.now(clock));
+    snapshot.setCollectedOn(clock.instant());
     snapshot.setTotalMetroCount(properties.getMetros().size());
     return snapshot;
   }
@@ -294,75 +299,64 @@ public class CanesBoxTrackerService {
     recalculateSnapshot(snapshot, Math.max(snapshot.getTotalMetroCount(), properties.getMetros().size()));
   }
 
+  /**
+   * Re-applies the public-menu plausibility floor, then recomputes the snapshot's counts and the
+   * average of verified prices.
+   */
   private void recalculateSnapshot(CanesBoxPriceSnapshot snapshot, int totalMetroCount) {
-    var prices = snapshot.getMetroPrices();
-    prices.forEach(this::excludeImplausiblePublicMenuPrice);
-    var successes = prices.stream()
-        .filter(price -> "SUCCESS".equals(price.getStatus()))
-        .filter(price -> price.getPrice() != null)
+    List<CanesBoxMetroPrice> metroPrices = snapshot.getMetroPrices();
+    for (CanesBoxMetroPrice metroPrice : metroPrices) {
+      excludeImplausiblePublicMenuPrice(metroPrice);
+    }
+    List<CanesBoxMetroPrice> collectedPrices = metroPrices.stream()
+        .filter(CanesBoxMetroPrice::hasCollectedPrice)
         .toList();
-    var verified = successes.stream()
-        .filter(price -> "VERIFIED".equals(normalizedQualityStatus(price)))
+    List<CanesBoxMetroPrice> verifiedPrices = collectedPrices.stream()
+        .filter(metroPrice -> metroPrice.effectiveQuality() == CanesBoxPriceQuality.VERIFIED)
         .toList();
-    snapshot.setTotalMetroCount(Math.max(totalMetroCount, prices.size()));
-    snapshot.setSuccessfulMetroCount(successes.size());
-    snapshot.setVerifiedMetroCount(verified.size());
-    snapshot.setProvisionalMetroCount((int) prices.stream()
-        .filter(price -> "PROVISIONAL".equals(normalizedQualityStatus(price)))
-        .count());
-    snapshot.setExcludedMetroCount((int) prices.stream()
-        .filter(price -> "EXCLUDED".equals(normalizedQualityStatus(price)))
-        .count());
-    snapshot.setAveragePrice(average(verified));
+    snapshot.setTotalMetroCount(Math.max(totalMetroCount, metroPrices.size()));
+    snapshot.setSuccessfulMetroCount(collectedPrices.size());
+    snapshot.setVerifiedMetroCount(verifiedPrices.size());
+    snapshot.setProvisionalMetroCount(countWithQuality(metroPrices, CanesBoxPriceQuality.PROVISIONAL));
+    snapshot.setExcludedMetroCount(countWithQuality(metroPrices, CanesBoxPriceQuality.EXCLUDED));
+    snapshot.setAveragePrice(averagePriceOf(verifiedPrices));
   }
 
-  private void excludeImplausiblePublicMenuPrice(CanesBoxMetroPrice price) {
-    if (!"PUBLIC_MENU".equals(price.getSourceName()) || price.getPrice() == null) {
-      return;
-    }
-    if (price.getPrice().compareTo(properties.getMinimumPublicMenuPrice()) >= 0) {
-      return;
-    }
-    price.setFailureReason("Public menu fallback price was implausibly low: " + price.getPrice());
-    price.setPrice(null);
-    price.setStatus("FAILED");
-    price.setQualityStatus("EXCLUDED");
-    price.setConfidenceLevel("NONE");
+  private static int countWithQuality(List<CanesBoxMetroPrice> metroPrices, CanesBoxPriceQuality quality) {
+    return (int) metroPrices.stream()
+        .filter(metroPrice -> metroPrice.effectiveQuality() == quality)
+        .count();
   }
 
-  private String normalizedQualityStatus(CanesBoxMetroPrice price) {
-    if (price.getQualityStatus() != null && !price.getQualityStatus().isBlank()) {
-      return price.getQualityStatus();
+  private void excludeImplausiblePublicMenuPrice(CanesBoxMetroPrice metroPrice) {
+    boolean isPublicMenuPrice =
+        metroPrice.isFromSource(CanesBoxPriceSource.PUBLIC_MENU) && metroPrice.getPrice() != null;
+    if (isPublicMenuPrice && metroPrice.getPrice().compareTo(properties.getMinimumPublicMenuPrice()) < 0) {
+      metroPrice.excludeAsImplausible(
+          "Public menu fallback price was implausibly low: " + metroPrice.getPrice());
     }
-    if ("SUCCESS".equals(price.getStatus()) && price.getPrice() != null) {
-      return "VERIFIED";
-    }
-    return "EXCLUDED";
   }
 
-  private boolean metroMatches(String actual, String requested) {
-    var normalizedActual = normalize(actual);
-    var normalizedRequested = normalize(requested);
-    return normalizedActual.equals(normalizedRequested)
-        || normalizedActual.startsWith(normalizedRequested)
-        || normalizedRequested.startsWith(normalizedActual);
+  /** Whether two metro names match ignoring case and punctuation, or one is a prefix of the other. */
+  private static boolean metroMatches(String storedMetroName, String requestedMetroName) {
+    String normalizedStored = lettersAndDigitsOf(storedMetroName);
+    String normalizedRequested = lettersAndDigitsOf(requestedMetroName);
+    return normalizedStored.equals(normalizedRequested)
+        || normalizedStored.startsWith(normalizedRequested)
+        || normalizedRequested.startsWith(normalizedStored);
   }
 
-  private String normalize(String value) {
-    return String.valueOf(value)
+  private static String lettersAndDigitsOf(String text) {
+    return String.valueOf(text)
         .toLowerCase(Locale.ROOT)
         .replaceAll("[^a-z0-9]+", "");
   }
 
-  private CanesBoxMetroPrice fetchMetroPrice(CanesBoxTrackerProperties.MetroTarget target) {
-    try {
-      return priceClient.fetchBoxComboPrice(target);
-    } catch (Exception e) {
-      return CanesBoxMetroPrice.failure(target, e.getMessage());
-    }
-  }
-
-  private CanesBoxWeeklyPriceDetail toDetail(CanesBoxPriceSnapshot snapshot) {
+  /**
+   * Builds the public week detail. Stored snapshots are recalculated in memory first, so current
+   * plausibility and quality rules apply to old weeks; nothing is saved.
+   */
+  private CanesBoxWeeklyPriceDetail detailOf(CanesBoxPriceSnapshot snapshot) {
     if (!snapshot.getMetroPrices().isEmpty()) {
       recalculateSnapshot(snapshot);
     }
@@ -377,15 +371,16 @@ public class CanesBoxTrackerService {
         snapshot.getProvisionalMetroCount(),
         snapshot.getExcludedMetroCount(),
         snapshot.getMetroPrices().stream()
-            .map(price -> price.copyWithFailureReason(publicFailureReason(price.getFailureReason())))
+            .map(metroPrice -> metroPrice.copyWithFailureReason(publicFailureReason(metroPrice.getFailureReason())))
             .toList());
   }
 
-  private String publicFailureReason(String failureReason) {
+  /** Replaces a bare {@code null} left in legacy failure messages with readable text. */
+  private static String publicFailureReason(String failureReason) {
     if (failureReason == null || failureReason.isBlank()) {
       return failureReason;
     }
-    return failureReason.replaceAll("(?i)\\bnull\\b", "details unavailable");
+    return failureReason.replaceAll("(?i)\\bnull\\b", PUBLIC_MISSING_DETAIL);
   }
 
   private ZoneId collectionZone() {
@@ -393,6 +388,7 @@ public class CanesBoxTrackerService {
   }
 
   private LocalDate currentWeekStart() {
-    return LocalDate.now(clock.withZone(collectionZone())).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+    return LocalDate.now(clock.withZone(collectionZone()))
+        .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
   }
 }

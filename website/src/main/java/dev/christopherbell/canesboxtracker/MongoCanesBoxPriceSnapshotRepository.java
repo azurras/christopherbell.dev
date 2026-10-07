@@ -20,9 +20,18 @@ public class MongoCanesBoxPriceSnapshotRepository
   public MongoCanesBoxPriceSnapshotRepository(DomainMongoOperationsFactory factory) {
     super(factory, CanesBoxPriceSnapshot.class);
   }
-  @Override public CanesBoxPriceSnapshot save(CanesBoxPriceSnapshot value) { return saveValue(value); }
-  @Override public Optional<CanesBoxPriceSnapshot> findById(String id) { return findValueById(id); }
-  @Override public List<CanesBoxPriceSnapshot> findTop60ByOrderByWeekStartDateDesc() {
+  @Override
+  public CanesBoxPriceSnapshot save(CanesBoxPriceSnapshot snapshot) {
+    return saveValue(snapshot);
+  }
+
+  @Override
+  public Optional<CanesBoxPriceSnapshot> findById(String weekStartDate) {
+    return findValueById(weekStartDate);
+  }
+
+  @Override
+  public List<CanesBoxPriceSnapshot> findTop60ByOrderByWeekStartDateDesc() {
     return find(new Query(), PageRequest.of(0, 60, Sort.by(Sort.Direction.DESC, "weekStartDate")));
   }
 }

@@ -1,5 +1,6 @@
 package dev.christopherbell.canesboxtracker;
 
+import java.time.Clock;
 import tools.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
@@ -40,7 +41,7 @@ class OfficialCanesBoxPriceClientTest {
   void findBoxComboPriceFindsNestedOfficialMenuPrice() throws Exception {
     var properties = new CanesBoxTrackerProperties();
     properties.setItemName("The Box Combo");
-    var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+    var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
     var price = client.findBoxComboPrice("""
         {
@@ -179,7 +180,7 @@ class OfficialCanesBoxPriceClientTest {
       target.setLatitude(30.2672);
       target.setLongitude(-97.7431);
       target.setRestaurantRef("stale-public-slug");
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(target);
 
@@ -205,7 +206,7 @@ class OfficialCanesBoxPriceClientTest {
     properties.setApiBaseUrl("https://nomnom-prod-api.raisingcanes.com/");
     var target = new CanesBoxTrackerProperties.MetroTarget();
     target.setRestaurantRef("tx/austin/415-w-martin-luther-king-jr-blvd");
-    var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+    var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
     var uri = client.restaurantUri(target);
 
@@ -245,7 +246,7 @@ class OfficialCanesBoxPriceClientTest {
       target.setMetroName("Dallas-Fort Worth-Arlington");
       target.setRestaurantRef("raising-canes-286");
       target.setFallbackMenuUrl("http://localhost:" + server.getAddress().getPort() + "/allmenus");
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(target);
 
@@ -290,7 +291,7 @@ class OfficialCanesBoxPriceClientTest {
       target.setMetroName("Dallas-Fort Worth-Arlington");
       target.setRestaurantRef("raising-canes-286");
       target.setFallbackMenuUrl("http://localhost:" + server.getAddress().getPort() + "/allmenus");
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(target);
 
@@ -335,7 +336,7 @@ class OfficialCanesBoxPriceClientTest {
       target.setMetroName("Dallas-Fort Worth-Arlington");
       target.setRestaurantRef("raising-canes-286");
       target.setFallbackMenuUrl("http://localhost:" + server.getAddress().getPort() + "/stale-allmenus");
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(target);
 
@@ -372,7 +373,7 @@ class OfficialCanesBoxPriceClientTest {
       var target = new CanesBoxTrackerProperties.MetroTarget();
       target.setMetroName("Austin-Round Rock");
       target.setRestaurantRef("raising-canes-101");
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(target);
 
@@ -401,7 +402,7 @@ class OfficialCanesBoxPriceClientTest {
     server.start();
     try {
       var properties = propertiesFor(server);
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(coordinateTarget());
 
@@ -424,7 +425,7 @@ class OfficialCanesBoxPriceClientTest {
     });
     server.start();
     try {
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), propertiesFor(server));
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), propertiesFor(server), Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(coordinateTarget());
 
@@ -448,7 +449,7 @@ class OfficialCanesBoxPriceClientTest {
     server.start();
     try {
       var properties = propertiesFor(server);
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(coordinateTarget());
 
@@ -470,7 +471,7 @@ class OfficialCanesBoxPriceClientTest {
     try {
       var properties = propertiesFor(server);
       properties.setGraphQlUrl("");
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(coordinateTarget());
 
@@ -490,7 +491,7 @@ class OfficialCanesBoxPriceClientTest {
     try {
       var properties = propertiesFor(server);
       properties.setGraphQlUrl("");
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(coordinateTarget());
 
@@ -517,7 +518,7 @@ class OfficialCanesBoxPriceClientTest {
       properties.setPublicMenuFallbackEnabled(true);
       var target = coordinateTarget();
       target.setFallbackMenuUrl(serverUrl(server) + "/fallback");
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(target);
 
@@ -544,7 +545,7 @@ class OfficialCanesBoxPriceClientTest {
       properties.setPublicMenuFallbackEnabled(true);
       var target = coordinateTarget();
       target.setFallbackMenuUrl(serverUrl(server) + "/fallback");
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(target);
 
@@ -576,7 +577,7 @@ class OfficialCanesBoxPriceClientTest {
       properties.setPublicMenuFallbackEnabled(true);
       var target = coordinateTarget();
       target.setFallbackMenuUrl(serverUrl(server) + "/fallback");
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = client.fetchBoxComboPrice(target);
 
@@ -597,7 +598,7 @@ class OfficialCanesBoxPriceClientTest {
       properties.setGraphQlUrl("");
       properties.setRequestTimeout(Duration.ofMillis(150));
       properties.setItemName("The Box Combo");
-      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties, Clock.systemUTC());
 
       var result = stall.callWhileBodyStalls(
           () -> client.fetchBoxComboPrice(coordinateTarget()), Duration.ofSeconds(1));

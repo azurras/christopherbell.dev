@@ -1,5 +1,6 @@
 package dev.christopherbell.canesboxtracker;
 
+import dev.christopherbell.canesboxtracker.model.CanesBoxPriceSource;
 import dev.christopherbell.canesboxtracker.model.CanesBoxMetroPrice;
 import dev.christopherbell.canesboxtracker.model.CanesBoxPriceSnapshot;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
@@ -263,7 +264,7 @@ class CanesBoxTrackerServiceTest {
     var properties = properties(target("Dallas-Fort Worth", "101"), target("Houston", "202"), target("Phoenix", "303"));
     var client = new StubCanesBoxPriceClient(List.of(
         CanesBoxMetroPrice.success(properties.getMetros().get(0), new BigDecimal("12.99"), Instant.parse("2026-06-01T12:00:00Z")),
-        CanesBoxMetroPrice.failure(properties.getMetros().get(1), "HTTP 403"),
+        CanesBoxMetroPrice.failure(properties.getMetros().get(1), "HTTP 403", Instant.parse("2026-06-01T12:00:00Z")),
         CanesBoxMetroPrice.success(properties.getMetros().get(2), new BigDecimal("13.49"), Instant.parse("2026-06-01T12:00:00Z"))
     ));
     var service = new CanesBoxTrackerService(
@@ -290,8 +291,8 @@ class CanesBoxTrackerServiceTest {
     when(repository.save(any(CanesBoxPriceSnapshot.class))).thenAnswer(invocation -> invocation.getArgument(0));
     var properties = properties(target("Dallas-Fort Worth", "101"), target("Houston", "202"));
     var client = new StubCanesBoxPriceClient(List.of(
-        CanesBoxMetroPrice.success(properties.getMetros().get(0), new BigDecimal("12.99"), Instant.parse("2026-06-01T12:00:00Z"), "OFFICIAL_API", "https://official.example/dallas"),
-        CanesBoxMetroPrice.success(properties.getMetros().get(1), new BigDecimal("11.50"), Instant.parse("2026-06-01T12:00:00Z"), "PUBLIC_MENU", "https://public.example/houston")
+        CanesBoxMetroPrice.success(properties.getMetros().get(0), new BigDecimal("12.99"), Instant.parse("2026-06-01T12:00:00Z"), CanesBoxPriceSource.OFFICIAL_API, "https://official.example/dallas"),
+        CanesBoxMetroPrice.success(properties.getMetros().get(1), new BigDecimal("11.50"), Instant.parse("2026-06-01T12:00:00Z"), CanesBoxPriceSource.PUBLIC_MENU, "https://public.example/houston")
     ));
     var service = new CanesBoxTrackerService(
         repository,
@@ -317,13 +318,13 @@ class CanesBoxTrackerServiceTest {
     snapshot.setId("2026-06-01");
     snapshot.setWeekStartDate("2026-06-01");
     snapshot.setMetroPrices(List.of(
-        CanesBoxMetroPrice.success(target, new BigDecimal("11.49"), Instant.parse("2026-06-01T12:00:00Z"), "PUBLIC_MENU", "https://public.example/dallas")
+        CanesBoxMetroPrice.success(target, new BigDecimal("11.49"), Instant.parse("2026-06-01T12:00:00Z"), CanesBoxPriceSource.PUBLIC_MENU, "https://public.example/dallas")
     ));
     when(repository.findById("2026-06-01")).thenReturn(Optional.of(snapshot));
     when(repository.save(any(CanesBoxPriceSnapshot.class))).thenAnswer(invocation -> invocation.getArgument(0));
     var service = new CanesBoxTrackerService(
         repository,
-        targetPrice -> CanesBoxMetroPrice.failure(targetPrice, "unused"),
+        targetPrice -> CanesBoxMetroPrice.failure(targetPrice, "unused", Instant.parse("2026-06-01T12:00:00Z")),
         properties(target),
         Clock.fixed(Instant.parse("2026-06-04T12:00:00Z"), ZoneId.of("America/Chicago")));
 
@@ -344,7 +345,7 @@ class CanesBoxTrackerServiceTest {
     when(repository.save(any(CanesBoxPriceSnapshot.class))).thenAnswer(invocation -> invocation.getArgument(0));
     var service = new CanesBoxTrackerService(
         repository,
-        targetPrice -> CanesBoxMetroPrice.failure(targetPrice, "unused"),
+        targetPrice -> CanesBoxMetroPrice.failure(targetPrice, "unused", Instant.parse("2026-06-01T12:00:00Z")),
         properties(target),
         Clock.fixed(Instant.parse("2026-06-04T12:00:00Z"), ZoneId.of("America/Chicago")));
 
@@ -392,7 +393,7 @@ class CanesBoxTrackerServiceTest {
     ));
     var service = new CanesBoxTrackerService(
         repository,
-        target -> CanesBoxMetroPrice.failure(target, "unused"),
+        target -> CanesBoxMetroPrice.failure(target, "unused", Instant.parse("2026-06-01T12:00:00Z")),
         properties(target("Dallas-Fort Worth", "101")),
         Clock.fixed(Instant.parse("2026-06-09T12:00:00Z"), ZoneId.of("America/Chicago")));
 
@@ -410,10 +411,12 @@ class CanesBoxTrackerServiceTest {
     var target = target("Dallas-Fort Worth", "101");
     var legacyFailure = CanesBoxMetroPrice.failure(
         target,
-        "Official Cane's GraphQL API failed: null; null; public menu fallback is disabled.");
+        "Official Cane's GraphQL API failed: null; null; public menu fallback is disabled.",
+        Instant.parse("2026-06-01T12:00:00Z"));
     var officialFailure = CanesBoxMetroPrice.failure(
         target("Houston", "202"),
-        "Official Cane's GraphQL API failed: HTTP 403; public menu fallback is disabled.");
+        "Official Cane's GraphQL API failed: HTTP 403; public menu fallback is disabled.",
+        Instant.parse("2026-06-01T12:00:00Z"));
     var snapshot = new CanesBoxPriceSnapshot();
     snapshot.setId("2026-09-28");
     snapshot.setWeekStartDate("2026-09-28");
@@ -422,7 +425,7 @@ class CanesBoxTrackerServiceTest {
     when(repository.findTop60ByOrderByWeekStartDateDesc()).thenReturn(List.of(snapshot));
     var service = new CanesBoxTrackerService(
         repository,
-        candidate -> CanesBoxMetroPrice.failure(candidate, "unused"),
+        candidate -> CanesBoxMetroPrice.failure(candidate, "unused", Instant.parse("2026-06-01T12:00:00Z")),
         properties(target, target("Houston", "202")),
         Clock.fixed(Instant.parse("2026-09-28T12:00:00Z"), ZoneId.of("America/Chicago")));
 
@@ -459,12 +462,12 @@ class CanesBoxTrackerServiceTest {
     snapshot.setSuccessfulMetroCount(1);
     snapshot.setTotalMetroCount(1);
     snapshot.setMetroPrices(List.of(
-        CanesBoxMetroPrice.success(target, new BigDecimal("11.49"), Instant.parse("2026-06-01T12:00:00Z"), "PUBLIC_MENU", "https://public.example/dallas")
+        CanesBoxMetroPrice.success(target, new BigDecimal("11.49"), Instant.parse("2026-06-01T12:00:00Z"), CanesBoxPriceSource.PUBLIC_MENU, "https://public.example/dallas")
     ));
     when(repository.findTop60ByOrderByWeekStartDateDesc()).thenReturn(List.of(snapshot));
     var service = new CanesBoxTrackerService(
         repository,
-        candidate -> CanesBoxMetroPrice.failure(candidate, "unused"),
+        candidate -> CanesBoxMetroPrice.failure(candidate, "unused", Instant.parse("2026-06-01T12:00:00Z")),
         properties(target),
         Clock.fixed(Instant.parse("2026-06-09T12:00:00Z"), ZoneId.of("America/Chicago")));
 
@@ -486,12 +489,12 @@ class CanesBoxTrackerServiceTest {
     snapshot.setSuccessfulMetroCount(1);
     snapshot.setTotalMetroCount(1);
     snapshot.setMetroPrices(List.of(
-        CanesBoxMetroPrice.success(target, new BigDecimal("7.80"), Instant.parse("2026-06-01T12:00:00Z"), "PUBLIC_MENU", "https://public.example/dallas")
+        CanesBoxMetroPrice.success(target, new BigDecimal("7.80"), Instant.parse("2026-06-01T12:00:00Z"), CanesBoxPriceSource.PUBLIC_MENU, "https://public.example/dallas")
     ));
     when(repository.findTop60ByOrderByWeekStartDateDesc()).thenReturn(List.of(snapshot));
     var service = new CanesBoxTrackerService(
         repository,
-        candidate -> CanesBoxMetroPrice.failure(candidate, "unused"),
+        candidate -> CanesBoxMetroPrice.failure(candidate, "unused", Instant.parse("2026-06-01T12:00:00Z")),
         properties(target),
         Clock.fixed(Instant.parse("2026-06-09T12:00:00Z"), ZoneId.of("America/Chicago")));
 
