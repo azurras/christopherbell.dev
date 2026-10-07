@@ -187,3 +187,16 @@ test('no survivor shows join form and joining sends only the chosen name', async
     assert.equal(documentRoot.getElementById('surviveJoin').hidden, true);
   } finally { mounted.dispose(); }
 });
+
+
+test('saved live survivors show durable ownership and only terminal characters can restart', () => {
+  const documentRoot = documentFixture();
+  renderSurviveState(documentRoot, { ...snapshot, saved: true });
+  assert.match(documentRoot.getElementById('surviveSaveStatus').textContent, /Saved to your account/);
+  assert.equal(documentRoot.getElementById('surviveRestart').disabled, true);
+  renderSurviveState(documentRoot, { ...snapshot, saved: true, status: 'DEAD', actions: [] });
+  assert.equal(documentRoot.getElementById('surviveRestart').disabled, false);
+  renderSurviveState(documentRoot, { ...snapshot, saved: false });
+  assert.match(documentRoot.getElementById('surviveSaveStatus').textContent, /Temporary guest/);
+  assert.equal(documentRoot.getElementById('surviveRestart').disabled, false);
+});

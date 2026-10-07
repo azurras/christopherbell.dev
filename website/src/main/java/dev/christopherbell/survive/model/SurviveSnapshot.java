@@ -8,7 +8,7 @@ public record SurviveSnapshot(
     int experienceToNextLevel, int wood, int food, int inventoryCapacity,
     int enemyHealth, Status status, long revision, long worldRevision,
     int shelters, int boats, List<String> survivors, List<String> events,
-    List<SurviveAction> actions, String message, String survivorId, List<Recipient> recipients) {
+    List<SurviveAction> actions, String message, String survivorId, List<Recipient> recipients, boolean saved) {
 
   /** Public targeting identity only; it never authorizes control of the survivor. */
   public record Recipient(String survivorId, String name) {}
