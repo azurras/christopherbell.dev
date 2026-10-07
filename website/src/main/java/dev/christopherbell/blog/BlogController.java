@@ -1,12 +1,10 @@
 package dev.christopherbell.blog;
 
 import dev.christopherbell.blog.model.BlogResponse;
-import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.api.model.Response;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,7 +15,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * REST controller for blog content under {@code /api/blog}.
  *
- * <p>Endpoints return a {@link Response} envelope containing a {@link BlogResponse} payload.</p>
+ * <p>Endpoints return a {@link Response} envelope containing a {@link BlogResponse} payload.
+ * A malformed post ID is rejected with 400 by UUID path conversion before the service runs.</p>
  */
 @AllArgsConstructor
 @RequestMapping("/api/blog")
@@ -26,32 +25,35 @@ public class BlogController {
   private final BlogService blogService;
 
   /**
-   * Retrieves a single post by its ID.
+   * Finds one configured post.
    *
-   * @param id the post identifier
-   * @return HTTP 200 with a {@link BlogResponse} containing the post
+   * @param postId the post identifier from the path
+   * @return HTTP 200 with a {@link BlogResponse} holding exactly that post
+   * @throws ResourceNotFoundException if no configured post has the ID
    */
   @GetMapping(value = "/v1/posts/{id}", produces = MediaType.APPLICATION_JSON_VALUE)
-  public ResponseEntity<Response<BlogResponse>> getBlogPostById(@PathVariable UUID id)
-      throws InvalidRequestException, ResourceNotFoundException {
-    return new ResponseEntity<>(
+  public ResponseEntity<Response<BlogResponse>> findBlogPost(@PathVariable("id") UUID postId)
+      throws ResourceNotFoundException {
+    BlogResponse matchingPost = blogService.findPostById(postId);
+    return ResponseEntity.ok(
         Response.<BlogResponse>builder()
-            .payload(blogService.getPostById(id.toString()))
+            .payload(matchingPost)
             .success(true)
-            .build(), HttpStatus.OK);
+            .build());
   }
 
   /**
-   * Lists all posts.
+   * Lists every configured post.
    *
-   * @return HTTP 200 with a {@link BlogResponse} containing all posts
+   * @return HTTP 200 with a {@link BlogResponse} holding all posts
    */
   @GetMapping(value = "/v1/posts", produces = MediaType.APPLICATION_JSON_VALUE)
-  public ResponseEntity<Response<BlogResponse>> getBlogPosts() {
-    return new ResponseEntity<>(
+  public ResponseEntity<Response<BlogResponse>> listBlogPosts() {
+    BlogResponse allPosts = blogService.listPosts();
+    return ResponseEntity.ok(
         Response.<BlogResponse>builder()
-            .payload(blogService.getPosts())
+            .payload(allPosts)
             .success(true)
-            .build(), HttpStatus.OK);
+            .build());
   }
 }

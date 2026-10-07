@@ -12,39 +12,34 @@ export function blogPostsFromResponse(response) {
     return Array.isArray(posts) ? [...posts] : [];
 }
 
-function appendTextElement(parent, tagName, className, text) {
-    const element = document.createElement(tagName);
-    if (className) element.className = className;
-    element.textContent = String(text || '');
-    parent.appendChild(element);
-    return element;
+function appendTextElement(parentElement, tagName, className, text) {
+    const textElement = document.createElement(tagName);
+    if (className) textElement.className = className;
+    textElement.textContent = String(text || '');
+    parentElement.appendChild(textElement);
+    return textElement;
 }
 
 class BlogPosts extends HTMLElement {
-    constructor() {
-        super();
-        this.posts = [];
-    }
-
     connectedCallback() {
-        this.render();
+        this.renderEmptyContainer();
         this.loadPosts();
     }
 
     async loadPosts() {
         try {
-            this.posts = blogPostsFromResponse(await fetchJson(API.blog.posts));
-            this.updatePosts();
+            const postsResponse = await fetchJson(API.blog.posts);
+            this.renderPosts(blogPostsFromResponse(postsResponse));
         } catch (error) {
             console.error('Failed to load posts', error);
         }
     }
 
-    updatePosts() {
+    renderPosts(blogPosts) {
         const postsContainer = this.querySelector('.blogPosts');
         postsContainer.replaceChildren();
 
-        if (this.posts.length === 0) {
+        if (blogPosts.length === 0) {
             appendTextElement(
                 postsContainer,
                 'p',
@@ -54,34 +49,36 @@ class BlogPosts extends HTMLElement {
             return;
         }
 
-        for (const post of this.posts) {
-            const article = document.createElement('article');
-            article.className = 'blogArticle';
-            appendTextElement(article, 'h2', 'text-center', post?.title);
-            appendTextElement(article, 'h5', 'text-center', `Author: ${post?.author || 'Unknown'}`);
-            if (post?.createdOn) {
-                const createdOn = new Date(post.createdOn);
-                if (!Number.isNaN(createdOn.getTime())) {
-                    const time = appendTextElement(
-                        article,
-                        'time',
-                        'd-block text-center',
-                        createdOn.toLocaleDateString()
-                    );
-                    time.dateTime = createdOn.toISOString();
-                }
-            }
-            article.appendChild(document.createElement('hr'));
-            appendTextElement(article, 'pre', '', post?.contentText);
-            postsContainer.appendChild(article);
+        for (const blogPost of blogPosts) {
+            postsContainer.appendChild(articleFor(blogPost));
         }
     }
 
-    render() {
+    renderEmptyContainer() {
         const postsContainer = document.createElement('div');
         postsContainer.className = 'blogPosts';
         this.replaceChildren(postsContainer);
     }
+}
+
+function articleFor(blogPost) {
+    const article = document.createElement('article');
+    article.className = 'blogArticle';
+    appendTextElement(article, 'h2', 'text-center', blogPost?.title);
+    appendTextElement(article, 'h5', 'text-center', `Author: ${blogPost?.author || 'Unknown'}`);
+    const publishedOn = blogPost?.createdOn ? new Date(blogPost.createdOn) : null;
+    if (publishedOn && !Number.isNaN(publishedOn.getTime())) {
+        const publishedOnElement = appendTextElement(
+            article,
+            'time',
+            'd-block text-center',
+            publishedOn.toLocaleDateString()
+        );
+        publishedOnElement.dateTime = publishedOn.toISOString();
+    }
+    article.appendChild(document.createElement('hr'));
+    appendTextElement(article, 'pre', '', blogPost?.contentText);
+    return article;
 }
 
 customElements.define('blog-posts', BlogPosts);

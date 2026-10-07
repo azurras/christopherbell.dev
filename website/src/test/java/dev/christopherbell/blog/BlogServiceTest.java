@@ -1,78 +1,59 @@
 package dev.christopherbell.blog;
 
-import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.christopherbell.blog.model.BlogProperties;
-import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.blog.model.BlogResponse;
+import dev.christopherbell.blog.model.Post;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
-@ExtendWith(MockitoExtension.class)
-public class BlogServiceTest {
+class BlogServiceTest {
 
-  private BlogService blogService;
-  @Mock
-  private BlogProperties blogProperties;
+  private final BlogService blogService =
+      new BlogService(new BlogProperties(BlogStub.configuredPosts()));
 
-  @BeforeEach
-  public void init() {
-    blogService = new BlogService(blogProperties);
+  @Test
+  void findsExactlyThePostWithTheRequestedId() throws ResourceNotFoundException {
+    BlogResponse matchingPost = blogService.findPostById(BlogStub.ROAD_TRIP_POST_ID);
+
+    assertThat(matchingPost.posts()).containsExactly(BlogStub.roadTripPost());
   }
 
   @Test
-  public void testGetPostById_success() throws InvalidRequestException, ResourceNotFoundException {
-
-    when(blogProperties.getPosts()).thenReturn(BlogStub.getPostsStub());
-
-    var post = blogService.getPostById(BlogStub.BLOG_ID);
-    Assertions.assertEquals(post.getPosts().getFirst().getId(),
-        blogProperties.getPosts().getFirst().getId());
+  void reportsAnAbsentPostIdAsNotFound() {
+    assertThatThrownBy(() -> blogService.findPostById(BlogStub.ABSENT_POST_ID))
+        .isInstanceOf(ResourceNotFoundException.class)
+        .hasMessageContaining(BlogStub.ABSENT_POST_ID.toString());
   }
 
   @Test
-  public void testGetPostById_failure_nullId() {
-    Assertions.assertThrows(InvalidRequestException.class, () -> {
-      blogService.getPostById(null);
-    });
+  void listsConfiguredPostsInConfigurationOrder() {
+    assertThat(blogService.listPosts().posts())
+        .containsExactly(BlogStub.miataPost(), BlogStub.roadTripPost());
   }
 
   @Test
-  public void testGetPostById_failure_blankId() {
-    Assertions.assertThrows(InvalidRequestException.class, () -> {
-      blogService.getPostById("");
-    });
+  void listsNoPostsWhenNoneAreConfigured() {
+    BlogService emptyBlogService = new BlogService(new BlogProperties(null));
+
+    assertThat(emptyBlogService.listPosts().posts()).isEmpty();
   }
 
   @Test
-  public void testGetPostById_failure_doesNotExist() {
-    Assertions.assertThrows(InvalidRequestException.class, () -> {
-      blogService.getPostById("-1");
-    });
+  void rejectsAConfiguredPostWithoutATitle() {
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> new Post(
+            "CBell", "text", null, "summary", BlogStub.MIATA_POST_ID, null, null, " "))
+        .withMessage("blog post title is required");
   }
 
   @Test
-  public void testGetPostById_failure_validButAbsentIdIsNotFound() {
-    when(blogProperties.getPosts()).thenReturn(BlogStub.getPostsStub());
+  void treatsMissingTagsAsNoTags() {
+    Post untaggedPost = BlogStub.roadTripPost();
 
-    Assertions.assertThrows(ResourceNotFoundException.class, () -> {
-      blogService.getPostById("00000000-0000-0000-0000-000000000000");
-    });
+    assertThat(untaggedPost.tags()).isEmpty();
   }
-
-  @Test
-  public void testGetPosts_success() {
-
-    when(blogProperties.getPosts()).thenReturn(BlogStub.getPostsStub());
-
-    var posts = blogService.getPosts();
-
-    Assertions.assertEquals(posts.getPosts().size(),
-        blogProperties.getPosts().size());
-  }
-
 }

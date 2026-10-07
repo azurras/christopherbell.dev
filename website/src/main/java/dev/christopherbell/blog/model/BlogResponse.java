@@ -1,15 +1,15 @@
 package dev.christopherbell.blog.model;
 
 import java.util.List;
-import lombok.Builder;
-import lombok.Data;
 
 /**
- * Response DTO containing a collection of blog posts.
+ * Blog API payload.
+ *
+ * @param posts the posts being returned, in display order
  */
-@Builder
-@Data
-public class BlogResponse {
+public record BlogResponse(List<Post> posts) {
 
-  private List<Post> posts;
+  public BlogResponse {
+    posts = List.copyOf(posts);
+  }
 }

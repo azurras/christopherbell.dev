@@ -2,64 +2,45 @@ package dev.christopherbell.blog;
 
 import dev.christopherbell.blog.model.BlogProperties;
 import dev.christopherbell.blog.model.BlogResponse;
-import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.blog.model.Post;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
- * Service layer for blog queries.
+ * Reads the configuration-backed blog.
  */
 @AllArgsConstructor
 @Service
-@Slf4j
 public class BlogService {
 
   private final BlogProperties blogProperties;
 
   /**
-   * Retrieves a blog post by ID.
+   * Finds the configured post with the given ID.
    *
-   * @param id the requested blog post ID
-   * @return a {@link BlogResponse} containing the matching post
-   * @throws InvalidRequestException if the ID is blank
-   * @throws ResourceNotFoundException if no post matches the valid ID
+   * @param postId the requested post ID
+   * @return a {@link BlogResponse} holding exactly the matching post
+   * @throws ResourceNotFoundException if no configured post has the ID
    */
-  public BlogResponse getPostById(String id)
-      throws InvalidRequestException, ResourceNotFoundException {
-    if (Objects.isNull(id) || id.isBlank()) {
-      throw new InvalidRequestException("Id can't be null or blank");
-    }
-    final UUID postId;
-    try {
-      postId = UUID.fromString(id);
-    } catch (IllegalArgumentException e) {
-      throw new InvalidRequestException("Id must be a valid UUID", e);
-    }
-
-    for (var post : blogProperties.getPosts()) {
-      if (post.getId().equals(postId)) {
-        return BlogResponse.builder()
-            .posts(List.of(post))
-            .build();
-      }
-    }
-
-    throw new ResourceNotFoundException("No Post Found");
+  public BlogResponse findPostById(UUID postId) throws ResourceNotFoundException {
+    Objects.requireNonNull(postId, "postId");
+    Post matchingPost = blogProperties.posts().stream()
+        .filter(post -> post.id().equals(postId))
+        .findFirst()
+        .orElseThrow(() -> new ResourceNotFoundException("No blog post has ID " + postId));
+    return new BlogResponse(List.of(matchingPost));
   }
 
   /**
-   * Retrieves all blog posts.
+   * Lists every configured post in configuration order.
    *
-   * @return a {@link BlogResponse} with all posts
+   * @return a {@link BlogResponse} holding all posts
    */
-  public BlogResponse getPosts() {
-    return BlogResponse.builder()
-        .posts(blogProperties.getPosts())
-        .build();
+  public BlogResponse listPosts() {
+    return new BlogResponse(blogProperties.posts());
   }
 }
