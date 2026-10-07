@@ -41,9 +41,9 @@ let currentHistory = { latest: null, weeks: [] };
 let selectedMetroName = '';
 
 /** Format a USD price or return a readable empty state. */
-export function formatUsd(value) {
-  if (value == null || Number.isNaN(Number(value))) return 'No data';
-  return `$${Number(value).toFixed(2)}`;
+export function formatUsd(amountInDollars) {
+  if (amountInDollars == null || Number.isNaN(Number(amountInDollars))) return 'No data';
+  return `$${Number(amountInDollars).toFixed(2)}`;
 }
 
 /** Calculate percent movement between the latest two priced weekly averages. */
@@ -135,9 +135,9 @@ export function formatQualityStatus(status) {
 }
 
 /** Format the latest collection timestamp as a stable date-only label. */
-export function formatCollectedDate(value) {
-  if (!value) return '-';
-  const text = String(value);
+export function formatCollectedDate(collectedOn) {
+  if (!collectedOn) return '-';
+  const text = String(collectedOn);
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
   const date = new Date(text);
   if (Number.isNaN(date.getTime())) return '-';
@@ -266,17 +266,17 @@ export function formatPeriodTrendContext(trend) {
   return `Latest priced week: ${trend.latestWeekStartDate}. Compared with week of ${trend.comparisonWeekStartDate}.`;
 }
 
-function normalizeMetroName(value) {
-  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+function normalizeMetroName(metroName) {
+  return String(metroName ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
-function isVerifiedMetroPrice(row) {
-  if (!row || row.price == null || row.status !== 'SUCCESS') return false;
-  return row.qualityStatus === 'VERIFIED' || !row.qualityStatus;
+function isVerifiedMetroPrice(metroPrice) {
+  if (!metroPrice || metroPrice.price == null || metroPrice.status !== 'SUCCESS') return false;
+  return metroPrice.qualityStatus === 'VERIFIED' || !metroPrice.qualityStatus;
 }
 
-function shellSingleQuote(value) {
-  return "'" + String(value).replace(/'/g, "'\"'\"'") + "'";
+function shellSingleQuote(shellArgument) {
+  return "'" + String(shellArgument).replace(/'/g, "'\"'\"'") + "'";
 }
 
 function officialRestaurantQuery() {
@@ -435,8 +435,8 @@ async function loadHistory() {
   try {
     const history = await fetchJson(API.canesBoxTracker.history);
     renderHistory(history);
-  } catch (err) {
-    showAlert(err.message || 'Raising Canes Box Index history could not be loaded.');
+  } catch (historyFailure) {
+    showAlert(historyFailure.message || 'Raising Canes Box Index history could not be loaded.');
     renderHistory({ latest: null, weeks: [] });
   }
 }
