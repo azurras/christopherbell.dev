@@ -102,16 +102,12 @@ music -> sharedfolder | dev.christopherbell.music.playback.MusicPlaybackService 
 music -> sharedfolder | dev.christopherbell.music.playback.MusicPlaybackService -> dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver$ReadHandle
 music -> sharedfolder | dev.christopherbell.music.playback.MusicPlaybackService -> dev.christopherbell.sharedfolder.service.SharedFolderRangeNotSatisfiableException
 music -> sharedfolder | dev.christopherbell.music.web.MusicReadController -> dev.christopherbell.sharedfolder.service.SharedFolderRangeNotSatisfiableException
-notification -> account | dev.christopherbell.notification.NotificationService -> dev.christopherbell.account.model.Account
 notification -> account | dev.christopherbell.notification.delivery.NotificationDeliveryService -> dev.christopherbell.account.AccountRepository
 notification -> account | dev.christopherbell.notification.delivery.NotificationDeliveryService -> dev.christopherbell.account.model.Account
 notification -> account | dev.christopherbell.notification.inbox.NotificationInboxService -> dev.christopherbell.permission.PermissionService
 notification -> account | dev.christopherbell.notification.preference.NotificationPreferenceService -> dev.christopherbell.permission.PermissionService
-notification -> message | dev.christopherbell.notification.NotificationService -> dev.christopherbell.message.model.Message
 notification -> message | dev.christopherbell.notification.delivery.NotificationDeliveryService -> dev.christopherbell.message.model.Message
-notification -> post | dev.christopherbell.notification.NotificationService -> dev.christopherbell.post.model.Post
 notification -> post | dev.christopherbell.notification.delivery.NotificationDeliveryService -> dev.christopherbell.post.model.Post
-notification -> whatsforlunch | dev.christopherbell.notification.NotificationService -> dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession
 notification -> whatsforlunch | dev.christopherbell.notification.delivery.NotificationDeliveryService -> dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession
 post -> account | dev.christopherbell.post.PostController -> dev.christopherbell.permission.PermissionService
 post -> account | dev.christopherbell.post.PostService -> dev.christopherbell.permission.PermissionService

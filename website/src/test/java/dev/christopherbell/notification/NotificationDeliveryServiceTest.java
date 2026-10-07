@@ -10,11 +10,9 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.notification.delivery.NotificationDeliveryService;
-import dev.christopherbell.notification.inbox.NotificationInboxService;
 import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.notification.model.NotificationType;
 import dev.christopherbell.notification.preference.NotificationPreferenceService;
-import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import java.util.Optional;
@@ -32,10 +30,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
-class NotificationServiceTest {
+class NotificationDeliveryServiceTest {
   @Mock private NotificationRepository notificationRepository;
   @Mock private AccountRepository accountRepository;
-  @Mock private PermissionService permissionService;
   @Mock private NotificationPreferenceService notificationPreferenceService;
   @Mock private NotificationFanoutGuard fanoutGuard;
 
@@ -185,18 +182,16 @@ class NotificationServiceTest {
     verify(notificationRepository, never()).save(any(Notification.class));
   }
 
-  private NotificationService service() {
+  private NotificationDeliveryService service() {
     org.mockito.Mockito.lenient()
         .when(fanoutGuard.tryAcquire(any(NotificationEventIdentity.class), any(Instant.class)))
         .thenReturn(Optional.of(new NotificationDeliveryPermit("claim", "rate")));
-    return new NotificationService(
-        new NotificationDeliveryService(
-            notificationRepository,
-            accountRepository,
-            notificationPreferenceService,
-            fanoutGuard,
-            Clock.fixed(Instant.parse("2026-07-26T12:00:00Z"), ZoneOffset.UTC)),
-        new NotificationInboxService(notificationRepository, permissionService, null, null));
+    return new NotificationDeliveryService(
+        notificationRepository,
+        accountRepository,
+        notificationPreferenceService,
+        fanoutGuard,
+        Clock.fixed(Instant.parse("2026-07-26T12:00:00Z"), ZoneOffset.UTC));
   }
 
   @Test

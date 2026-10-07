@@ -45,7 +45,7 @@ class NotificationControllerTest {
   @DisplayName("Get notification page: user -> 200 with cursor metadata")
   @WithMockUser(authorities = {"USER"})
   void getMyNotificationPage_whenUser_returnsPage() throws Exception {
-    when(notificationInboxService.getMyNotifications(eq("cursor-1"), eq(10)))
+    when(notificationInboxService.myNotificationPage(eq("cursor-1"), eq(10)))
         .thenReturn(new NotificationPage(List.of(detail("notification-1")), "cursor-2"));
 
     mockMvc.perform(get("/api/notifications" + APIVersion.V20260726)
@@ -71,8 +71,8 @@ class NotificationControllerTest {
   @Test
   @DisplayName("Get notifications: user -> 200 with requested limit")
   @WithMockUser(authorities = {"USER"})
-  void getMyNotifications_whenUser_returnsNotifications() throws Exception {
-    when(notificationInboxService.getMyNotifications(eq(10))).thenReturn(List.of(detail("notification-1")));
+  void listMyNotifications_whenUser_returnsNotifications() throws Exception {
+    when(notificationInboxService.listMyNotifications(eq(10))).thenReturn(List.of(detail("notification-1")));
 
     mockMvc.perform(get("/api/notifications" + APIVersion.V20250914)
             .param("limit", "10"))
@@ -81,12 +81,12 @@ class NotificationControllerTest {
         .andExpect(jsonPath("$.payload[0].id").value("notification-1"))
         .andExpect(jsonPath("$.payload[0].notificationType").value("MENTION"));
 
-    verify(notificationInboxService).getMyNotifications(eq(10));
+    verify(notificationInboxService).listMyNotifications(eq(10));
   }
 
   @Test
   @DisplayName("Get notifications: anonymous -> 401")
-  void getMyNotifications_whenAnonymous_returnsUnauthorized() throws Exception {
+  void listMyNotifications_whenAnonymous_returnsUnauthorized() throws Exception {
     mockMvc.perform(get("/api/notifications" + APIVersion.V20250914))
         .andExpect(status().isUnauthorized());
 
