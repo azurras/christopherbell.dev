@@ -41,6 +41,8 @@ import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.passwordreset.PasswordResetNotificationService;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
+import dev.christopherbell.account.api.LoginTokens;
+import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
@@ -81,6 +83,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 @ExtendWith(MockitoExtension.class)
 public class AccountServiceTest {
+  private static final LoginTokens LOGIN_TOKENS =
+      LoginTokensFixture.localDevelopmentLoginTokens();
   @Mock private AccountMapper accountMapper;
   @Mock private AccountRepository accountRepository;
   @Mock private AccountLoginStore accountLoginStore;
@@ -100,7 +104,7 @@ public class AccountServiceTest {
   @BeforeEach
   void setUp() {
     var authenticationService = new AccountAuthenticationService(
-        accountRepository, accountLoginStore, sessionRevoker);
+        accountRepository, accountLoginStore, sessionRevoker, LOGIN_TOKENS);
     var passwordResetService = new PasswordResetService(
         accountRepository, passwordResetNotificationService, sessionRevoker);
     var profileService = new AccountProfileService(accountRepository, accountMapper, postRepository, follows);
@@ -308,7 +312,7 @@ public class AccountServiceTest {
 
     var token = accountService.loginAccount(new AccountLoginRequest("user@example.com", password));
 
-    assertEquals("USER", PermissionService.validateToken(token).get(Account.PROPERTY_ROLE));
+    assertEquals("USER", LOGIN_TOKENS.verifiedClaimsOf(token).get(Account.PROPERTY_ROLE));
     assertEquals(Role.ADMIN, observed.getRole());
     verify(accountRepository, never()).save(any(Account.class));
     verify(sessionRevoker, never()).revokeAll(anyString());
@@ -399,7 +403,7 @@ public class AccountServiceTest {
         .username("target")
         .role(Role.USER)
         .build();
-    var token = dev.christopherbell.permission.PermissionService.generateToken(self);
+    var token = LOGIN_TOKENS.issueFor(self);
     SecurityContextHolder.getContext()
         .setAuthentication(new UsernamePasswordAuthenticationToken("self", token, java.util.List.of()));
 
@@ -540,7 +544,7 @@ public class AccountServiceTest {
         .role(Role.USER)
         .status(AccountStatus.ACTIVE)
         .build();
-    var token = dev.christopherbell.permission.PermissionService.generateToken(self);
+    var token = LOGIN_TOKENS.issueFor(self);
     SecurityContextHolder.getContext()
         .setAuthentication(new UsernamePasswordAuthenticationToken("self", token, java.util.List.of()));
 

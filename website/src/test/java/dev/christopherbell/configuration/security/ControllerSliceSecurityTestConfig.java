@@ -1,5 +1,6 @@
 package dev.christopherbell.configuration.security;
 
+import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.account.AccountRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -47,7 +48,8 @@ public class ControllerSliceSecurityTestConfig {
                 null,
                 null,
                 null,
-                accountRepositories.getIfAvailable()),
+                accountRepositories.getIfAvailable(),
+                LoginTokensFixture.localDevelopmentLoginTokens()),
             AuthorizationFilter.class)
         .build();
   }
