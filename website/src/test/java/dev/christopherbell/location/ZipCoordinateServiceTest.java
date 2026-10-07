@@ -112,7 +112,7 @@ class ZipCoordinateServiceTest {
     when(zipCoordinateRepository.findById(eq("78701")))
         .thenReturn(java.util.Optional.of(coordinate("78701", 30.271128, -97.743699)));
 
-    var detail = zipCoordinateService.getZipCoordinate("78701-1234");
+    var detail = zipCoordinateService.findCoordinateForZip("78701-1234");
 
     assertEquals("78701", detail.zipCode());
     assertEquals(30.271128, detail.latitude());
@@ -121,7 +121,7 @@ class ZipCoordinateServiceTest {
 
   @Test
   void lookupRejectsMalformedZipCodes() {
-    assertThrows(InvalidRequestException.class, () -> zipCoordinateService.getZipCoordinate("zip"));
+    assertThrows(InvalidRequestException.class, () -> zipCoordinateService.findCoordinateForZip("zip"));
 
     verify(zipCoordinateRepository, never()).findById(any());
   }
@@ -130,7 +130,7 @@ class ZipCoordinateServiceTest {
   void lookupReportsMissingImportedZipCoordinates() {
     when(zipCoordinateRepository.findById(eq("78701"))).thenReturn(java.util.Optional.empty());
 
-    assertThrows(ResourceNotFoundException.class, () -> zipCoordinateService.getZipCoordinate("78701"));
+    assertThrows(ResourceNotFoundException.class, () -> zipCoordinateService.findCoordinateForZip("78701"));
   }
 
   private ZipCoordinate coordinate(String zipCode, double latitude, double longitude) {

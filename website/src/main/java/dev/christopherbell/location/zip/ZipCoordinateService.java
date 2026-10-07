@@ -12,10 +12,12 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.HexFormat;
+import java.util.Optional;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +28,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class ZipCoordinateService {
   private static final String CENSUS_STATE_ID = "census-zcta";
+  private static final Pattern FIVE_DIGIT_ZIP = Pattern.compile("\\d{5}");
+  private static final Pattern ZIP_PLUS_FOUR = Pattern.compile("\\d{5}-\\d{4}");
 
   private final Clock clock;
   private final ZipCoordinateGazetteerReader zipCoordinateGazetteerReader;
@@ -33,60 +37,38 @@ public class ZipCoordinateService {
   private final ZipCoordinateRepository zipCoordinateRepository;
 
   /**
-   * Imports or refreshes bundled Census ZIP coordinates in MongoDB.
+   * Imports or refreshes the bundled Census ZIP coordinates in MongoDB.
+   *
+   * <p>An unchanged dataset checksum returns a no-op result without touching coordinates.
+   * Otherwise new ZIP codes are created, changed ones updated in place, and Census ZIP codes
+   * missing from the dataset deleted, then the import state is recorded.</p>
    *
    * @return import result counts
    */
   public ZipCoordinateImportResult importCensusZipCoordinates() {
-    var importedCoordinates = zipCoordinateGazetteerReader.readBundledCensusData();
-    var checksum = datasetChecksum(importedCoordinates);
-    var previousState = zipCoordinateImportStateRepository.findById(CENSUS_STATE_ID);
-    if (previousState.map(ZipCoordinateImportState::getChecksum).filter(checksum::equals).isPresent()) {
-      return ZipCoordinateImportResult.builder()
-          .processed(importedCoordinates.size())
-          .unchanged(importedCoordinates.size())
-          .source(ZipCoordinateGazetteerReader.CENSUS_SOURCE)
-          .sourceYear(ZipCoordinateGazetteerReader.CENSUS_SOURCE_YEAR)
-          .checksum(checksum)
-          .importedOn(previousState.get().getImportedOn())
-          .noOp(true)
-          .build();
-    }
-    var existingByZipCode = existingCensusCoordinatesByZipCode();
-    var changedCoordinates = new ArrayList<ZipCoordinate>();
-    var created = 0;
-    var updated = 0;
-    var unchanged = 0;
-
-    for (var importedCoordinate : importedCoordinates) {
-      var existing = existingByZipCode.remove(importedCoordinate.getZipCode());
-      if (existing == null) {
-        changedCoordinates.add(importedCoordinate);
-        created++;
-      } else if (mergeChangedValues(existing, importedCoordinate)) {
-        changedCoordinates.add(existing);
-        updated++;
-      } else {
-        unchanged++;
-      }
+    List<ZipCoordinate> importedCoordinates = zipCoordinateGazetteerReader.readBundledCensusData();
+    String checksum = datasetChecksum(importedCoordinates);
+    Optional<ZipCoordinateImportState> previousImport =
+        zipCoordinateImportStateRepository.findById(CENSUS_STATE_ID);
+    if (previousImport.map(ZipCoordinateImportState::getChecksum).filter(checksum::equals).isPresent()) {
+      return unchangedDatasetResult(importedCoordinates.size(), checksum, previousImport.get());
     }
 
-    if (!changedCoordinates.isEmpty()) {
-      zipCoordinateRepository.saveAll(changedCoordinates);
+    CensusImportPlan importPlan = planCensusImport(importedCoordinates);
+    if (!importPlan.coordinatesToSave().isEmpty()) {
+      zipCoordinateRepository.saveAll(importPlan.coordinatesToSave());
+    }
+    if (!importPlan.staleCoordinates().isEmpty()) {
+      zipCoordinateRepository.deleteAll(importPlan.staleCoordinates());
     }
 
-    var staleCensusCoordinates = List.copyOf(existingByZipCode.values());
-    if (!staleCensusCoordinates.isEmpty()) {
-      zipCoordinateRepository.deleteAll(staleCensusCoordinates);
-    }
-
-    var importedOn = Instant.now(clock);
-    var result = ZipCoordinateImportResult.builder()
+    Instant importedOn = Instant.now(clock);
+    ZipCoordinateImportResult importResult = ZipCoordinateImportResult.builder()
         .processed(importedCoordinates.size())
-        .created(created)
-        .updated(updated)
-        .unchanged(unchanged)
-        .deleted(staleCensusCoordinates.size())
+        .created(importPlan.createdCount())
+        .updated(importPlan.updatedCount())
+        .unchanged(importPlan.unchangedCount())
+        .deleted(importPlan.staleCoordinates().size())
         .source(ZipCoordinateGazetteerReader.CENSUS_SOURCE)
         .sourceYear(ZipCoordinateGazetteerReader.CENSUS_SOURCE_YEAR)
         .checksum(checksum)
@@ -99,73 +81,119 @@ public class ZipCoordinateService {
         .source(ZipCoordinateGazetteerReader.CENSUS_SOURCE)
         .sourceYear(ZipCoordinateGazetteerReader.CENSUS_SOURCE_YEAR)
         .importedOn(importedOn)
-        .result(result)
+        .result(importResult)
         .build());
-    return result;
-  }
-
-  /** Produces a stable checksum independent of repository order. */
-  public static String datasetChecksum(List<ZipCoordinate> coordinates) {
-    try {
-      var digest = MessageDigest.getInstance("SHA-256");
-      coordinates.stream()
-          .map(coordinate -> "%s|%s|%s|%s|%s".formatted(
-              coordinate.getZipCode(),
-              coordinate.getLatitude(),
-              coordinate.getLongitude(),
-              coordinate.getSource(),
-              coordinate.getSourceYear()))
-          .sorted()
-          .forEach(value -> digest.update((value + "\n").getBytes(StandardCharsets.UTF_8)));
-      return HexFormat.of().formatHex(digest.digest());
-    } catch (NoSuchAlgorithmException impossible) {
-      throw new IllegalStateException("SHA-256 is unavailable", impossible);
-    }
+    return importResult;
   }
 
   /**
-   * Finds a public ZIP coordinate by ZIP or ZIP+4 input.
+   * Produces a SHA-256 checksum of a coordinate dataset that is independent of row order.
    *
-   * @param requestedZipCode ZIP input
+   * @param coordinates the dataset rows
+   * @return the lowercase hex checksum
+   */
+  public static String datasetChecksum(List<ZipCoordinate> coordinates) {
+    List<String> sortedRowFingerprints = coordinates.stream()
+        .map(coordinate -> "%s|%s|%s|%s|%s".formatted(
+            coordinate.getZipCode(),
+            coordinate.getLatitude(),
+            coordinate.getLongitude(),
+            coordinate.getSource(),
+            coordinate.getSourceYear()))
+        .sorted()
+        .toList();
+    MessageDigest sha256 = sha256Digest();
+    for (String rowFingerprint : sortedRowFingerprints) {
+      sha256.update((rowFingerprint + "\n").getBytes(StandardCharsets.UTF_8));
+    }
+    return HexFormat.of().formatHex(sha256.digest());
+  }
+
+  /**
+   * Finds the imported coordinate origin for a ZIP or ZIP+4 code.
+   *
+   * @param requestedZipCode ZIP input as the caller sent it
    * @return public ZIP coordinate detail
-   * @throws InvalidRequestException when the ZIP syntax is invalid
+   * @throws InvalidRequestException when the input is not a ZIP or ZIP+4 code
    * @throws ResourceNotFoundException when imported Location data has no coordinate for the ZIP
    */
-  public ZipCoordinateDetail getZipCoordinate(String requestedZipCode)
+  public ZipCoordinateDetail findCoordinateForZip(String requestedZipCode)
       throws InvalidRequestException, ResourceNotFoundException {
-    var zipCode = normalizeZipCode(requestedZipCode);
-    return zipCoordinateRepository.findById(zipCode)
-        .map(this::toDetail)
+    String fiveDigitZipCode = fiveDigitZipCodeOf(requestedZipCode);
+    return zipCoordinateRepository.findById(fiveDigitZipCode)
+        .map(ZipCoordinateService::detailOf)
         .orElseThrow(() -> new ResourceNotFoundException(
-            "ZIP coordinate not found: " + zipCode));
+            "ZIP coordinate not found: " + fiveDigitZipCode));
   }
 
-  private Map<String, ZipCoordinate> existingCensusCoordinatesByZipCode() {
-    var coordinates = new LinkedHashMap<String, ZipCoordinate>();
-    zipCoordinateRepository.findAllBySource(ZipCoordinateGazetteerReader.CENSUS_SOURCE)
-        .forEach(coordinate -> coordinates.put(coordinate.getZipCode(), coordinate));
-    return coordinates;
-  }
+  private CensusImportPlan planCensusImport(List<ZipCoordinate> importedCoordinates) {
+    Map<String, ZipCoordinate> storedCoordinatesByZipCode = storedCensusCoordinatesByZipCode();
+    List<ZipCoordinate> coordinatesToSave = new ArrayList<>();
+    int createdCount = 0;
+    int updatedCount = 0;
+    int unchangedCount = 0;
 
-  private boolean mergeChangedValues(ZipCoordinate existing, ZipCoordinate imported) {
-    if (sameImportedValues(existing, imported)) {
-      return false;
+    for (ZipCoordinate importedCoordinate : importedCoordinates) {
+      ZipCoordinate storedCoordinate =
+          storedCoordinatesByZipCode.remove(importedCoordinate.getZipCode());
+      if (storedCoordinate == null) {
+        coordinatesToSave.add(importedCoordinate);
+        createdCount++;
+      } else if (hasSameImportedValues(storedCoordinate, importedCoordinate)) {
+        unchangedCount++;
+      } else {
+        copyImportedValues(importedCoordinate, storedCoordinate);
+        coordinatesToSave.add(storedCoordinate);
+        updatedCount++;
+      }
     }
-    existing.setLatitude(imported.getLatitude());
-    existing.setLongitude(imported.getLongitude());
-    existing.setSource(imported.getSource());
-    existing.setSourceYear(imported.getSourceYear());
-    return true;
+
+    List<ZipCoordinate> staleCoordinates = List.copyOf(storedCoordinatesByZipCode.values());
+    return new CensusImportPlan(
+        List.copyOf(coordinatesToSave), staleCoordinates, createdCount, updatedCount, unchangedCount);
   }
 
-  private boolean sameImportedValues(ZipCoordinate existing, ZipCoordinate imported) {
-    return Double.compare(existing.getLatitude(), imported.getLatitude()) == 0
-        && Double.compare(existing.getLongitude(), imported.getLongitude()) == 0
-        && existing.getSourceYear() == imported.getSourceYear()
-        && imported.getSource().equals(existing.getSource());
+  private Map<String, ZipCoordinate> storedCensusCoordinatesByZipCode() {
+    Map<String, ZipCoordinate> coordinatesByZipCode = new LinkedHashMap<>();
+    List<ZipCoordinate> storedCoordinates =
+        zipCoordinateRepository.findAllBySource(ZipCoordinateGazetteerReader.CENSUS_SOURCE);
+    for (ZipCoordinate storedCoordinate : storedCoordinates) {
+      coordinatesByZipCode.put(storedCoordinate.getZipCode(), storedCoordinate);
+    }
+    return coordinatesByZipCode;
   }
 
-  private ZipCoordinateDetail toDetail(ZipCoordinate coordinate) {
+  private static ZipCoordinateImportResult unchangedDatasetResult(
+      int processedCount, String checksum, ZipCoordinateImportState previousImport) {
+    return ZipCoordinateImportResult.builder()
+        .processed(processedCount)
+        .unchanged(processedCount)
+        .source(ZipCoordinateGazetteerReader.CENSUS_SOURCE)
+        .sourceYear(ZipCoordinateGazetteerReader.CENSUS_SOURCE_YEAR)
+        .checksum(checksum)
+        .importedOn(previousImport.getImportedOn())
+        .noOp(true)
+        .build();
+  }
+
+  private static boolean hasSameImportedValues(
+      ZipCoordinate storedCoordinate, ZipCoordinate importedCoordinate) {
+    return Double.compare(storedCoordinate.getLatitude(), importedCoordinate.getLatitude()) == 0
+        && Double.compare(storedCoordinate.getLongitude(), importedCoordinate.getLongitude()) == 0
+        && storedCoordinate.getSourceYear() == importedCoordinate.getSourceYear()
+        && importedCoordinate.getSource().equals(storedCoordinate.getSource());
+  }
+
+  /** Overwrites the stored row's dataset values in place, keeping its id and audit dates. */
+  private static void copyImportedValues(
+      ZipCoordinate importedCoordinate, ZipCoordinate storedCoordinate) {
+    storedCoordinate.setLatitude(importedCoordinate.getLatitude());
+    storedCoordinate.setLongitude(importedCoordinate.getLongitude());
+    storedCoordinate.setSource(importedCoordinate.getSource());
+    storedCoordinate.setSourceYear(importedCoordinate.getSourceYear());
+  }
+
+  private static ZipCoordinateDetail detailOf(ZipCoordinate coordinate) {
     return ZipCoordinateDetail.builder()
         .zipCode(coordinate.getZipCode())
         .latitude(coordinate.getLatitude())
@@ -175,14 +203,31 @@ public class ZipCoordinateService {
         .build();
   }
 
-  private String normalizeZipCode(String requestedZipCode) throws InvalidRequestException {
-    var normalized = requestedZipCode == null ? "" : requestedZipCode.strip();
-    if (normalized.matches("\\d{5}")) {
-      return normalized;
+  private static String fiveDigitZipCodeOf(String requestedZipCode) throws InvalidRequestException {
+    String trimmedZipCode = requestedZipCode == null ? "" : requestedZipCode.strip();
+    if (FIVE_DIGIT_ZIP.matcher(trimmedZipCode).matches()) {
+      return trimmedZipCode;
     }
-    if (normalized.matches("\\d{5}-\\d{4}")) {
-      return normalized.substring(0, 5);
+    if (ZIP_PLUS_FOUR.matcher(trimmedZipCode).matches()) {
+      return trimmedZipCode.substring(0, 5);
     }
     throw new InvalidRequestException("ZIP code must be a valid 5-digit US ZIP code.");
+  }
+
+  private static MessageDigest sha256Digest() {
+    try {
+      return MessageDigest.getInstance("SHA-256");
+    } catch (NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 is unavailable", impossible);
+    }
+  }
+
+  /** What a Census refresh will write, computed before any repository change. */
+  private record CensusImportPlan(
+      List<ZipCoordinate> coordinatesToSave,
+      List<ZipCoordinate> staleCoordinates,
+      int createdCount,
+      int updatedCount,
+      int unchangedCount) {
   }
 }
