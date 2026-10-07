@@ -279,7 +279,7 @@ public class RestaurantService {
   private ZipCoordinateDetail getZipCoordinateOrigin(String zipCode)
       throws InvalidRequestException {
     try {
-      return zipCoordinateService.getZipCoordinate(zipCode);
+      return zipCoordinateService.findCoordinateForZip(zipCode);
     } catch (ResourceNotFoundException e) {
       throw new InvalidRequestException("ZIP code must match an imported US ZIP coordinate.", e);
     }

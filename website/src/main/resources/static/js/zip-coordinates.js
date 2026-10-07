@@ -3,17 +3,17 @@ import { renderAlert } from './lib/status-message.js';
 import { fetchJson } from './lib/util.js';
 
 const hasDocument = typeof document !== 'undefined';
-const form = hasDocument ? document.getElementById('zipCoordinateForm') : null;
-const input = hasDocument ? document.getElementById('zipCoordinateInput') : null;
-const button = hasDocument ? document.getElementById('zipCoordinateButton') : null;
+const lookupForm = hasDocument ? document.getElementById('zipCoordinateForm') : null;
+const zipInput = hasDocument ? document.getElementById('zipCoordinateInput') : null;
+const lookupButton = hasDocument ? document.getElementById('zipCoordinateButton') : null;
 const alertBox = hasDocument ? document.getElementById('zipCoordinateAlert') : null;
-const result = hasDocument ? document.getElementById('zipCoordinateResult') : null;
+const resultPanel = hasDocument ? document.getElementById('zipCoordinateResult') : null;
 
 /** Normalize ZIP or ZIP+4 input into the five-digit lookup key the API accepts. */
-export function normalizeZipInput(value) {
-  const zipCode = String(value || '').trim();
-  if (/^\d{5}$/.test(zipCode)) return zipCode;
-  if (/^\d{5}-\d{4}$/.test(zipCode)) return zipCode.slice(0, 5);
+export function normalizeZipInput(enteredZipCode) {
+  const trimmedZipCode = String(enteredZipCode || '').trim();
+  if (/^\d{5}$/.test(trimmedZipCode)) return trimmedZipCode;
+  if (/^\d{5}-\d{4}$/.test(trimmedZipCode)) return trimmedZipCode.slice(0, 5);
   return '';
 }
 
@@ -27,9 +27,9 @@ export function zipCoordinateCurl(origin, zipCode) {
   return `curl '${zipCoordinateApiUrl(origin, zipCode)}'`;
 }
 
-function setText(id, value) {
-  const element = document.getElementById(id);
-  if (element) element.textContent = value || '-';
+function setTextOf(elementId, text) {
+  const element = document.getElementById(elementId);
+  if (element) element.textContent = text || '-';
 }
 
 function showAlert(message) {
@@ -41,63 +41,63 @@ function hideAlert() {
 }
 
 function renderCoordinate(coordinate) {
-  const zipCode = coordinate?.zipCode || normalizeZipInput(input?.value);
+  const zipCode = coordinate?.zipCode || normalizeZipInput(zipInput?.value);
   const apiUrl = zipCoordinateApiUrl(window.location.origin, zipCode);
 
-  setText('zipCoordinateCode', zipCode);
-  setText('zipLatitude', coordinate?.latitude == null ? '' : String(coordinate.latitude));
-  setText('zipLongitude', coordinate?.longitude == null ? '' : String(coordinate.longitude));
-  setText('zipSource', coordinate?.source);
-  setText('zipSourceYear', coordinate?.sourceYear == null ? '' : String(coordinate.sourceYear));
-  setText('zipApiUrl', apiUrl);
-  setText('zipCurlOutput', zipCoordinateCurl(window.location.origin, zipCode));
-  result?.classList.remove('d-none');
+  setTextOf('zipCoordinateCode', zipCode);
+  setTextOf('zipLatitude', coordinate?.latitude == null ? '' : String(coordinate.latitude));
+  setTextOf('zipLongitude', coordinate?.longitude == null ? '' : String(coordinate.longitude));
+  setTextOf('zipSource', coordinate?.source);
+  setTextOf('zipSourceYear', coordinate?.sourceYear == null ? '' : String(coordinate.sourceYear));
+  setTextOf('zipApiUrl', apiUrl);
+  setTextOf('zipCurlOutput', zipCoordinateCurl(window.location.origin, zipCode));
+  resultPanel?.classList.remove('d-none');
 }
 
-async function copyElementText(element, buttonElement) {
-  if (!element || !buttonElement) return;
+async function copyTextOf(sourceElement, copyButton) {
+  if (!sourceElement || !copyButton) return;
   try {
-    await navigator.clipboard.writeText(element.textContent || '');
-    const original = buttonElement.textContent;
-    buttonElement.textContent = 'Copied';
-    setTimeout(() => { buttonElement.textContent = original; }, 1200);
+    await navigator.clipboard.writeText(sourceElement.textContent || '');
+    const originalLabel = copyButton.textContent;
+    copyButton.textContent = 'Copied';
+    setTimeout(() => { copyButton.textContent = originalLabel; }, 1200);
   } catch {
     showAlert('Unable to copy text. Please copy it manually.');
   }
 }
 
-form?.addEventListener('submit', async (event) => {
+lookupForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   hideAlert();
-  const zipCode = normalizeZipInput(input?.value);
+  const zipCode = normalizeZipInput(zipInput?.value);
   if (!zipCode) {
-    result?.classList.add('d-none');
+    resultPanel?.classList.add('d-none');
     showAlert('Enter a five-digit ZIP code or ZIP+4.');
     return;
   }
 
   try {
-    if (button) button.disabled = true;
+    if (lookupButton) lookupButton.disabled = true;
     const coordinate = await fetchJson(API.location.zipCoordinate(zipCode));
     renderCoordinate(coordinate);
-  } catch (err) {
-    result?.classList.add('d-none');
-    showAlert(err.message || 'ZIP coordinate lookup failed.');
+  } catch (lookupFailure) {
+    resultPanel?.classList.add('d-none');
+    showAlert(lookupFailure.message || 'ZIP coordinate lookup failed.');
   } finally {
-    if (button) button.disabled = false;
+    if (lookupButton) lookupButton.disabled = false;
   }
 });
 
-input?.addEventListener('input', () => {
-  input.value = input.value.replace(/[^\d-]/g, '').slice(0, 10);
+zipInput?.addEventListener('input', () => {
+  zipInput.value = zipInput.value.replace(/[^\d-]/g, '').slice(0, 10);
 });
 
 if (hasDocument) {
   document.getElementById('copyZipApiButton')?.addEventListener('click', () => {
-    copyElementText(document.getElementById('zipApiUrl'), document.getElementById('copyZipApiButton'));
+    copyTextOf(document.getElementById('zipApiUrl'), document.getElementById('copyZipApiButton'));
   });
 
   document.getElementById('copyZipCurlButton')?.addEventListener('click', () => {
-    copyElementText(document.getElementById('zipCurlOutput'), document.getElementById('copyZipCurlButton'));
+    copyTextOf(document.getElementById('zipCurlOutput'), document.getElementById('copyZipCurlButton'));
   });
 }

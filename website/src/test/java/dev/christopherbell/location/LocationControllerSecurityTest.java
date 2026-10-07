@@ -41,7 +41,7 @@ class LocationControllerSecurityTest {
 
   @Test
   void anonymousZipLookupIsPublic() throws Exception {
-    when(zipCoordinateService.getZipCoordinate(eq("78701")))
+    when(zipCoordinateService.findCoordinateForZip(eq("78701")))
         .thenReturn(ZipCoordinateDetail.builder()
             .zipCode("78701")
             .latitude(30.271128)

@@ -514,7 +514,7 @@ public class RestaurantServiceTest {
     var zipDetail = RestaurantStub.getRestaurantDetailStub("zip-center");
     var nearbyDetail = RestaurantStub.getRestaurantDetailStub("nearby");
 
-    when(zipCoordinateService.getZipCoordinate(eq("78701")))
+    when(zipCoordinateService.findCoordinateForZip(eq("78701")))
         .thenReturn(zipCoordinate("78701", 30.2672, -97.7431));
     stubCoordinateCandidates(List.of(zipCenter, nearby, dallas));
     when(restaurantMapper.toRestaurantDetail(eq(zipCenter))).thenReturn(zipDetail);
@@ -525,7 +525,7 @@ public class RestaurantServiceTest {
 
     assertEquals(2, result.size());
     assertTrue(ids.containsAll(List.of("zip-center", "nearby")));
-    verify(zipCoordinateService).getZipCoordinate(eq("78701"));
+    verify(zipCoordinateService).findCoordinateForZip(eq("78701"));
     verifyNoInteractions(whatsForLunchPreferenceRepository);
   }
 
@@ -534,7 +534,7 @@ public class RestaurantServiceTest {
   public void testGetNearbyLunchPicksByZipCode_resolvesZipOriginBeforeNearbyCandidates() throws Exception {
     var zipCenter = nearbyRestaurant("zip-center", "Downtown Tacos", 30.2672, -97.7431);
 
-    when(zipCoordinateService.getZipCoordinate(eq("78701")))
+    when(zipCoordinateService.findCoordinateForZip(eq("78701")))
         .thenReturn(zipCoordinate("78701", 30.2672, -97.7431));
     when(restaurantRepository.findByCoordinateBounds(
         anyDouble(),
@@ -547,7 +547,7 @@ public class RestaurantServiceTest {
 
     restaurantService.getNearbyLunchPicksByZipCode("78701", 15, List.of(), false);
 
-    verify(zipCoordinateService).getZipCoordinate(eq("78701"));
+    verify(zipCoordinateService).findCoordinateForZip(eq("78701"));
     verify(restaurantRepository).findByCoordinateBounds(
         anyDouble(),
         anyDouble(),
@@ -560,7 +560,7 @@ public class RestaurantServiceTest {
   @DisplayName("Nearby lunch picks: unknown ZIP coordinate origins are rejected")
   public void testGetNearbyLunchPicksByZipCode_whenZipCoordinatesDoNotResolve_throws()
       throws Exception {
-    when(zipCoordinateService.getZipCoordinate(eq("78701")))
+    when(zipCoordinateService.findCoordinateForZip(eq("78701")))
         .thenThrow(new ResourceNotFoundException("ZIP coordinate not found."));
 
     var ex = assertThrows(
@@ -568,7 +568,7 @@ public class RestaurantServiceTest {
         () -> restaurantService.getNearbyLunchPicksByZipCode("78701", 15, List.of(), false));
 
     assertTrue(ex.getMessage().contains("ZIP code"));
-    verify(zipCoordinateService).getZipCoordinate(eq("78701"));
+    verify(zipCoordinateService).findCoordinateForZip(eq("78701"));
     verify(restaurantRepository, never()).findByCoordinateBounds(
         anyDouble(),
         anyDouble(),

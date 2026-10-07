@@ -37,7 +37,7 @@ class LocationControllerTest {
 
   @Test
   void publicZipLookupReturnsCoordinates() throws Exception {
-    when(zipCoordinateService.getZipCoordinate(eq("78701")))
+    when(zipCoordinateService.findCoordinateForZip(eq("78701")))
         .thenReturn(ZipCoordinateDetail.builder()
             .zipCode("78701")
             .latitude(30.271128)
@@ -55,12 +55,12 @@ class LocationControllerTest {
         .andExpect(jsonPath("$.payload.source").value("Census Gazetteer ZCTA"))
         .andExpect(jsonPath("$.payload.sourceYear").value(2025));
 
-    verify(zipCoordinateService).getZipCoordinate(eq("78701"));
+    verify(zipCoordinateService).findCoordinateForZip(eq("78701"));
   }
 
   @Test
   void publicZipLookupRejectsMalformedZipCodes() throws Exception {
-    when(zipCoordinateService.getZipCoordinate(eq("bad")))
+    when(zipCoordinateService.findCoordinateForZip(eq("bad")))
         .thenThrow(new InvalidRequestException("ZIP code must be valid."));
 
     mockMvc.perform(get("/api/location/zip/bad"))
@@ -69,7 +69,7 @@ class LocationControllerTest {
 
   @Test
   void publicZipLookupReturnsNotFoundForMissingImportedZipCodes() throws Exception {
-    when(zipCoordinateService.getZipCoordinate(eq("78701")))
+    when(zipCoordinateService.findCoordinateForZip(eq("78701")))
         .thenThrow(new ResourceNotFoundException("ZIP coordinate not found."));
 
     mockMvc.perform(get("/api/location/zip/78701"))
