@@ -2,7 +2,6 @@ package dev.christopherbell.view.account;
 
 import dev.christopherbell.federation.consent.FederationConsentService;
 import dev.christopherbell.view.ViewIndexingPolicy;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,7 +23,7 @@ public class AccountViewController {
    * @return {@code login.html}
    */
   @GetMapping(value = "/login")
-  public String getLoginPage(HttpServletRequest request, Model model) {
+  public String getLoginPage(Model model) {
     ViewIndexingPolicy.noIndex(model);
     return "login.html";
   }
@@ -35,7 +34,7 @@ public class AccountViewController {
    * @return {@code forgot-password.html}
    */
   @GetMapping(value = "/forgot-password")
-  public String getForgotPasswordPage(HttpServletRequest request, Model model) {
+  public String getForgotPasswordPage(Model model) {
     ViewIndexingPolicy.noIndex(model);
     return "forgot-password.html";
   }
@@ -46,7 +45,7 @@ public class AccountViewController {
    * @return {@code reset-password.html}
    */
   @GetMapping(value = "/reset-password")
-  public String getResetPasswordPage(HttpServletRequest request, Model model) {
+  public String getResetPasswordPage(Model model) {
     ViewIndexingPolicy.noIndex(model);
     return "reset-password.html";
   }
@@ -57,7 +56,7 @@ public class AccountViewController {
    * @return {@code signup.html}
    */
   @GetMapping(value = "/signup")
-  public String getSignupPage(HttpServletRequest request, Model model) {
+  public String getSignupPage(Model model) {
     ViewIndexingPolicy.noIndex(model);
     model.addAttribute("federationEnrollmentAvailable", federationConsent.enrollmentAvailable());
     return "signup.html";
@@ -69,7 +68,7 @@ public class AccountViewController {
    * @return {@code void/login.html}
    */
   @GetMapping(value = "/void/login")
-  public String getVoidLoginPage(HttpServletRequest request, Model model) {
+  public String getVoidLoginPage(Model model) {
     ViewIndexingPolicy.noIndex(model);
     return "void/login.html";
   }
@@ -80,7 +79,7 @@ public class AccountViewController {
    * @return {@code void/sign_up.html}
    */
   @GetMapping(value = "/void/signup")
-  public String getVoidCreateAccountPage(HttpServletRequest request, Model model) {
+  public String getVoidSignupPage(Model model) {
     ViewIndexingPolicy.noIndex(model);
     return "void/sign_up.html";
   }

@@ -1,6 +1,7 @@
 package dev.christopherbell.view.wfl;
 
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.view.PublicSiteUrls;
 import dev.christopherbell.view.ViewIndexingPolicy;
 import jakarta.servlet.http.HttpServletResponse;
 import java.net.URI;
@@ -18,7 +19,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 @Controller
 @RequiredArgsConstructor
 public class WhatsForLunchViewController {
-  private static final String PUBLIC_ROOT = "https://www.christopherbell.dev";
   private final RestaurantProfilePageService restaurantProfiles;
 
   /**
@@ -40,7 +40,7 @@ public class WhatsForLunchViewController {
   @GetMapping(value = "/wfl/favorites")
   public String getWhatsForLunchFavoritesPage(Model model) {
     model.addAttribute("socialTitle", "CB | Favorite Restaurants");
-    model.addAttribute("socialUrl", PUBLIC_ROOT + "/wfl/favorites");
+    model.addAttribute("socialUrl", PublicSiteUrls.ROOT + "/wfl/favorites");
     ViewIndexingPolicy.noIndex(model);
     model.addAttribute("listMode", "favorites");
     model.addAttribute("listTitle", "Favorite Restaurants");
@@ -56,7 +56,7 @@ public class WhatsForLunchViewController {
   @GetMapping(value = "/wfl/top-liked")
   public String getWhatsForLunchTopLikedPage(Model model) {
     model.addAttribute("socialTitle", "CB | Top 10 Liked Restaurants");
-    model.addAttribute("socialUrl", PUBLIC_ROOT + "/wfl/top-liked");
+    model.addAttribute("socialUrl", PublicSiteUrls.ROOT + "/wfl/top-liked");
     model.addAttribute("listMode", "top-liked");
     model.addAttribute("listTitle", "Top 10 Liked Restaurants");
     model.addAttribute("listDescription", "The restaurants with the highest member approval from What's For Lunch.");
@@ -65,7 +65,7 @@ public class WhatsForLunchViewController {
 
   /** Permanently redirects the legacy top-rated route to the canonical public list. */
   @GetMapping(value = "/wfl/top-rated")
-  public ResponseEntity<Void> legacyTopRated() {
+  public ResponseEntity<Void> redirectLegacyTopRatedToTopLiked() {
     return ResponseEntity.status(HttpStatus.PERMANENT_REDIRECT)
         .location(URI.create("/wfl/top-liked"))
         .build();
@@ -83,9 +83,9 @@ public class WhatsForLunchViewController {
       Model model
   ) {
     try {
-      model.addAttribute("restaurantProfile", restaurantProfiles.profile(restaurantId));
+      model.addAttribute("restaurantProfile", restaurantProfiles.pageFor(restaurantId));
       return "restaurant.html";
-    } catch (ResourceNotFoundException exception) {
+    } catch (ResourceNotFoundException missingRestaurant) {
       response.setStatus(HttpServletResponse.SC_NOT_FOUND);
       return "error/404";
     }

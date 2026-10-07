@@ -44,7 +44,7 @@ class RestaurantProfilePageServiceTest {
         .createdBy("private-account")
         .build());
 
-    var page = service().profile("rest/one");
+    var page = service().pageFor("rest/one");
 
     assertThat(page.canonicalUrl()).endsWith("/wfl/restaurants/rest%2Fone");
     assertThat(page.addressLine()).isEqualTo("100 Main St, Austin, TX, 78701");
@@ -75,7 +75,7 @@ class RestaurantProfilePageServiceTest {
         .voteCount(0)
         .build());
 
-    var page = service().profile("sparse");
+    var page = service().pageFor("sparse");
 
     assertThat(page.hasVotes()).isFalse();
     assertThat(page.website()).isNull();
@@ -97,7 +97,7 @@ class RestaurantProfilePageServiceTest {
         .voteCount(1)
         .build());
 
-    assertThatThrownBy(() -> service().profile("malformed"))
+    assertThatThrownBy(() -> service().pageFor("malformed"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("Restaurant vote summary is invalid.");
   }
@@ -107,7 +107,7 @@ class RestaurantProfilePageServiceTest {
     when(restaurants.getRestaurantById("bad"))
         .thenThrow(new InvalidRequestException("internal validation detail"));
 
-    assertThatThrownBy(() -> service().profile("bad"))
+    assertThatThrownBy(() -> service().pageFor("bad"))
         .isInstanceOf(ResourceNotFoundException.class)
         .hasMessage("Restaurant not found.");
   }
