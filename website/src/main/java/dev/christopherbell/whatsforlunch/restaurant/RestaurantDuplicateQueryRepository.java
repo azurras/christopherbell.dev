@@ -1,16 +1,16 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import java.util.List;
 import org.bson.Document;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.http.HttpStatus;
@@ -48,7 +48,7 @@ public class RestaurantDuplicateQueryRepository implements RestaurantDuplicateQu
         new Document("$limit", size + 1));
     var grouped = restaurants.aggregate(KindScopedAggregation.local(
         Aggregation.newAggregation(pipeline.stream()
-            .<org.springframework.data.mongodb.core.aggregation.AggregationOperation>
+            .<AggregationOperation>
                 map(stage -> context -> stage)
             .toList())), Document.class);
     var keysWithExtra = grouped.stream()
