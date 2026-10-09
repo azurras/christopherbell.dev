@@ -1,9 +1,11 @@
 package dev.christopherbell.configuration.mongo.migration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -32,8 +34,8 @@ class V008RemoveAccountApprovalFieldsTest {
 
     var update = ArgumentCaptor.forClass(UpdateDefinition.class);
     verify(mongo).updateMulti(
-        org.mockito.ArgumentMatchers.any(Query.class), update.capture(), eq("accounts"));
-    var unset = (org.bson.Document) update.getValue().getUpdateObject().get("$unset");
+        any(Query.class), update.capture(), eq("accounts"));
+    var unset = (Document) update.getValue().getUpdateObject().get("$unset");
     assertThat(unset.keySet()).containsExactlyInAnyOrder("isApproved", "approvedBy");
   }
 }

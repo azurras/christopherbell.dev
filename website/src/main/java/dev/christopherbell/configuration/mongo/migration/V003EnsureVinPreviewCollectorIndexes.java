@@ -1,9 +1,9 @@
 package dev.christopherbell.configuration.mongo.migration;
 
 import dev.christopherbell.configuration.persistence.MongoBackendComponent;
-import dev.christopherbell.vehicle.model.VehicleVinDecodeCache;
 import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun;
 import dev.christopherbell.post.preview.PostLinkPreviewCacheEntry;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeCache;
 import java.time.Duration;
 import org.springframework.data.domain.Sort.Direction;
 import org.springframework.data.mongodb.core.MongoTemplate;

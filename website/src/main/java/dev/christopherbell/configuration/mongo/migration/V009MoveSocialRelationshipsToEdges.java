@@ -1,13 +1,14 @@
 package dev.christopherbell.configuration.mongo.migration;
 
-import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import dev.christopherbell.account.follow.AccountFollow;
 import dev.christopherbell.account.follow.AccountFollowStore;
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import dev.christopherbell.post.like.PostLike;
 import dev.christopherbell.post.like.PostLikeStore;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.function.Consumer;
 import org.bson.Document;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -110,7 +111,7 @@ public final class V009MoveSocialRelationshipsToEdges implements ApplicationMigr
   private static void forEachBatch(
       MongoTemplate mongo,
       String collection,
-      java.util.function.Consumer<List<Document>> consumer
+      Consumer<List<Document>> consumer
   ) {
     String lastId = null;
     while (true) {
