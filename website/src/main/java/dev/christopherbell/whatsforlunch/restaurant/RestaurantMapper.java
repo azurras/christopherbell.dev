@@ -1,7 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
 import org.mapstruct.Mapper;

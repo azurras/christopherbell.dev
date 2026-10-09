@@ -1,7 +1,5 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 import dev.christopherbell.libs.http.BoundedResponseBodyHandlers;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.model.Address;
@@ -19,14 +17,24 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Client for importing restaurant-like places from OpenStreetMap via Overpass.
+ *
+ * <p>Tag readers return null for an absent tag, because every address and restaurant field they
+ * fill is optional.
  */
 @Component
 public class OpenStreetMapRestaurantClient {
   private static final long MAXIMUM_RESPONSE_BYTES = 16L * 1024 * 1024;
+  private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+  /** Extra time past Overpass's own query timeout before the HTTP request gives up. */
+  private static final Duration RESPONSE_TIMEOUT_MARGIN = Duration.ofSeconds(10);
+  private static final Set<String> UNITED_STATES_NAMES = Set.of("us", "usa", "unitedstates");
   private static final Map<String, String> STATE_NAMES_BY_ABBREVIATION = Map.of(
       "ca", "california",
       "la", "louisiana",
@@ -45,7 +53,7 @@ public class OpenStreetMapRestaurantClient {
     this.properties = wflProperties.getRestaurantImport().getOsm();
     this.supportedLocations = configuredLocations(properties.getMetros());
     this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
+        .connectTimeout(CONNECT_TIMEOUT)
         .build();
   }
 
@@ -54,7 +62,7 @@ public class OpenStreetMapRestaurantClient {
     var query = buildQuery();
     var request = HttpRequest.newBuilder(properties.getEndpoint())
         .POST(HttpRequest.BodyPublishers.ofString("data=" + URLEncoder.encode(query, StandardCharsets.UTF_8)))
-        .timeout(properties.getTimeout().plusSeconds(10))
+        .timeout(properties.getTimeout().plus(RESPONSE_TIMEOUT_MARGIN))
         .header("Accept", "application/json")
         .header("Content-Type", "application/x-www-form-urlencoded")
         .header("User-Agent", "christopherbell.dev whats-for-lunch importer")
@@ -126,19 +134,13 @@ public class OpenStreetMapRestaurantClient {
         || !isCoordinate(longitude, -180.0, 180.0)) {
       return Optional.empty();
     }
-    var location = supportedLocation(tags, latitude, longitude);
-    if (location.isEmpty()) {
-      return Optional.empty();
-    }
-    var supportedLocation = location.orElseThrow();
-
-    return Optional.of(Restaurant.builder()
+    return supportedLocation(tags, latitude, longitude).map(location -> Restaurant.builder()
         .id("osm:" + element.path("type").asText() + ":" + element.path("id").asText())
         .name(name.strip())
         .address(Address.builder()
             .street1(street1(tags))
-            .city(supportedLocation.city())
-            .state(supportedLocation.state())
+            .city(location.city())
+            .state(location.state())
             .country("US")
             .latitude(latitude)
             .longitude(longitude)
@@ -235,7 +237,7 @@ public class OpenStreetMapRestaurantClient {
   }
 
   private boolean isUnitedStates(String value) {
-    return List.of("us", "usa", "unitedstates").contains(normalizeLocation(value));
+    return UNITED_STATES_NAMES.contains(normalizeLocation(value));
   }
 
   private boolean stateMatches(String suppliedState, String canonicalState) {

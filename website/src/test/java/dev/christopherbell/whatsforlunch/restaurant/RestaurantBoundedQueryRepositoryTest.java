@@ -3,6 +3,7 @@ package dev.christopherbell.whatsforlunch.restaurant;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.web.server.ResponseStatusException;
 
 class RestaurantBoundedQueryRepositoryTest {
   private KindScopedMongoOperations<Restaurant> restaurants;
@@ -58,16 +60,16 @@ class RestaurantBoundedQueryRepositoryTest {
   @Test
   void boundedRepositoriesRejectInvalidPageSizesBeforeMongoAccess() {
     assertThatThrownBy(() -> inventory.find(null, null, null, null, 0))
-        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        .isInstanceOf(ResponseStatusException.class);
     assertThatThrownBy(() -> duplicates.find(null, 101))
-        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        .isInstanceOf(ResponseStatusException.class);
     verifyNoInteractions(restaurants);
   }
 
   @Test
   void duplicatePreviewAggregatesKeysThenFetchesOnlyPagedMembers() {
     when(restaurants.aggregate(any(KindScopedAggregation.class),
-        org.mockito.ArgumentMatchers.eq(Document.class)))
+        eq(Document.class)))
         .thenReturn(List.of(
             new Document("_id", "alpha").append("count", 2),
             new Document("_id", "beta").append("count", 3),
@@ -88,7 +90,7 @@ class RestaurantBoundedQueryRepositoryTest {
         .contains("dedupeKey", "alpha", "beta")
         .doesNotContain("gamma");
     verify(restaurants).aggregate(any(KindScopedAggregation.class),
-        org.mockito.ArgumentMatchers.eq(Document.class));
+        eq(Document.class));
   }
 
   private static Restaurant restaurant(
