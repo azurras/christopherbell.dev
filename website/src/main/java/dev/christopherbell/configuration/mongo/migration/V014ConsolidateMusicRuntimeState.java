@@ -21,9 +21,20 @@ public final class V014ConsolidateMusicRuntimeState implements ApplicationMigrat
     this.music = music;
   }
 
-  @Override public String id() { return "014-consolidate-music-runtime-state"; }
-  @Override public String checksum() { return CHECKSUM; }
-  @Override public String description() { return "Consolidate Music queue and radio runtime state"; }
+  @Override
+  public String id() {
+    return "014-consolidate-music-runtime-state";
+  }
+
+  @Override
+  public String checksum() {
+    return CHECKSUM;
+  }
+
+  @Override
+  public String description() {
+    return "Consolidate Music queue and radio runtime state";
+  }
 
   @Override
   public void apply(MongoTemplate mongo) {

@@ -1,14 +1,15 @@
 package dev.christopherbell.configuration.mongo.migration;
 
-import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import dev.christopherbell.configuration.SharedFolderMediaProperties;
 import dev.christopherbell.configuration.SharedFolderProperties;
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import dev.christopherbell.sharedfolder.media.MediaJobStatus;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.function.Consumer;
 import org.bson.Document;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -40,9 +41,18 @@ public final class V012RetainSharedFolderWork implements ApplicationMigration {
     this.clock = clock;
   }
 
-  @Override public String id() { return "012-retain-shared-folder-work"; }
-  @Override public String checksum() { return CHECKSUM; }
-  @Override public String description() {
+  @Override
+  public String id() {
+    return "012-retain-shared-folder-work";
+  }
+
+  @Override
+  public String checksum() {
+    return CHECKSUM;
+  }
+
+  @Override
+  public String description() {
     return "Backfill cleanup-before-TTL retention for shared-folder uploads and media";
   }
 
@@ -107,7 +117,7 @@ public final class V012RetainSharedFolderWork implements ApplicationMigration {
       MongoTemplate mongo,
       String collection,
       Criteria criteria,
-      java.util.function.Consumer<Document> consumer) {
+      Consumer<Document> consumer) {
     String lastId = null;
     while (true) {
       Criteria page = lastId == null
@@ -115,7 +125,9 @@ public final class V012RetainSharedFolderWork implements ApplicationMigration {
           : new Criteria().andOperator(criteria, Criteria.where("_id").gt(lastId));
       Query query = Query.query(page).with(Sort.by(Sort.Direction.ASC, "_id")).limit(BATCH_SIZE);
       List<Document> batch = mongo.find(query, Document.class, collection);
-      if (batch.isEmpty()) return;
+      if (batch.isEmpty()) {
+        return;
+      }
       batch.forEach(consumer);
       lastId = batch.getLast().getString("_id");
     }
@@ -123,13 +135,20 @@ public final class V012RetainSharedFolderWork implements ApplicationMigration {
 
   private Instant timestamp(Document document, String primary, String fallback) {
     Instant value = instant(document.get(primary));
-    if (value == null) value = instant(document.get(fallback));
+    if (value == null) {
+      value = instant(document.get(fallback));
+    }
     return value == null ? clock.instant() : value;
   }
 
+  /** A stored timestamp as an instant, or null when the field is missing or not a timestamp. */
   private Instant instant(Object value) {
-    if (value instanceof Instant instant) return instant;
-    if (value instanceof Date date) return date.toInstant();
+    if (value instanceof Instant instant) {
+      return instant;
+    }
+    if (value instanceof Date date) {
+      return date.toInstant();
+    }
     return null;
   }
 }
