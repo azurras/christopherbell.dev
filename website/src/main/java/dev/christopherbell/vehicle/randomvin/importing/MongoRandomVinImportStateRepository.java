@@ -13,7 +13,17 @@ import org.springframework.stereotype.Repository;
 public class MongoRandomVinImportStateRepository
     extends KindScopedRepositorySupport<RandomVinImportState>
     implements RandomVinImportStateRepository {
-  public MongoRandomVinImportStateRepository(DomainMongoOperationsFactory factory) { super(factory, RandomVinImportState.class); }
-  @Override public Optional<RandomVinImportState> findById(String id) { return findValueById(id); }
-  @Override public RandomVinImportState save(RandomVinImportState value) { return saveValue(value); }
+  public MongoRandomVinImportStateRepository(DomainMongoOperationsFactory factory) {
+    super(factory, RandomVinImportState.class);
+  }
+
+  @Override
+  public Optional<RandomVinImportState> findById(String id) {
+    return findValueById(id);
+  }
+
+  @Override
+  public RandomVinImportState save(RandomVinImportState state) {
+    return saveValue(state);
+  }
 }

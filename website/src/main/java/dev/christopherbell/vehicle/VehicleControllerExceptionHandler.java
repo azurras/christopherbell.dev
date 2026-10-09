@@ -14,14 +14,14 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class VehicleControllerExceptionHandler {
   @ExceptionHandler(VehicleVinDecodeRateLimitException.class)
   @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
-  public Response<?> handleVinDecodeRateLimit(VehicleVinDecodeRateLimitException e) {
-    return error("VIN_DECODE_RATE_LIMITED", e.getMessage());
+  public Response<?> handleVinDecodeRateLimit(VehicleVinDecodeRateLimitException rateLimited) {
+    return error("VIN_DECODE_RATE_LIMITED", rateLimited.getMessage());
   }
 
   @ExceptionHandler(VehicleVinDecodeUnavailableException.class)
   @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
-  public Response<?> handleVinDecodeUnavailable(VehicleVinDecodeUnavailableException e) {
-    return error("VIN_DECODE_UNAVAILABLE", e.getMessage());
+  public Response<?> handleVinDecodeUnavailable(VehicleVinDecodeUnavailableException unavailable) {
+    return error("VIN_DECODE_UNAVAILABLE", unavailable.getMessage());
   }
 
   private Response<?> error(String code, String description) {

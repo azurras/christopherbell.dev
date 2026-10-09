@@ -72,9 +72,9 @@ public class RandomVinRobotsPolicy {
         return Result.denied("robots_fetch_status_" + response.statusCode(), failClosed);
       }
       return evaluate(response.body());
-    } catch (IOException e) {
+    } catch (IOException fetchFailure) {
       return Result.denied("robots_fetch_failed", failClosed);
-    } catch (InterruptedException e) {
+    } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
       return Result.denied("robots_fetch_interrupted", failClosed);
     }
@@ -154,7 +154,7 @@ public class RandomVinRobotsPolicy {
         continue;
       }
 
-      var key = line.substring(0, separatorIndex).trim().toLowerCase();
+      var key = line.substring(0, separatorIndex).trim().toLowerCase(Locale.ROOT);
       var value = line.substring(separatorIndex + 1).trim();
 
       if ("user-agent".equals(key)) {

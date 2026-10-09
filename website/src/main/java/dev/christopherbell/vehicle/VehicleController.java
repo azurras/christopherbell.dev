@@ -4,6 +4,9 @@ import static dev.christopherbell.libs.api.APIVersion.V20260509;
 import static dev.christopherbell.libs.api.APIVersion.V20260726;
 
 import dev.christopherbell.configuration.ClientIpResolver;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.ResourceExistsException;
+import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.vehicle.core.VehicleDataCollectionStateService;
 import dev.christopherbell.vehicle.model.VehicleCreateRequest;
@@ -11,9 +14,9 @@ import dev.christopherbell.vehicle.model.VehicleDataCollectionState;
 import dev.christopherbell.vehicle.model.VehicleDetail;
 import dev.christopherbell.vehicle.model.VehicleUpdateRequest;
 import dev.christopherbell.vehicle.model.VehicleVinBatchRequest;
-import dev.christopherbell.vehicle.model.VehicleVinDecodeRequest;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchRequest;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchResponse;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeRequest;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeResponse;
 import dev.christopherbell.vehicle.model.VehicleVinRequest;
 import dev.christopherbell.vehicle.nhtsa.decode.VehicleVinDecodeService;
@@ -54,7 +57,8 @@ public class VehicleController {
    *
    * @param request the vehicle creation request body
    * @return the created vehicle response
-   * @throws Exception when creation fails
+   * @throws InvalidRequestException when the request is invalid
+   * @throws ResourceExistsException when a vehicle already has the VIN
    */
   @PostMapping(
       value = V20260509,
@@ -64,7 +68,7 @@ public class VehicleController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<VehicleDetail>> createVehicle(
       @RequestBody VehicleCreateRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceExistsException {
     return new ResponseEntity<>(
         Response.<VehicleDetail>builder()
             .payload(vehicleService.createVehicle(request))
@@ -78,7 +82,8 @@ public class VehicleController {
    *
    * @param request the VIN request body
    * @return the created vehicle response
-   * @throws Exception when creation fails
+   * @throws InvalidRequestException when the request is invalid
+   * @throws ResourceExistsException when a vehicle already has the VIN
    */
   @PostMapping(
       value = V20260509 + "/vin",
@@ -88,7 +93,7 @@ public class VehicleController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<VehicleDetail>> createVehicleFromVin(
       @RequestBody VehicleVinRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceExistsException {
     return new ResponseEntity<>(
         Response.<VehicleDetail>builder()
             .payload(vehicleService.createVehicleFromVin(request))
@@ -100,9 +105,10 @@ public class VehicleController {
   /**
    * Decodes a VIN through NHTSA without creating or updating a stored vehicle.
    *
-   * @param request the VIN decode request body
+   * @param decodeRequest the VIN decode request body
+   * @param servletRequest the current HTTP request used to derive the rate-limit key
    * @return the decoded VIN response
-   * @throws Exception when decoding fails
+   * @throws InvalidRequestException when the VIN is invalid
    */
   @PostMapping(
       value = V20260509 + "/vin/decode",
@@ -110,15 +116,15 @@ public class VehicleController {
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   public ResponseEntity<Response<VehicleVinDecodeResponse>> decodeVin(
-      @Valid @RequestBody VehicleVinDecodeRequest request,
+      @Valid @RequestBody VehicleVinDecodeRequest decodeRequest,
       HttpServletRequest servletRequest
-  ) throws Exception {
+  ) throws InvalidRequestException {
     var clientIp = clientIpResolver.resolveClientIp(servletRequest);
-    var clientKey = clientKey(servletRequest, clientIp);
+    var clientKey = clientKey(clientIp);
     log.info("VIN decoder used from ip={} clientKey={}.", clientIp, clientKey);
     return new ResponseEntity<>(
         Response.<VehicleVinDecodeResponse>builder()
-            .payload(vehicleVinDecodeService.decode(request, clientKey))
+            .payload(vehicleVinDecodeService.decode(decodeRequest, clientKey))
             .success(true)
             .build(),
         HttpStatus.OK);
@@ -127,10 +133,10 @@ public class VehicleController {
   /**
    * Decodes an ordered VIN batch with one success or safe error per submitted position.
    *
-   * @param request the ordered VIN batch
+   * @param batchRequest the ordered VIN batch
    * @param servletRequest the current HTTP request used to derive the rate-limit key
    * @return ordered partial-success decode results
-   * @throws Exception when envelope validation or rate limiting fails
+   * @throws InvalidRequestException when the batch envelope is invalid
    */
   @PostMapping(
       value = V20260726 + "/vin/decode/batch",
@@ -138,20 +144,20 @@ public class VehicleController {
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   public ResponseEntity<Response<VehicleVinDecodeBatchResponse>> decodeVinBatch(
-      @Valid @RequestBody VehicleVinDecodeBatchRequest request,
+      @Valid @RequestBody VehicleVinDecodeBatchRequest batchRequest,
       HttpServletRequest servletRequest
-  ) throws Exception {
+  ) throws InvalidRequestException {
     var clientIp = clientIpResolver.resolveClientIp(servletRequest);
-    var clientKey = clientKey(servletRequest, clientIp);
+    var clientKey = clientKey(clientIp);
     log.info("VIN batch decoder used from ip={} clientKey={} count={}.",
-        clientIp, clientKey, request.vins().size());
+        clientIp, clientKey, batchRequest.vins().size());
     return ResponseEntity.ok(Response.<VehicleVinDecodeBatchResponse>builder()
-        .payload(vehicleVinDecodeService.decodeBatch(request, clientKey))
+        .payload(vehicleVinDecodeService.decodeBatch(batchRequest, clientKey))
         .success(true)
         .build());
   }
 
-  private String clientKey(HttpServletRequest request, String clientIp) {
+  private String clientKey(String clientIp) {
     var authentication = SecurityContextHolder.getContext().getAuthentication();
     if (authentication != null
         && authentication.isAuthenticated()
@@ -168,7 +174,8 @@ public class VehicleController {
    *
    * @param request the VIN batch request body
    * @return the created vehicles response
-   * @throws Exception when creation fails
+   * @throws InvalidRequestException when the request is invalid
+   * @throws ResourceExistsException when a vehicle already has the VIN
    */
   @PostMapping(
       value = V20260509 + "/vins",
@@ -178,7 +185,7 @@ public class VehicleController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<List<VehicleDetail>>> createVehiclesFromVins(
       @RequestBody VehicleVinBatchRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceExistsException {
     return new ResponseEntity<>(
         Response.<List<VehicleDetail>>builder()
             .payload(vehicleService.createVehiclesFromVins(request))
@@ -192,13 +199,14 @@ public class VehicleController {
    *
    * @param id the vehicle id to delete
    * @return the deleted vehicle response
-   * @throws Exception when deletion fails
+   * @throws InvalidRequestException when the request is invalid
+   * @throws ResourceNotFoundException when no vehicle has the id
    */
   @DeleteMapping(value = V20260509 + "/{id}", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<VehicleDetail>> deleteVehicleById(
       @PathVariable String id
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<VehicleDetail>builder()
             .payload(vehicleService.deleteVehicleById(id))
@@ -244,13 +252,13 @@ public class VehicleController {
    *
    * @param make the make to search for
    * @return matching vehicles
-   * @throws Exception when lookup fails
+   * @throws InvalidRequestException when the make is blank
    */
   @GetMapping(value = V20260509 + "/make/{make}", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<List<VehicleDetail>>> getVehiclesByMake(
       @PathVariable String make
-  ) throws Exception {
+  ) throws InvalidRequestException {
     return new ResponseEntity<>(
         Response.<List<VehicleDetail>>builder()
             .payload(vehicleService.getVehiclesByMake(make))
@@ -264,13 +272,14 @@ public class VehicleController {
    *
    * @param id the vehicle id to fetch
    * @return the matching vehicle response
-   * @throws Exception when lookup fails
+   * @throws InvalidRequestException when the request is invalid
+   * @throws ResourceNotFoundException when no vehicle has the id
    */
   @GetMapping(value = V20260509 + "/{id}", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<VehicleDetail>> getVehicleById(
       @PathVariable String id
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<VehicleDetail>builder()
             .payload(vehicleService.getVehicleById(id))
@@ -285,7 +294,9 @@ public class VehicleController {
    * @param id the vehicle id to update
    * @param request the vehicle update request body
    * @return the updated vehicle response
-   * @throws Exception when update fails
+   * @throws InvalidRequestException when the request is invalid
+   * @throws ResourceExistsException when a vehicle already has the VIN
+   * @throws ResourceNotFoundException when no vehicle has the id
    */
   @PutMapping(
       value = V20260509 + "/{id}",
@@ -296,7 +307,7 @@ public class VehicleController {
   public ResponseEntity<Response<VehicleDetail>> updateVehicle(
       @PathVariable String id,
       @RequestBody VehicleUpdateRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceExistsException, ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<VehicleDetail>builder()
             .payload(vehicleService.updateVehicle(id, request))

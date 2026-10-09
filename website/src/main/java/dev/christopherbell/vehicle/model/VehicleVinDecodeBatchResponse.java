@@ -13,20 +13,24 @@ public record VehicleVinDecodeBatchResponse(
     results = List.copyOf(results);
     if (submittedCount != results.size()
         || successCount + errorCount != submittedCount
-        || successCount != results.stream().filter(entry -> "SUCCESS".equals(entry.status())).count()) {
+        || successCount != successCountOf(results)) {
       throw new IllegalArgumentException("VIN batch counts must agree with ordered results.");
     }
   }
 
   public static VehicleVinDecodeBatchResponse from(List<VehicleVinDecodeBatchEntry> results) {
     var immutableResults = List.copyOf(results);
-    var successCount = (int) immutableResults.stream()
-        .filter(entry -> "SUCCESS".equals(entry.status()))
-        .count();
+    var successCount = successCountOf(immutableResults);
     return new VehicleVinDecodeBatchResponse(
         immutableResults.size(),
         successCount,
         immutableResults.size() - successCount,
         immutableResults);
+  }
+
+  private static int successCountOf(List<VehicleVinDecodeBatchEntry> results) {
+    return (int) results.stream()
+        .filter(entry -> VehicleVinDecodeBatchEntry.SUCCESS.equals(entry.status()))
+        .count();
   }
 }

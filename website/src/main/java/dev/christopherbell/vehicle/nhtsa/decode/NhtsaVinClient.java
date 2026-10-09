@@ -60,7 +60,7 @@ public class NhtsaVinClient {
    */
   public Map<String, String> decodeVin(String vin, Integer modelYear)
       throws IOException, InterruptedException, InvalidRequestException, NhtsaVinClientException {
-    return decodeVins(List.of(new NhtsaVinDecodeRequest(vin, modelYear))).get(0);
+    return decodeVins(List.of(new NhtsaVinDecodeRequest(vin, modelYear))).getFirst();
   }
 
   /**
