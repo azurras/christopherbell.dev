@@ -24,17 +24,28 @@ public class MongoMusicMetadataEditRepository
     super(factory, MusicMetadataEdit.class);
   }
 
-  @Override public MusicMetadataEdit save(MusicMetadataEdit edit) { return saveValue(edit); }
-  @Override public Optional<MusicMetadataEdit> findById(String id) { return findValueById(id); }
-  @Override public void deleteById(String id) { super.deleteById(id); }
-  @Override public void delete(MusicMetadataEdit edit) {
+  @Override
+  public MusicMetadataEdit save(MusicMetadataEdit edit) {
+    return saveValue(edit);
+  }
+  @Override
+  public Optional<MusicMetadataEdit> findById(String id) {
+    return findValueById(id);
+  }
+  @Override
+  public void deleteById(String id) {
+    super.deleteById(id);
+  }
+  @Override
+  public void delete(MusicMetadataEdit edit) {
     var query = Query.query(Criteria.where("id").is(edit.id()));
     if (edit.version() != null) query.addCriteria(Criteria.where("version").is(edit.version()));
     if (mongo.remove(query).getDeletedCount() != 1) {
       throw new OptimisticLockingFailureException("Music metadata edit changed during deletion.");
     }
   }
-  @Override public List<MusicMetadataEdit> findTop100ByExpiresAtBeforeOrderByExpiresAtAsc(
+  @Override
+  public List<MusicMetadataEdit> findTop100ByExpiresAtBeforeOrderByExpiresAtAsc(
       Instant cutoff) {
     return find(Query.query(Criteria.where("expiresAt").lt(cutoff))
         .with(Sort.by(Sort.Direction.ASC, "expiresAt")), PageRequest.of(0, 100));

@@ -2,6 +2,7 @@ package dev.christopherbell.music.radio;
 
 import dev.christopherbell.libs.lease.LeaseService;
 import dev.christopherbell.music.catalog.MusicCatalog;
+import dev.christopherbell.music.catalog.MusicIndexStatus;
 import dev.christopherbell.music.catalog.MusicProperties;
 import dev.christopherbell.music.catalog.MusicTrack;
 import dev.christopherbell.music.security.MusicAccessService;
@@ -11,6 +12,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -99,23 +101,24 @@ public final class MusicRadioService {
     if (candidates.isEmpty() && queue.loadForRadio().entries().isEmpty()) {
       return MusicRadioSnapshot.empty();
     }
-    MusicTrack active = activeTrack(state);
-    if (state != null && active != null) {
-      ensureHistory(state, active);
+    Optional<MusicTrack> active = activeTrack(state);
+    if (active.isPresent()) {
+      ensureHistory(state, active.orElseThrow());
     }
     List<MusicRadioHistoryEvent> recent = new ArrayList<>(
         history.findTop100ByOrderByStationSequenceDesc());
     int transitions = 0;
-    while (state == null || active == null || ended(state).compareTo(now) <= 0) {
+    while (state == null || active.isEmpty() || ended(state).compareTo(now) <= 0) {
       if (++transitions > radioProperties.maximumCatchUpTransitions()) {
         break;
       }
-      Instant startedAt = state == null || active == null ? now : ended(state);
+      Instant startedAt = state == null || active.isEmpty() ? now : ended(state);
       long sequence = state == null ? 1 : Math.incrementExact(state.stationSequence());
-      Selection selected = selectNext(candidates, recent, state, sequence, startedAt);
-      if (selected == null) {
+      Optional<Selection> next = selectNext(candidates, recent, state, sequence, startedAt);
+      if (next.isEmpty()) {
         return MusicRadioSnapshot.empty();
       }
+      Selection selected = next.orElseThrow();
       MusicRadioState replacement = new MusicRadioState(
           MusicRadioState.ID,
           sequence,
@@ -137,12 +140,12 @@ public final class MusicRadioService {
       if (selected.queueEntryId() != null) {
         queue.consumeForRadio(selected.queueEntryId());
       }
-      active = selected.track();
+      active = Optional.of(selected.track());
     }
     return snapshot(state, now);
   }
 
-  private Selection selectNext(
+  private Optional<Selection> selectNext(
       List<MusicTrack> candidates,
       List<MusicRadioHistoryEvent> recent,
       MusicRadioState previous,
@@ -153,10 +156,12 @@ public final class MusicRadioService {
       if (previous != null && entry.id().equals(previous.queueEntryId())) {
         continue;
       }
-      MusicTrack queued = catalog.findReady(entry.trackId()).orElse(null);
-      if (queued != null && hasTrustedDuration(queued)
-          && entry.observedToken().equals(queued.observedToken())) {
-        return new Selection(queued, MusicRadioState.Source.QUEUE, entry.id());
+      Optional<Selection> playableQueued = catalog.findReady(entry.trackId())
+          .filter(this::hasTrustedDuration)
+          .filter(queued -> entry.observedToken().equals(queued.observedToken()))
+          .map(queued -> new Selection(queued, MusicRadioState.Source.QUEUE, entry.id()));
+      if (playableQueued.isPresent()) {
+        return playableQueued;
       }
       saveHistoryOnce(new MusicRadioHistoryEvent(
           "skip:" + entry.id(), nextSequence, entry.trackId(), entry.observedToken(), null,
@@ -166,33 +171,34 @@ public final class MusicRadioService {
       queue.consumeForRadio(entry.id());
     }
     if (candidates.isEmpty()) {
-      return null;
+      return Optional.empty();
     }
     String previousTrackId = previous == null ? null : previous.trackId();
-    return new Selection(
+    return Optional.of(new Selection(
         selector.select(candidates, recent, previousTrackId),
         MusicRadioState.Source.RADIO,
-        null);
+        null));
   }
 
-  private MusicTrack activeTrack(MusicRadioState state) {
+  /** The track the station is playing, when it is still playable as the state recorded it. */
+  private Optional<MusicTrack> activeTrack(MusicRadioState state) {
     if (state == null) {
-      return null;
+      return Optional.empty();
     }
-    MusicTrack track = catalog.findReady(state.trackId()).orElse(null);
-    if (track == null || !hasTrustedDuration(track)
-        || !state.observedToken().equals(track.observedToken())
-        || (state.source() == MusicRadioState.Source.RADIO && track.excludedFromRadio())) {
-      return null;
-    }
-    return track;
+    return catalog.findReady(state.trackId())
+        .filter(this::hasTrustedDuration)
+        .filter(track -> state.observedToken().equals(track.observedToken()))
+        .filter(track -> state.source() != MusicRadioState.Source.RADIO
+            || !track.excludedFromRadio());
   }
 
   private MusicRadioSnapshot snapshot(MusicRadioState state, Instant now) {
-    MusicTrack track = activeTrack(state);
-    if (state == null || track == null) {
-      return MusicRadioSnapshot.empty();
-    }
+    return activeTrack(state)
+        .map(track -> playing(state, track, now))
+        .orElseGet(MusicRadioSnapshot::empty);
+  }
+
+  private MusicRadioSnapshot playing(MusicRadioState state, MusicTrack track, Instant now) {
     double elapsed = Math.max(0, Duration.between(state.startedAt(), now).toMillis() / 1_000.0);
     double position = Math.min(state.durationSeconds(), elapsed);
     return new MusicRadioSnapshot(
@@ -239,7 +245,7 @@ public final class MusicRadioService {
   }
 
   private boolean hasTrustedDuration(MusicTrack track) {
-    return track != null && track.indexStatus() == dev.christopherbell.music.catalog.MusicIndexStatus.READY
+    return track != null && track.indexStatus() == MusicIndexStatus.READY
         && track.missingSince() == null && track.observedToken() != null
         && Double.isFinite(track.durationSeconds()) && track.durationSeconds() > 0
         && track.durationSeconds() <= 86_400;

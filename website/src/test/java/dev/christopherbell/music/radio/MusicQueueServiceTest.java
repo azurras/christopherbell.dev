@@ -2,6 +2,7 @@ package dev.christopherbell.music.radio;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -13,6 +14,7 @@ import dev.christopherbell.music.security.MusicAccessService;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
@@ -31,7 +33,7 @@ class MusicQueueServiceTest {
     when(access.requireWrite()).thenReturn(Account.builder().id("writer-1").build());
     when(catalog.findReady(track.id())).thenReturn(Optional.of(track));
     when(runtimeState.findQueue()).thenReturn(Optional.empty());
-    when(runtimeState.saveQueue(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+    when(runtimeState.saveQueue(any())).thenAnswer(invocation -> {
       MusicQueueState state = invocation.getArgument(0);
       return new MusicQueueState(state.id(), state.entries(), 0L);
     });
@@ -52,7 +54,7 @@ class MusicQueueServiceTest {
   void staleWriterCannotOverwriteTheGlobalQueue() {
     var runtimeState = mock(MusicRuntimeStateStore.class);
     when(runtimeState.findQueue())
-        .thenReturn(Optional.of(new MusicQueueState(MusicQueueState.ID, java.util.List.of(), 3L)));
+        .thenReturn(Optional.of(new MusicQueueState(MusicQueueState.ID, List.of(), 3L)));
     var access = mock(MusicAccessService.class);
     when(access.requireWrite()).thenReturn(Account.builder().id("writer-1").build());
     var service = new MusicQueueService(
@@ -77,7 +79,7 @@ class MusicQueueServiceTest {
     MusicTrack track = track("song.mp3");
     var runtimeState = mock(MusicRuntimeStateStore.class);
     when(runtimeState.findQueue()).thenReturn(Optional.empty());
-    when(runtimeState.saveQueue(org.mockito.ArgumentMatchers.any())).thenThrow(failure);
+    when(runtimeState.saveQueue(any())).thenThrow(failure);
     var catalog = mock(MusicCatalog.class);
     when(catalog.findReady(track.id())).thenReturn(Optional.of(track));
     var access = mock(MusicAccessService.class);

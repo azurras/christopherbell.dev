@@ -15,6 +15,7 @@ import dev.christopherbell.music.security.MusicAccessService;
 import dev.christopherbell.music.web.MusicTrackView;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
@@ -158,7 +159,7 @@ public final class MusicMetadataService {
             undone.id(), replacement.token(), undone.expiresAt(), MusicTrackView.from(refreshed));
       } finally {
         try {
-          java.nio.file.Files.deleteIfExists(stage);
+          Files.deleteIfExists(stage);
         } catch (IOException ignored) {
           // Retained private staging is safer than touching the source after a failed undo.
         }

@@ -14,8 +14,16 @@ public final class MusicRuntimeStateStore {
     this.states = states;
   }
 
-  public Optional<MusicQueueState> findQueue() { return states.findQueue(); }
-  public MusicQueueState saveQueue(MusicQueueState state) { return states.saveQueue(state); }
-  public Optional<MusicRadioState> findRadio() { return states.findRadio(); }
-  public MusicRadioState saveRadio(MusicRadioState state) { return states.saveRadio(state); }
+  public Optional<MusicQueueState> findQueue() {
+    return states.findQueue();
+  }
+  public MusicQueueState saveQueue(MusicQueueState state) {
+    return states.saveQueue(state);
+  }
+  public Optional<MusicRadioState> findRadio() {
+    return states.findRadio();
+  }
+  public MusicRadioState saveRadio(MusicRadioState state) {
+    return states.saveRadio(state);
+  }
 }

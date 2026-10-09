@@ -3,6 +3,7 @@ package dev.christopherbell.music.catalog;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -52,7 +53,7 @@ public class MusicArtworkService {
       }
       try {
         Files.move(temporary, destination, StandardCopyOption.ATOMIC_MOVE);
-      } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+      } catch (AtomicMoveNotSupportedException unsupported) {
         Files.move(temporary, destination);
       }
       return Optional.of(artworkRevision);

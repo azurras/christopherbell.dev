@@ -13,10 +13,7 @@ public interface MusicTrackRepository {
 
   List<MusicTrack> findAllByMissingSinceIsNull();
 
+  /** Replaces a track's preferences only when they still equal {@code expected}. */
   boolean updatePreferences(
-      String id,
-      boolean expectedFavorite,
-      boolean expectedExcluded,
-      boolean favorite,
-      boolean excluded);
+      String id, MusicTrackPreferences expected, MusicTrackPreferences desired);
 }

@@ -27,23 +27,30 @@ public class MongoMusicAccessAttemptRepository implements MusicAccessAttemptRepo
     Query identity = Query.query(Criteria.where("id").is(id));
     Update update = new Update().inc("count", 1).set("lastAttemptAt", occurredAt)
         .set("expiresAt", expiresAt);
-    var existing = attempts.findAndUpdate(identity, update);
-    if (existing.isPresent()) return existing.get();
+    return attempts.findAndUpdate(identity, update).orElseGet(() -> insertFirst(
+        identity,
+        update,
+        new MusicAccessAttempt(id, type, principal, reason, 1, occurredAt, occurredAt, expiresAt)));
+  }
+
+  /** Inserts the first attempt in a bucket, or counts it when a concurrent insert won. */
+  private MusicAccessAttempt insertFirst(Query identity, Update update, MusicAccessAttempt first) {
     try {
-      return attempts.insert(new MusicAccessAttempt(
-          id, type, principal, reason, 1, occurredAt, occurredAt, expiresAt));
+      return attempts.insert(first);
     } catch (DuplicateKeyException contention) {
       return attempts.findAndUpdate(identity, update).orElseThrow(() ->
           new IllegalStateException("Concurrent Music access audit insert left no record.", contention));
     }
   }
 
-  @Override public List<MusicAccessAttempt> recent(int limit) {
+  @Override
+  public List<MusicAccessAttempt> recent(int limit) {
     Query query = new Query().with(Sort.by(Sort.Direction.DESC, "lastAttemptAt")).limit(limit);
     return attempts.find(query, Pageable.unpaged());
   }
 
-  @Override public int deleteExpired(Instant cutoff, int limit) {
+  @Override
+  public int deleteExpired(Instant cutoff, int limit) {
     List<String> ids = attempts.find(Query.query(Criteria.where("expiresAt").lte(cutoff))
         .with(Sort.by("expiresAt", "id")).limit(limit), Pageable.unpaged()).stream()
         .map(MusicAccessAttempt::id).toList();

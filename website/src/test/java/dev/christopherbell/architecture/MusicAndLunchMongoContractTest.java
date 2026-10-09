@@ -17,6 +17,7 @@ import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicIndexStatus;
 import dev.christopherbell.music.catalog.MusicQuery;
 import dev.christopherbell.music.catalog.MusicTrack;
+import dev.christopherbell.music.catalog.MusicTrackPreferences;
 import dev.christopherbell.music.library.MongoMusicPlaylistRepository;
 import dev.christopherbell.music.library.MusicPlaylist;
 import dev.christopherbell.music.metadata.MongoMusicMetadataEditRepository;
@@ -27,33 +28,34 @@ import dev.christopherbell.music.radio.MusicQueueState;
 import dev.christopherbell.music.radio.MusicRadioHistoryEvent;
 import dev.christopherbell.music.radio.MusicRadioState;
 import dev.christopherbell.music.radio.MusicRuntimeStateStore;
+import dev.christopherbell.music.security.MongoMusicAccessAttemptRepository;
 import dev.christopherbell.music.security.MusicAccessAuditQueryService;
 import dev.christopherbell.music.security.MusicAccessAuditRecorder;
-import dev.christopherbell.music.security.MongoMusicAccessAttemptRepository;
-import dev.christopherbell.whatsforlunch.restaurant.MongoRestaurantRepository;
 import dev.christopherbell.whatsforlunch.restaurant.MongoDailyLunchPicksRepository;
 import dev.christopherbell.whatsforlunch.restaurant.MongoRestaurantImportStateRepository;
+import dev.christopherbell.whatsforlunch.restaurant.MongoRestaurantRepository;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantDuplicateQueryRepository;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantInventoryQueryRepository;
+import dev.christopherbell.whatsforlunch.restaurant.favorite.MongoRestaurantFavoriteRepository;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewDocument;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewStore;
+import dev.christopherbell.whatsforlunch.restaurant.model.Address;
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVote;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteValue;
+import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVote;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteValue;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreference;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRestaurantsRequest;
-import dev.christopherbell.whatsforlunch.restaurant.favorite.MongoRestaurantFavoriteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.preference.MongoWhatsForLunchPreferenceRepository;
 import dev.christopherbell.whatsforlunch.restaurant.session.MongoWhatsForLunchSessionRepository;
 import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionMutationStore;
 import dev.christopherbell.whatsforlunch.restaurant.vote.MongoRestaurantVoteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteQueryRepository;
-import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
-import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewDocument;
-import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewStore;
-import dev.christopherbell.whatsforlunch.restaurant.model.Address;
-import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -67,13 +69,13 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.auditing.IsNewAwareAuditingHandler;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.event.AuditingEntityCallback;
-import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 /** Real-Mongo behavioral proof for the highest-risk Task 4 adapter invariants. */
 @EnabledIfEnvironmentVariable(named = "DOMAIN_COLLECTION_TEST_URI", matches = ".+")
@@ -279,7 +281,8 @@ class MusicAndLunchMongoContractTest {
     tracks.save(secondTrack);
     assertThat(tracks.findByPath("a.mp3")).contains(secondTrack);
     assertThat(tracks.findAllByMissingSinceIsNull()).hasSize(2);
-    assertThat(tracks.updatePreferences("track-1", false, false, true, true)).isTrue();
+    assertThat(tracks.updatePreferences("track-1",
+        new MusicTrackPreferences(false, false), new MusicTrackPreferences(true, true))).isTrue();
     assertThat(tracks.findById("track-1")).get().satisfies(updated -> {
       assertThat(updated.favorite()).isTrue();
       assertThat(updated.excludedFromRadio()).isTrue();
@@ -341,7 +344,7 @@ class MusicAndLunchMongoContractTest {
         .containsExactly("track-1");
 
     var attempts = new MongoMusicAccessAttemptRepository(factory);
-    var recorder = new MusicAccessAuditRecorder(attempts);
+    var recorder = new MusicAccessAuditRecorder(attempts, Clock.systemUTC());
     var attempt = recorder.deniedIp("203.0.113.7", "SIGN_IN_REQUIRED");
     assertThat(attempt.count()).isEqualTo(1);
     assertThat(new MusicAccessAuditQueryService(attempts).recent(100)).contains(attempt);

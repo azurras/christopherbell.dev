@@ -2,6 +2,7 @@ package dev.christopherbell.music.web;
 
 import static dev.christopherbell.libs.api.APIVersion.V20260728;
 
+import dev.christopherbell.music.catalog.MusicTrackPreferences;
 import dev.christopherbell.music.library.MusicLibraryService;
 import dev.christopherbell.music.library.MusicPlaylistView;
 import dev.christopherbell.music.radio.MusicRadioHistoryEvent;
@@ -64,12 +65,7 @@ public final class MusicLibraryController {
   public ResponseEntity<MusicTrackView> preferences(
       @PathVariable @NotBlank @Size(max = 128) String id,
       @Valid @RequestBody PreferenceUpdate request) {
-    return noStore(library.updatePreferences(
-        id,
-        request.expectedFavorite(),
-        request.expectedExcludedFromRadio(),
-        request.favorite(),
-        request.excludedFromRadio()));
+    return noStore(library.updatePreferences(id, request.expected(), request.desired()));
   }
 
   @GetMapping("/history")
@@ -95,5 +91,13 @@ public final class MusicLibraryController {
       boolean expectedFavorite,
       boolean expectedExcludedFromRadio,
       boolean favorite,
-      boolean excludedFromRadio) {}
+      boolean excludedFromRadio) {
+    MusicTrackPreferences expected() {
+      return new MusicTrackPreferences(expectedFavorite, expectedExcludedFromRadio);
+    }
+
+    MusicTrackPreferences desired() {
+      return new MusicTrackPreferences(favorite, excludedFromRadio);
+    }
+  }
 }

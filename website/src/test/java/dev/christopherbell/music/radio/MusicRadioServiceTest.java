@@ -15,6 +15,7 @@ import dev.christopherbell.music.catalog.MusicProbeResult;
 import dev.christopherbell.music.catalog.MusicProperties;
 import dev.christopherbell.music.catalog.MusicTrack;
 import dev.christopherbell.music.security.MusicAccessService;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -187,7 +188,7 @@ class MusicRadioServiceTest {
 
   private MusicProperties musicProperties() {
     return new MusicProperties(
-        java.nio.file.Path.of("Music"), java.nio.file.Path.of("artwork"),
+        Path.of("Music"), Path.of("artwork"),
         "ffprobe", "ffmpeg", 100, Duration.ofMinutes(1), Duration.ofSeconds(10),
         1024 * 1024, 5 * 1024 * 1024, 1024, true);
   }

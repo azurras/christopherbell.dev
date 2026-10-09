@@ -25,8 +25,8 @@ public final class FfmpegMusicTagProcess implements MusicTagProcess {
       Path artwork) {
     var command = new ArrayList<>(List.of(
         music.ffmpegCommand(), "-nostdin", "-v", "error", "-y", "-i", source.toString()));
-    if (artwork != null) command.addAll(List.of("-i", artwork.toString()));
     if (artwork != null) {
+      command.addAll(List.of("-i", artwork.toString()));
       command.addAll(List.of("-map", "0:a", "-map", "1:v:0", "-c:a", "copy", "-c:v", "copy",
           "-disposition:v:0", "attached_pic"));
     } else if (update.removeArtwork()) {

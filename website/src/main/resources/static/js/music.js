@@ -1,6 +1,5 @@
 import { API } from './lib/api.js';
 import {
-  formatMusicDuration,
   musicCatalog,
   musicCatalogParameters,
   musicPaginationMarkup,
@@ -302,14 +301,23 @@ function showError(error) {
   showToast(error?.status === 409 ? 'Music changed. Refresh and try again.' : error?.message || 'Music request failed.');
 }
 
-function input(id) { return String(document.getElementById(id)?.value || '').trim() || null; }
-function integer(id) { const value = input(id); return value === null ? null : Number(value); }
-function fileDataUrl(file) { return new Promise((resolve, reject) => {
-  const reader = new FileReader();
-  reader.onload = () => resolve(String(reader.result));
-  reader.onerror = () => reject(new Error('Artwork could not be read.'));
-  reader.readAsDataURL(file);
-}); }
+function input(id) {
+  return String(document.getElementById(id)?.value || '').trim() || null;
+}
+
+function integer(id) {
+  const value = input(id);
+  return value === null ? null : Number(value);
+}
+
+function fileDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('Artwork could not be read.'));
+    reader.readAsDataURL(file);
+  });
+}
 
 elements.search?.addEventListener('submit', event => {
   event.preventDefault();
