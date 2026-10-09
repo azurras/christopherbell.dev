@@ -1,8 +1,8 @@
 package dev.christopherbell.configuration.mongo.runtime;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.libs.lease.ScheduledCollectorRun;
 import dev.christopherbell.libs.lease.ScheduledCollectorRunStore;
 import org.springframework.stereotype.Repository;
