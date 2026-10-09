@@ -1,9 +1,8 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
@@ -17,10 +16,14 @@ public class MongoRestaurantImportStateRepository
   public MongoRestaurantImportStateRepository(DomainMongoOperationsFactory factory) {
     super(factory, RestaurantImportState.class);
   }
-  @Override public RestaurantImportState save(RestaurantImportState state) {
+
+  @Override
+  public RestaurantImportState save(RestaurantImportState state) {
     return saveValue(state);
   }
-  @Override public Optional<RestaurantImportState> findById(String id) {
+
+  @Override
+  public Optional<RestaurantImportState> findById(String id) {
     return findValueById(id);
   }
 }
