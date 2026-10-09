@@ -2,23 +2,24 @@ package dev.christopherbell.sharedfolder.web;
 
 import static dev.christopherbell.libs.api.APIVersion.V20260717;
 
-import dev.christopherbell.sharedfolder.model.SharedDirectoryResponse;
-import dev.christopherbell.sharedfolder.model.SharedFolderPreviewResponse;
-import dev.christopherbell.sharedfolder.model.SharedFolderSearchRequest;
-import dev.christopherbell.sharedfolder.model.SharedFolderSearchResponse;
-import dev.christopherbell.sharedfolder.model.SharedFolderRadioDurationRequest;
-import dev.christopherbell.sharedfolder.model.SharedFolderRadioResponse;
-import dev.christopherbell.sharedfolder.radio.SharedFolderRadioService;
-import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
-import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService;
-import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService.SharedFolderDownload;
-import dev.christopherbell.sharedfolder.service.SharedFolderDownloadAuditResource;
-import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
-import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService.SharedFolderPreview;
+import dev.christopherbell.sharedfolder.model.SharedDirectoryResponse;
+import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
+import dev.christopherbell.sharedfolder.model.SharedFolderPreviewResponse;
+import dev.christopherbell.sharedfolder.model.SharedFolderRadioDurationRequest;
+import dev.christopherbell.sharedfolder.model.SharedFolderRadioResponse;
+import dev.christopherbell.sharedfolder.model.SharedFolderSearchRequest;
+import dev.christopherbell.sharedfolder.model.SharedFolderSearchResponse;
+import dev.christopherbell.sharedfolder.radio.SharedFolderRadioService;
+import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import dev.christopherbell.sharedfolder.service.SharedFolderBrowserService;
 import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
+import dev.christopherbell.sharedfolder.service.SharedFolderDownloadAuditResource;
+import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService.SharedFolderDownload;
+import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService;
+import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService.SharedFolderPreview;
+import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
 import dev.christopherbell.sharedfolder.service.SharedFolderRangeNotSatisfiableException;
 import java.util.List;
 import org.springframework.core.io.Resource;
@@ -180,13 +181,13 @@ public class SharedFolderReadController {
       HttpHeaders headers = new HttpHeaders();
       headers.set("X-Content-Type-Options", "nosniff");
       headers.setCacheControl("private, no-store");
-      if (preview.kind() == dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind.TEXT) {
+      if (preview.kind() == SharedFolderPreviewKind.TEXT) {
         return ResponseEntity.ok().headers(headers)
             .body(new SharedFolderPreviewResponse(preview.text(), preview.truncated()));
       }
       headers.setContentType(preview.mediaType());
       headers.set(HttpHeaders.CONTENT_DISPOSITION, preview.disposition());
-      if (preview.kind() == dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind.PDF) {
+      if (preview.kind() == SharedFolderPreviewKind.PDF) {
         headers.set("Content-Security-Policy", "sandbox; default-src 'none'");
       }
       return new ResponseEntity<>(preview.resource(), headers, HttpStatus.OK);

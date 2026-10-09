@@ -1,9 +1,8 @@
 package dev.christopherbell.sharedfolder.audit;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,10 +17,17 @@ import org.springframework.stereotype.Repository;
 public class MongoSharedFolderAuditRepository
     extends KindScopedRepositorySupport<SharedFolderAuditEvent>
     implements SharedFolderAuditRepository {
-  public MongoSharedFolderAuditRepository(DomainMongoOperationsFactory factory) { super(factory, SharedFolderAuditEvent.class); }
-  @Override public SharedFolderAuditEvent save(SharedFolderAuditEvent value) { return saveValue(value); }
+  public MongoSharedFolderAuditRepository(DomainMongoOperationsFactory factory) {
+    super(factory, SharedFolderAuditEvent.class);
+  }
 
-  @Override public int deleteExpired(Instant cutoff, int limit) {
+  @Override
+  public SharedFolderAuditEvent save(SharedFolderAuditEvent value) {
+    return saveValue(value);
+  }
+
+  @Override
+  public int deleteExpired(Instant cutoff, int limit) {
     List<String> ids = find(Query.query(Criteria.where("expiresAt").lte(cutoff)),
         PageRequest.of(0, limit, Sort.by("expiresAt", "id"))).stream()
         .map(SharedFolderAuditEvent::id).toList();
@@ -33,7 +39,8 @@ public class MongoSharedFolderAuditRepository
     return deleted;
   }
 
-  @Override public List<SharedFolderAuditEvent> search(
+  @Override
+  public List<SharedFolderAuditEvent> search(
       String accountId, String action, String outcome, String relativePath,
       Instant from, Instant to, int limit) {
     var filters = new ArrayList<Criteria>();

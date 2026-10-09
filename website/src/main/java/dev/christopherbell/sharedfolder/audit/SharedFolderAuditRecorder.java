@@ -3,20 +3,21 @@ package dev.christopherbell.sharedfolder.audit;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
-import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Creates safe best-effort audit commands and deduplicates logical ranged content access. */
@@ -26,6 +27,8 @@ public final class SharedFolderAuditRecorder {
   private static final Duration LOGICAL_ACCESS_WINDOW = Duration.ofMinutes(5);
   private static final int MAX_LOGICAL_ACCESS_ENTRIES = 10_000;
   private static final int MAX_REJECTED_EVENTS_PER_WINDOW = 1_000;
+  /** Recorded when an account id or client address is unavailable. */
+  private static final String UNKNOWN = "unknown";
   private static final String REQUEST_AUDIT_MARKERS =
       SharedFolderAuditRecorder.class.getName() + ".request-markers";
 
@@ -55,7 +58,7 @@ public final class SharedFolderAuditRecorder {
     try {
       accountId = permissions.getSelfId();
     } catch (RuntimeException exception) {
-      accountId = "unknown";
+      accountId = UNKNOWN;
     }
     record(accountId, action, resource, size, outcome, failureCategory);
   }
@@ -63,7 +66,7 @@ public final class SharedFolderAuditRecorder {
   public void recordFor(
       Account account, String action, String resource, Long size,
       String outcome, String failureCategory) {
-    record(account == null ? "unknown" : account.getId(), action, resource, size,
+    record(account == null ? UNKNOWN : account.getId(), action, resource, size,
         outcome, failureCategory);
   }
 
@@ -87,7 +90,7 @@ public final class SharedFolderAuditRecorder {
     try {
       accountId = permissions.getSelfId();
     } catch (RuntimeException exception) {
-      accountId = "unknown";
+      accountId = UNKNOWN;
     }
     String safeResource = safeResource(resource);
     String key = accountId + "\n" + action + "\n" + safeResource;
@@ -156,18 +159,18 @@ public final class SharedFolderAuditRecorder {
 
   /** Reports whether this request already emitted the same action/outcome audit fact. */
   public boolean currentRequestAlreadyRecorded(String action, String outcome) {
-    HttpServletRequest request = currentRequest();
-    if (request == null) return false;
-    Object markers = request.getAttribute(REQUEST_AUDIT_MARKERS);
-    return markers instanceof Set<?> set && set.contains(marker(action, outcome));
+    return currentRequest()
+        .map(request -> request.getAttribute(REQUEST_AUDIT_MARKERS))
+        .filter(markers -> markers instanceof Set<?> set && set.contains(marker(action, outcome)))
+        .isPresent();
   }
 
   private String failureCategory(RuntimeException failure) {
-    String category = "failure";
     if (failure instanceof AccessDeniedException) {
-      category = "access_denied";
-    } else if (failure instanceof ResponseStatusException status) {
-      category = switch (status.getStatusCode().value()) {
+      return "access_denied";
+    }
+    if (failure instanceof ResponseStatusException status) {
+      return switch (status.getStatusCode().value()) {
         case 400 -> "invalid_request";
         case 403 -> "access_denied";
         case 404 -> "not_found";
@@ -180,7 +183,7 @@ public final class SharedFolderAuditRecorder {
         default -> "failure";
       };
     }
-    return category;
+    return "failure";
   }
 
   private void record(
@@ -198,14 +201,14 @@ public final class SharedFolderAuditRecorder {
   }
 
   private void markCurrentRequest(String action, String outcome) {
-    HttpServletRequest request = currentRequest();
-    if (request == null) return;
-    Object existing = request.getAttribute(REQUEST_AUDIT_MARKERS);
-    @SuppressWarnings("unchecked")
-    Set<String> markers = existing instanceof Set<?> set
-        ? (Set<String>) set : new HashSet<>();
-    markers.add(marker(action, outcome));
-    request.setAttribute(REQUEST_AUDIT_MARKERS, markers);
+    currentRequest().ifPresent(request -> {
+      Object existing = request.getAttribute(REQUEST_AUDIT_MARKERS);
+      @SuppressWarnings("unchecked")
+      Set<String> markers = existing instanceof Set<?> set
+          ? (Set<String>) set : new HashSet<>();
+      markers.add(marker(action, outcome));
+      request.setAttribute(REQUEST_AUDIT_MARKERS, markers);
+    });
   }
 
   private String marker(String action, String outcome) {
@@ -213,7 +216,7 @@ public final class SharedFolderAuditRecorder {
   }
 
   private String safeAccountId(String value) {
-    return value == null || value.isBlank() ? "unknown" : value;
+    return value == null || value.isBlank() ? UNKNOWN : value;
   }
 
   private String safeResource(String value) {
@@ -230,19 +233,18 @@ public final class SharedFolderAuditRecorder {
   }
 
   private String currentClientIp() {
-    HttpServletRequest request = currentRequest();
-    if (request != null) {
-      String value = clientIps.resolveClientIp(request);
-      return value == null || value.isBlank() ? "unknown" : value;
-    }
-    return "unknown";
+    return currentRequest()
+        .map(clientIps::resolveClientIp)
+        .filter(value -> !value.isBlank())
+        .orElse(UNKNOWN);
   }
 
-  private HttpServletRequest currentRequest() {
+  /** The servlet request bound to this thread, or empty outside a request (scheduled work). */
+  private Optional<HttpServletRequest> currentRequest() {
     var attributes = RequestContextHolder.getRequestAttributes();
     if (attributes instanceof ServletRequestAttributes servlet) {
-      return servlet.getRequest();
+      return Optional.of(servlet.getRequest());
     }
-    return null;
+    return Optional.empty();
   }
 }
