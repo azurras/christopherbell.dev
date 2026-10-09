@@ -15,15 +15,15 @@ import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
-import org.springframework.util.unit.DataSize;
+import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
+import org.springframework.util.unit.DataSize;
 import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Servlet filter that rejects requests exceeding a configured maximum size.
- *
- * <p>Defaults to 1 MB when no explicit limit is provided.</p>
+ * Servlet filter that rejects requests exceeding a configured maximum size, with a separate
+ * limit for streamed shared-folder upload chunks.
  */
 public class RequestSizeLimitFilter extends OncePerRequestFilter {
 
@@ -31,28 +31,12 @@ public class RequestSizeLimitFilter extends OncePerRequestFilter {
   private static final String REQUEST_TOO_LARGE_DESCRIPTION =
       "The request body exceeds the allowed size.";
 
-  private static final java.util.regex.Pattern SHARED_UPLOAD_CHUNK = java.util.regex.Pattern.compile(
+  private static final Pattern SHARED_UPLOAD_CHUNK = Pattern.compile(
       "^/api/shared-folder/2026-07-17/uploads/[^/]+/chunks/[0-9]+$");
 
   private final long maxSizeBytes;
   private final long sharedUploadChunkMaxSizeBytes;
   private final ApiErrorResponseWriter errors;
-
-  /**
-   * Creates a filter with a default limit of 1 MB.
-   */
-  public RequestSizeLimitFilter() {
-    this(1_000_000L, 8L * 1024 * 1024, new ApiErrorResponseWriter(new ObjectMapper()));
-  }
-
-  /**
-   * Creates a filter with a custom size limit. Intended for testing or configuration.
-   *
-   * @param maxSizeBytes maximum allowed request size in bytes
-   */
-  public RequestSizeLimitFilter(long maxSizeBytes) {
-    this(maxSizeBytes, 8L * 1024 * 1024, new ApiErrorResponseWriter(new ObjectMapper()));
-  }
 
   /** Creates route-aware limits for ordinary requests and streamed shared-folder chunks. */
   public RequestSizeLimitFilter(long maxSizeBytes, long sharedUploadChunkMaxSizeBytes) {
@@ -105,7 +89,7 @@ public class RequestSizeLimitFilter extends OncePerRequestFilter {
           ? cacheUnknownLengthBody(request, limit)
           : new SizeLimitedRequestWrapper(request, limit);
       filterChain.doFilter(boundedRequest, response);
-    } catch (RequestPayloadTooLargeException e) {
+    } catch (RequestPayloadTooLargeException tooLarge) {
       reject(request, response);
     }
   }
@@ -163,12 +147,17 @@ public class RequestSizeLimitFilter extends OncePerRequestFilter {
 
     @Override
     public BufferedReader getReader() throws IOException {
-      var encoding = getCharacterEncoding();
-      Charset charset = encoding == null || encoding.isBlank()
-          ? StandardCharsets.UTF_8
-          : Charset.forName(encoding);
-      return new BufferedReader(new InputStreamReader(getInputStream(), charset));
+      return readerFor(this, getInputStream());
     }
+  }
+
+  /** Decodes a request body with its declared character encoding, or UTF-8 when none is set. */
+  private static BufferedReader readerFor(HttpServletRequest request, ServletInputStream body) {
+    var encoding = request.getCharacterEncoding();
+    Charset charset = encoding == null || encoding.isBlank()
+        ? StandardCharsets.UTF_8
+        : Charset.forName(encoding);
+    return new BufferedReader(new InputStreamReader(body, charset));
   }
 
   private static class CachedBodyRequestWrapper extends HttpServletRequestWrapper {
@@ -195,12 +184,8 @@ public class RequestSizeLimitFilter extends OncePerRequestFilter {
     }
 
     @Override
-    public BufferedReader getReader() throws IOException {
-      var encoding = getCharacterEncoding();
-      Charset charset = encoding == null || encoding.isBlank()
-          ? StandardCharsets.UTF_8
-          : Charset.forName(encoding);
-      return new BufferedReader(new InputStreamReader(getInputStream(), charset));
+    public BufferedReader getReader() {
+      return readerFor(this, getInputStream());
     }
   }
 
@@ -239,8 +224,8 @@ public class RequestSizeLimitFilter extends OncePerRequestFilter {
         } else {
           readListener.onDataAvailable();
         }
-      } catch (IOException e) {
-        readListener.onError(e);
+      } catch (IOException failure) {
+        readListener.onError(failure);
       }
     }
   }
