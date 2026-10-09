@@ -26,7 +26,8 @@ export async function loadDiscoverySection(state, fetchPage, append = false) {
   state.error = null;
   try {
     return applyDiscoveryPage(state, await fetchPage(state.nextCursor), append);
-  } catch (_) {
+  } catch {
+    // The panel shows a retry message; other panels keep their own state.
     state.loading = false;
     state.error = SECTION_ERROR;
     return state;
