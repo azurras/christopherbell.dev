@@ -5,10 +5,11 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.account.AccountRepository;
-import dev.christopherbell.configuration.security.SecurityConfig;
+import dev.christopherbell.account.api.LoginTokensFixture;
+import dev.christopherbell.configuration.ApplicationClockConfiguration;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
+import dev.christopherbell.configuration.security.SecurityConfig;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
 import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
@@ -18,11 +19,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(SurviveController.class)
-@Import({SurviveService.class, SecurityConfig.class,
+@Import({SurviveService.class, SecurityConfig.class, ApplicationClockConfiguration.class,
     LoginTokensFixture.TestConfigurationWithLoginTokens.class, BrowserAuthenticationCookies.class,
     InteractiveBrowserRequest.class, ControllerExceptionHandler.class})
 class SurviveControllerTest {

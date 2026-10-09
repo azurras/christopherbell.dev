@@ -1,6 +1,7 @@
 package dev.christopherbell.configuration.security;
 
 import java.net.URI;
+import java.util.Locale;
 import java.util.Set;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -31,6 +32,6 @@ public record BrowserSecurityProperties(
   }
 
   private static String normalize(String value) {
-    return value == null ? "" : value.toLowerCase(java.util.Locale.ROOT);
+    return value == null ? "" : value.toLowerCase(Locale.ROOT);
   }
 }

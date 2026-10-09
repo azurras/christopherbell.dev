@@ -8,8 +8,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.api.LoginTokensFixture;
+import dev.christopherbell.configuration.ApplicationClockConfiguration;
 import dev.christopherbell.configuration.security.browser.BrowserSessionActivityStore;
 import dev.christopherbell.configuration.security.browser.BrowserSessionAuthenticationStore;
 import dev.christopherbell.configuration.security.browser.BrowserSessionRepository;
@@ -45,6 +46,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 @WebMvcTest(AsyncDispatcherSecurityIntegrationTest.ProtectedController.class)
 @Import({
     SecurityConfig.class,
+    ApplicationClockConfiguration.class,
     LoginTokensFixture.TestConfigurationWithLoginTokens.class,
     BrowserAuthenticationCookies.class,
     InteractiveBrowserRequest.class,

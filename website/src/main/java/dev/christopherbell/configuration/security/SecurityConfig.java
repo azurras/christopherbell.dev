@@ -1,27 +1,29 @@
 package dev.christopherbell.configuration.security;
 
+import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.api.LoginTokens;
 import dev.christopherbell.configuration.ClientIpProperties;
 import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.configuration.RateLimitProperties;
 import dev.christopherbell.configuration.RequestSizeProperties;
 import dev.christopherbell.configuration.SharedFolderProperties;
-import dev.christopherbell.configuration.security.browser.BrowserSessionRepository;
-import dev.christopherbell.configuration.security.browser.BrowserSessionService;
-import dev.christopherbell.account.api.LoginTokens;
-import dev.christopherbell.configuration.security.browser.BrowserSessionActivityStore;
-import dev.christopherbell.configuration.security.browser.BrowserSessionAuthenticationStore;
-import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
-import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.configuration.filter.ApiErrorResponseWriter;
 import dev.christopherbell.configuration.filter.RateLimitFilter;
 import dev.christopherbell.configuration.filter.RequestSizeLimitFilter;
+import dev.christopherbell.configuration.security.browser.BrowserSessionActivityStore;
+import dev.christopherbell.configuration.security.browser.BrowserSessionAuthenticationStore;
+import dev.christopherbell.configuration.security.browser.BrowserSessionRepository;
+import dev.christopherbell.configuration.security.browser.BrowserSessionService;
+import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
+import dev.christopherbell.federation.discovery.FederationNoStoreFilter;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.music.web.MusicNoStoreFilter;
-import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
-import dev.christopherbell.federation.discovery.FederationNoStoreFilter;
+import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import jakarta.servlet.DispatcherType;
+import jakarta.servlet.http.HttpServletRequest;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -29,6 +31,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -37,9 +40,9 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
+import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.security.web.header.writers.StaticHeadersWriter;
-import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import tools.jackson.databind.ObjectMapper;
@@ -72,6 +75,7 @@ public class SecurityConfig {
       "media-src 'self' blob:",
       "worker-src 'self' blob:",
       "form-action 'self'");
+  private static final long HSTS_MAX_AGE_SECONDS = 31_536_000;
   private static final String PERMISSIONS_POLICY =
       "camera=(), geolocation=(), microphone=(), payment=(), usb=()";
 
@@ -174,6 +178,7 @@ public class SecurityConfig {
    * Builds the application {@link SecurityFilterChain}.
    *
    * @return the configured security filter chain
+   * @throws Exception as declared by Spring Security's {@code HttpSecurity.build()}
    */
   @Bean
   public SecurityFilterChain securityFilterChain(HttpSecurity http,
@@ -197,7 +202,7 @@ public class SecurityConfig {
           headers.httpStrictTransportSecurity(hsts -> hsts
               .requestMatcher(request -> browserSecurityProperties.hstsEnabled())
               .includeSubDomains(true)
-              .maxAgeInSeconds(31_536_000));
+              .maxAgeInSeconds(HSTS_MAX_AGE_SECONDS));
           headers.addHeaderWriter(new StaticHeadersWriter("Permissions-Policy", PERMISSIONS_POLICY));
           headers.referrerPolicy(referrer -> referrer
               .policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN));
@@ -217,7 +222,7 @@ public class SecurityConfig {
         .addFilterBefore(sharedFolderNoStoreFilter, CsrfFilter.class)
         .addFilterBefore(musicNoStoreFilter, CsrfFilter.class)
         .addFilterBefore(federationNoStoreFilter, CsrfFilter.class)
-        
+
         // Build the SecurityFilterChain
         .build();
   }
@@ -229,13 +234,14 @@ public class SecurityConfig {
   public RateLimitFilter rateLimitFilter(
       ClientIpResolver clientIpResolver,
       RateLimitProperties rateLimitProperties,
-      ApiErrorResponseWriter apiErrorResponseWriter
+      ApiErrorResponseWriter apiErrorResponseWriter,
+      Clock clock
   ) {
     return new RateLimitFilter(
         clientIpResolver,
         rateLimitProperties,
         apiErrorResponseWriter,
-        Clock.systemUTC());
+        clock);
   }
 
   /**
@@ -271,20 +277,22 @@ public class SecurityConfig {
       BrowserSessionActivityStore activity,
       BrowserSessionAuthenticationStore authentications,
       AccountRepository accounts,
-      LoginTokens loginTokens) {
+      LoginTokens loginTokens,
+      Clock clock) {
     return new BrowserSessionService(
-        browserSessions, activity, authentications, accounts, loginTokens, Clock.systemUTC());
+        browserSessions, activity, authentications, accounts, loginTokens, clock);
   }
 
-  public static boolean hasExplicitBearerToken(jakarta.servlet.http.HttpServletRequest request) {
-    var authorization = request.getHeader(org.springframework.http.HttpHeaders.AUTHORIZATION);
+  /** Whether the request carries a non-blank bearer token, which exempts it from CSRF. */
+  public static boolean hasExplicitBearerToken(HttpServletRequest request) {
+    var authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
     return authorization != null
         && authorization.startsWith("Bearer ")
         && !authorization.substring("Bearer ".length()).isBlank();
   }
 
   /** Keeps the established stateless login contract while browser cookie mode stays CSRF protected. */
-  public static boolean isLegacyApiLogin(jakarta.servlet.http.HttpServletRequest request) {
+  public static boolean isLegacyApiLogin(HttpServletRequest request) {
     var expectedPath = "/api/accounts" + APIVersion.V20241215 + "/login";
     var browserMode = request.getHeader("X-CBELL-Browser-Session");
     return "POST".equalsIgnoreCase(request.getMethod())
@@ -337,6 +345,8 @@ public class SecurityConfig {
 
   /**
    * Exposes the Spring {@link AuthenticationManager}.
+   *
+   * @throws Exception as declared by Spring Security's {@code getAuthenticationManager()}
    */
   @Bean
   public AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
@@ -348,30 +358,37 @@ public class SecurityConfig {
    */
   public static List<RequestMatcher> publicMatchersList() {
     List<RequestMatcher> matchers = Arrays.stream(PUBLIC_URLS)
-        .map(Sec::toMatcher)
-        .collect(Collectors.toList());
+        .map(SecurityConfig::toMatcher)
+        .collect(Collectors.toCollection(ArrayList::new));
     matchers.add(new StaticAssetRequestMatcher());
-    // Add a precise matcher for single post GET: /api/posts/{version}/{postId}
-    // Excludes reserved paths like "/me" and "/account/**".
-    matchers.add(request -> {
-      if (!"GET".equalsIgnoreCase(request.getMethod())) return false;
-      String prefix = "/api/posts" + APIVersion.V20250914 + "/";
-      String path = request.getRequestURI();
-      if (!path.startsWith(prefix)) return false;
-      String tail = path.substring(prefix.length());
-      if (tail.isEmpty()) return false;
-      if (tail.contains("/")) return false; // only single segment
-      if ("me".equals(tail)) return false;
-      if (tail.startsWith("account")) return false;
-      return true; // treat as public single-post GET
-    });
+    matchers.add(SecurityConfig::isPublicSinglePostGet);
     // Let unknown browser-page GETs reach MVC's content-free 404 renderer without
     // weakening protected API, management, documentation, or federation namespaces.
     matchers.add(SecurityConfig::isPublicHtmlFallback);
     return matchers;
   }
 
-  static boolean isPublicHtmlFallback(jakarta.servlet.http.HttpServletRequest request) {
+  /**
+   * A GET of one post, {@code /api/posts/{version}/{postId}}: exactly one path segment after the
+   * prefix, excluding the reserved {@code me} and {@code account...} paths.
+   */
+  static boolean isPublicSinglePostGet(HttpServletRequest request) {
+    if (!"GET".equalsIgnoreCase(request.getMethod())) {
+      return false;
+    }
+    var prefix = "/api/posts" + APIVersion.V20250914 + "/";
+    var path = request.getRequestURI();
+    if (!path.startsWith(prefix)) {
+      return false;
+    }
+    var tail = path.substring(prefix.length());
+    return !tail.isEmpty()
+        && !tail.contains("/")
+        && !"me".equals(tail)
+        && !tail.startsWith("account");
+  }
+
+  static boolean isPublicHtmlFallback(HttpServletRequest request) {
     if (!"GET".equalsIgnoreCase(request.getMethod())) {
       return false;
     }
@@ -408,16 +425,12 @@ public class SecurityConfig {
     return publicMatchersList().toArray(new RequestMatcher[0]);
   }
 
-  private static class Sec {
-    static RequestMatcher toMatcher(String spec) {
-      // Allow "METHOD:/path" or just "/path"
-      if (spec.contains(":")) {
-        String[] parts = spec.split(":", 2);
-        String method = parts[0];
-        String pattern = parts[1];
-        return PathPatternRequestMatcher.pathPattern(HttpMethod.valueOf(method), pattern);
-      }
-      return PathPatternRequestMatcher.pathPattern(spec);
+  /** Turns a {@code "METHOD:/path"} or {@code "/path"} specification into a request matcher. */
+  private static RequestMatcher toMatcher(String spec) {
+    if (spec.contains(":")) {
+      var parts = spec.split(":", 2);
+      return PathPatternRequestMatcher.pathPattern(HttpMethod.valueOf(parts[0]), parts[1]);
     }
+    return PathPatternRequestMatcher.pathPattern(spec);
   }
 }
