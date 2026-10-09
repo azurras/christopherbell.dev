@@ -15,13 +15,14 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.spec.InvalidKeySpecException;
+import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Base64;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
 import org.springframework.dao.IncorrectResultSizeDataAccessException;
+import org.springframework.stereotype.Service;
 
 /**
  * Owns password reset token lifecycle and delegates delivery to the mail notifier.
@@ -36,7 +37,7 @@ public class PasswordResetService {
   private final AccountRepository accountRepository;
   private final PasswordResetNotificationService passwordResetNotificationService;
   private final AccountSessionRevoker sessionRevoker;
-
+  private final Clock clock;
   /**
    * Requests a password reset without revealing whether the email exists.
    */
@@ -45,23 +46,22 @@ public class PasswordResetService {
       return;
     }
 
-    Account account;
+    final Optional<Account> account;
     try {
       var sanitizedEmail = EmailSanitizer.sanitize(request.email());
-      account = accountRepository.findByEmailIgnoreCase(sanitizedEmail).orElse(null);
+      account = accountRepository.findByEmailIgnoreCase(sanitizedEmail);
     } catch (IllegalArgumentException | IncorrectResultSizeDataAccessException failure) {
       return;
     }
-    if (account == null) {
-      return;
-    }
+    account.ifPresent(found -> sendResetLink(found, baseUrl));
+  }
 
+  private void sendResetLink(Account account, String baseUrl) {
     log.info("Password reset requested for account id: {}", account.getId());
     var token = generatePasswordResetToken();
     account.setPasswordResetTokenHash(hashPasswordResetToken(token));
-    account.setPasswordResetTokenExpiresOn(Instant.now().plus(PASSWORD_RESET_TTL));
+    account.setPasswordResetTokenExpiresOn(clock.instant().plus(PASSWORD_RESET_TTL));
     accountRepository.save(account);
-
     var resetUrl = buildPasswordResetUrl(baseUrl, token);
     passwordResetNotificationService.sendPasswordReset(account, resetUrl);
   }
@@ -84,7 +84,7 @@ public class PasswordResetService {
         .orElseThrow(() -> new InvalidTokenException("Password reset token is invalid or expired."));
 
     if (account.getPasswordResetTokenExpiresOn() == null
-        || account.getPasswordResetTokenExpiresOn().isBefore(Instant.now())) {
+        || account.getPasswordResetTokenExpiresOn().isBefore(clock.instant())) {
       clearPasswordResetToken(account);
       accountRepository.save(account);
       throw new InvalidTokenException("Password reset token is invalid or expired.");
@@ -94,12 +94,13 @@ public class PasswordResetService {
       account.setPasswordSalt(null);
       account.setPasswordHash(PasswordUtil.hashPassword(request.password()));
       clearPasswordResetToken(account);
-      account.setLastUpdatedOn(Instant.now());
+      account.setLastUpdatedOn(clock.instant());
       accountRepository.save(account);
       sessionRevoker.revokeAll(account.getId());
       log.info("Password reset completed for account id: {}", account.getId());
-    } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
-      throw new InvalidTokenException("Error resetting password: " + e.getMessage(), e);
+    } catch (NoSuchAlgorithmException | InvalidKeySpecException hashingUnavailable) {
+      throw new InvalidTokenException(
+          "Error resetting password: " + hashingUnavailable.getMessage(), hashingUnavailable);
     }
   }
 
@@ -114,8 +115,8 @@ public class PasswordResetService {
       var digest = MessageDigest.getInstance("SHA-256");
       var hash = digest.digest(token.getBytes(StandardCharsets.UTF_8));
       return Base64.getEncoder().encodeToString(hash);
-    } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 is not available.", e);
+    } catch (NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 is not available.", impossible);
     }
   }
 

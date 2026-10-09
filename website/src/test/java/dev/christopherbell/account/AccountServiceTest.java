@@ -1,22 +1,27 @@
 package dev.christopherbell.account;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.account.api.LoginTokens;
+import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.account.auth.AccountAuthenticationService;
 import dev.christopherbell.account.auth.AccountLoginStore;
 import dev.christopherbell.account.auth.AccountSessionRevoker;
@@ -25,7 +30,6 @@ import dev.christopherbell.account.deletion.AccountDeletionService;
 import dev.christopherbell.account.deletion.AccountDeletionStatus;
 import dev.christopherbell.account.follow.AccountFollowService;
 import dev.christopherbell.account.follow.AccountFollowStore;
-import dev.christopherbell.account.moderation.AccountModerationService;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
@@ -33,38 +37,39 @@ import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
-import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
+import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
+import dev.christopherbell.account.moderation.AccountModerationService;
 import dev.christopherbell.account.passwordreset.PasswordResetNotificationService;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
-import dev.christopherbell.account.api.LoginTokens;
-import dev.christopherbell.account.api.LoginTokensFixture;
-import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.admin.activity.AdminActivityService;
+import dev.christopherbell.federation.consent.FederationConsentService;
+import dev.christopherbell.libs.api.exception.InternalServiceException;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
-import dev.christopherbell.libs.api.exception.InternalServiceException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.PasswordUtil;
+import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.abuse.NewAccountVoidMutationLimiter;
 import dev.christopherbell.post.abuse.VoidMutationKind;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
-import dev.christopherbell.federation.consent.FederationConsentService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Instant;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -73,11 +78,12 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.Sort;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.IncorrectResultSizeDataAccessException;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -104,9 +110,9 @@ public class AccountServiceTest {
   @BeforeEach
   void setUp() {
     var authenticationService = new AccountAuthenticationService(
-        accountRepository, accountLoginStore, sessionRevoker, LOGIN_TOKENS);
+        accountRepository, accountLoginStore, sessionRevoker, LOGIN_TOKENS, Clock.systemUTC());
     var passwordResetService = new PasswordResetService(
-        accountRepository, passwordResetNotificationService, sessionRevoker);
+        accountRepository, passwordResetNotificationService, sessionRevoker, Clock.systemUTC());
     var profileService = new AccountProfileService(accountRepository, accountMapper, postRepository, follows);
     var followService = new AccountFollowService(
         profileService,
@@ -127,10 +133,11 @@ public class AccountServiceTest {
         sharedFolderAudit,
         sharedFolderAccess,
         federationConsent,
-        sessionRevoker);
-    org.mockito.Mockito.lenient().when(sharedFolderAccess.requireAdmin()).thenReturn(
+        sessionRevoker,
+        Clock.systemUTC());
+    lenient().when(sharedFolderAccess.requireAdmin()).thenReturn(
         Account.builder().id("admin-1").role(Role.ADMIN).build());
-    org.mockito.Mockito.lenient().when(permissionService.getSelfId()).thenReturn("admin-1");
+    lenient().when(permissionService.getSelfId()).thenReturn("admin-1");
   }
 
   @Test
@@ -200,7 +207,7 @@ public class AccountServiceTest {
     accountService.createAccount(request);
 
     var account = ArgumentCaptor.forClass(Account.class);
-    var order = org.mockito.Mockito.inOrder(federationConsent, accountRepository);
+    var order = inOrder(federationConsent, accountRepository);
     order.verify(federationConsent).prepareNewAccount(account.capture(), eq(true));
     order.verify(accountRepository).save(account.getValue());
   }
@@ -235,7 +242,7 @@ public class AccountServiceTest {
         .password("pass")
         .username("user")
         .build();
-    var failure = new java.security.NoSuchAlgorithmException("provider-secret");
+    var failure = new NoSuchAlgorithmException("provider-secret");
 
     try (MockedStatic<PasswordUtil> passwords = mockStatic(PasswordUtil.class)) {
       passwords.when(() -> PasswordUtil.hashPassword("pass")).thenThrow(failure);
@@ -405,7 +412,7 @@ public class AccountServiceTest {
         .build();
     var token = LOGIN_TOKENS.issueFor(self);
     SecurityContextHolder.getContext()
-        .setAuthentication(new UsernamePasswordAuthenticationToken("self", token, java.util.List.of()));
+        .setAuthentication(new UsernamePasswordAuthenticationToken("self", token, List.of()));
 
     try {
       when(accountRepository.findById(eq("self"))).thenReturn(Optional.of(self));
@@ -420,7 +427,7 @@ public class AccountServiceTest {
 
       assertEquals("target", profile.username());
       assertEquals(1L, profile.followerCount());
-      org.junit.jupiter.api.Assertions.assertTrue(profile.followedByMe());
+      assertTrue(profile.followedByMe());
       verify(accountRepository).findById(eq("self"));
       verify(accountRepository).findByUsernameAndStatus(eq("target"), eq(AccountStatus.ACTIVE));
       verify(mutationLimiter).require(eq(self), eq(VoidMutationKind.FOLLOW));
@@ -454,8 +461,8 @@ public class AccountServiceTest {
     assertEquals(3, profile.postCount());
     assertEquals(5, profile.replyCount());
     assertEquals(2, profile.followerCount());
-    org.junit.jupiter.api.Assertions.assertFalse(profile.self());
-    org.junit.jupiter.api.Assertions.assertFalse(profile.followedByMe());
+    assertFalse(profile.self());
+    assertFalse(profile.followedByMe());
   }
 
   @Test
@@ -475,8 +482,8 @@ public class AccountServiceTest {
 
       var profile = accountService.getPublicProfile("target");
 
-      org.junit.jupiter.api.Assertions.assertFalse(profile.self());
-      org.junit.jupiter.api.Assertions.assertFalse(profile.followedByMe());
+      assertFalse(profile.self());
+      assertFalse(profile.followedByMe());
       verify(accountRepository).findById(eq("missing-viewer"));
     } finally {
       SecurityContextHolder.clearContext();
@@ -546,7 +553,7 @@ public class AccountServiceTest {
         .build();
     var token = LOGIN_TOKENS.issueFor(self);
     SecurityContextHolder.getContext()
-        .setAuthentication(new UsernamePasswordAuthenticationToken("self", token, java.util.List.of()));
+        .setAuthentication(new UsernamePasswordAuthenticationToken("self", token, List.of()));
 
     try {
       when(accountRepository.findById(eq("self"))).thenReturn(Optional.of(self));
@@ -597,7 +604,7 @@ public class AccountServiceTest {
     verify(accountRepository).findByEmailIgnoreCase(eq("old@example.com"));
     verify(accountRepository).save(eq(account));
     verify(passwordResetNotificationService).sendPasswordReset(eq(account), resetUrl.capture());
-    org.junit.jupiter.api.Assertions.assertTrue(
+    assertTrue(
         resetUrl.getValue().startsWith("https://example.com/reset-password?token="));
   }
 
@@ -646,7 +653,7 @@ public class AccountServiceTest {
 
     assertNull(account.getPasswordResetTokenHash());
     assertNull(account.getPasswordResetTokenExpiresOn());
-    org.junit.jupiter.api.Assertions.assertTrue(
+    assertTrue(
         PasswordUtil.verifyPassword("new-password", account.getPasswordSalt(), account.getPasswordHash()));
     verify(accountRepository).findByPasswordResetTokenHash(eq(tokenHash));
     var order = inOrder(accountRepository, sessionRevoker);
@@ -798,7 +805,7 @@ public class AccountServiceTest {
     verify(accountRepository).findById("admin-1");
     verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
     verify(accountRepository).findByUsernameIgnoreCase(eq("Chris.Bell"));
-    verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(existing));
+    verify(accountRepository, times(2)).save(eq(existing));
     verify(accountMapper).toAccount(eq(existing));
     verifyNoMoreInteractions(accountRepository);
   }
@@ -835,7 +842,7 @@ public class AccountServiceTest {
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
     verify(accountRepository).findById("admin-1");
-    verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(existing));
+    verify(accountRepository, times(2)).save(eq(existing));
     verify(accountMapper).toAccount(eq(existing));
     verifyNoMoreInteractions(accountRepository);
   }
@@ -867,7 +874,7 @@ public class AccountServiceTest {
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
     verify(accountRepository).findById("admin-1");
-    verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(existing));
+    verify(accountRepository, times(2)).save(eq(existing));
     verify(accountMapper).toAccount(eq(existing));
     verifyNoMoreInteractions(accountRepository);
   }
@@ -1004,20 +1011,20 @@ public class AccountServiceTest {
     accountService.updateSharedFolderPermissions(
         account.getId(), new SharedFolderPermissionUpdate(true, true));
     assertEquals(
-        java.util.Set.of(AccountPermission.SHARED_FOLDER_READ, AccountPermission.SHARED_FOLDER_WRITE),
+        Set.of(AccountPermission.SHARED_FOLDER_READ, AccountPermission.SHARED_FOLDER_WRITE),
         account.getPermissions());
 
     accountService.updateSharedFolderPermissions(
         account.getId(), new SharedFolderPermissionUpdate(false, false));
-    assertEquals(java.util.Set.of(), account.getPermissions());
+    assertEquals(Set.of(), account.getPermissions());
 
     assertThrows(
         InvalidRequestException.class,
         () -> accountService.updateSharedFolderPermissions(
             account.getId(), new SharedFolderPermissionUpdate(false, true)));
-    verify(sharedFolderAudit, org.mockito.Mockito.times(2)).recordCurrent(
+    verify(sharedFolderAudit, times(2)).recordCurrent(
         "PERMISSION_CHANGE", account.getId(), null, "accepted", null);
-    verify(sessionRevoker, org.mockito.Mockito.times(2)).revokeAll(account.getId());
+    verify(sessionRevoker, times(2)).revokeAll(account.getId());
     verify(sharedFolderAudit).recordRejectedOnce(
         "PERMISSION_CHANGE", account.getId(), "invalid_request");
   }
@@ -1028,7 +1035,7 @@ public class AccountServiceTest {
     var account = Account.builder()
         .id("account-permission-families")
         .role(Role.USER)
-        .permissions(java.util.Set.of(
+        .permissions(Set.of(
             AccountPermission.MUSIC_READ,
             AccountPermission.MUSIC_WRITE))
         .build();
@@ -1041,7 +1048,7 @@ public class AccountServiceTest {
         account.getId(), new SharedFolderPermissionUpdate(true, false));
 
     assertEquals(
-        java.util.Set.of(
+        Set.of(
             AccountPermission.MUSIC_READ,
             AccountPermission.MUSIC_WRITE,
             AccountPermission.SHARED_FOLDER_READ),
@@ -1057,7 +1064,7 @@ public class AccountServiceTest {
     var account = Account.builder()
         .id("account-music-permissions")
         .role(Role.USER)
-        .permissions(java.util.Set.of(
+        .permissions(Set.of(
             AccountPermission.SHARED_FOLDER_READ,
             AccountPermission.SHARED_FOLDER_WRITE))
         .build();
@@ -1070,7 +1077,7 @@ public class AccountServiceTest {
         account.getId(), new MusicPermissionUpdate(true, true));
 
     assertEquals(
-        java.util.Set.of(
+        Set.of(
             AccountPermission.SHARED_FOLDER_READ,
             AccountPermission.SHARED_FOLDER_WRITE,
             AccountPermission.MUSIC_READ,
@@ -1095,7 +1102,7 @@ public class AccountServiceTest {
     var account = Account.builder()
         .id("account-unchanged-permissions")
         .role(Role.USER)
-        .permissions(java.util.Set.of(AccountPermission.SHARED_FOLDER_READ))
+        .permissions(Set.of(AccountPermission.SHARED_FOLDER_READ))
         .build();
     when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
     when(accountRepository.save(account)).thenReturn(account);
@@ -1111,13 +1118,13 @@ public class AccountServiceTest {
   @DisplayName("Shared folder permissions: revocation failure is surfaced after persistence")
   void sharedFolderPermissionUpdate_whenRevocationFails_surfacesFailure() throws Exception {
     var account = Account.builder().id("account-revocation-failure").role(Role.USER).build();
-    var failure = new org.springframework.dao.DataAccessResourceFailureException("mongo");
+    var failure = new DataAccessResourceFailureException("mongo");
     when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
     when(accountRepository.save(account)).thenReturn(account);
     doThrow(failure).when(sessionRevoker).revokeAll(account.getId());
 
     assertSame(failure, assertThrows(
-        org.springframework.dao.DataAccessResourceFailureException.class,
+        DataAccessResourceFailureException.class,
         () -> accountService.updateSharedFolderPermissions(
             account.getId(), new SharedFolderPermissionUpdate(true, false))));
 
@@ -1130,17 +1137,17 @@ public class AccountServiceTest {
   @Test
   @DisplayName("Shared folder permissions: fresh persisted admin state is required")
   void sharedFolderPermissionsRequireFreshAdminState() {
-    org.mockito.Mockito.doThrow(new org.springframework.security.access.AccessDeniedException(
+    doThrow(new AccessDeniedException(
         "demoted")).when(sharedFolderAccess).requireAdmin();
 
     assertThrows(
-        org.springframework.security.access.AccessDeniedException.class,
+        AccessDeniedException.class,
         () -> accountService.updateSharedFolderPermissions(
             "account-permissions", new SharedFolderPermissionUpdate(true, false)));
 
     verify(sharedFolderAudit).recordFailureOnce(
         eq("PERMISSION_CHANGE"), eq("account-permissions"), any(
-            org.springframework.security.access.AccessDeniedException.class));
+            AccessDeniedException.class));
     verifyNoMoreInteractions(accountRepository);
   }
 
@@ -1156,10 +1163,10 @@ public class AccountServiceTest {
 
     var account = Account.builder().id("save-failure").role(Role.USER).build();
     when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
-    var persistenceFailure = new org.springframework.dao.DataAccessResourceFailureException("mongo");
+    var persistenceFailure = new DataAccessResourceFailureException("mongo");
     when(accountRepository.save(account)).thenThrow(persistenceFailure);
 
-    assertThrows(org.springframework.dao.DataAccessResourceFailureException.class,
+    assertThrows(DataAccessResourceFailureException.class,
         () -> accountService.updateSharedFolderPermissions(
             account.getId(), new SharedFolderPermissionUpdate(true, false)));
     verify(sharedFolderAudit).recordFailureOnce(

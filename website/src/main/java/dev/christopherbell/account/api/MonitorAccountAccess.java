@@ -1,8 +1,9 @@
 package dev.christopherbell.account.api;
 
 import dev.christopherbell.account.AccountRepository;
-import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.deletion.AccountDeletionService;
+import dev.christopherbell.account.model.AccountStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
@@ -20,7 +21,7 @@ public class MonitorAccountAccess {
     var authentication = SecurityContextHolder.getContext().getAuthentication();
     if (authentication == null || !authentication.isAuthenticated()
         || !isActive(authentication.getName())) {
-      throw new org.springframework.security.access.AccessDeniedException("Active account required.");
+      throw new AccessDeniedException("Active account required.");
     }
     return authentication.getName();
   }

@@ -1,43 +1,49 @@
 package dev.christopherbell.account;
 
-import static org.mockito.ArgumentMatchers.eq;
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.hamcrest.Matchers.allOf;
-import static org.hamcrest.Matchers.containsString;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import dev.christopherbell.account.model.dto.AccountUpdateRequest;
-import dev.christopherbell.account.model.dto.AccountCreateRequest;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import dev.christopherbell.account.deletion.AccountDeletionResult;
 import dev.christopherbell.account.deletion.AccountDeletionStatus;
-import dev.christopherbell.account.model.dto.AccountDetail;
-import dev.christopherbell.account.model.dto.AccountProfile;
-import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
+import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
+import dev.christopherbell.account.model.dto.AccountCreateRequest;
+import dev.christopherbell.account.model.dto.AccountDetail;
+import dev.christopherbell.account.model.dto.AccountProfile;
+import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
+import dev.christopherbell.account.model.dto.FederationConsentStatus;
+import dev.christopherbell.account.model.dto.FederationConsentUpdate;
 import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
-import dev.christopherbell.account.model.dto.FederationConsentUpdate;
-import dev.christopherbell.account.model.dto.FederationConsentStatus;
-import dev.christopherbell.configuration.security.ControllerSliceSecurityTestConfig;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
+import dev.christopherbell.configuration.security.ControllerSliceSecurityTestConfig;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
@@ -48,27 +54,25 @@ import dev.christopherbell.libs.test.TestUtil;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
-import java.util.List;
 import java.net.URI;
-import org.junit.jupiter.api.DisplayName;
+import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.http.MediaType;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver;
-import org.slf4j.LoggerFactory;
 
 @WebMvcTest(AccountController.class)
 @Import({
@@ -131,7 +135,7 @@ public class AccountControllerTest {
     var request = new SharedFolderPermissionUpdate(true, true);
     var detail = AccountDetail.builder()
         .id("acc-42")
-        .permissions(java.util.Set.of(
+        .permissions(Set.of(
             AccountPermission.SHARED_FOLDER_READ,
             AccountPermission.SHARED_FOLDER_WRITE))
         .build();
@@ -145,7 +149,7 @@ public class AccountControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.permissions").value(
-            org.hamcrest.Matchers.containsInAnyOrder(
+            containsInAnyOrder(
                 "SHARED_FOLDER_READ",
                 "SHARED_FOLDER_WRITE")));
 
@@ -159,7 +163,7 @@ public class AccountControllerTest {
     var request = new MusicPermissionUpdate(true, true);
     var detail = AccountDetail.builder()
         .id("acc-42")
-        .permissions(java.util.Set.of(
+        .permissions(Set.of(
             AccountPermission.MUSIC_READ,
             AccountPermission.MUSIC_WRITE))
         .build();
@@ -173,7 +177,7 @@ public class AccountControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.permissions").value(
-            org.hamcrest.Matchers.containsInAnyOrder("MUSIC_READ", "MUSIC_WRITE")));
+            containsInAnyOrder("MUSIC_READ", "MUSIC_WRITE")));
 
     verify(accountService).updateMusicPermissions(eq("acc-42"), eq(request));
   }
@@ -184,7 +188,7 @@ public class AccountControllerTest {
   public void updateSharedFolderPermissions_whenNonAdmin_ReturnsForbidden() throws Exception {
     when(accountService.updateSharedFolderPermissions(
         eq("acc-42"), eq(new SharedFolderPermissionUpdate(true, true))))
-        .thenThrow(new org.springframework.security.access.AccessDeniedException("fresh denial"));
+        .thenThrow(new AccessDeniedException("fresh denial"));
 
     mockMvc
         .perform(patch("/api/accounts/2026-07-17/{accountId}/shared-folder-permissions", "acc-42")
@@ -236,7 +240,7 @@ public class AccountControllerTest {
   public void updateSharedFolderPermissions_whenRevoked_ReturnsEmptyPermissions() throws Exception {
     var request = new SharedFolderPermissionUpdate(false, false);
     when(accountService.updateSharedFolderPermissions(eq("acc-42"), eq(request)))
-        .thenReturn(AccountDetail.builder().id("acc-42").permissions(java.util.Set.of()).build());
+        .thenReturn(AccountDetail.builder().id("acc-42").permissions(Set.of()).build());
 
     mockMvc
         .perform(patch("/api/accounts/2026-07-17/{accountId}/shared-folder-permissions", "acc-42")
@@ -524,7 +528,7 @@ public class AccountControllerTest {
 
     mockMvc
         .perform(
-            get("/api/accounts" + dev.christopherbell.libs.api.APIVersion.V20241215 + "/email/{email}", "user@example.com")
+            get("/api/accounts" + APIVersion.V20241215 + "/email/{email}", "user@example.com")
                 .accept(MediaType.APPLICATION_JSON))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
@@ -713,7 +717,7 @@ public class AccountControllerTest {
   @DisplayName("Login returns HttpOnly browser cookie without exposing the JWT")
   @WithMockUser
   public void testLoginAccount_whenValid_Returns200WithToken() throws Exception {
-    when(accountService.loginAccount(eq(new dev.christopherbell.account.model.AccountLoginRequest("user@example.com", "pass"))))
+    when(accountService.loginAccount(eq(new AccountLoginRequest("user@example.com", "pass"))))
         .thenReturn("jwt-token");
     when(browserSessions.create("jwt-token")).thenReturn("opaque-session-token");
 
@@ -739,7 +743,7 @@ public class AccountControllerTest {
   @DisplayName("API login preserves JWT response without setting browser cookies")
   @WithMockUser
   void loginAccount_whenBrowserModeAbsent_returnsBearerTokenPayload() throws Exception {
-    when(accountService.loginAccount(eq(new dev.christopherbell.account.model.AccountLoginRequest(
+    when(accountService.loginAccount(eq(new AccountLoginRequest(
         "api@example.com", "password")))).thenReturn("api-jwt-token");
 
     mockMvc.perform(post("/api/accounts" + APIVersion.V20241215 + "/login")
@@ -754,7 +758,7 @@ public class AccountControllerTest {
   @Test
   @DisplayName("Login rejects an unacceptable Accept header with a safe JSON error envelope")
   void loginAccount_whenAcceptIsXml_returnsSafeJsonErrorWithoutResolverThrowable() throws Exception {
-    when(accountService.loginAccount(eq(new dev.christopherbell.account.model.AccountLoginRequest(
+    when(accountService.loginAccount(eq(new AccountLoginRequest(
         "api@example.com", "password")))).thenReturn("api-jwt-token");
     var logger = (Logger) LoggerFactory.getLogger(ExceptionHandlerExceptionResolver.class);
     Level originalLevel = logger.getLevel();

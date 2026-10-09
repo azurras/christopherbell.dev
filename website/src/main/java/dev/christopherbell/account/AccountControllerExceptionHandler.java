@@ -21,24 +21,24 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @Slf4j
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class AccountControllerExceptionHandler {
-  private final static String ACCOUNT_NOT_ACTIVE_CODE = "ACCOUNT_NOT_ACTIVE";
+  private static final String ACCOUNT_NOT_ACTIVE_CODE = "ACCOUNT_NOT_ACTIVE";
 
   /**
    * Handles {@link AccountNotActiveException} and returns HTTP 400 with a descriptive error.
    *
-   * @param e the thrown exception
+   * @param notActive the thrown exception
    * @return a {@link Response} with {@code success=false} and an error {@link Message}
    */
   @ExceptionHandler({AccountNotActiveException.class})
   @ResponseStatus(HttpStatus.BAD_REQUEST)
-  public Response<?> handleAccountNotActiveException(AccountNotActiveException e) {
-    log.error(ACCOUNT_NOT_ACTIVE_CODE, e);
+  public Response<?> handleAccountNotActiveException(AccountNotActiveException notActive) {
+    log.error(ACCOUNT_NOT_ACTIVE_CODE, notActive);
     return Response.builder()
-            .messages(List.of(Message.builder()
-                .code(ACCOUNT_NOT_ACTIVE_CODE)
-                .description(e.getMessage())
-                .build()))
-            .success(false)
-            .build();
+        .messages(List.of(Message.builder()
+            .code(ACCOUNT_NOT_ACTIVE_CODE)
+            .description(notActive.getMessage())
+            .build()))
+        .success(false)
+        .build();
   }
 }

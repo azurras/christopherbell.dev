@@ -47,8 +47,8 @@ public class PasswordResetNotificationService {
         """.formatted(resetUrl));
     try {
       mailSender.send(message);
-    } catch (MailException e) {
-      log.error("Unable to send password reset email for account {}.", account.getId(), e);
+    } catch (MailException sendFailure) {
+      log.error("Unable to send password reset email for account {}.", account.getId(), sendFailure);
     }
   }
 }

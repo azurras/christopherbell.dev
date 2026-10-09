@@ -21,7 +21,8 @@ class MongoAccountTrustRepository
     super(factory, AccountTrustRelationship.class);
   }
 
-  @Override public AccountTrustRelationship save(AccountTrustRelationship value) {
+  @Override
+  public AccountTrustRelationship save(AccountTrustRelationship value) {
     return saveValue(value);
   }
   @Override

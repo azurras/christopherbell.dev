@@ -4,13 +4,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
+import dev.christopherbell.libs.lease.LeaseGrant;
+import dev.christopherbell.libs.lease.LeaseStore;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,28 +29,29 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
 class AccountDeletionServiceTest {
+  private static final Instant STARTED_ON = Instant.parse("2026-10-09T12:00:00Z");
   @Mock private AccountDeletionJobRepository jobs;
   @Mock private AccountDeletionOperations operations;
   private AccountDeletionService service;
-  @Mock private dev.christopherbell.libs.lease.LeaseStore leases;
+  @Mock private LeaseStore leases;
 
   @BeforeEach
   void setUp() {
-    var grant = new dev.christopherbell.libs.lease.LeaseGrant("site-monitor-pilot", "test", 1,
-        java.time.Instant.now().plusSeconds(180));
-    org.mockito.Mockito.lenient().when(leases.tryAcquire(any(), any(), any())).thenReturn(Optional.of(grant));
-    org.mockito.Mockito.lenient().when(leases.renew(any(), any())).thenReturn(Optional.of(grant));
-    service = new AccountDeletionService(jobs, operations, leases);
+    var grant = new LeaseGrant("site-monitor-pilot", "test", 1,
+        Instant.now().plusSeconds(180));
+    lenient().when(leases.tryAcquire(any(), any(), any())).thenReturn(Optional.of(grant));
+    lenient().when(leases.renew(any(), any())).thenReturn(Optional.of(grant));
+    service = new AccountDeletionService(jobs, operations, leases, Clock.systemUTC());
   }
 
   @Test void monitorLeaseContentionDoesNotBeginDeletion() {
     when(leases.tryAcquire(any(), any(), any())).thenReturn(Optional.empty());
     assertThatThrownBy(() -> service.delete("account-123")).isInstanceOf(ServiceUnavailableException.class);
-    org.mockito.Mockito.verifyNoInteractions(jobs, operations);
+    verifyNoInteractions(jobs, operations);
   }
   @Test void failedDeletionStillBlocksMonitoring() {
     when(jobs.findById(AccountDeletionService.pseudonymFor("account-123")))
-        .thenReturn(Optional.of(AccountDeletionJob.started(AccountDeletionService.pseudonymFor("account-123"))));
+        .thenReturn(Optional.of(AccountDeletionJob.started(AccountDeletionService.pseudonymFor("account-123"), STARTED_ON)));
     assertThat(service.hasStarted("account-123")).isTrue();
   }
   @Test
@@ -87,7 +95,7 @@ class AccountDeletionServiceTest {
       return job;
     });
     when(operations.accountExists("account-456")).thenReturn(true);
-    org.mockito.Mockito.doThrow(new IllegalStateException("private database detail"))
+    doThrow(new IllegalStateException("private database detail"))
         .doNothing()
         .when(operations).removePrivateData("account-456");
 
@@ -113,8 +121,8 @@ class AccountDeletionServiceTest {
   @DisplayName("Completed deletion is idempotent and does not re-enter cleanup")
   void delete_whenJobComplete_returnsStoredResultWithoutEffects() throws Exception {
     var pseudonym = AccountDeletionService.pseudonymFor("account-789");
-    var completed = AccountDeletionJob.started(pseudonym);
-    completed.complete();
+    var completed = AccountDeletionJob.started(pseudonym, STARTED_ON);
+    completed.complete(STARTED_ON);
     when(jobs.findById(pseudonym)).thenReturn(Optional.of(completed));
 
     var first = service.delete("account-789");

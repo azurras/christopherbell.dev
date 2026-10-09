@@ -5,16 +5,17 @@ import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import dev.christopherbell.libs.security.EmailSanitizer;
 import dev.christopherbell.libs.security.UsernameSanitizer;
 import dev.christopherbell.permission.PermissionService;
-import dev.christopherbell.admin.activity.AdminActivityService;
-import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import java.time.Instant;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -154,7 +155,7 @@ public class AccountModerationService {
 
   private void ensureEmailUniqueForUpdate(String email, String selfId) throws ResourceExistsException {
     var owner = accountRepository.findByEmailIgnoreCase(email);
-    if (owner.isPresent() && !owner.get().getId().equals(selfId)) {
+    if (owner.filter(found -> !found.getId().equals(selfId)).isPresent()) {
       throw new ResourceExistsException("Email already in use by another account.");
     }
   }
@@ -162,7 +163,7 @@ public class AccountModerationService {
   private void ensureUsernameUniqueForUpdate(String username, String selfId)
       throws ResourceExistsException {
     var owner = accountRepository.findByUsernameIgnoreCase(username);
-    if (owner.isPresent() && !owner.get().getId().equals(selfId)) {
+    if (owner.filter(found -> !found.getId().equals(selfId)).isPresent()) {
       throw new ResourceExistsException("Username already in use by another account.");
     }
   }
@@ -177,7 +178,7 @@ public class AccountModerationService {
   }
 
   private record ModerationAccountSnapshot(
-      dev.christopherbell.account.model.Role role,
+      Role role,
       AccountStatus status) {
 
     private static ModerationAccountSnapshot from(Account account) {

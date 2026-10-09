@@ -16,6 +16,12 @@ class MongoAccountDeletionJobRepository
     super(factory, AccountDeletionJob.class);
   }
 
-  @Override public Optional<AccountDeletionJob> findById(String id) { return findValueById(id); }
-  @Override public AccountDeletionJob save(AccountDeletionJob job) { return saveValue(job); }
+  @Override
+  public Optional<AccountDeletionJob> findById(String id) {
+    return findValueById(id);
+  }
+  @Override
+  public AccountDeletionJob save(AccountDeletionJob job) {
+    return saveValue(job);
+  }
 }

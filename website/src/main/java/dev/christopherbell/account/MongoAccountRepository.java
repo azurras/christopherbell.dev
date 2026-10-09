@@ -37,12 +37,22 @@ public class MongoAccountRepository extends KindScopedRepositorySupport<Account>
       throw new DuplicateKeyException("MongoDB rejected a duplicate account identity", failure);
     }
   }
-  @Override public Optional<Account> findById(String id) { return findValueById(id); }
-  @Override public boolean existsById(String id) {
+  @Override
+  public Optional<Account> findById(String id) {
+    return findValueById(id);
+  }
+  @Override
+  public boolean existsById(String id) {
     return mongo.exists(Query.query(Criteria.where("id").is(id)));
   }
-  @Override public void deleteById(String id) { super.deleteById(id); }
-  @Override public Page<Account> findAll(Pageable pageable) { return page(new Query(), pageable); }
+  @Override
+  public void deleteById(String id) {
+    super.deleteById(id);
+  }
+  @Override
+  public Page<Account> findAll(Pageable pageable) {
+    return page(new Query(), pageable);
+  }
 
   @Override
   public List<Account> findAllById(Iterable<String> ids) {
@@ -51,22 +61,28 @@ public class MongoAccountRepository extends KindScopedRepositorySupport<Account>
     return values.isEmpty() ? List.of() : find(Query.query(Criteria.where("id").in(values)));
   }
 
-  @Override public Optional<Account> findByEmail(String email) {
+  @Override
+  public Optional<Account> findByEmail(String email) {
     return findOne(Query.query(Criteria.where("email").is(email)));
   }
-  @Override public Optional<Account> findByEmailIgnoreCase(String email) {
+  @Override
+  public Optional<Account> findByEmailIgnoreCase(String email) {
     return findUnique(Query.query(Criteria.where("email").regex(exactIgnoreCase(email))));
   }
-  @Override public Optional<Account> findByPasswordResetTokenHash(String hash) {
+  @Override
+  public Optional<Account> findByPasswordResetTokenHash(String hash) {
     return findOne(Query.query(Criteria.where("passwordResetTokenHash").is(hash)));
   }
-  @Override public Optional<Account> findByUsername(String username) {
+  @Override
+  public Optional<Account> findByUsername(String username) {
     return findOne(Query.query(Criteria.where("username").is(username)));
   }
-  @Override public Optional<Account> findByUsernameAndStatus(String username, AccountStatus status) {
+  @Override
+  public Optional<Account> findByUsernameAndStatus(String username, AccountStatus status) {
     return findOne(Query.query(Criteria.where("username").is(username).and("status").is(status)));
   }
-  @Override public Optional<Account> findByUsernameIgnoreCase(String username) {
+  @Override
+  public Optional<Account> findByUsernameIgnoreCase(String username) {
     return findUnique(Query.query(Criteria.where("username").regex(exactIgnoreCase(username))));
   }
   @Override
@@ -75,10 +91,12 @@ public class MongoAccountRepository extends KindScopedRepositorySupport<Account>
     return findUnique(Query.query(Criteria.where("username").regex(exactIgnoreCase(username))
         .and("status").is(status).and("federationEnabled").is(true)));
   }
-  @Override public long countByStatus(AccountStatus status) {
+  @Override
+  public long countByStatus(AccountStatus status) {
     return mongo.count(Query.query(Criteria.where("status").is(status)));
   }
-  @Override public Page<Account> findByStatus(AccountStatus status, Pageable pageable) {
+  @Override
+  public Page<Account> findByStatus(AccountStatus status, Pageable pageable) {
     return page(Query.query(Criteria.where("status").is(status)), pageable);
   }
   @Override

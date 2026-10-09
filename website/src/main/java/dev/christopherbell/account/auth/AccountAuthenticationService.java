@@ -1,19 +1,20 @@
 package dev.christopherbell.account.auth;
 
 import dev.christopherbell.account.AccountRepository;
-import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.account.api.LoginTokens;
+import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountLoginRequest;
+import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import dev.christopherbell.libs.security.EmailSanitizer;
 import dev.christopherbell.libs.security.PasswordUtil;
-import dev.christopherbell.account.api.LoginTokens;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
-import java.time.Instant;
+import java.time.Clock;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
 import org.springframework.dao.IncorrectResultSizeDataAccessException;
+import org.springframework.stereotype.Service;
 
 /**
  * Handles account authentication so login rules can evolve without expanding account CRUD.
@@ -28,7 +29,7 @@ public class AccountAuthenticationService {
   private final AccountLoginStore accountLoginStore;
   private final AccountSessionRevoker sessionRevoker;
   private final LoginTokens loginTokens;
-
+  private final Clock clock;
   /**
    * Validates login information and returns a signed JWT for active accounts.
    */
@@ -55,7 +56,7 @@ public class AccountAuthenticationService {
           ? PasswordUtil.upgradePassword(
               password, account.getPasswordSalt(), account.getPasswordHash())
           : account.getPasswordHash();
-      var current = accountLoginStore.completeLogin(account, currentHash, Instant.now())
+      var current = accountLoginStore.completeLogin(account, currentHash, clock.instant())
           .filter(updated -> updated.getStatus() == AccountStatus.ACTIVE)
           .orElseThrow(this::rejectedLogin);
       if (rehashRequired) {
@@ -70,7 +71,7 @@ public class AccountAuthenticationService {
     }
   }
 
-  private String rejectionCategory(dev.christopherbell.account.model.Account account, boolean verified) {
+  private String rejectionCategory(Account account, boolean verified) {
     if (account == null) return "unknown-account";
     if (!verified) return "invalid-password";
     return "inactive-account";

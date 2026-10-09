@@ -7,4 +7,4 @@ import jakarta.validation.constraints.NotNull;
  */
 public record SharedFolderPermissionUpdate(
     @NotNull Boolean read,
-    @NotNull Boolean write) {}
+    @NotNull Boolean write) implements CapabilityPairUpdate {}
