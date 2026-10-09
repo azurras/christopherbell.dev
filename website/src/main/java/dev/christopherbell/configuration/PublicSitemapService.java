@@ -7,6 +7,7 @@ import dev.christopherbell.whatsforlunch.restaurant.RestaurantRepository;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -17,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.UriUtils;
@@ -176,7 +178,7 @@ public class PublicSitemapService {
       long requestedEnd,
       long sourceStart,
       long sourceCount,
-      Function<org.springframework.data.domain.Pageable, Page<T>> query,
+      Function<Pageable, Page<T>> query,
       Function<T, String> location) {
     var sourceEnd = Math.addExact(sourceStart, sourceCount);
     var overlapStart = Math.max(requestedStart, sourceStart);
@@ -244,7 +246,7 @@ public class PublicSitemapService {
   }
 
   private record SitemapCatalog(
-      java.time.Instant generatedAt,
+      Instant generatedAt,
       long accountCount,
       long postCount,
       long restaurantCount,

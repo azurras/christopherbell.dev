@@ -6,12 +6,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
@@ -89,14 +91,14 @@ class FederationSecretApplicationContextInitializerTest {
   @Test
   void wrongSizedExistingSecretFailsWithoutLeakingItsBytes() throws IOException {
     var secretFile = protectedSecretFile();
-    var malformed = "this-value-must-never-appear".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    var malformed = "this-value-must-never-appear".getBytes(StandardCharsets.UTF_8);
     Files.write(secretFile, malformed);
 
     assertThatThrownBy(() -> initialize(
         enabledValues(secretFile), "prod", "deploy-smoke"))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining(SECRET_FILE_PROPERTY)
-        .hasMessageNotContaining(new String(malformed, java.nio.charset.StandardCharsets.UTF_8));
+        .hasMessageNotContaining(new String(malformed, StandardCharsets.UTF_8));
   }
 
   @Test
@@ -153,7 +155,7 @@ class FederationSecretApplicationContextInitializerTest {
   }
 
   private Path protectedSecretFile() throws IOException {
-    var parent = temporaryDirectory.resolve("config-" + java.util.UUID.randomUUID());
+    var parent = temporaryDirectory.resolve("config-" + UUID.randomUUID());
     Files.createDirectory(parent);
     return parent.resolve("federation-secret.bin");
   }

@@ -1,7 +1,37 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
+import dev.christopherbell.libs.api.APIVersion;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.ResourceExistsException;
+import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.libs.api.model.Response;
+import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantDataFreshness;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportApplyRequest;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewResponse;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportRunDetail;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportWorkflowService;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeApplyRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupePreview;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeResult;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantInventoryPage;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteSetRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceDetail;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionDetail;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRestaurantsRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionVoteRequest;
+import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionService;
+import java.io.IOException;
 import java.util.List;
-
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -15,34 +45,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import dev.christopherbell.libs.api.APIVersion;
-import dev.christopherbell.libs.api.model.Response;
-import dev.christopherbell.permission.PermissionService;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeResult;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeApplyRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupePreview;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantInventoryPage;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteSetRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
-import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportApplyRequest;
-import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantDataFreshness;
-import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewResponse;
-import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportRunDetail;
-import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportWorkflowService;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState;
-import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceDetail;
-import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionDetail;
-import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRestaurantsRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionVoteRequest;
-import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionService;
-import lombok.RequiredArgsConstructor;
 
 /**
  * REST controller for restaurant management under {@code /api/whatsforlunch/restaurant}.
@@ -71,7 +73,7 @@ public class RestaurantController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<RestaurantDetail>> createRestaurant(
       @RequestBody RestaurantCreateRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceExistsException {
     var response = restaurantService.createRestaurant(request);
     return new ResponseEntity<>(
         Response.<RestaurantDetail>builder()
@@ -94,7 +96,7 @@ public class RestaurantController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<RestaurantDetail>> deleteRestaurantById(
       @PathVariable String id
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = restaurantService.deleteRestaurantById(id);
     return new ResponseEntity<>(
         Response.<RestaurantDetail>builder()
@@ -113,7 +115,7 @@ public class RestaurantController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<RestaurantDetail>> getRestaurantById(
       @PathVariable String id
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = restaurantService.getRestaurantById(id);
     return new ResponseEntity<>(
         Response.<RestaurantDetail>builder()
@@ -129,7 +131,7 @@ public class RestaurantController {
    */
   @GetMapping(value = APIVersion.V20250912, produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
-  public ResponseEntity<Response<List<RestaurantDetail>>> getRestaurants() throws Exception {
+  public ResponseEntity<Response<List<RestaurantDetail>>> getRestaurants() {
     var response = restaurantService.getRestaurants();
     return new ResponseEntity<>(
         Response.<List<RestaurantDetail>>builder()
@@ -185,7 +187,7 @@ public class RestaurantController {
       @RequestParam(value = "cuisine", required = false) List<String> cuisines,
       @RequestParam(value = "useSavedPreferences", required = false, defaultValue = "true")
       boolean useSavedPreferences
-  ) throws Exception {
+  ) throws InvalidRequestException {
     var response = restaurantService.getNearbyLunchPicks(
         latitude,
         longitude,
@@ -212,7 +214,7 @@ public class RestaurantController {
       @RequestParam(value = "cuisine", required = false) List<String> cuisines,
       @RequestParam(value = "useSavedPreferences", required = false, defaultValue = "true")
       boolean useSavedPreferences
-  ) throws Exception {
+  ) throws InvalidRequestException {
     var response = restaurantService.getNearbyLunchPicksByZipCode(
         zipCode,
         radiusMiles,
@@ -234,7 +236,7 @@ public class RestaurantController {
   @GetMapping(value = APIVersion.V20260517 + "/profile/{id}", produces = MediaType.APPLICATION_JSON_VALUE)
   public ResponseEntity<Response<RestaurantDetail>> getPublicRestaurantById(
       @PathVariable String id
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = restaurantService.getRestaurantById(id);
     return new ResponseEntity<>(
         Response.<RestaurantDetail>builder()
@@ -288,7 +290,7 @@ public class RestaurantController {
   @PreAuthorize("isAuthenticated()")
   public ResponseEntity<Response<WhatsForLunchPreferenceDetail>> updateMyPreferences(
       @RequestBody WhatsForLunchPreferenceRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException {
     var response = restaurantService.updateMyPreferences(request);
     return new ResponseEntity<>(
         Response.<WhatsForLunchPreferenceDetail>builder()
@@ -313,7 +315,7 @@ public class RestaurantController {
   public ResponseEntity<Response<RestaurantDetail>> voteRestaurant(
       @PathVariable String id,
       @RequestBody RestaurantVoteRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = restaurantService.voteRestaurant(id, request);
     return new ResponseEntity<>(
         Response.<RestaurantDetail>builder()
@@ -336,7 +338,7 @@ public class RestaurantController {
   @PreAuthorize("isAuthenticated()")
   public ResponseEntity<Response<RestaurantDetail>> voteRestaurant(
       @RequestBody RestaurantVoteSetRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = restaurantService.voteRestaurant(
         request == null ? null : request.restaurantId(),
         new RestaurantVoteRequest(request == null ? null : request.vote()));
@@ -377,7 +379,7 @@ public class RestaurantController {
   @PreAuthorize("isAuthenticated()")
   public ResponseEntity<Response<RestaurantDetail>> favoriteRestaurant(
       @RequestBody RestaurantFavoriteRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = restaurantService.favoriteRestaurant(request);
     return new ResponseEntity<>(
         Response.<RestaurantDetail>builder()
@@ -400,7 +402,7 @@ public class RestaurantController {
   @PreAuthorize("isAuthenticated()")
   public ResponseEntity<Response<RestaurantDetail>> unfavoriteRestaurant(
       @RequestBody RestaurantFavoriteRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = restaurantService.unfavoriteRestaurant(request);
     return new ResponseEntity<>(
         Response.<RestaurantDetail>builder()
@@ -423,7 +425,7 @@ public class RestaurantController {
   @PreAuthorize("isAuthenticated()")
   public ResponseEntity<Response<WhatsForLunchSessionDetail>> createSession(
       @RequestBody WhatsForLunchSessionCreateRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = whatsForLunchSessionService.createSession(request);
     return new ResponseEntity<>(
         Response.<WhatsForLunchSessionDetail>builder()
@@ -442,7 +444,7 @@ public class RestaurantController {
   @PreAuthorize("isAuthenticated()")
   public ResponseEntity<Response<List<WhatsForLunchSessionDetail>>> getMySessions(
       @RequestParam(value = "limit", required = false, defaultValue = "10") int limit
-  ) throws Exception {
+  ) throws ResourceNotFoundException {
     var response = whatsForLunchSessionService.getMySessions(limit);
     return new ResponseEntity<>(
         Response.<List<WhatsForLunchSessionDetail>>builder()
@@ -461,7 +463,7 @@ public class RestaurantController {
   @PreAuthorize("isAuthenticated()")
   public ResponseEntity<Response<WhatsForLunchSessionDetail>> getSession(
       @PathVariable String sessionId
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = whatsForLunchSessionService.getSession(sessionId);
     return new ResponseEntity<>(
         Response.<WhatsForLunchSessionDetail>builder()
@@ -480,7 +482,7 @@ public class RestaurantController {
   @PreAuthorize("isAuthenticated()")
   public ResponseEntity<Response<WhatsForLunchSessionDetail>> joinSession(
       @PathVariable String sessionId
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = whatsForLunchSessionService.joinSession(sessionId);
     return new ResponseEntity<>(
         Response.<WhatsForLunchSessionDetail>builder()
@@ -505,7 +507,7 @@ public class RestaurantController {
   public ResponseEntity<Response<WhatsForLunchSessionDetail>> voteInSession(
       @PathVariable String sessionId,
       @RequestBody WhatsForLunchSessionVoteRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = whatsForLunchSessionService.vote(sessionId, request);
     return new ResponseEntity<>(
         Response.<WhatsForLunchSessionDetail>builder()
@@ -530,7 +532,7 @@ public class RestaurantController {
   public ResponseEntity<Response<WhatsForLunchSessionDetail>> updateSessionRestaurants(
       @PathVariable String sessionId,
       @RequestBody WhatsForLunchSessionRestaurantsRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = whatsForLunchSessionService.updateRestaurants(sessionId, request);
     return new ResponseEntity<>(
         Response.<WhatsForLunchSessionDetail>builder()
@@ -549,7 +551,7 @@ public class RestaurantController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<List<RestaurantDetail>>> deleteRestaurantFromTodaysLunchPicks(
       @PathVariable String id
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var response = restaurantService.deleteRestaurantFromTodaysLunchPicks(id);
     return new ResponseEntity<>(
         Response.<List<RestaurantDetail>>builder()
@@ -559,14 +561,16 @@ public class RestaurantController {
   }
 
   /**
-   * Imports configured metro restaurants from OpenStreetMap.
+   * Previews an OpenStreetMap import of the configured metros without changing any restaurant.
    *
-   * @return HTTP 200 with import counts
+   * @return HTTP 200 with the preview token, checksum and change counts
    */
-  @PostMapping(value = APIVersion.V20260726 + "/import/openstreetmap/preview", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PostMapping(
+      value = APIVersion.V20260726 + "/import/openstreetmap/preview",
+      produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<RestaurantImportPreviewResponse>> previewOpenStreetMapRestaurants()
-      throws Exception {
+      throws IOException, InterruptedException, InvalidRequestException {
     var response = restaurantImportWorkflowService.previewOpenStreetMapImport();
     return new ResponseEntity<>(
         Response.<RestaurantImportPreviewResponse>builder()
@@ -583,7 +587,7 @@ public class RestaurantController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<RestaurantImportRunDetail>> applyOpenStreetMapRestaurants(
       @RequestBody RestaurantImportApplyRequest request
-  ) throws Exception {
+  ) throws IOException, InterruptedException, InvalidRequestException {
     var response = restaurantImportWorkflowService.applyOpenStreetMapImport(
         request == null ? null : request.token());
     return ResponseEntity.ok(Response.<RestaurantImportRunDetail>builder()
@@ -593,9 +597,12 @@ public class RestaurantController {
   }
 
   /** Returns durable status for the most recent OpenStreetMap import attempt. */
-  @GetMapping(value = APIVersion.V20260726 + "/import/openstreetmap/status", produces = MediaType.APPLICATION_JSON_VALUE)
+  @GetMapping(
+      value = APIVersion.V20260726 + "/import/openstreetmap/status",
+      produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<RestaurantImportState>> getOpenStreetMapImportStatus() {
+    // An import that has never run is reported as a null payload in the JSON contract.
     var response = restaurantImportWorkflowService.getStatus().orElse(null);
     return ResponseEntity.ok(Response.<RestaurantImportState>builder()
         .payload(response)
@@ -662,7 +669,7 @@ public class RestaurantController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<RestaurantDetail>> updateRestaurantById(
       @RequestBody RestaurantUpdateRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceExistsException, ResourceNotFoundException {
     var response = restaurantService.updateRestaurant(request);
     return new ResponseEntity<>(
         Response.<RestaurantDetail>builder()
