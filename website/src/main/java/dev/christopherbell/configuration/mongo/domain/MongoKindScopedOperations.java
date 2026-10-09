@@ -1,18 +1,19 @@
 package dev.christopherbell.configuration.mongo.domain;
 
 import com.mongodb.MongoException;
-
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.time.Instant;
-import org.springframework.data.mapping.callback.EntityCallbacks;
 import org.bson.Document;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.mapping.callback.EntityCallbacks;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.FindAndReplaceOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -20,11 +21,12 @@ import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.aggregation.AggregationUpdate;
 import org.springframework.data.mongodb.core.convert.QueryMapper;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.data.mongodb.core.mapping.event.AfterSaveCallback;
 import org.springframework.data.mongodb.core.mapping.event.BeforeConvertCallback;
 import org.springframework.data.mongodb.core.mapping.event.BeforeSaveCallback;
+import org.springframework.data.mongodb.core.query.BasicQuery;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 
 /** Mongo-backed implementation that owns all access to one approved logical kind. */
 public final class MongoKindScopedOperations<T> implements KindScopedMongoOperations<T> {
@@ -214,7 +216,7 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
       Query exactStateQuery, MongoDatabaseLeaseMutation mutation) {
     var mappedQuery = fieldMapper.mapMutationQuery(exactStateQuery, kind.schemaVersion());
     var deadlinePath = fieldMapper.mapWritablePath(mutation.deadlineField());
-    var deadline = new Document("$ifNull", List.of("$" + deadlinePath, new java.util.Date(0)));
+    var deadline = new Document("$ifNull", List.of("$" + deadlinePath, new Date(0)));
     Document timePredicate = switch (mutation.expectation()) {
       case UNEXPIRED -> new Document("$expr", new Document("$gt", List.of(deadline, "$$NOW")));
       case EXPIRED_OR_MISSING ->
@@ -226,7 +228,7 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
             new Document("$expr", new Document("$lte", List.of(deadline, "$$NOW")))));
       }
     };
-    var selector = new org.springframework.data.mongodb.core.query.BasicQuery(
+    var selector = new BasicQuery(
         new Document("$and", List.of(mappedQuery.getQueryObject(), timePredicate)));
     var mappedUpdate = fieldMapper.mapLeaseUpdate(
         mutation.update(), mutation.advanceVersion()).getUpdateObject();
@@ -366,9 +368,9 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   public <R> List<R> aggregate(KindScopedAggregation domainAggregation, Class<R> resultType) {
     Objects.requireNonNull(domainAggregation, "domainAggregation");
     Objects.requireNonNull(resultType, "resultType");
-    var operations = new java.util.ArrayList<AggregationOperation>();
+    var operations = new ArrayList<AggregationOperation>();
     var selector = fieldMapper.mapQuery(
-        new org.springframework.data.mongodb.core.query.BasicQuery(
+        new BasicQuery(
             domainAggregation.trustedSelector())).getQueryObject();
     DomainEnvelopeAggregationValidation.stages(
         selector, kind.kind(), kind.schemaVersion()).stream()
