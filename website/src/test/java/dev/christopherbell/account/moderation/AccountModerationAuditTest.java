@@ -3,8 +3,10 @@ package dev.christopherbell.account.moderation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -42,8 +44,8 @@ class AccountModerationAuditTest {
   @BeforeEach
   void setUp() {
     service = new AccountModerationService(accounts, mapper, activity, permissions, sessionRevoker);
-    org.mockito.Mockito.lenient().when(permissions.getSelfId()).thenReturn("admin-a");
-    org.mockito.Mockito.lenient().when(accounts.findById("admin-a")).thenReturn(Optional.of(
+    lenient().when(permissions.getSelfId()).thenReturn("admin-a");
+    lenient().when(accounts.findById("admin-a")).thenReturn(Optional.of(
         Account.builder().id("admin-a").username("original-admin").build()));
   }
 
@@ -129,15 +131,15 @@ class AccountModerationAuditTest {
     assertThat(account.getStatus()).isEqualTo(AccountStatus.SUSPENDED);
     assertThat(account.getPendingModerationAudit()).isNotNull();
 
-    org.mockito.Mockito.lenient().when(permissions.getSelfId()).thenReturn("admin-b");
-    org.mockito.Mockito.lenient().when(accounts.findById("admin-b")).thenReturn(Optional.of(
+    lenient().when(permissions.getSelfId()).thenReturn("admin-b");
+    lenient().when(accounts.findById("admin-b")).thenReturn(Optional.of(
         Account.builder().id("admin-b").username("retrying-admin").build()));
 
     service.updateAccount(request);
 
     assertThat(account.getPendingModerationAudit()).isNull();
     var commands = ArgumentCaptor.forClass(ModerationAuditCommand.class);
-    verify(activity, org.mockito.Mockito.times(2)).recordModeration(commands.capture());
+    verify(activity, times(2)).recordModeration(commands.capture());
     assertThat(commands.getAllValues())
         .allSatisfy(command -> {
           assertThat(command.actorAccountId()).isEqualTo("admin-a");

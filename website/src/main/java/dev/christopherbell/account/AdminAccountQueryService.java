@@ -6,6 +6,7 @@ import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.persistence.MongoPersistence;
 import java.util.ArrayList;
 import java.util.regex.Pattern;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -33,7 +34,7 @@ public class AdminAccountQueryService implements AdminAccountQueryPort {
         .with(sort)
         .skip((long) request.page() * request.size())
         .limit(request.size());
-    var items = accounts.find(pageQuery, org.springframework.data.domain.Pageable.unpaged()).stream()
+    var items = accounts.find(pageQuery, Pageable.unpaged()).stream()
         .map(accountMapper::toAccount)
         .toList();
     var totalPages = totalElements == 0
@@ -69,7 +70,7 @@ public class AdminAccountQueryService implements AdminAccountQueryPort {
       return new Criteria();
     }
     return criteria.size() == 1
-        ? criteria.get(0)
+        ? criteria.getFirst()
         : new Criteria().andOperator(criteria);
   }
 }

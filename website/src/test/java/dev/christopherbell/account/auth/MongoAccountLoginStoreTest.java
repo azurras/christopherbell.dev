@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory;
 import java.time.Instant;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,7 @@ class MongoAccountLoginStoreTest {
   void completeLoginConditionsOnActiveObservedCredentialAndUpdatesOnlyLoginFields() {
     var mongo = mock(MongoTemplate.class);
     var store = new MongoAccountLoginStore(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
+        DomainMongoOperationsTestFactory.create(mongo));
     var observed = Account.builder()
         .id("account-1")
         .passwordHash("old-hash")
@@ -41,7 +42,7 @@ class MongoAccountLoginStoreTest {
         .build();
     var loginOn = Instant.parse("2026-07-29T14:00:00Z");
     var currentEnvelope =
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        DomainMongoOperationsTestFactory
             .envelope(mongo, current);
     when(mongo.findAndModify(
         any(Query.class), any(Update.class), any(FindAndModifyOptions.class),

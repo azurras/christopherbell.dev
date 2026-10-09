@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory;
 import java.util.List;
 import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,7 +31,7 @@ class MongoAccountDeletionOperationsTest {
   @BeforeEach
   void setUp() {
     operations = new MongoAccountDeletionOperations(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo),
+        DomainMongoOperationsTestFactory.create(mongo),
         resources);
   }
 

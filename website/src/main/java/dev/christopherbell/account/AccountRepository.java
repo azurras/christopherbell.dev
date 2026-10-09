@@ -10,21 +10,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 /**
- * Repository interface for managing {@link Account} entities in MongoDB.
- *
- * <p>
- * This explicit port preserves the service-facing account persistence contract.
- * </p>
- *
- * <p>
- * The primary key type for {@link Account} is {@link String}.
- * </p>
- *
- * <p>
- * Custom query methods can be defined by following Spring Data's method
- * naming conventions, allowing for automatic implementation of common
- * queries without the need for boilerplate code.
- * </p>
+ * Service-facing persistence port for {@link Account} documents, keyed by {@link String} id.
  *
  * @see Account
  */
@@ -38,13 +24,6 @@ public interface AccountRepository {
 
   /**
    * Retrieves an {@link Account} by its unique email address.
-   *
-   * <p>
-   * This query method leverages Spring Data's derived query generation.
-   * If an {@code AccountEntity} with the given email exists, it will be
-   * returned wrapped in an {@link Optional}; otherwise, the result will
-   * be {@link Optional#empty()}.
-   * </p>
    *
    * @param email the email address to look up (must not be {@code null})
    * @return an {@link Optional} containing the matching {@link Account}
@@ -73,13 +52,6 @@ public interface AccountRepository {
 
   /**
    * Finds an {@link Account} by its unique username.
-   *
-   * <p>
-   * This query method is automatically implemented by Spring Data based
-   * on the method name. If a record with the specified username exists,
-   * it will be returned wrapped in an {@link Optional}; otherwise, the
-   * result will be {@link Optional#empty()}.
-   * </p>
    *
    * @param username the username to search for (must not be {@code null})
    * @return an {@link Optional} containing the matching {@link Account}
