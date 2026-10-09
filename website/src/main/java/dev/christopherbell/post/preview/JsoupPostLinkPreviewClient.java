@@ -3,6 +3,7 @@ package dev.christopherbell.post.preview;
 import dev.christopherbell.post.model.PostLinkPreview;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Locale;
 import java.util.Optional;
 import org.jsoup.Jsoup;
@@ -30,7 +31,7 @@ public class JsoupPostLinkPreviewClient implements PostLinkPreviewClient {
   public JsoupPostLinkPreviewClient(int timeoutMillis, int maxBodyBytes) {
     this.transport = null;
     this.properties = new PostLinkPreviewProperties();
-    this.properties.setRequestTimeout(java.time.Duration.ofMillis(timeoutMillis));
+    this.properties.setRequestTimeout(Duration.ofMillis(timeoutMillis));
     this.properties.setMaxResponseBytes(maxBodyBytes);
   }
 

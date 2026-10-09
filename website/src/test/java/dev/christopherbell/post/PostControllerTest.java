@@ -22,13 +22,14 @@ import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.test.TestUtil;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.post.editing.PostEditRequest;
+import dev.christopherbell.post.editing.PostEditingService;
+import dev.christopherbell.post.feed.PostDetailPage;
+import dev.christopherbell.post.feed.PostFeedPage;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
-import dev.christopherbell.post.editing.PostEditingService;
-import dev.christopherbell.post.editing.PostEditRequest;
-import dev.christopherbell.post.feed.PostFeedPage;
-import dev.christopherbell.post.feed.PostDetailPage;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -68,7 +69,7 @@ public class PostControllerTest {
   @WithMockUser(authorities = {"USER"})
   public void editPost_whenOwner_returnsUpdatedDetail() throws Exception {
     var request = new PostEditRequest("after");
-    var editedOn = java.time.Instant.parse("2026-07-26T12:00:00Z");
+    var editedOn = Instant.parse("2026-07-26T12:00:00Z");
     when(permissionService.getSelfId()).thenReturn("owner");
     when(permissionService.hasAuthority("ADMIN")).thenReturn(false);
     when(postEditingService.edit("p1", request, "owner"))
@@ -133,7 +134,7 @@ public class PostControllerTest {
   @DisplayName("Global feed: supports before and limit query params")
   @WithMockUser(authorities = {"USER"})
   public void testGetGlobalFeed_withBeforeAndLimit() throws Exception {
-    var ts = java.time.Instant.parse("2025-01-01T00:00:00Z");
+    var ts = Instant.parse("2025-01-01T00:00:00Z");
     when(postService.getGlobalFeed(eq(ts), eq(10))).thenReturn(List.of());
 
     mockMvc

@@ -11,6 +11,7 @@ import {
 } from './lib/void-discovery.js';
 
 const PAGE_SIZE = 12;
+const MAX_SHARED_TOPICS = 3;
 
 function definitions() {
   const topic = document.body.dataset.topic || '';
@@ -26,20 +27,25 @@ function definitions() {
   ];
 }
 
+/** Append a link for each topic that has a canonical name; topic text stays a DOM text node. */
+function appendTopicLinks(container, topics, className) {
+  topics.forEach(topic => {
+    if (!topic?.canonical) return;
+    const link = document.createElement('a');
+    link.className = className;
+    link.href = topicHref(topic.canonical);
+    link.textContent = `#${topic.display || topic.canonical}`;
+    container.append(link);
+  });
+}
+
 function appendTopicChips(card, post) {
   const topics = Array.isArray(post.topics) ? post.topics : [];
   if (!topics.length) return;
   const chips = document.createElement('nav');
   chips.className = 'void-post-topics';
   chips.setAttribute('aria-label', 'Post topics');
-  topics.forEach(topic => {
-    if (!topic?.canonical) return;
-    const link = document.createElement('a');
-    link.className = 'void-topic-chip';
-    link.href = topicHref(topic.canonical);
-    link.textContent = `#${topic.display || topic.canonical}`;
-    chips.append(link);
-  });
+  appendTopicLinks(chips, topics, 'void-topic-chip');
   if (chips.childElementCount) card.append(chips);
 }
 
@@ -53,35 +59,37 @@ function renderPosts(container, items, rendererContext) {
 }
 
 function renderTopics(container, items) {
-  items.forEach(topic => {
-    if (!topic?.canonical) return;
-    const link = document.createElement('a');
-    link.className = 'void-topic-chip void-topic-chip-large';
-    link.href = topicHref(topic.canonical);
-    link.textContent = `#${topic.display || topic.canonical}`;
-    container.append(link);
-  });
+  appendTopicLinks(container, items, 'void-topic-chip void-topic-chip-large');
+}
+
+function personDetail(person) {
+  const shared = Array.isArray(person.sharedTopics) ? person.sharedTopics.slice(0, MAX_SHARED_TOPICS) : [];
+  if (!shared.length) return 'Recently active in the Void';
+  return `Shared: ${shared.map(topic => `#${topic}`).join(' · ')}`;
+}
+
+function personCard(person) {
+  const card = document.createElement('article');
+  card.className = 'void-person-card';
+  const avatar = document.createElement('span');
+  avatar.className = 'void-person-avatar';
+  avatar.textContent = person.username.slice(0, 1).toUpperCase();
+  const copy = document.createElement('div');
+  const profile = document.createElement('a');
+  profile.className = 'void-person-name';
+  profile.href = `/u/${encodeURIComponent(person.username)}`;
+  profile.textContent = `@${person.username}`;
+  const detail = document.createElement('p');
+  detail.textContent = personDetail(person);
+  copy.append(profile, detail);
+  card.append(avatar, copy);
+  return card;
 }
 
 function renderPeople(container, items) {
   items.forEach(person => {
     if (!person?.accountId || !person?.username) return;
-    const card = document.createElement('article');
-    card.className = 'void-person-card';
-    const avatar = document.createElement('span');
-    avatar.className = 'void-person-avatar';
-    avatar.textContent = person.username.slice(0, 1).toUpperCase();
-    const copy = document.createElement('div');
-    const profile = document.createElement('a');
-    profile.className = 'void-person-name';
-    profile.href = `/u/${encodeURIComponent(person.username)}`;
-    profile.textContent = `@${person.username}`;
-    const detail = document.createElement('p');
-    const shared = Array.isArray(person.sharedTopics) ? person.sharedTopics.slice(0, 3) : [];
-    detail.textContent = shared.length ? `Shared: ${shared.map(topic => `#${topic}`).join(' · ')}` : 'Recently active in the Void';
-    copy.append(profile, detail);
-    card.append(avatar, copy);
-    container.append(card);
+    container.append(personCard(person));
   });
 }
 

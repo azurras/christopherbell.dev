@@ -6,9 +6,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory;
+import dev.christopherbell.post.like.PostLikeStore;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostTopic;
-import dev.christopherbell.post.like.PostLikeStore;
 import java.time.Instant;
 import java.util.List;
 import org.bson.Document;
@@ -35,10 +36,10 @@ class VoidPeopleDiscoveryQueryRepositoryTest {
         .topics(List.of(new PostTopic("music", "Music"), new PostTopic("music", "MUSIC")))
         .build();
     when(likes.recentLikedPostIds("self")).thenReturn(List.of("liked-post"));
-    var factory = dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+    var factory = DomainMongoOperationsTestFactory
         .create(mongo);
     var postEnvelope =
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        DomainMongoOperationsTestFactory
             .envelope(mongo, post);
     when(mongo.find(any(Query.class), eq(Document.class), eq("content")))
         .thenReturn(List.of(postEnvelope));
@@ -59,7 +60,7 @@ class VoidPeopleDiscoveryQueryRepositoryTest {
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
     new VoidPeopleDiscoveryQueryRepository(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo),
+        DomainMongoOperationsTestFactory.create(mongo),
         likes).recentActiveCandidates(NOW, 500);
 
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);

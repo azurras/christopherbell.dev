@@ -24,24 +24,27 @@ import dev.christopherbell.account.trust.AccountTrustService;
 import dev.christopherbell.federation.outbound.FederationPublicationPolicy;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.notification.delivery.NotificationDeliveryService;
-import dev.christopherbell.post.creation.PostCreationService;
+import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.abuse.NewAccountVoidMutationLimiter;
 import dev.christopherbell.post.abuse.VoidMutationKind;
+import dev.christopherbell.post.creation.PostCreationService;
 import dev.christopherbell.post.expiration.PostExpirationService;
-import dev.christopherbell.post.feed.PostFeedService;
-import dev.christopherbell.post.feed.PostFeedQueryRepository;
+import dev.christopherbell.post.expiration.PostExpirationStore;
 import dev.christopherbell.post.feed.PostEngagementQueryRepository;
 import dev.christopherbell.post.feed.PostFeedItemAssembler;
+import dev.christopherbell.post.feed.PostFeedQueryRepository;
+import dev.christopherbell.post.feed.PostFeedService;
 import dev.christopherbell.post.feed.PostFeedSlice;
 import dev.christopherbell.post.feed.PostFeedVisibility;
-import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.hide.HiddenPostThreadService;
 import dev.christopherbell.post.interaction.PostInteractionService;
 import dev.christopherbell.post.like.PostLikeStore;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
+import dev.christopherbell.post.model.PostLinkPreview;
 import dev.christopherbell.post.model.PostTopic;
 import dev.christopherbell.post.preview.PostLinkPreviewService;
 import dev.christopherbell.post.thread.PostThreadService;
@@ -62,6 +65,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -71,7 +75,7 @@ public class PostServiceTest {
   @Mock private PostRepository postRepository;
   @Mock private AccountRepository accountRepository;
   @Mock private PostMapper postMapper;
-  @Mock private dev.christopherbell.permission.PermissionService permissionService;
+  @Mock private PermissionService permissionService;
   @Mock private NotificationDeliveryService notificationDeliveryService;
   @Mock private PostLinkPreviewService postLinkPreviewService;
   @Mock private AccountTrustService accountTrustService;
@@ -90,7 +94,7 @@ public class PostServiceTest {
   void setUp() {
     clock = Clock.fixed(NOW, ZoneOffset.UTC);
     postExpirationService = new PostExpirationService(
-        postRepository, (dev.christopherbell.post.expiration.PostExpirationStore) null, clock, true);
+        postRepository, (PostExpirationStore) null, clock, true);
     lenient().when(accountTrustService.hiddenAccountIdsForSelf()).thenReturn(Set.of());
     lenient().when(hiddenPostThreadService.hiddenRootIdsForSelf()).thenReturn(Set.of());
     lenient().when(engagement.replyCounts(any())).thenReturn(Map.of());
@@ -148,7 +152,7 @@ public class PostServiceTest {
         .id("p1").accountId(existing.getId()).text("hello world")
         .createdOn(Instant.now()).lastUpdatedOn(Instant.now())
         .build();
-    when(postRepository.save(org.mockito.ArgumentMatchers.any(Post.class))).thenReturn(post);
+    when(postRepository.save(any(Post.class))).thenReturn(post);
     var detail = PostDetail.builder().id("p1").accountId(existing.getId()).text("hello world").build();
     when(postMapper.toDetail(eq(post))).thenReturn(detail);
 
@@ -157,7 +161,7 @@ public class PostServiceTest {
     assertNotNull(result);
     assertEquals("p1", result.id());
     verify(accountRepository).findById(eq(existing.getId()));
-    verify(postRepository).save(org.mockito.ArgumentMatchers.any(Post.class));
+    verify(postRepository).save(any(Post.class));
     verify(notificationDeliveryService).createMentionNotifications(eq(post), eq(existing));
     verify(postMapper).toDetail(eq(post));
     verifyNoMoreInteractions(accountRepository, postRepository, postMapper, notificationDeliveryService);
@@ -209,7 +213,7 @@ public class PostServiceTest {
     when(accountRepository.findById(eq(existing.getId()))).thenReturn(Optional.of(existing));
     when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
     when(postMapper.toDetail(any(Post.class))).thenReturn(PostDetail.builder().id("p1").build());
-    var preview = dev.christopherbell.post.model.PostLinkPreview.builder()
+    var preview = PostLinkPreview.builder()
         .url("https://example.com/lunch")
         .domain("example.com")
         .title("Lunch")
@@ -470,14 +474,14 @@ public class PostServiceTest {
     var p1 = Post.builder().id("p1").accountId(existing.getId()).text("a").build();
     var d1 = PostDetail.builder().id("p1").text("a").build();
     when(postRepository.findByAccountIdOrderByCreatedOnDesc(
-        eq(existing.getId()), any(org.springframework.data.domain.Pageable.class)))
+        eq(existing.getId()), any(Pageable.class)))
         .thenReturn(List.of(p1));
     when(postMapper.toDetail(eq(p1))).thenReturn(d1);
 
     var list = service.getMyPosts();
     assertEquals(1, list.size());
     assertEquals("p1", list.get(0).id());
-    var page = ArgumentCaptor.forClass(org.springframework.data.domain.Pageable.class);
+    var page = ArgumentCaptor.forClass(Pageable.class);
     verify(postRepository).findByAccountIdOrderByCreatedOnDesc(
         eq(existing.getId()), page.capture());
     assertEquals(100, page.getValue().getPageSize());
@@ -516,7 +520,7 @@ public class PostServiceTest {
 
     when(accountRepository.findById(eq(existing.getId()))).thenReturn(Optional.of(existing));
     when(postRepository.findByAccountIdOrderByCreatedOnDesc(
-        eq(existing.getId()), any(org.springframework.data.domain.Pageable.class)))
+        eq(existing.getId()), any(Pageable.class)))
         .thenReturn(List.of(p1));
     when(postMapper.toDetail(eq(p1))).thenReturn(d1);
 
@@ -526,7 +530,7 @@ public class PostServiceTest {
 
     verify(accountRepository).findById(eq(existing.getId()));
     verify(postRepository).findByAccountIdOrderByCreatedOnDesc(
-        eq(existing.getId()), any(org.springframework.data.domain.Pageable.class));
+        eq(existing.getId()), any(Pageable.class));
     verify(postMapper).toDetail(eq(p1));
     verifyNoMoreInteractions(accountRepository, postRepository, postMapper);
   }
@@ -554,7 +558,7 @@ public class PostServiceTest {
     when(postRepository.findById(eq("p1"))).thenReturn(Optional.of(post));
     when(accountRepository.findById(eq(author.getId()))).thenReturn(Optional.of(author));
     when(accountRepository.findById(eq(liker.getId()))).thenReturn(Optional.of(liker));
-    when(postRepository.save(org.mockito.ArgumentMatchers.any(Post.class))).thenReturn(post);
+    when(postRepository.save(any(Post.class))).thenReturn(post);
     when(postLikes.exists("p1", "liker")).thenReturn(false, true);
     when(postLikes.like("p1", "liker", NOW))
         .thenReturn(new PostLikeStore.LikeTransition(true, false));
@@ -698,7 +702,7 @@ public class PostServiceTest {
     verify(postRepository).findByExpiresOnIsNull(any());
     verify(postRepository).save(eq(stale));
     verify(postRepository).findByExpiresOnLessThanEqual(
-        org.mockito.ArgumentMatchers.any(Instant.class), any());
+        any(Instant.class), any());
     assertNotNull(stale.getExpiresOn());
   }
 
@@ -729,7 +733,7 @@ public class PostServiceTest {
   @Test
   @DisplayName("GlobalFeed: returns newest posts with usernames")
   public void testGetGlobalFeed_returnsMappedItems() {
-    var preview = dev.christopherbell.post.model.PostLinkPreview.builder()
+    var preview = PostLinkPreview.builder()
         .url("https://example.com")
         .domain("example.com")
         .title("Example")

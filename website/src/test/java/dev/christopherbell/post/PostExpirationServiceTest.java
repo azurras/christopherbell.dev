@@ -10,15 +10,22 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.mongodb.client.result.DeleteResult;
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory;
+import dev.christopherbell.post.expiration.MongoPostExpirationStore;
 import dev.christopherbell.post.expiration.PostExpirationService;
+import dev.christopherbell.post.expiration.PostExpirationStore;
 import dev.christopherbell.post.model.Post;
-import java.time.Duration;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -27,7 +34,6 @@ import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.UpdateDefinition;
-import com.mongodb.client.result.DeleteResult;
 
 @ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class PostExpirationServiceTest {
@@ -37,9 +43,9 @@ class PostExpirationServiceTest {
   @Test
   void purgeExpiredPosts_whenNoPostsNeedWork_doesNotLogStartOrCompletion(CapturedOutput output) {
     var service = new PostExpirationService(postRepository, true);
-    when(postRepository.findByExpiresOnIsNull(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+    when(postRepository.findByExpiresOnIsNull(any())).thenReturn(List.of());
     when(postRepository.findByExpiresOnLessThanEqual(
-        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+        any(), any())).thenReturn(List.of());
 
     service.purgeExpiredPosts();
 
@@ -54,7 +60,7 @@ class PostExpirationServiceTest {
     var service =
         new PostExpirationService(
             postRepository,
-            (dev.christopherbell.post.expiration.PostExpirationStore) null,
+            (PostExpirationStore) null,
             Clock.fixed(extendedOn, ZoneOffset.UTC),
             true);
     var root = Post.builder()
@@ -69,7 +75,7 @@ class PostExpirationServiceTest {
         .parentId("root")
         .expiresOn(root.getExpiresOn())
         .build();
-    when(postRepository.findById(eq("root"))).thenReturn(java.util.Optional.of(root));
+    when(postRepository.findById(eq("root"))).thenReturn(Optional.of(root));
     when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root")))
         .thenReturn(List.of(root, reply));
 
@@ -101,34 +107,34 @@ class PostExpirationServiceTest {
         .threadReplyLikesCount(0)
         .threadReplyCount(10_000)
         .build();
-    var factory = dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+    var factory = DomainMongoOperationsTestFactory
         .create(mongo);
     var updatedEnvelope =
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        DomainMongoOperationsTestFactory
             .envelope(mongo, updated);
     when(mongo.findAndModify(
         any(Query.class),
         any(UpdateDefinition.class),
         any(FindAndModifyOptions.class),
-        eq(org.bson.Document.class), eq("content"))).thenReturn(updatedEnvelope);
+        eq(Document.class), eq("content"))).thenReturn(updatedEnvelope);
     var service = new PostExpirationService(
         postRepository,
-        new dev.christopherbell.post.expiration.MongoPostExpirationStore(factory),
+        new MongoPostExpirationStore(factory),
         Clock.fixed(changedOn, ZoneOffset.UTC),
         true);
 
     service.applyLikeTransition(root, null, 1, changedOn);
 
-    var counterUpdate = org.mockito.ArgumentCaptor.forClass(UpdateDefinition.class);
+    var counterUpdate = ArgumentCaptor.forClass(UpdateDefinition.class);
     verify(mongo).findAndModify(
         any(Query.class),
         counterUpdate.capture(),
         any(FindAndModifyOptions.class),
-        eq(org.bson.Document.class), eq("content"));
+        eq(Document.class), eq("content"));
     assertEquals(1, counterUpdate.getValue().getUpdateObject()
-        .get("$inc", org.bson.Document.class).getInteger("payload.likesCount"));
+        .get("$inc", Document.class).getInteger("payload.likesCount"));
     verify(mongo).updateMulti(
-        any(Query.class), any(UpdateDefinition.class), eq(org.bson.Document.class), eq("content"));
+        any(Query.class), any(UpdateDefinition.class), eq(Document.class), eq("content"));
     verify(postRepository, never()).findByRootIdOrderByCreatedOnAsc(any());
   }
 
@@ -159,16 +165,16 @@ class PostExpirationServiceTest {
         .build();
     when(postRepository.findByRootIdOrderByCreatedOnAsc("root"))
         .thenReturn(List.of(root, reply));
-    when(mongo.remove(any(Query.class), eq(org.bson.Document.class), any(String.class)))
+    when(mongo.remove(any(Query.class), eq(Document.class), any(String.class)))
         .thenReturn(DeleteResult.acknowledged(1));
-    var factory = dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+    var factory = DomainMongoOperationsTestFactory
         .create(mongo);
     var linearizedEnvelope =
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        DomainMongoOperationsTestFactory
             .envelope(mongo, linearized);
     when(mongo.findAndModify(
         any(Query.class), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
-        eq(org.bson.Document.class), eq("content")))
+        eq(Document.class), eq("content")))
         .thenAnswer(invocation -> {
           var update = invocation.<UpdateDefinition>getArgument(1).getUpdateObject();
           if (update.toString().contains("$max") && update.toString().contains("$subtract")) {
@@ -178,7 +184,7 @@ class PostExpirationServiceTest {
         });
     var service = new PostExpirationService(
         postRepository,
-        new dev.christopherbell.post.expiration.MongoPostExpirationStore(factory),
+        new MongoPostExpirationStore(factory),
         Clock.fixed(changedOn, ZoneOffset.UTC),
         true);
 
@@ -186,6 +192,6 @@ class PostExpirationServiceTest {
 
     verify(mongo, times(1)).findAndModify(
         any(Query.class), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
-        eq(org.bson.Document.class), eq("content"));
+        eq(Document.class), eq("content"));
   }
 }

@@ -3,6 +3,7 @@ package dev.christopherbell.post;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import dev.christopherbell.post.preview.LinkPreviewFetchException;
 import dev.christopherbell.post.preview.PostLinkPreviewDestinationPolicy;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -10,6 +11,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class PostLinkPreviewDestinationPolicyTest {
@@ -82,7 +84,7 @@ class PostLinkPreviewDestinationPolicyTest {
       assertThatThrownBy(() -> policy.requirePublic(uri))
           .isInstanceOf(IllegalArgumentException.class);
     }
-    org.assertj.core.api.Assertions.assertThat(resolutions).hasValue(0);
+    Assertions.assertThat(resolutions).hasValue(0);
   }
 
   @Test
@@ -95,12 +97,12 @@ class PostLinkPreviewDestinationPolicyTest {
     var approved = policy.resolveApproved(uri, Duration.ofSeconds(1));
 
     assertThatCode(() -> approved.remoteAddress().getAddress()).doesNotThrowAnyException();
-    org.assertj.core.api.Assertions.assertThat(approved.uri()).isEqualTo(uri);
-    org.assertj.core.api.Assertions.assertThat(approved.originalHost()).isEqualTo("public.example");
-    org.assertj.core.api.Assertions.assertThat(approved.approvedAddresses())
+    Assertions.assertThat(approved.uri()).isEqualTo(uri);
+    Assertions.assertThat(approved.originalHost()).isEqualTo("public.example");
+    Assertions.assertThat(approved.approvedAddresses())
         .containsExactlyInAnyOrder(first, second)
         .contains(approved.remoteAddress().getAddress());
-    org.assertj.core.api.Assertions.assertThat(approved.remoteAddress().getPort()).isEqualTo(443);
+    Assertions.assertThat(approved.remoteAddress().getPort()).isEqualTo(443);
   }
 
   @Test
@@ -117,10 +119,10 @@ class PostLinkPreviewDestinationPolicyTest {
 
     assertThatThrownBy(() -> policy.resolveApproved(
         URI.create("https://slow-dns.example/"), Duration.ofMillis(50)))
-        .isInstanceOf(dev.christopherbell.post.preview.LinkPreviewFetchException.class)
+        .isInstanceOf(LinkPreviewFetchException.class)
         .extracting("category")
         .isEqualTo("TIMEOUT");
-    org.assertj.core.api.Assertions.assertThat(Duration.ofNanos(System.nanoTime() - started))
+    Assertions.assertThat(Duration.ofNanos(System.nanoTime() - started))
         .isLessThan(Duration.ofSeconds(1));
   }
 

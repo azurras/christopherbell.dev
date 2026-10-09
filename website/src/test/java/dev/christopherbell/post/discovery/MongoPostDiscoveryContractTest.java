@@ -3,6 +3,7 @@ package dev.christopherbell.post.discovery;
 import com.mongodb.ConnectionString;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.client.model.Filters;
 import dev.christopherbell.account.MongoAccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory;
@@ -33,7 +34,7 @@ class MongoPostDiscoveryContractTest implements PostDiscoveryParityContract {
     client = MongoClients.create(connection);
     var mongo = new MongoTemplate(client, "test");
     mongo.getCollection("content").deleteMany(
-        com.mongodb.client.model.Filters.eq("_kind", "post"));
+        Filters.eq("_kind", "post"));
     var factory = DomainMongoOperationsTestFactory.createForDisposableMongo(mongo);
     accounts = new MongoAccountRepository(factory);
     posts = MongoPostRepositoryTestFactory.create(factory);
