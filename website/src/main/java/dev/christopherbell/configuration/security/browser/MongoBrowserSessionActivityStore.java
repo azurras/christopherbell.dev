@@ -1,9 +1,8 @@
 package dev.christopherbell.configuration.security.browser;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import java.time.Instant;
 import java.util.Optional;
 import org.springframework.data.mongodb.core.query.Criteria;
