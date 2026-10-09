@@ -61,12 +61,9 @@ public final class FederationSecretApplicationContextInitializer
       secret = resolveOrCreate(Path.of(configuredPath), allowAlternatePath);
       var encoded = Base64.getEncoder().encodeToString(secret);
       environment.getPropertySources().addFirst(new SecretPropertySource(encoded));
+    } catch (InvalidSecretFileException invalid) {
+      throw invalid;
     } catch (RuntimeException | IOException failure) {
-      if (failure instanceof IllegalStateException stateFailure
-          && stateFailure.getMessage() != null
-          && stateFailure.getMessage().contains(SECRET_FILE_PROPERTY)) {
-        throw stateFailure;
-      }
       throw invalidSecretFile(failure);
     } finally {
       if (secret != null) {
@@ -144,11 +141,18 @@ public final class FederationSecretApplicationContextInitializer
     }
   }
 
-  private static IllegalStateException invalidSecretFile(Throwable cause) {
-    return new IllegalStateException(
-        "Invalid " + SECRET_FILE_PROPERTY
-            + ": require an existing protected parent and one regular 32-byte file.",
-        cause);
+  private static InvalidSecretFileException invalidSecretFile(Throwable cause) {
+    return new InvalidSecretFileException(cause);
+  }
+
+  /** The secret file is missing, misplaced or malformed; already explains itself, so it is never rewrapped. */
+  private static final class InvalidSecretFileException extends IllegalStateException {
+    private InvalidSecretFileException(Throwable cause) {
+      super(
+          "Invalid " + SECRET_FILE_PROPERTY
+              + ": require an existing protected parent and one regular 32-byte file.",
+          cause);
+    }
   }
 
   private static final class SecretPropertySource extends PropertySource<String> {
