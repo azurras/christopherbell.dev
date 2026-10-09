@@ -98,7 +98,7 @@ public final class RateLimitBucketStore {
     }
     try {
       return duration.toNanos();
-    } catch (ArithmeticException ignored) {
+    } catch (ArithmeticException overflow) {
       return Long.MAX_VALUE;
     }
   }
@@ -106,7 +106,7 @@ public final class RateLimitBucketStore {
   private long saturatingAdd(long left, long right) {
     try {
       return Math.addExact(left, right);
-    } catch (ArithmeticException ignored) {
+    } catch (ArithmeticException overflow) {
       return Long.MAX_VALUE;
     }
   }

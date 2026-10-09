@@ -1,6 +1,5 @@
 package dev.christopherbell.configuration.filter;
 
-import dev.christopherbell.configuration.ClientIpProperties;
 import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.configuration.RateLimitProperties;
 import io.github.bucket4j.Bandwidth;
@@ -39,21 +38,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
   private final RateLimitBucketStore buckets;
   private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
-  /** Creates a filter with repository defaults. */
-  public RateLimitFilter() {
-    this(
-        null,
-        new ClientIpResolver(new ClientIpProperties()),
-        new RateLimitProperties(),
-        new ApiErrorResponseWriter(new ObjectMapper()),
-        Clock.systemUTC());
-  }
-
-  /** Creates a filter with default rules and shared client-IP resolution. */
-  public RateLimitFilter(ClientIpResolver clientIpResolver) {
-    this(clientIpResolver, new RateLimitProperties());
-  }
-
   /** Creates a filter with configured endpoint-aware limits. */
   public RateLimitFilter(ClientIpResolver clientIpResolver, RateLimitProperties properties) {
     this(
@@ -71,11 +55,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
       Clock clock
   ) {
     this(null, clientIpResolver, properties, errors, clock);
-  }
-
-  /** Creates a filter with a custom bucket supplier for focused tests. */
-  public RateLimitFilter(Supplier<Bucket> bucketSupplier) {
-    this(bucketSupplier, new ClientIpResolver(new ClientIpProperties()));
   }
 
   /** Creates a filter with a custom bucket supplier and client-IP resolver for focused tests. */
@@ -157,8 +136,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         return new MatchedRule(index, rule);
       }
     }
-    return new MatchedRule(-1, new RateLimitProperties.Rule(
-        "default", 10_000, Duration.ofMinutes(1), List.of(), List.of("/**")));
+    return new MatchedRule(-1, new RateLimitProperties.Rule());
   }
 
   private List<RateLimitProperties.Rule> rules() {
@@ -216,7 +194,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
   private long saturatingAdd(long left, long right) {
     try {
       return Math.addExact(left, right);
-    } catch (ArithmeticException ignored) {
+    } catch (ArithmeticException overflow) {
       return right >= 0 ? Long.MAX_VALUE : Long.MIN_VALUE;
     }
   }
