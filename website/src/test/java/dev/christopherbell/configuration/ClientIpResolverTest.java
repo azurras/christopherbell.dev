@@ -3,6 +3,7 @@ package dev.christopherbell.configuration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 
@@ -20,7 +21,7 @@ class ClientIpResolverTest {
   @Test
   void resolveClientIp_whenForwardedForFromTrustedRemote_usesFirstForwardedAddress() {
     var properties = new ClientIpProperties();
-    properties.setTrustedProxies(java.util.List.of("10.0.0.1"));
+    properties.setTrustedProxies(List.of("10.0.0.1"));
     var resolver = new ClientIpResolver(properties);
     var request = request("10.0.0.1", "203.0.113.10, 10.0.0.1");
 
@@ -30,7 +31,7 @@ class ClientIpResolverTest {
   @Test
   void resolveClientIp_whenTrustedProxySendsBlankForwardedFor_usesRemoteAddress() {
     var properties = new ClientIpProperties();
-    properties.setTrustedProxies(java.util.List.of("10.0.0.1"));
+    properties.setTrustedProxies(List.of("10.0.0.1"));
     var resolver = new ClientIpResolver(properties);
     var request = request("10.0.0.1", " ");
 
@@ -40,7 +41,7 @@ class ClientIpResolverTest {
   @Test
   void constructor_whenTrustedProxyCidrIsInvalid_failsStartup() {
     var properties = new ClientIpProperties();
-    properties.setTrustedProxies(java.util.List.of("10.0.0.1/99"));
+    properties.setTrustedProxies(List.of("10.0.0.1/99"));
 
     assertThrows(IllegalArgumentException.class, () -> new ClientIpResolver(properties));
   }
@@ -48,7 +49,7 @@ class ClientIpResolverTest {
   @Test
   void constructor_whenIpv4UsesAmbiguousShorthand_failsStartup() {
     var properties = new ClientIpProperties();
-    properties.setTrustedProxies(java.util.List.of("127.1/32"));
+    properties.setTrustedProxies(List.of("127.1/32"));
 
     assertThrows(IllegalArgumentException.class, () -> new ClientIpResolver(properties));
   }
@@ -56,7 +57,7 @@ class ClientIpResolverTest {
   @Test
   void resolveClientIp_walksTrustedChainFromNearestHopAndIgnoresSpoofedPrefix() {
     var properties = new ClientIpProperties();
-    properties.setTrustedProxies(java.util.List.of("127.0.0.1/32", "10.0.0.0/8"));
+    properties.setTrustedProxies(List.of("127.0.0.1/32", "10.0.0.0/8"));
     var resolver = new ClientIpResolver(properties);
     var request = request(
         "127.0.0.1",
@@ -68,7 +69,7 @@ class ClientIpResolverTest {
   @Test
   void resolveClientIp_supportsIpv6LoopbackTunnelHop() {
     var properties = new ClientIpProperties();
-    properties.setTrustedProxies(java.util.List.of("::1/128"));
+    properties.setTrustedProxies(List.of("::1/128"));
     var resolver = new ClientIpResolver(properties);
     var request = request("0:0:0:0:0:0:0:1", "2001:db8::42");
 
