@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -35,7 +36,7 @@ class MigrationStateStoreTest {
       TestPropertyValues.of("app.persistence.backend=mongodb").applyTo(context);
       context.registerBean(
           DomainMongoOperationsFactory.class,
-          () -> org.mockito.Mockito.mock(DomainMongoOperationsFactory.class));
+          () -> mock(DomainMongoOperationsFactory.class));
       context.register(MigrationStateStore.class);
 
       context.refresh();

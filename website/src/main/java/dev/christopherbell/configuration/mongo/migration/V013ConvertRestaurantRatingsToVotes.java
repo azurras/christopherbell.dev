@@ -19,9 +19,20 @@ public final class V013ConvertRestaurantRatingsToVotes implements ApplicationMig
   private static final String CHECKSUM =
       "c10c2769b37044d866224770f7fb8b0877e02c2457c53d33ee25eeb879ab86f7";
 
-  @Override public String id() { return "013-convert-restaurant-ratings-to-votes"; }
-  @Override public String checksum() { return CHECKSUM; }
-  @Override public String description() { return "Convert WFL 1-5 ratings to binary votes"; }
+  @Override
+  public String id() {
+    return "013-convert-restaurant-ratings-to-votes";
+  }
+
+  @Override
+  public String checksum() {
+    return CHECKSUM;
+  }
+
+  @Override
+  public String description() {
+    return "Convert WFL 1-5 ratings to binary votes";
+  }
 
   @Override
   public void apply(MongoTemplate mongo) {

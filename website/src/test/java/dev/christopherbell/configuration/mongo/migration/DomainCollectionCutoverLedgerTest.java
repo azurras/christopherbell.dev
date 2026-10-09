@@ -83,7 +83,7 @@ class DomainCollectionCutoverLedgerTest {
   @Test
   void rejectsExtraReorderedAndMistypedPayloadFields() {
     var extra = envelope("TARGET_ACTIVE", true, DomainCollectionManifest.DIGEST);
-    extra.get("payload", Document.class).append("publicationOperations", java.util.List.of());
+    extra.get("payload", Document.class).append("publicationOperations", List.of());
     var reordered = envelope("TARGET_ACTIVE", true, DomainCollectionManifest.DIGEST);
     var payload = reordered.get("payload", Document.class);
     var state = payload.remove("state");

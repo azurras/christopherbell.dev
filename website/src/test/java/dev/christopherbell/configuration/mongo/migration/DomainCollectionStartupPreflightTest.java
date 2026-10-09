@@ -1,6 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,7 +23,7 @@ class DomainCollectionStartupPreflightTest {
     preflight.requireReady();
     preflight.requireReady();
 
-    verify(ledger, org.mockito.Mockito.times(2)).requireTargetSchemaReady();
+    verify(ledger, times(2)).requireTargetSchemaReady();
   }
 
   @Test

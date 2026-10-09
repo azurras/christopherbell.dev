@@ -28,6 +28,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -244,7 +245,7 @@ class V014ConsolidateMusicRuntimeStateTest {
     verify(mongo, never()).findAll(Document.class, TARGET);
     verifyNoTargetInsert();
 
-    org.mockito.Mockito.reset(mongo, targetCollection);
+    Mockito.reset(mongo, targetCollection);
     exposeRawTargetCollection();
     when(mongo.findAll(Document.class, LEGACY_QUEUE))
         .thenReturn(List.of(queueSource(4L).append("_id", "other")));
@@ -305,7 +306,7 @@ class V014ConsolidateMusicRuntimeStateTest {
   }
 
   private void assertInvalidDestination(List<Document> documents) {
-    org.mockito.Mockito.reset(mongo, targetCollection);
+    Mockito.reset(mongo, targetCollection);
     exposeRawTargetCollection();
     validSources(queueSource(4L), radioSource(9L));
     when(mongo.findAll(Document.class, TARGET)).thenReturn(documents);
@@ -319,7 +320,7 @@ class V014ConsolidateMusicRuntimeStateTest {
 
   private void assertInvalidMembership(
       List<Document> queues, List<Document> radios, List<Document> targets) {
-    org.mockito.Mockito.reset(mongo, targetCollection);
+    Mockito.reset(mongo, targetCollection);
     exposeRawTargetCollection();
     sources(queues, radios);
     when(mongo.findAll(Document.class, TARGET)).thenReturn(targets);

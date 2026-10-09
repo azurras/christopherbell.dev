@@ -7,6 +7,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import org.bson.Document;
@@ -43,7 +44,7 @@ class V011HardenWhatsForLunchDataTest {
                 .append("address", new Document("city", " Austin ").append("state", " TX "))),
             List.of());
 
-    new V011HardenWhatsForLunchData().apply(mongo);
+    new V011HardenWhatsForLunchData(Clock.systemUTC()).apply(mongo);
 
     var sessionUpdate = ArgumentCaptor.forClass(UpdateDefinition.class);
     verify(mongo).updateFirst(any(Query.class), sessionUpdate.capture(),

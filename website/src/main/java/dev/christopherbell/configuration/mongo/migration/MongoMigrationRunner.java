@@ -63,20 +63,24 @@ public class MongoMigrationRunner implements InitializingBean {
 
   private void applyIfPending(
       ApplicationMigration migration, String ownerToken, Instant timestamp) {
-    var existing = state.find(migration.id());
-    if (existing.isPresent()) {
-      var record = existing.orElseThrow();
-      if (!migration.checksum().equals(record.getChecksum())) {
-        throw new IllegalStateException(
-            "Migration " + migration.id() + " checksum does not match its durable record.");
-      }
-      if (record.getStatus() == MigrationStatus.APPLIED) {
-        return;
-      }
+    state.find(migration.id()).ifPresentOrElse(
+        record -> requireApplied(migration, record),
+        () -> apply(migration, ownerToken, timestamp));
+  }
+
+  /** A recorded migration must match its checksum and have finished; it is never rerun. */
+  private static void requireApplied(ApplicationMigration migration, MigrationRecord record) {
+    if (!migration.checksum().equals(record.getChecksum())) {
+      throw new IllegalStateException(
+          "Migration " + migration.id() + " checksum does not match its durable record.");
+    }
+    if (record.getStatus() != MigrationStatus.APPLIED) {
       throw new IllegalStateException(
           "Migration " + migration.id() + " has an incomplete durable record.");
     }
+  }
 
+  private void apply(ApplicationMigration migration, String ownerToken, Instant timestamp) {
     state.start(migration, ownerToken, timestamp);
     try {
       migration.apply(mongo);
@@ -84,7 +88,7 @@ public class MongoMigrationRunner implements InitializingBean {
     } catch (RuntimeException failure) {
       try {
         state.fail(migration.id(), ownerToken, Instant.now(clock), "MIGRATION_FAILED");
-      } catch (RuntimeException ignored) {
+      } catch (RuntimeException failureNotRecorded) {
         // The startup failure below remains intentionally redacted.
       }
       throw new IllegalStateException("Migration " + migration.id() + " failed.");

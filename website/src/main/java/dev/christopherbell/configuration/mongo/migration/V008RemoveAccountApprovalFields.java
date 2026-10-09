@@ -1,7 +1,6 @@
 package dev.christopherbell.configuration.mongo.migration;
 
 import dev.christopherbell.configuration.persistence.MongoBackendComponent;
-
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;

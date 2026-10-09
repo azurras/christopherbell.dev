@@ -1,7 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
-import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 /** Blocks a target-schema release until the exact domain cutover is active. */

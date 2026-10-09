@@ -2,11 +2,13 @@ package dev.christopherbell.configuration.mongo.migration;
 
 import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantWebsiteUrlPolicy;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Consumer;
 import org.bson.Document;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -23,6 +25,17 @@ public final class V011HardenWhatsForLunchData implements ApplicationMigration {
   private static final Duration ARCHIVE_LIFETIME = Duration.ofDays(30);
   private static final String CHECKSUM =
       "73e242e0b87a60dea69ee9eaf7e3290c014891b5a306ac4d6c4df39c53fe2f2a";
+
+  private final Clock clock;
+
+  /**
+   * Creates the migration with the clock that dates sessions recorded without any timestamp.
+   *
+   * @param clock the application clock
+   */
+  public V011HardenWhatsForLunchData(Clock clock) {
+    this.clock = clock;
+  }
 
   @Override
   public String id() {
@@ -78,13 +91,13 @@ public final class V011HardenWhatsForLunchData implements ApplicationMigration {
         .named("restaurant_dedupe_key_member"));
   }
 
-  private static void backfillSession(MongoTemplate mongo, Document session) {
+  private void backfillSession(MongoTemplate mongo, Document session) {
     var createdOn = instant(session.get("createdOn"));
     if (createdOn == null) {
       createdOn = instant(session.get("lastUpdatedOn"));
     }
     if (createdOn == null) {
-      createdOn = Instant.now();
+      createdOn = clock.instant();
     }
     var activeUntil = instant(session.get("activeUntil"));
     if (activeUntil == null) {
@@ -129,7 +142,7 @@ public final class V011HardenWhatsForLunchData implements ApplicationMigration {
   private static void forEachBatch(
       MongoTemplate mongo,
       String collection,
-      java.util.function.Consumer<Document> consumer
+      Consumer<Document> consumer
   ) {
     String lastId = null;
     while (true) {
