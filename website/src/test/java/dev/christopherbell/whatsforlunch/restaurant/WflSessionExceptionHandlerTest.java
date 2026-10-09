@@ -2,6 +2,7 @@ package dev.christopherbell.whatsforlunch.restaurant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.christopherbell.whatsforlunch.restaurant.session.WflSessionConflict;
 import dev.christopherbell.whatsforlunch.restaurant.session.WflSessionConflictException;
 import dev.christopherbell.whatsforlunch.restaurant.session.WflSessionExceptionHandler;
 import org.junit.jupiter.api.Test;
@@ -12,7 +13,7 @@ class WflSessionExceptionHandlerTest {
 
   @Test
   void returnsStableConflictEnvelopeWithoutPersistenceDetails() {
-    var response = handler.handleConflict(new WflSessionConflictException("WFL_SESSION_FULL"));
+    var response = handler.handleConflict(new WflSessionConflictException(WflSessionConflict.FULL));
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
     assertThat(response.getBody()).isNotNull();

@@ -22,28 +22,29 @@ import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRestaurantsRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionVoteRequest;
-import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.session.WflSessionConflictException;
 import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionMutationStore;
 import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionRepository;
 import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionService;
+import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 
 @ExtendWith(MockitoExtension.class)
 class WhatsForLunchSessionServiceTest {
@@ -107,7 +108,7 @@ class WhatsForLunchSessionServiceTest {
     when(permissionService.getSelfId()).thenReturn("owner-id");
     when(accountRepository.findById("owner-id")).thenReturn(Optional.of(account("owner-id", "owner")));
     stubRestaurants(ORIGINAL_IDS);
-    var invitees = java.util.stream.IntStream.range(0, 20)
+    var invitees = IntStream.range(0, 20)
         .mapToObj(index -> "member" + index)
         .toList();
 
@@ -209,7 +210,7 @@ class WhatsForLunchSessionServiceTest {
       throws Exception {
     when(permissionService.getSelfId()).thenReturn("owner-id");
     when(accountRepository.findById("owner-id")).thenReturn(Optional.of(account("owner-id", "owner")));
-    var sessions = java.util.stream.IntStream.range(0, sessionCount)
+    var sessions = IntStream.range(0, sessionCount)
         .mapToObj(index -> {
           var value = session();
           value.setId("session-" + index);
