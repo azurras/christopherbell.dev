@@ -95,12 +95,7 @@ public class FederationDiscoveryService {
   }
 
   public ActivityPubActor actor(String username) throws ResourceNotFoundException {
-    requireDiscovery();
-    if (username == null || !USERNAME.matcher(username).matches()) {
-      throw notFound();
-    }
-    Account account = findDiscoverableAccount(username);
-    return actorForAccount(account);
+    return actorForAccount(actorAccount(username));
   }
 
   Account actorAccount(String username) throws ResourceNotFoundException {

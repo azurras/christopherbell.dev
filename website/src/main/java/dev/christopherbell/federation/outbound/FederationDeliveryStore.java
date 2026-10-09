@@ -6,7 +6,7 @@ import java.util.Optional;
 
 /** Owns durable scan, idempotent enqueue, claim, and exact-owner delivery transitions. */
 interface FederationDeliveryStore {
-  FederationScanCursor loadCursor();
+  Optional<FederationScanCursor> loadCursor();
 
   void enqueueIfAbsent(String postId, String accountId, ControlledPeer peer, Instant now);
 

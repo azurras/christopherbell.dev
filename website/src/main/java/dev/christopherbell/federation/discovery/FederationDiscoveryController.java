@@ -67,7 +67,10 @@ public class FederationDiscoveryController {
       @RequestParam(defaultValue = "") String cursor,
       @RequestParam(defaultValue = "20") int size
   ) throws ResourceNotFoundException, InvalidRequestException {
-    return publicNoStore(collections.outbox(username, page, cursor, size), ACTIVITY_JSON);
+    var outbox = page
+        ? collections.outboxPage(username, cursor, size)
+        : collections.outbox(username);
+    return publicNoStore(outbox, ACTIVITY_JSON);
   }
 
   @GetMapping(value = "/ap/users/{username}/followers", produces = "application/activity+json")

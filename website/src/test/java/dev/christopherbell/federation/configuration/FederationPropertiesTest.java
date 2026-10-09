@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
@@ -103,7 +104,7 @@ class FederationPropertiesTest {
         Base64.getEncoder().encodeToString(new byte[32]),
         outbound);
 
-    org.junit.jupiter.api.Assertions.assertSame(outbound, properties.outbound());
+    assertThat(properties.outbound()).isSameAs(outbound);
   }
 
   @Test
@@ -129,7 +130,7 @@ class FederationPropertiesTest {
             var sources = new YamlPropertySourceLoader().load(
                 "application", new ClassPathResource("application.yml"));
             sources.forEach(context.getEnvironment().getPropertySources()::addLast);
-          } catch (java.io.IOException failure) {
+          } catch (IOException failure) {
             throw new IllegalStateException("Could not load application.yml", failure);
           }
         })

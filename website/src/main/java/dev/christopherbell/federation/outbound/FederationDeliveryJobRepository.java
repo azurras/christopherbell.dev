@@ -1,16 +1,16 @@
 package dev.christopherbell.federation.outbound;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
-import dev.christopherbell.federation.configuration.FederationOutboundProperties.ControlledPeer;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+import dev.christopherbell.federation.configuration.FederationOutboundProperties.ControlledPeer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Optional;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -30,21 +30,23 @@ class FederationDeliveryJobRepository implements FederationDeliveryStore {
   }
 
   @Override
-  public FederationScanCursor loadCursor() {
+  public Optional<FederationScanCursor> loadCursor() {
     return scans.findById(FederationScanState.OUTBOUND_CREATE)
-        .map(FederationScanState::cursor).orElse(null);
+        .map(FederationScanState::cursor);
   }
 
   @Override
   public void enqueueIfAbsent(
       String postId, String accountId, ControlledPeer peer, Instant now) {
     String id = stableJobId(postId, peer.name());
-    if (jobs.findById(id).isPresent()) return;
+    if (jobs.findById(id).isPresent()) {
+      return;
+    }
     try {
       jobs.insert(new FederationDeliveryJob(id, postId, accountId, peer.name(),
           peer.inbox().toString(), FederationDeliveryState.PENDING, 0, now, null, null,
           null, null, now, now));
-    } catch (org.springframework.dao.DuplicateKeyException ignored) {
+    } catch (DuplicateKeyException ignored) {
       // A concurrent coordinator already created the same deterministic job.
     }
   }

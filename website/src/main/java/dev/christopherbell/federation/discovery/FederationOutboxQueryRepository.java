@@ -1,14 +1,14 @@
 package dev.christopherbell.federation.discovery;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.model.Post;
 import java.time.Instant;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -29,6 +29,7 @@ public class FederationOutboxQueryRepository implements FederationOutboxQueryPor
     this.cursors = cursors;
   }
 
+  @Override
   public FederationPage<FederationOutboxEntry> page(
       String accountId,
       Optional<StableCursor> cursor,
@@ -45,7 +46,7 @@ public class FederationOutboxQueryRepository implements FederationOutboxQueryPor
             new Sort.Order(Sort.Direction.DESC, "createdOn"),
             new Sort.Order(Sort.Direction.DESC, "id")))
         .limit(size + 1);
-    var loaded = mongo.find(query, org.springframework.data.domain.Pageable.unpaged());
+    var loaded = mongo.find(query, Pageable.unpaged());
     boolean hasNext = loaded.size() > size;
     var items = loaded.stream().limit(size).map(FederationOutboxQueryRepository::entry).toList();
     String nextCursor = null;
@@ -65,6 +66,7 @@ public class FederationOutboxQueryRepository implements FederationOutboxQueryPor
         post.getLastUpdatedOn());
   }
 
+  @Override
   public long count(String accountId, Instant now) {
     return mongo.count(new Query(activeOwned(accountId, now)));
   }

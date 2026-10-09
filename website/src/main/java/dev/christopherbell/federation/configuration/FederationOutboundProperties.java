@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 /** Bounded scheduling and allow-list settings for controlled ActivityPub delivery. */
@@ -79,7 +80,7 @@ public record FederationOutboundProperties(
   private static void requireBoundedPeerInbox(URI inbox, boolean developmentLoopbackEnabled) {
     String scheme = inbox.getScheme() == null
         ? ""
-        : inbox.getScheme().toLowerCase(java.util.Locale.ROOT);
+        : inbox.getScheme().toLowerCase(Locale.ROOT);
     boolean validHttps = "https".equals(scheme)
         && (inbox.getPort() == -1 || inbox.getPort() == 443);
     boolean validDevelopmentHttp = developmentLoopbackEnabled

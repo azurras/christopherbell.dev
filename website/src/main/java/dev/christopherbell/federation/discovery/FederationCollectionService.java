@@ -51,48 +51,68 @@ public class FederationCollectionService {
     this.activities = Objects.requireNonNull(activities, "activities");
   }
 
-  public ActivityPubOrderedCollection<ActivityPubCreate> outbox(
+  /** Returns the actor's outbox collection: its size and a link to its first page. */
+  public ActivityPubOrderedCollection<ActivityPubCreate> outbox(String username)
+      throws ResourceNotFoundException {
+    ActorOutbox outbox = actorOutbox(username);
+    return new ActivityPubOrderedCollection<>(
+        List.of(CONTEXT),
+        outbox.collectionId(),
+        "OrderedCollection",
+        outbox.totalItems(),
+        pageUrl(outbox.collectionId(), null),
+        null,
+        null,
+        null);
+  }
+
+  /** Returns one bounded page of the actor's outbox, starting after the given cursor. */
+  public ActivityPubOrderedCollection<ActivityPubCreate> outboxPage(
       String username,
-      boolean page,
       String cursor,
       int requestedSize
   ) throws ResourceNotFoundException, InvalidRequestException {
-    Account account = discovery.actorAccount(username);
-    String actorId = discovery.actorForAccount(account).id();
-    String collectionId = actorId + "/outbox";
-    Instant now = Instant.now(clock);
-    long totalItems = outboxQueries.count(account.getId(), now);
-    if (!page) {
-      return new ActivityPubOrderedCollection<>(
-          List.of(CONTEXT),
-          collectionId,
-          "OrderedCollection",
-          totalItems,
-          pageUrl(collectionId, null),
-          null,
-          null,
-          null);
-    }
-
+    ActorOutbox outbox = actorOutbox(username);
     int size = Math.max(1, Math.min(requestedSize, MAX_PAGE_SIZE));
-    var loaded = outboxQueries.page(account.getId(), cursors.decode(cursor), size, now);
+    var loaded = outboxQueries.page(
+        outbox.accountId(), cursors.decode(cursor), size, outbox.countedOn());
     var items = loaded.items().stream()
-        .map(post -> activities.create(actorId, post))
+        .map(post -> activities.create(outbox.actorId(), post))
         .toList();
-    String currentPage = pageUrl(collectionId, cursor == null || cursor.isBlank() ? null : cursor);
+    String currentPage = pageUrl(
+        outbox.collectionId(), cursor == null || cursor.isBlank() ? null : cursor);
     String next = loaded.nextCursor() == null
         ? null
-        : pageUrl(collectionId, loaded.nextCursor());
+        : pageUrl(outbox.collectionId(), loaded.nextCursor());
     return new ActivityPubOrderedCollection<>(
         List.of(CONTEXT),
         currentPage,
         "OrderedCollectionPage",
-        totalItems,
+        outbox.totalItems(),
         null,
-        collectionId,
+        outbox.collectionId(),
         items,
         next);
   }
+
+  private ActorOutbox actorOutbox(String username) throws ResourceNotFoundException {
+    Account account = discovery.actorAccount(username);
+    String actorId = discovery.actorForAccount(account).id();
+    Instant countedOn = Instant.now(clock);
+    return new ActorOutbox(
+        account.getId(),
+        actorId,
+        actorId + "/outbox",
+        outboxQueries.count(account.getId(), countedOn),
+        countedOn);
+  }
+
+  private record ActorOutbox(
+      String accountId,
+      String actorId,
+      String collectionId,
+      long totalItems,
+      Instant countedOn) {}
 
   public ActivityPubOrderedCollection<String> following(String username)
       throws ResourceNotFoundException {

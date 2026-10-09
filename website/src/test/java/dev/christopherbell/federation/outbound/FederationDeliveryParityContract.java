@@ -21,7 +21,7 @@ interface FederationDeliveryParityContract {
     var now = Instant.now();
     var cursor = new FederationScanCursor(deliveryPost().getCreatedOn(), deliveryPost().getId());
     deliveries().saveCursor(cursor, now);
-    assertThat(deliveries().loadCursor()).isEqualTo(cursor);
+    assertThat(deliveries().loadCursor()).contains(cursor);
 
     var peer = new ControlledPeer("parity-" + RUN, URI.create("https://peer.example/inbox"));
     deliveries().enqueueIfAbsent(
