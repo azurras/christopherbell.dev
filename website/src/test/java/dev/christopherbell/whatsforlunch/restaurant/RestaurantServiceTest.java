@@ -7,21 +7,22 @@ import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.libs.lease.CollectorLeaseGuard;
 import dev.christopherbell.libs.lease.LeaseOwnershipLostException;
 import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
-import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
+import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
+import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportLeaseGuard;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportSnapshot;
-import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeConfirmation;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeApplyRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeConfirmation;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVote;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteValue;
@@ -40,6 +41,7 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -52,28 +54,30 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.web.server.ResponseStatusException;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 /**
@@ -102,6 +106,8 @@ public class RestaurantServiceTest {
 
   @BeforeEach
   void setUpWeightedSelectionDefaults() {
+    // The service reads today's date from the application clock; tests that need a fixed time override this.
+    lenient().when(clock.instant()).thenAnswer(invocation -> Instant.now());
     lenient().when(restaurantVoteQueryRepository.summariesForRestaurants(any()))
         .thenReturn(List.of());
     lenient().when(restaurantSelector.select(any(), any(), anyInt()))
@@ -179,7 +185,7 @@ public class RestaurantServiceTest {
         List.of(imported),
         new RestaurantImportPreviewCounts(1, 0, 0, 0, 0, 1),
         List.of());
-    var guard = org.mockito.Mockito.mock(RestaurantImportLeaseGuard.class);
+    var guard = mock(RestaurantImportLeaseGuard.class);
 
     var result = restaurantService.applyPreparedImport(snapshot, guard);
 
@@ -258,7 +264,7 @@ public class RestaurantServiceTest {
     var restaurant = RestaurantStub.getRestaurantStub(RestaurantStub.ID);
     var failure = new DataAccessResourceFailureException("database-secret");
     when(restaurantRepository.findById(RestaurantStub.ID)).thenReturn(Optional.of(restaurant));
-    org.mockito.Mockito.doThrow(failure).when(restaurantRepository).delete(restaurant);
+    doThrow(failure).when(restaurantRepository).delete(restaurant);
 
     var exception = assertThrows(
         ServiceUnavailableException.class,
@@ -273,7 +279,7 @@ public class RestaurantServiceTest {
     var restaurant = RestaurantStub.getRestaurantStub(RestaurantStub.ID);
     var failure = new DataAccessResourceFailureException("database-secret");
     when(restaurantRepository.findById(RestaurantStub.ID)).thenReturn(Optional.of(restaurant));
-    org.mockito.Mockito.doThrow(failure).when(restaurantRepository).delete(restaurant);
+    doThrow(failure).when(restaurantRepository).delete(restaurant);
 
     var exception = assertThrows(
         ServiceUnavailableException.class,
@@ -285,7 +291,7 @@ public class RestaurantServiceTest {
   @Test
   @DisplayName("Translates update persistence failure into ServiceUnavailableException")
   void updateRestaurantWhenDataAccessFailsPreservesCauseInNamedException() {
-    var request = dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest.builder()
+    var request = RestaurantUpdateRequest.builder()
         .id(RestaurantStub.ID)
         .name(RestaurantStub.NAME)
         .address(RestaurantStub.getAddressStub())
@@ -680,7 +686,7 @@ public class RestaurantServiceTest {
   @DisplayName("Preferences: save normalizes and deduplicates filters")
   public void testUpdateMyPreferences_NormalizesAndSavesCuisines() throws Exception {
     when(permissionService.getSelfId()).thenReturn("account-1");
-    when(whatsForLunchPreferenceRepository.save(org.mockito.ArgumentMatchers.any(WhatsForLunchPreference.class)))
+    when(whatsForLunchPreferenceRepository.save(any(WhatsForLunchPreference.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     var result = restaurantService.updateMyPreferences(
@@ -688,7 +694,7 @@ public class RestaurantServiceTest {
 
     assertEquals(List.of("mexican", "bbq", "thai"), result.cuisines());
     assertEquals(20, result.radiusMiles());
-    verify(whatsForLunchPreferenceRepository).save(org.mockito.ArgumentMatchers.argThat(preference ->
+    verify(whatsForLunchPreferenceRepository).save(argThat(preference ->
         "account-1".equals(preference.getAccountId())
             && preference.getCuisines().equals(List.of("mexican", "bbq", "thai"))
             && Integer.valueOf(20).equals(preference.getRadiusMiles())));
@@ -697,7 +703,7 @@ public class RestaurantServiceTest {
   @Test
   @DisplayName("Preferences: rejects too many cuisine filters")
   public void testUpdateMyPreferences_whenTooManyFilters_ThrowsInvalidRequestException() {
-    var cuisines = java.util.stream.IntStream.range(0, 21)
+    var cuisines = IntStream.range(0, 21)
         .mapToObj(index -> "cuisine-" + index)
         .toList();
     when(permissionService.getSelfId()).thenReturn("account-1");
@@ -976,7 +982,7 @@ public class RestaurantServiceTest {
 
     when(restaurantRepository.findAll())
         .thenReturn(List.of(austin, pflugerville, roundRock, miami, oklahoma));
-    when(dailyLunchPicksRepository.save(org.mockito.ArgumentMatchers.any(DailyLunchPicks.class)))
+    when(dailyLunchPicksRepository.save(any(DailyLunchPicks.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     var pick = restaurantService.refreshDailyLunchPicks(LocalDate.of(2026, 5, 17));
@@ -985,7 +991,7 @@ public class RestaurantServiceTest {
     assertEquals(3, pick.getRestaurantIds().size());
     assertTrue(pick.getRestaurantIds().containsAll(List.of("austin", "pflugerville", "round-rock")));
     verify(restaurantRepository).findAll();
-    verify(dailyLunchPicksRepository).save(org.mockito.ArgumentMatchers.any(DailyLunchPicks.class));
+    verify(dailyLunchPicksRepository).save(any(DailyLunchPicks.class));
   }
 
   @Test
@@ -1036,8 +1042,8 @@ public class RestaurantServiceTest {
   @DisplayName("Scheduled daily picks: lost ownership prevents the pick write")
   void setRestaurantOfTheDay_whenOwnershipIsLost_doesNotSaveThePick() throws Exception {
     wflProperties.getRestaurantOfTheDay().setEnabled(true);
-    var guard = org.mockito.Mockito.mock(CollectorLeaseGuard.class);
-    org.mockito.Mockito.doThrow(new LeaseOwnershipLostException("wfl-daily-picks"))
+    var guard = mock(CollectorLeaseGuard.class);
+    doThrow(new LeaseOwnershipLostException("wfl-daily-picks"))
         .when(guard).verifyHeld();
     when(scheduledCollectors.run(
         eq("wfl-daily-picks"), eq(Duration.ofMinutes(10)), any()))
@@ -1069,7 +1075,7 @@ public class RestaurantServiceTest {
     fastFood.setSourceAmenity("fast_food");
 
     when(restaurantRepository.findAll()).thenReturn(List.of(fastFood, bistro, diner));
-    when(dailyLunchPicksRepository.save(org.mockito.ArgumentMatchers.any(DailyLunchPicks.class)))
+    when(dailyLunchPicksRepository.save(any(DailyLunchPicks.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     var pick = restaurantService.refreshDailyLunchPicks(LocalDate.of(2026, 5, 17));
@@ -1077,7 +1083,7 @@ public class RestaurantServiceTest {
     assertEquals(3, pick.getRestaurantIds().size());
     assertTrue(pick.getRestaurantIds().containsAll(List.of("fast-food", "bistro", "diner")));
     verify(restaurantRepository).findAll();
-    verify(dailyLunchPicksRepository).save(org.mockito.ArgumentMatchers.any(DailyLunchPicks.class));
+    verify(dailyLunchPicksRepository).save(any(DailyLunchPicks.class));
   }
 
   @Test
@@ -1336,7 +1342,7 @@ public class RestaurantServiceTest {
   @DisplayName("Prepared import verifies lease before each write and after completion")
   public void testApplyPreparedImport_verifiesLeaseThroughoutMutation() throws Exception {
     var imported = RestaurantStub.getRestaurantStub("osm:node:lease");
-    var guard = org.mockito.Mockito.mock(RestaurantImportLeaseGuard.class);
+    var guard = mock(RestaurantImportLeaseGuard.class);
     when(restaurantRepository.findById(eq(imported.getId()))).thenReturn(Optional.empty());
     when(restaurantRepository.findByNormalizedName(eq("pflugerville taco house")))
         .thenReturn(Optional.empty());
