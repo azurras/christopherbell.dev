@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -13,6 +14,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -437,7 +439,7 @@ public final class DomainCollectionManifest {
     if (collection == null) {
       throw new IllegalStateException("Mongo index kind is not approved.");
     }
-    var keys = java.util.Arrays.stream(sourceKeys)
+    var keys = Arrays.stream(sourceKeys)
         .map(sourceKey -> new IndexKey(indexPath(sourceKey.path()), sourceKey.direction()))
         .toList();
     if (legacySparse && keys.size() != 1) {
@@ -526,7 +528,7 @@ public final class DomainCollectionManifest {
 
   private static <K> Map<K, KindDefinition> uniqueMap(
       List<KindDefinition> definitions,
-      java.util.function.Function<KindDefinition, K> key,
+      Function<KindDefinition, K> key,
       String label) {
     var result = new LinkedHashMap<K, KindDefinition>();
     for (var definition : definitions) {

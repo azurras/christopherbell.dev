@@ -8,13 +8,20 @@ import com.mongodb.ExplainVerbosity;
 import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.client.model.IndexOptions;
+import dev.christopherbell.notification.preference.NotificationPreference;
+import dev.christopherbell.report.model.PostReport;
+import dev.christopherbell.report.model.ReportStatus;
+import dev.christopherbell.report.model.ReportTargetType;
+import dev.christopherbell.report.model.ReportType;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.bson.Document;
 import org.bson.types.Decimal128;
 import org.bson.types.ObjectId;
@@ -22,32 +29,26 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.dao.OptimisticLockingFailureException;
-import org.springframework.data.auditing.IsNewAwareAuditingHandler;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
+import org.springframework.data.auditing.IsNewAwareAuditingHandler;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mapping.callback.EntityCallbacks;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
-import org.springframework.data.mongodb.core.mapping.event.AuditingEntityCallback;
+import org.springframework.data.mongodb.core.mapping.Field;
 import org.springframework.data.mongodb.core.mapping.event.AfterSaveCallback;
+import org.springframework.data.mongodb.core.mapping.event.AuditingEntityCallback;
 import org.springframework.data.mongodb.core.mapping.event.BeforeConvertCallback;
 import org.springframework.data.mongodb.core.mapping.event.BeforeSaveCallback;
-import org.springframework.data.mapping.callback.EntityCallbacks;
-import org.springframework.data.mongodb.core.mapping.Field;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
-import dev.christopherbell.notification.preference.NotificationPreference;
-import dev.christopherbell.report.model.PostReport;
-import dev.christopherbell.report.model.ReportStatus;
-import dev.christopherbell.report.model.ReportTargetType;
-import dev.christopherbell.report.model.ReportType;
-import java.time.Instant;
 
 @EnabledIfEnvironmentVariable(named = "DOMAIN_COLLECTION_TEST_URI", matches = ".+")
 class MongoKindScopedOperationsMongoTest {
@@ -94,7 +95,7 @@ class MongoKindScopedOperationsMongoTest {
         objectId, "object", 9L, Decimal128.parse("0.0000000000000001"), null);
     mongo.getCollection("content").createIndex(
         new Document("_kind", 1).append("payload.display_name", 1),
-        new com.mongodb.client.model.IndexOptions().name("kind_display_name"));
+        new IndexOptions().name("kind_display_name"));
 
     var insertedScalar = firstKind.insert(scalar);
     var insertedObject = firstKind.insert(object);
@@ -446,7 +447,7 @@ class MongoKindScopedOperationsMongoTest {
         .append("payload", new Document("id", "post-id")));
     mongo.getCollection("content").createIndex(
         new Document("_kind", 1).append("_id.legacyId", 1),
-        new com.mongodb.client.model.IndexOptions().name("kind_legacy_selector"));
+        new IndexOptions().name("kind_legacy_selector"));
     var lookup = new Document("$lookup", new Document("from", "content")
         .append("let", new Document("foreignId", "$visits"))
         .append("pipeline", List.of(new Document("$match", new Document(

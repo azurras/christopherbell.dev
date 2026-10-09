@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoTimeoutException;
 import com.mongodb.ServerAddress;
+import com.mongodb.client.result.UpdateResult;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.List;
@@ -36,7 +37,6 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.FindAndReplaceOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Collation;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.convert.DefaultMongoTypeMapper;
@@ -44,6 +44,7 @@ import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
 import org.springframework.data.mongodb.core.convert.NoOpDbRefResolver;
 import org.springframework.data.mongodb.core.mapping.Field;
 import org.springframework.data.mongodb.core.mapping.MongoMappingContext;
+import org.springframework.data.mongodb.core.query.Collation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -128,7 +129,7 @@ class MongoKindScopedOperationsTest {
   @Test
   void updateMapsQueryAndMutationFieldsWithoutExposingEnvelopeMetadata() {
     when(mongo.updateFirst(any(Query.class), any(Update.class), eq(Document.class), eq("content")))
-        .thenReturn(com.mongodb.client.result.UpdateResult.acknowledged(1, 1L, null));
+        .thenReturn(UpdateResult.acknowledged(1, 1L, null));
 
     operations.updateFirst(
         Query.query(Criteria.where("displayName").is("Ada")),
@@ -192,7 +193,7 @@ class MongoKindScopedOperationsTest {
   @Test
   void updateMultiScopesEveryMatchedDocumentToTheKind() {
     when(mongo.updateMulti(any(Query.class), any(Update.class), eq(Document.class), eq("content")))
-        .thenReturn(com.mongodb.client.result.UpdateResult.acknowledged(2, 2L, null));
+        .thenReturn(UpdateResult.acknowledged(2, 2L, null));
 
     operations.updateMulti(
         Query.query(Criteria.where("displayName").is("Ada")),

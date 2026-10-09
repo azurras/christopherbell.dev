@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import dev.christopherbell.sharedfolder.maintenance.MongoSharedFolderMaintenanceLeaseStore;
 import dev.christopherbell.sharedfolder.maintenance.SharedFolderMaintenanceLeaseStore;
@@ -43,7 +44,7 @@ class MongoBackendComponentContextTest {
     TestPropertyValues.of("spring.main.lazy-initialization=true").applyTo(context);
     context.registerBean(MongoTemplate.class, () -> {
       var mongo = mock(MongoTemplate.class);
-      org.mockito.Mockito.when(mongo.getConverter()).thenReturn(mock(MongoConverter.class));
+      when(mongo.getConverter()).thenReturn(mock(MongoConverter.class));
       return mongo;
     });
     context.registerBean(MongoLeaseStore.class, () -> mock(MongoLeaseStore.class));

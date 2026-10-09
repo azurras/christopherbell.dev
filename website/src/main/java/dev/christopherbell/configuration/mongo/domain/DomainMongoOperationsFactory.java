@@ -1,6 +1,7 @@
 package dev.christopherbell.configuration.mongo.domain;
 
 import dev.christopherbell.configuration.persistence.MongoBackendComponent;
+import java.util.Map;
 import java.util.Objects;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,13 +49,13 @@ public final class DomainMongoOperationsFactory {
   // Additive runtime approval is deliberately separate from the immutable cutover manifest.
   private static final String SURVIVE_WORLD_TYPE = "dev.christopherbell.survive.model.SurviveSavedWorld";
   private static final DomainDocumentKindRegistry SURVIVE_KINDS = DomainDocumentKindRegistry.of(
-      java.util.Map.of("survive_world", "application_runtime"));
+      Map.of("survive_world", "application_runtime"));
   private static final String MONITOR_WORKSPACE_TYPE =
       "dev.christopherbell.sitemonitor.model.MonitorWorkspace";
   private static final String MONITOR_SCHEDULE_TYPE =
       "dev.christopherbell.sitemonitor.model.MonitorSchedule";
   private static final DomainDocumentKindRegistry MONITOR_KINDS = DomainDocumentKindRegistry.of(
-      java.util.Map.of("site_monitor_workspace", "application_runtime",
+      Map.of("site_monitor_workspace", "application_runtime",
           "site_monitor_schedule", "application_runtime"));
 
   KindScopedMongoOperations<?> forExactKind(String kind) {
