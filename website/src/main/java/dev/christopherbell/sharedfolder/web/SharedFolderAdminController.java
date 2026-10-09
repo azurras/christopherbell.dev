@@ -17,6 +17,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Supplier;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
@@ -101,7 +102,7 @@ public class SharedFolderAdminController {
     return headers;
   }
 
-  private <T> T audited(String action, String resource, java.util.function.Supplier<T> operation) {
+  private <T> T audited(String action, String resource, Supplier<T> operation) {
     T result = operation.get();
     if (action.equals("AUDIT_BROWSE") || action.equals("RECYCLE_BROWSE")) {
       recorder.recordCurrent(action, resource, null, "accepted", null);

@@ -2,23 +2,24 @@ package dev.christopherbell.sharedfolder.web;
 
 import static dev.christopherbell.libs.api.APIVersion.V20260717;
 
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedFolderCreateFolderRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderDeleteRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderMoveRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderRenameRequest;
-import dev.christopherbell.sharedfolder.service.SharedFolderMutationService;
+import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
 import dev.christopherbell.sharedfolder.service.SharedFolderCatalogInvalidation;
 import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
-import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
-import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import dev.christopherbell.sharedfolder.service.SharedFolderMutationService;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadCompleteRequest;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadCreateRequest;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadService;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadStatus;
-import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import java.io.IOException;
+import java.util.function.Supplier;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -166,7 +167,7 @@ public class SharedFolderWriteController {
     return headers;
   }
 
-  private <T> T audited(String action, String resource, java.util.function.Supplier<T> operation) {
+  private <T> T audited(String action, String resource, Supplier<T> operation) {
     return operation.get();
   }
 }
