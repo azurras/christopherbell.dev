@@ -17,15 +17,21 @@ class MongoHiddenPostThreadRepository extends KindScopedRepositorySupport<Hidden
   MongoHiddenPostThreadRepository(DomainMongoOperationsFactory factory) {
     super(factory, HiddenPostThread.class);
   }
-  @Override public HiddenPostThread save(HiddenPostThread value) { return saveValue(value); }
-  @Override public Optional<HiddenPostThread> findByAccountIdAndRootPostId(
+  @Override
+  public HiddenPostThread save(HiddenPostThread value) {
+    return saveValue(value);
+  }
+  @Override
+  public Optional<HiddenPostThread> findByAccountIdAndRootPostId(
       String accountId, String rootId) {
     return findOne(Query.query(exact(accountId, rootId)));
   }
-  @Override public List<HiddenPostThread> findByAccountId(String accountId) {
+  @Override
+  public List<HiddenPostThread> findByAccountId(String accountId) {
     return find(Query.query(Criteria.where("accountId").is(accountId)));
   }
-  @Override public void deleteByAccountIdAndRootPostId(String accountId, String rootId) {
+  @Override
+  public void deleteByAccountIdAndRootPostId(String accountId, String rootId) {
     mongo.remove(Query.query(exact(accountId, rootId)));
   }
   private static Criteria exact(String accountId, String rootId) {

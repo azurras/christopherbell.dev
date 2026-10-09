@@ -73,10 +73,10 @@ public class PostLinkPreviewService {
   private Optional<PostLinkPreview> resolve(String url) {
     var now = Instant.now(clock);
     var cached = findFresh(url, now);
-    if (cached != null) {
-      return "SUCCESS".equals(cached.getStatus())
-          ? Optional.ofNullable(cached.getPreview())
-          : Optional.empty();
+    if (cached.isPresent()) {
+      return cached
+          .filter(PostLinkPreviewCacheEntry::succeeded)
+          .map(PostLinkPreviewCacheEntry::getPreview);
     }
 
     try {
@@ -106,15 +106,15 @@ public class PostLinkPreviewService {
     }
   }
 
-  private PostLinkPreviewCacheEntry findFresh(String url, Instant now) {
+  private Optional<PostLinkPreviewCacheEntry> findFresh(String url, Instant now) {
     if (cacheRepository == null) {
-      return null;
+      return Optional.empty();
     }
     try {
-      return cacheRepository.findById(url).filter(entry -> entry.isFresh(now)).orElse(null);
+      return cacheRepository.findById(url).filter(entry -> entry.isFresh(now));
     } catch (DataAccessException failure) {
       log.debug("Link preview cache read failed.", failure);
-      return null;
+      return Optional.empty();
     }
   }
 

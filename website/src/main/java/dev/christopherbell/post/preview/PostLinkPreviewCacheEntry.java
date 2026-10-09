@@ -15,6 +15,8 @@ import org.springframework.data.annotation.Id;
 @NoArgsConstructor
 public class PostLinkPreviewCacheEntry {
   public static final String COLLECTION = "post_link_preview_cache";
+  static final String SUCCESS = "SUCCESS";
+  static final String FAILURE = "FAILURE";
 
   @Id private String url;
   private String status;
@@ -30,7 +32,7 @@ public class PostLinkPreviewCacheEntry {
     }
     return PostLinkPreviewCacheEntry.builder()
         .url(url)
-        .status("SUCCESS")
+        .status(SUCCESS)
         .preview(preview)
         .completedOn(completedOn)
         .expiresOn(expiresOn)
@@ -44,13 +46,17 @@ public class PostLinkPreviewCacheEntry {
     }
     return PostLinkPreviewCacheEntry.builder()
         .url(url)
-        .status("FAILURE")
+        .status(FAILURE)
         .failureCategory(category)
         .completedOn(completedOn)
         .expiresOn(expiresOn)
         .build();
   }
 
+  /** Whether this entry records a fetched preview rather than a cached failure. */
+  public boolean succeeded() {
+    return SUCCESS.equals(status);
+  }
   public boolean isFresh(Instant now) {
     return expiresOn != null && expiresOn.isAfter(now);
   }

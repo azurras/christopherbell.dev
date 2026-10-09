@@ -19,6 +19,7 @@ import dev.christopherbell.post.preview.PostLinkPreviewService;
 import dev.christopherbell.post.topic.PostTopicExtractor;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
@@ -63,14 +64,14 @@ public class PostCreationService {
     String rootId;
     Integer level;
     Instant inheritedReplyExpiration = null;
-    Account parentAuthor = null;
+    Optional<Account> parentAuthor = Optional.empty();
     if (parentId != null && !parentId.isBlank()) {
       var parent = postRepository.findById(parentId)
           .orElseThrow(() -> new ResourceNotFoundException(
               String.format("Parent post with id %s not found.", parentId)));
       postExpirationService.ensureActive(parent);
       if (!account.getId().equals(parent.getAccountId())) {
-        parentAuthor = accountRepository.findById(parent.getAccountId()).orElse(null);
+        parentAuthor = accountRepository.findById(parent.getAccountId());
       }
       rootId = parent.getRootId() != null ? parent.getRootId() : parent.getId();
       level = (parent.getLevel() != null ? parent.getLevel() : 0) + 1;
@@ -111,9 +112,8 @@ public class PostCreationService {
     var saved = postRepository.save(post);
     postExpirationService.refreshThreadRootExpirationForNewReply(saved, now);
     notificationDeliveryService.createMentionNotifications(saved, account);
-    if (parentAuthor != null) {
-      notificationDeliveryService.createPostCommentNotification(saved, account, parentAuthor);
-    }
+    parentAuthor.ifPresent(author ->
+        notificationDeliveryService.createPostCommentNotification(saved, account, author));
     return postMapper.toDetail(saved);
   }
 

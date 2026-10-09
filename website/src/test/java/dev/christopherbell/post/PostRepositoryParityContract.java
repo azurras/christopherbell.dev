@@ -5,13 +5,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import dev.christopherbell.post.model.Post;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.PageRequest;
 
 /** Identical post and cursor assertions run against both persistence engines. */
 interface PostRepositoryParityContract {
-  String RUN = java.util.UUID.randomUUID().toString();
+  String RUN = UUID.randomUUID().toString();
   String OWNER = "post-parity-owner-" + RUN;
   String FIRST = "post-parity-a-" + RUN;
   String SECOND = "post-parity-b-" + RUN;

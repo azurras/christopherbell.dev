@@ -1,6 +1,7 @@
 package dev.christopherbell.post;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.christopherbell.post.model.PostTopic;
 import dev.christopherbell.post.topic.PostTopicExtractor;
@@ -50,7 +51,7 @@ class PostTopicExtractorTest {
   @Test
   void canonicalizesOneSafeRouteSegmentAndRejectsPunctuation() {
     assertEquals("music", PostTopic.canonicalizeRoute("ＭＵＳＩＣ"));
-    org.junit.jupiter.api.Assertions.assertThrows(
+    assertThrows(
         IllegalArgumentException.class, () -> PostTopic.canonicalizeRoute("bad.topic"));
   }
 }

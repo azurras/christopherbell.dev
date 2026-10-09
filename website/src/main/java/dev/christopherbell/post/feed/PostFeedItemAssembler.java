@@ -51,6 +51,6 @@ public class PostFeedItemAssembler {
   }
 
   public PostFeedItem single(Post post, String username, String viewerId) {
-    return assemble(List.of(post), Map.of(post.getAccountId(), username), viewerId).get(0);
+    return assemble(List.of(post), Map.of(post.getAccountId(), username), viewerId).getFirst();
   }
 }

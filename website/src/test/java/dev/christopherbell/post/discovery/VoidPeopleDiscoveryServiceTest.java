@@ -14,9 +14,12 @@ import dev.christopherbell.account.trust.AccountTrustRepository;
 import dev.christopherbell.account.trust.model.AccountTrustType;
 import dev.christopherbell.post.model.PostTopic;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -59,7 +62,7 @@ class VoidPeopleDiscoveryServiceTest {
         eq("self"), any(), eq(AccountTrustType.BLOCK)))
         .thenReturn(List.of(relationship("incoming-block", "self", AccountTrustType.BLOCK)));
 
-    var result = service.suggestions(Optional.of("self"), NOW);
+    var result = service.suggestionsFor("self", NOW);
 
     assertThat(result).extracting(VoidPersonSuggestion::accountId)
         .containsExactly("best", "recent");
@@ -70,20 +73,20 @@ class VoidPeopleDiscoveryServiceTest {
   @Test
   void anonymousRotationIsStableWithinOneUtcDayAndChangesAcrossDays() {
     var service = new VoidPeopleDiscoveryService(queries, accounts, trust, follows, null, null);
-    var candidates = java.util.stream.IntStream.range(0, 10)
+    var candidates = IntStream.range(0, 10)
         .mapToObj(index -> candidate("a" + index, NOW.minusSeconds(index), "music"))
         .toList();
     when(queries.recentActiveCandidates(any(), eq(128))).thenReturn(candidates);
     when(accounts.findAllById(any())).thenAnswer(invocation -> {
       Iterable<String> ids = invocation.getArgument(0);
-      var result = new java.util.ArrayList<Account>();
+      var result = new ArrayList<Account>();
       ids.forEach(id -> result.add(account(id, id + "-user", AccountStatus.ACTIVE)));
       return result;
     });
 
-    var first = service.suggestions(Optional.empty(), NOW);
-    var again = service.suggestions(Optional.empty(), NOW.plusSeconds(60));
-    var tomorrow = service.suggestions(Optional.empty(), NOW.plusSeconds(86_400));
+    var first = service.anonymousSuggestions(NOW);
+    var again = service.anonymousSuggestions(NOW.plusSeconds(60));
+    var tomorrow = service.anonymousSuggestions(NOW.plusSeconds(86_400));
 
     assertThat(first).hasSize(8);
     assertThat(again).extracting(VoidPersonSuggestion::accountId)
@@ -95,7 +98,7 @@ class VoidPeopleDiscoveryServiceTest {
   private static VoidPersonCandidate candidate(String id, Instant activity, String... topics) {
     return new VoidPersonCandidate(
         id,
-        java.util.Arrays.stream(topics)
+        Arrays.stream(topics)
             .map(topic -> new PostTopic(topic, Character.toUpperCase(topic.charAt(0)) + topic.substring(1)))
             .toList(),
         activity);

@@ -39,9 +39,9 @@ public class PostThreadService {
     var rootId = post.getRootId() != null ? post.getRootId() : post.getId();
     var posts = postRepository.findByRootIdOrderByCreatedOnAsc(rootId);
     var authorIds = posts.stream().map(Post::getAccountId).distinct().toList();
-    var idToUser = usernamesByAccountId(authorIds);
-    var active = posts.stream().filter(p -> !postExpirationService.isExpired(p)).toList();
-    return feedItems.assemble(active, idToUser, selfId);
+    var usernames = usernamesByAccountId(authorIds);
+    var active = posts.stream().filter(threadPost -> !postExpirationService.isExpired(threadPost)).toList();
+    return feedItems.assemble(active, usernames, selfId);
   }
 
   private Map<String, String> usernamesByAccountId(List<String> accountIds) {

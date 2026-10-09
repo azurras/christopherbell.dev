@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 /** Privacy-aware people suggestions derived from shared active topics, never popularity. */
@@ -50,33 +51,42 @@ public final class VoidPeopleDiscoveryService {
     this.clock = clock;
   }
 
+  /** Suggestions for the current viewer, signed in or anonymous. */
   public List<VoidPersonSuggestion> suggestions() {
-    Optional<String> selfId = permissions.hasAuthority("USER")
-        ? Optional.of(permissions.getSelfId())
-        : Optional.empty();
-    return suggestions(selfId, clock.instant());
+    if (permissions.hasAuthority("USER")) {
+      var selfId = permissions.getSelfId();
+      return suggestionsFor(selfId, clock.instant());
+    }
+    return anonymousSuggestions(clock.instant());
   }
 
-  public List<VoidPersonSuggestion> suggestions(Optional<String> selfId, Instant now) {
+  /** Suggestions for a signed-in account, ranked by topics shared with its recent activity. */
+  public List<VoidPersonSuggestion> suggestionsFor(String selfId, Instant now) {
     Objects.requireNonNull(selfId, "selfId");
     Objects.requireNonNull(now, "now");
     var candidates = queries.recentActiveCandidates(now, CANDIDATE_POOL_SIZE);
-    var candidateAccounts = activeAccounts(candidates);
-    return selfId.isPresent()
-        ? signedInSuggestions(selfId.get(), now, candidates, candidateAccounts)
-        : anonymousSuggestions(now, candidates, candidateAccounts);
+    return rankedForViewer(selfId, now, candidates, activeAccounts(candidates));
   }
 
-  private List<VoidPersonSuggestion> signedInSuggestions(
+  /** Suggestions for an anonymous visitor, rotated once per UTC day. */
+  public List<VoidPersonSuggestion> anonymousSuggestions(Instant now) {
+    Objects.requireNonNull(now, "now");
+    var candidates = queries.recentActiveCandidates(now, CANDIDATE_POOL_SIZE);
+    return rotatedDaily(now, candidates, activeAccounts(candidates));
+  }
+
+  private List<VoidPersonSuggestion> rankedForViewer(
       String selfId,
       Instant now,
       List<VoidPersonCandidate> candidates,
       Map<String, Account> candidateAccounts
   ) {
-    var self = accounts.findById(selfId).orElse(null);
-    if (self == null || self.getStatus() != AccountStatus.ACTIVE) {
+    var activeSelf = accounts.findById(selfId)
+        .filter(account -> account.getStatus() == AccountStatus.ACTIVE);
+    if (activeSelf.isEmpty()) {
       return List.of();
     }
+    var self = activeSelf.orElseThrow();
     var excluded = excludedAccountIds(self, candidates);
     var interests = queries.interestsFor(selfId, now);
     return candidates.stream()
@@ -94,7 +104,7 @@ public final class VoidPeopleDiscoveryService {
         .toList();
   }
 
-  private List<VoidPersonSuggestion> anonymousSuggestions(
+  private List<VoidPersonSuggestion> rotatedDaily(
       Instant now,
       List<VoidPersonCandidate> candidates,
       Map<String, Account> candidateAccounts
@@ -132,7 +142,7 @@ public final class VoidPeopleDiscoveryService {
     var candidateIds = candidates.stream().map(VoidPersonCandidate::accountId).distinct().toList();
     excluded.add(self.getId());
     excluded.addAll(follows.followedAccountIds(
-        self.getId(), org.springframework.data.domain.PageRequest.of(0, CANDIDATE_POOL_SIZE)));
+        self.getId(), PageRequest.of(0, CANDIDATE_POOL_SIZE)));
     trust.findByOwnerAccountIdAndTargetAccountIdInAndTypeIn(
             self.getId(), candidateIds, List.of(AccountTrustType.MUTE, AccountTrustType.BLOCK))
         .forEach(relationship -> excluded.add(relationship.getTargetAccountId()));

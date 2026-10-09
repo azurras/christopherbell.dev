@@ -165,11 +165,13 @@ public class PostExpirationService {
     if (rootId == null || rootId.isBlank() || rootId.equals(reply.getId())) {
       return false;
     }
-    var rootExpiration = postRepository.findById(rootId).map(Post::getExpiresOn);
-    if (rootExpiration.isEmpty() || rootExpiration.get() == null || rootExpiration.get().equals(reply.getExpiresOn())) {
+    var rootExpiration = postRepository.findById(rootId)
+        .map(Post::getExpiresOn)
+        .filter(expiresOn -> !expiresOn.equals(reply.getExpiresOn()));
+    if (rootExpiration.isEmpty()) {
       return false;
     }
-    reply.setExpiresOn(rootExpiration.get());
+    reply.setExpiresOn(rootExpiration.orElseThrow());
     return true;
   }
 
@@ -261,9 +263,9 @@ public class PostExpirationService {
         Sort.by(Sort.Direction.ASC, "id"));
     var missing = postRepository.findByExpiresOnIsNull(page);
     if (!missing.isEmpty()) {
-      missing.forEach(p -> {
-        refreshExpiration(p);
-        postRepository.save(p);
+      missing.forEach(post -> {
+        refreshExpiration(post);
+        postRepository.save(post);
       });
       log.info("Post expiration cleanup repaired {} posts missing expiration timestamps.", missing.size());
     }

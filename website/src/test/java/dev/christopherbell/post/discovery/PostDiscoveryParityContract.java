@@ -3,6 +3,8 @@ package dev.christopherbell.post.discovery;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.account.model.Role;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.model.Post;
@@ -11,12 +13,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /** Shared discovery behavior checks for MongoDB-backed post queries. */
 interface PostDiscoveryParityContract {
-  String RUN = java.util.UUID.randomUUID().toString();
+  String RUN = UUID.randomUUID().toString();
   String OWNER = "discovery-owner-" + RUN;
   String OTHER = "discovery-other-" + RUN;
   String FIRST = "discovery-first-" + RUN;
@@ -64,8 +67,8 @@ interface PostDiscoveryParityContract {
 
   private static Account account(String id) {
     return Account.builder().id(id).createdOn(NOW).email(id + "@example.test")
-        .passwordHash("hash").role(dev.christopherbell.account.model.Role.USER)
-        .status(dev.christopherbell.account.model.AccountStatus.ACTIVE).username(id).build();
+        .passwordHash("hash").role(Role.USER)
+        .status(AccountStatus.ACTIVE).username(id).build();
   }
 
   private static Post post(String id, String accountId, Instant createdOn, String topic) {

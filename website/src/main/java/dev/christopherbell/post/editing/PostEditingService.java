@@ -9,6 +9,7 @@ import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.preview.PostLinkPreviewService;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -50,7 +51,7 @@ public class PostEditingService {
       throw new InvalidRequestException(NOT_EDITABLE);
     }
     var audit = new ArrayList<>(post.getEditAudit() == null
-        ? java.util.List.of() : post.getEditAudit());
+        ? List.of() : post.getEditAudit());
     audit.add(new PostEditAuditEvent(actorAccountId, post.getText(), text, now));
     int excess = audit.size() - properties.editAuditLimit();
     if (excess > 0) {

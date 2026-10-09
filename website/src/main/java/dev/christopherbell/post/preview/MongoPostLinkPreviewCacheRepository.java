@@ -20,10 +20,12 @@ class MongoPostLinkPreviewCacheRepository
   MongoPostLinkPreviewCacheRepository(DomainMongoOperationsFactory factory) {
     super(factory, PostLinkPreviewCacheEntry.class);
   }
-  @Override public Optional<PostLinkPreviewCacheEntry> findById(String id) {
+  @Override
+  public Optional<PostLinkPreviewCacheEntry> findById(String id) {
     return findValueById(id);
   }
-  @Override public PostLinkPreviewCacheEntry save(PostLinkPreviewCacheEntry value) {
+  @Override
+  public PostLinkPreviewCacheEntry save(PostLinkPreviewCacheEntry value) {
     return saveValue(value);
   }
 

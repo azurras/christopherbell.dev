@@ -3,6 +3,8 @@ package dev.christopherbell.post.feed;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.account.model.Role;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.model.Post;
@@ -10,6 +12,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -51,7 +54,7 @@ interface PostReadModelParityContract {
     assertThat(feed().account(OTHER, Optional.empty(), 10).posts())
         .extracting(Post::getId).containsExactly(REPLY_A);
     var visibility = new PostFeedVisibility(
-        java.util.Set.of(OTHER), java.util.Set.of(), Optional.of(NOW.minusSeconds(1)));
+        Set.of(OTHER), Set.of(), Optional.of(NOW.minusSeconds(1)));
     assertThat(feed().global(Optional.empty(), 10, visibility).posts())
         .extracting(Post::getId).doesNotContain(REPLY_A);
   }
@@ -65,8 +68,8 @@ interface PostReadModelParityContract {
 
   private static Account account(String id) {
     return Account.builder().id(id).createdOn(NOW).email(id + "@example.test")
-        .passwordHash("hash").role(dev.christopherbell.account.model.Role.USER)
-        .status(dev.christopherbell.account.model.AccountStatus.ACTIVE).username(id).build();
+        .passwordHash("hash").role(Role.USER)
+        .status(AccountStatus.ACTIVE).username(id).build();
   }
 
   private static Post post(
