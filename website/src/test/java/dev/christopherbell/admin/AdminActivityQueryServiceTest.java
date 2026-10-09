@@ -12,6 +12,7 @@ import dev.christopherbell.admin.activity.AdminActivityQuery;
 import dev.christopherbell.admin.activity.AdminActivityQueryService;
 import dev.christopherbell.admin.activity.MongoAdminActivityQueryRepository;
 import dev.christopherbell.admin.model.AdminActivity;
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import java.time.Instant;
 import java.util.List;
@@ -34,7 +35,7 @@ class AdminActivityQueryServiceTest {
   @BeforeEach
   void setUp() {
     service = new AdminActivityQueryService(new MongoAdminActivityQueryRepository(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo)));
+        DomainMongoOperationsTestFactory.create(mongo)));
   }
 
   @Test
@@ -42,7 +43,7 @@ class AdminActivityQueryServiceTest {
   void query_appliesAllFilters() throws Exception {
     var activity = AdminActivity.builder().id("a1").build();
     var activityEnvelope =
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        DomainMongoOperationsTestFactory
             .envelope(mongo, activity);
     when(mongo.count(any(Query.class), eq(Document.class), eq("admin_activity"))).thenReturn(1L);
     when(mongo.find(any(Query.class), eq(Document.class), eq("admin_activity")))

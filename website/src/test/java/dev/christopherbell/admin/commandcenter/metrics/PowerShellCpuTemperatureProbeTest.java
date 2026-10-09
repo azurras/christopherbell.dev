@@ -3,11 +3,12 @@ package dev.christopherbell.admin.commandcenter.metrics;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.io.IOException;
+import java.util.OptionalDouble;
 import java.util.concurrent.FutureTask;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -96,7 +97,7 @@ class PowerShellCpuTemperatureProbeTest {
     assertThat(tempDir).doesNotExist();
   }
 
-  private static java.util.OptionalDouble read(FakeManagedProcess process) {
+  private static OptionalDouble read(FakeManagedProcess process) {
     return probe(new FakeProcessFactory(process)).readCelsius();
   }
 

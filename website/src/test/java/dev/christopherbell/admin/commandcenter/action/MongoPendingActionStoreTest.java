@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.mongodb.client.result.DeleteResult;
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory;
 import java.time.Instant;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
@@ -29,7 +30,7 @@ class MongoPendingActionStoreTest {
   void reserveUsesOneFixedKeyAndMapsAtomicContentionToFalse() {
     var mongo = mock(MongoTemplate.class);
     var store = new MongoPendingActionStore(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
+        DomainMongoOperationsTestFactory.create(mongo));
     when(mongo.insert(any(Document.class), eq("admin_activity")))
         .thenAnswer(invocation -> invocation.getArgument(0))
         .thenThrow(new DuplicateKeyException("fixed pending action is active"));
@@ -56,8 +57,8 @@ class MongoPendingActionStoreTest {
   void activeReturnsAnUnexpiredReservationWithoutAWrite() {
     var mongo = mock(MongoTemplate.class);
     var store = new MongoPendingActionStore(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
-    var envelope = dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        DomainMongoOperationsTestFactory.create(mongo));
+    var envelope = DomainMongoOperationsTestFactory
         .envelope(mongo, document(RESTART));
     when(mongo.findOne(any(Query.class), eq(Document.class), eq("admin_activity")))
         .thenReturn(envelope);
@@ -71,10 +72,10 @@ class MongoPendingActionStoreTest {
   void activeClearsAnElapsedReservationByExactIdentityAndReturnsEmpty() {
     var mongo = mock(MongoTemplate.class);
     var store = new MongoPendingActionStore(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
+        DomainMongoOperationsTestFactory.create(mongo));
     var expired = new PendingActionStore.Reservation(
         CommandCenterActionType.SHUTDOWN_COMPUTER, NOW.minusSeconds(60), NOW);
-    var envelope = dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+    var envelope = DomainMongoOperationsTestFactory
         .envelope(mongo, document(expired));
     when(mongo.findOne(any(Query.class), eq(Document.class), eq("admin_activity")))
         .thenReturn(envelope);
@@ -94,7 +95,7 @@ class MongoPendingActionStoreTest {
   void clearRequiresTheExactActionAndBothTimestamps() {
     var mongo = mock(MongoTemplate.class);
     var store = new MongoPendingActionStore(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
+        DomainMongoOperationsTestFactory.create(mongo));
     when(mongo.remove(any(Query.class), eq(Document.class), eq("admin_activity")))
         .thenReturn(DeleteResult.acknowledged(1));
 

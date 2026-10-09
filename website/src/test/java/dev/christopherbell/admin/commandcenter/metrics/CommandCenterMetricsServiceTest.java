@@ -6,9 +6,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
-import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.MetricReading;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.MetricStatus;
+import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -16,21 +16,24 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.ObjectMapper;
 import oshi.hardware.CentralProcessor;
 import oshi.hardware.GlobalMemory;
-import oshi.hardware.HardwareAbstractionLayer;
 import oshi.hardware.HWDiskStore;
+import oshi.hardware.HardwareAbstractionLayer;
 import oshi.hardware.NetworkIF;
 import oshi.hardware.Sensors;
 import oshi.software.os.FileSystem;
 import oshi.software.os.OSFileStore;
 import oshi.software.os.OperatingSystem;
 import oshi.spi.SystemInfoProvider;
+import tools.jackson.databind.ObjectMapper;
 
 class CommandCenterMetricsServiceTest {
   private static final Instant START = Instant.parse("2026-07-12T12:00:00Z");
@@ -108,7 +111,7 @@ class CommandCenterMetricsServiceTest {
     try {
       var service = new CommandCenterMetricsService(
           List.of(blocked, healthy), properties, clock, "test-version", timeout -> true, executor,
-          () -> java.util.Optional.empty());
+          () -> Optional.empty());
 
       long started = System.nanoTime();
       service.collect();
@@ -131,7 +134,7 @@ class CommandCenterMetricsServiceTest {
     var properties = properties();
     properties.setProviderTimeout(Duration.ofMillis(50));
     var release = new CountDownLatch(1);
-    var invocations = new java.util.concurrent.atomic.AtomicInteger();
+    var invocations = new AtomicInteger();
     HostMetricsProvider blocked = sampledAt -> {
       invocations.incrementAndGet();
       while (release.getCount() > 0) {
@@ -143,7 +146,7 @@ class CommandCenterMetricsServiceTest {
     try {
       var service = new CommandCenterMetricsService(
           List.of(blocked), properties, clock, "test", timeout -> true, executor,
-          java.util.Optional::empty);
+          Optional::empty);
       service.collect();
       clock.advance(Duration.ofSeconds(5));
       service.collect();
@@ -179,8 +182,8 @@ class CommandCenterMetricsServiceTest {
 
   @Test
   void snapshotComposesPendingActionAndRestoresUnderlyingHealthAfterCancel() {
-    var pending = new java.util.concurrent.atomic.AtomicReference<
-        java.util.Optional<CommandCenterSnapshot.PendingAction>>(java.util.Optional.of(
+    var pending = new AtomicReference<
+        Optional<CommandCenterSnapshot.PendingAction>>(Optional.of(
             new CommandCenterSnapshot.PendingAction("RESTART_COMPUTER", START.plusSeconds(60), true)));
     var executor = Executors.newSingleThreadExecutor();
     var service = new CommandCenterMetricsService(
@@ -192,7 +195,7 @@ class CommandCenterMetricsServiceTest {
       assertThat(service.snapshot().health()).isEqualTo(CommandCenterSnapshot.HealthStatus.ACTION_PENDING);
       assertThat(service.snapshot().pendingAction()).isEqualTo(pending.get().orElseThrow());
 
-      pending.set(java.util.Optional.empty());
+      pending.set(Optional.empty());
       assertThat(service.snapshot().health()).isEqualTo(CommandCenterSnapshot.HealthStatus.HEALTHY);
       assertThat(service.snapshot().pendingAction()).isNull();
     } finally {

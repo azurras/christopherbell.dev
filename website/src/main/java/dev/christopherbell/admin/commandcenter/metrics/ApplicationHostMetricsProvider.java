@@ -16,12 +16,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.concurrent.TimeUnit;
-import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -55,18 +56,17 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
     readings.put("application.last-start", available(
         "application.last-start", "Last application start", applicationStartedAt.getEpochSecond(),
         "epoch-seconds", sampledAt));
-    String commit = safeCommit(properties.getCommitIdentifier());
-    if (commit == null) {
-      commit = safeCommit(result.releaseCommit().orElse(null));
-    }
-    readings.put("application.commit", commit == null
-        ? unavailable("application.commit", "Application commit", "state", sampledAt)
-        : new MetricReading("application.commit", "Application commit", 1.0, "commit",
-            MetricStatus.AVAILABLE, sampledAt, commit));
-    readings.put("production.service.running", result.serviceRunning().isPresent()
-        ? available("production.service.running", "Production service",
-            result.serviceRunning().orElseThrow() ? 1 : 0, "state", sampledAt)
-        : unavailable("production.service.running", "Production service", "state", sampledAt));
+    var commit = safeCommit(properties.getCommitIdentifier())
+        .or(() -> result.releaseCommit().flatMap(ApplicationHostMetricsProvider::safeCommit));
+    readings.put("application.commit", commit
+        .map(value -> new MetricReading("application.commit", "Application commit", 1.0, "commit",
+            MetricStatus.AVAILABLE, sampledAt, value))
+        .orElseGet(() -> unavailable("application.commit", "Application commit", "state", sampledAt)));
+    readings.put("production.service.running", result.serviceRunning()
+        .map(running -> available(
+            "production.service.running", "Production service", running ? 1 : 0, "state", sampledAt))
+        .orElseGet(() -> unavailable(
+            "production.service.running", "Production service", "state", sampledAt)));
     readings.put("application.local-response", result.responseMillis().isPresent()
         ? available("application.local-response", "Local response time",
             result.responseMillis().getAsDouble(), "milliseconds", sampledAt)
@@ -74,11 +74,11 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
     return Map.copyOf(readings);
   }
 
-  private static String safeCommit(String commit) {
+  private static Optional<String> safeCommit(String commit) {
     if (commit == null || !commit.matches("[A-Za-z0-9._-]{1,64}") || "unknown".equalsIgnoreCase(commit)) {
-      return null;
+      return Optional.empty();
     }
-    return commit;
+    return Optional.of(commit);
   }
 
   static Optional<String> readReleaseCommit(Path metadata) {
@@ -137,7 +137,7 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
     }
 
     private Optional<Boolean> serviceRunning() {
-      if (!System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")) {
+      if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
         return Optional.empty();
       }
       Process process = null;

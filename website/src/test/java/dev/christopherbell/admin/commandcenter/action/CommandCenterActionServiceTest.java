@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -28,15 +29,24 @@ import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.security.PasswordUtil;
 import dev.christopherbell.permission.PermissionService;
 import jakarta.servlet.http.HttpServletRequest;
+import java.io.IOException;
+import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.IntFunction;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -126,9 +136,9 @@ class CommandCenterActionServiceTest {
     var challenge = service.createChallenge(RESTART_COMPUTER);
     var confirmation = new ActionConfirmation(
         challenge.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER");
-    var successes = new java.util.concurrent.atomic.AtomicInteger(0);
-    var start = new java.util.concurrent.CountDownLatch(1);
-    var done = new java.util.concurrent.CountDownLatch(2);
+    var successes = new AtomicInteger(0);
+    var start = new CountDownLatch(1);
+    var done = new CountDownLatch(2);
     for (int i = 0; i < 2; i++) {
       Thread.startVirtualThread(() -> {
         try {
@@ -150,7 +160,7 @@ class CommandCenterActionServiceTest {
 
   @Test
   void concurrentDistinctChallengesCannotBypassTheAcceptedActionCooldown() throws Exception {
-    var concurrentExecutions = java.util.Collections.synchronizedList(
+    var concurrentExecutions = Collections.synchronizedList(
         new ArrayList<CommandCenterActionType>());
     var concurrentService = new CommandCenterActionService(
         properties, accounts, permissions, activities, clientIps, concurrentExecutions::add,
@@ -162,8 +172,8 @@ class CommandCenterActionServiceTest {
             first.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER"),
         new ActionConfirmation(
             second.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER"));
-    var successes = new java.util.concurrent.atomic.AtomicInteger();
-    var done = new java.util.concurrent.CountDownLatch(2);
+    var successes = new AtomicInteger();
+    var done = new CountDownLatch(2);
 
     for (var confirmation : confirmations) {
       Thread.startVirtualThread(() -> {
@@ -253,7 +263,7 @@ class CommandCenterActionServiceTest {
     }
     assertThat(storedChallenges(service).size()).isLessThanOrEqualTo(2);
 
-    var currentActor = new java.util.concurrent.atomic.AtomicReference<>("bounded-admin-0");
+    var currentActor = new AtomicReference<>("bounded-admin-0");
     when(permissions.getSelfId()).thenAnswer(ignored -> currentActor.get());
     when(accounts.findById(any())).thenAnswer(invocation -> {
       String id = invocation.getArgument(0);
@@ -319,13 +329,13 @@ class CommandCenterActionServiceTest {
 
     @SuppressWarnings("unchecked")
     var metadata = ArgumentCaptor.forClass(
-        (Class<java.util.Map<String, String>>) (Class<?>) java.util.Map.class);
+        (Class<Map<String, String>>) (Class<?>) Map.class);
     verify(activities).recordForActor(
-        org.mockito.ArgumentMatchers.eq("admin-1"), org.mockito.ArgumentMatchers.eq("admin"),
-        org.mockito.ArgumentMatchers.eq("COMMAND_CENTER_ACTION_ACCEPTED"),
-        org.mockito.ArgumentMatchers.eq("command-center"),
-        org.mockito.ArgumentMatchers.eq("RESTART_COMPUTER"),
-        org.mockito.ArgumentMatchers.eq("RESTART_COMPUTER"),
+        eq("admin-1"), eq("admin"),
+        eq("COMMAND_CENTER_ACTION_ACCEPTED"),
+        eq("command-center"),
+        eq("RESTART_COMPUTER"),
+        eq("RESTART_COMPUTER"),
         any(), metadata.capture());
     assertThat(metadata.getValue()).containsOnlyKeys("action", "clientIp", "mode", "outcome");
     assertThat(metadata.getValue().toString())
@@ -368,8 +378,8 @@ class CommandCenterActionServiceTest {
 
     @SuppressWarnings("unchecked")
     var metadata = ArgumentCaptor.forClass(
-        (Class<java.util.Map<String, String>>) (Class<?>) java.util.Map.class);
-    verify(activities, org.mockito.Mockito.atLeast(5)).recordForActor(
+        (Class<Map<String, String>>) (Class<?>) Map.class);
+    verify(activities, atLeast(5)).recordForActor(
         eq("admin-1"), eq("admin"), eq("COMMAND_CENTER_ACTION_REJECTED"),
         eq("command-center"), eq("RESTART_SITE"), eq("RESTART_SITE"), any(), metadata.capture());
     assertThat(metadata.getAllValues()).extracting(value -> value.get("outcome"))
@@ -393,7 +403,7 @@ class CommandCenterActionServiceTest {
 
     @SuppressWarnings("unchecked")
     var metadata = ArgumentCaptor.forClass(
-        (Class<java.util.Map<String, String>>) (Class<?>) java.util.Map.class);
+        (Class<Map<String, String>>) (Class<?>) Map.class);
     verify(activities).recordForActor(
         eq("admin-1"), eq("admin"), eq("COMMAND_CENTER_CHALLENGE_CREATED"),
         eq("command-center"), eq("RESTART_SITE"), eq("RESTART_SITE"), any(), metadata.capture());
@@ -454,8 +464,8 @@ class CommandCenterActionServiceTest {
     assertThat(result.accepted()).isTrue();
     assertThat(executed).isEmpty();
     verify(activities).recordForActor(
-        org.mockito.ArgumentMatchers.eq("admin-1"), org.mockito.ArgumentMatchers.eq("admin"),
-        org.mockito.ArgumentMatchers.eq("COMMAND_CENTER_ACTION_ACCEPTED"), any(), any(), any(),
+        eq("admin-1"), eq("admin"),
+        eq("COMMAND_CENTER_ACTION_ACCEPTED"), any(), any(), any(),
         any(), any());
 
     var scheduledAction = ArgumentCaptor.forClass(Runnable.class);
@@ -466,8 +476,8 @@ class CommandCenterActionServiceTest {
     assertThat(executed).containsExactly(RESTART_SITE);
     verify(permissions, never()).getSelfId();
     verify(activities).recordForActor(
-        org.mockito.ArgumentMatchers.eq("admin-1"), org.mockito.ArgumentMatchers.eq("admin"),
-        org.mockito.ArgumentMatchers.eq("COMMAND_CENTER_ACTION_LAUNCHED"), any(), any(), any(),
+        eq("admin-1"), eq("admin"),
+        eq("COMMAND_CENTER_ACTION_LAUNCHED"), any(), any(), any(),
         any(), any());
   }
 
@@ -529,11 +539,11 @@ class CommandCenterActionServiceTest {
 
   @Test
   void failedCancellationLaunchRestoresPendingStateForRetry() throws Exception {
-    var failCancellation = new java.util.concurrent.atomic.AtomicBoolean(true);
+    var failCancellation = new AtomicBoolean(true);
     CommandExecutor retryableExecutor = action -> {
       if (action == CommandCenterActionType.CANCEL_PENDING_ACTION
           && failCancellation.get()) {
-        throw new java.io.IOException("simulated fixed cancel launch failure");
+        throw new IOException("simulated fixed cancel launch failure");
       }
       executed.add(action);
     };
@@ -585,7 +595,7 @@ class CommandCenterActionServiceTest {
     orderedService.execute(new ActionConfirmation(
         challenge.id(), SHUTDOWN_COMPUTER, PASSWORD, "SHUTDOWN COMPUTER"), request);
     clearInvocations(activities, orderedExecutor);
-    doThrow(new java.io.IOException("simulated cancel failure"))
+    doThrow(new IOException("simulated cancel failure"))
         .when(orderedExecutor).execute(CommandCenterActionType.CANCEL_PENDING_ACTION);
 
     assertThatThrownBy(() -> orderedService.cancel(request))
@@ -604,22 +614,22 @@ class CommandCenterActionServiceTest {
 
   @Test
   void cancellationCannotOvertakeAReservedPowerActionBeforeItsLaunch() throws Exception {
-    var powerEntered = new java.util.concurrent.CountDownLatch(1);
-    var releasePower = new java.util.concurrent.CountDownLatch(1);
-    var cancelEntered = new java.util.concurrent.CountDownLatch(1);
-    var done = new java.util.concurrent.CountDownLatch(2);
-    var launchOrder = java.util.Collections.synchronizedList(
+    var powerEntered = new CountDownLatch(1);
+    var releasePower = new CountDownLatch(1);
+    var cancelEntered = new CountDownLatch(1);
+    var done = new CountDownLatch(2);
+    var launchOrder = Collections.synchronizedList(
         new ArrayList<CommandCenterActionType>());
     CommandExecutor blockingExecutor = action -> {
       if (action == RESTART_COMPUTER) {
         powerEntered.countDown();
         try {
           if (!releasePower.await(5, TimeUnit.SECONDS)) {
-            throw new java.io.IOException("timed out waiting to release power launch");
+            throw new IOException("timed out waiting to release power launch");
           }
         } catch (InterruptedException exception) {
           Thread.currentThread().interrupt();
-          throw new java.io.IOException("interrupted", exception);
+          throw new IOException("interrupted", exception);
         }
       } else if (action == CommandCenterActionType.CANCEL_PENDING_ACTION) {
         cancelEntered.countDown();
@@ -661,8 +671,8 @@ class CommandCenterActionServiceTest {
 
   @Test
   void failedPowerLaunchDoesNotLeaveAPhantomPendingAction() throws Exception {
-    var failLaunch = new java.util.concurrent.atomic.AtomicBoolean(true);
-    var launchFailure = new java.io.IOException("simulated fixed power launch failure");
+    var failLaunch = new AtomicBoolean(true);
+    var launchFailure = new IOException("simulated fixed power launch failure");
     CommandExecutor failingExecutor = action -> {
       if (failLaunch.get()) {
         throw launchFailure;
@@ -709,7 +719,7 @@ class CommandCenterActionServiceTest {
   void completionAuditFailureCannotMisreportAnAlreadyLaunchedHostAction() throws Exception {
     doThrow(new IllegalStateException("simulated audit persistence failure"))
         .when(activities).recordForActor(
-            any(), any(), org.mockito.ArgumentMatchers.eq("COMMAND_CENTER_ACTION_LAUNCHED"),
+            any(), any(), eq("COMMAND_CENTER_ACTION_LAUNCHED"),
             any(), any(), any(), any(), any());
     var challenge = service.createChallenge(RESTART_COMPUTER);
 
@@ -770,7 +780,7 @@ class CommandCenterActionServiceTest {
 
   private List<String> runConcurrently(
       int attempts,
-      java.util.function.IntFunction<ActionConfirmation> confirmationFactory) throws Exception {
+      IntFunction<ActionConfirmation> confirmationFactory) throws Exception {
     var confirmations = new ArrayList<ActionConfirmation>();
     for (int attempt = 0; attempt < attempts; attempt++) {
       confirmations.add(confirmationFactory.apply(attempt));
@@ -779,9 +789,9 @@ class CommandCenterActionServiceTest {
   }
 
   private List<String> runConcurrently(List<ActionConfirmation> confirmations) throws Exception {
-    var messages = java.util.Collections.synchronizedList(new ArrayList<String>());
-    var start = new java.util.concurrent.CountDownLatch(1);
-    var done = new java.util.concurrent.CountDownLatch(confirmations.size());
+    var messages = Collections.synchronizedList(new ArrayList<String>());
+    var start = new CountDownLatch(1);
+    var done = new CountDownLatch(confirmations.size());
     for (var confirmation : confirmations) {
       Thread.startVirtualThread(() -> {
         try {
@@ -803,7 +813,7 @@ class CommandCenterActionServiceTest {
   }
 
   private void alignAccountLookups(int participants) {
-    var actorLookups = new java.util.concurrent.CountDownLatch(participants);
+    var actorLookups = new CountDownLatch(participants);
     when(accounts.findById(actor.getId())).thenAnswer(ignored -> {
       actorLookups.countDown();
       try {
@@ -819,11 +829,11 @@ class CommandCenterActionServiceTest {
   }
 
   @SuppressWarnings("unchecked")
-  private static java.util.Map<String, ?> storedChallenges(CommandCenterActionService target)
+  private static Map<String, ?> storedChallenges(CommandCenterActionService target)
       throws Exception {
     var field = CommandCenterActionService.class.getDeclaredField("challenges");
     field.setAccessible(true);
-    return (java.util.Map<String, ?>) field.get(target);
+    return (Map<String, ?>) field.get(target);
   }
 
   private static Account account(String id, Role role, AccountStatus status) {
@@ -837,7 +847,7 @@ class CommandCenterActionServiceTest {
           .passwordSalt(salt)
           .passwordHash(PasswordUtil.hashPassword(PASSWORD, salt))
           .build();
-    } catch (java.security.GeneralSecurityException exception) {
+    } catch (GeneralSecurityException exception) {
       throw new AssertionError("Unable to build password fixture", exception);
     }
   }
