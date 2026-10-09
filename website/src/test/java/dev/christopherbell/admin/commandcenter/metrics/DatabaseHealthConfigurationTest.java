@@ -3,6 +3,7 @@ package dev.christopherbell.admin.commandcenter.metrics;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.health.contributor.Status;
@@ -21,7 +22,7 @@ class DatabaseHealthConfigurationTest {
       assertThat(context).hasBean("databaseHealthIndicator");
       var health = context.getBean("databaseHealthIndicator", HealthIndicator.class).health();
       assertThat(health.getStatus()).isEqualTo(Status.UP);
-      assertThat(health.getDetails()).containsExactlyInAnyOrderEntriesOf(java.util.Map.of(
+      assertThat(health.getDetails()).containsExactlyInAnyOrderEntriesOf(Map.of(
           "backend", "mongodb", "database", "christopherbell", "schemaVersion", "legacy"));
     });
   }

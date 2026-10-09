@@ -7,12 +7,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
 /** Reads NVIDIA GPU data with a fixed, bounded {@code nvidia-smi} invocation. */
 @Component
@@ -38,7 +39,7 @@ public class NvidiaMetricsProvider implements HostMetricsProvider {
 
   @Override
   public Map<String, MetricReading> read(Instant sampledAt) {
-    var command = new java.util.ArrayList<String>();
+    var command = new ArrayList<String>();
     command.add(executable);
     command.addAll(QUERY_ARGUMENTS);
     final CommandResult result;
@@ -78,13 +79,12 @@ public class NvidiaMetricsProvider implements HostMetricsProvider {
       throw new IllegalArgumentException("Unexpected NVIDIA metric count.");
     }
     try {
-      var sample = new NvidiaSample(
+      return new NvidiaSample(
           optionalNumber(columns[0]),
           optionalTemperature(columns[1]),
           optionalNumber(columns[2]),
           optionalNumber(columns[3]),
           optionalNumber(columns[4]));
-      return sample;
     } catch (NumberFormatException failure) {
       throw new IllegalArgumentException("NVIDIA metrics contain a non-numeric value.", failure);
     }

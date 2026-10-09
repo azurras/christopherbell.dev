@@ -6,8 +6,8 @@ import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
-import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.PendingAction;
 import dev.christopherbell.admin.commandcenter.action.PendingActionStore.Reservation;
+import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.PendingAction;
 import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.security.PasswordUtil;
@@ -23,13 +23,15 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Base64;
+import java.util.Comparator;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.TaskScheduler;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 
 /** Protects fixed host actions with fresh account checks and one-time challenges. */
@@ -199,8 +201,8 @@ public class CommandCenterActionService {
     var actor = requireCurrentAdmin();
     var clientIp = clientIpResolver.resolveClientIp(servletRequest);
     synchronized (actionStateLock) {
-      var current = pendingActions.active(clock.instant()).orElse(null);
-      if (current == null) {
+      var current = pendingActions.active(clock.instant());
+      if (current.isEmpty()) {
         var acceptedAt = clock.instant();
         audit(actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp, "already-clear");
         return new ActionResult(
@@ -208,7 +210,7 @@ public class CommandCenterActionService {
       }
       audit(actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp, "accepted");
       executeNow(actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp);
-      pendingActions.clear(current);
+      pendingActions.clear(current.orElseThrow());
       var acceptedAt = clock.instant();
       return new ActionResult(
           CommandCenterActionType.CANCEL_PENDING_ACTION, true, acceptedAt, acceptedAt);
@@ -241,7 +243,7 @@ public class CommandCenterActionService {
       throws InvalidRequestException {
     if (confirmation.challengeId() == null || confirmation.action() == null
         || !confirmation.action().isRequiresChallenge()) {
-      throw new InvalidRequestException("A valid action challenge is required.");
+      throw new ActionRejectedException(ActionRejection.CHALLENGE_REQUIRED);
     }
     StoredChallenge challenge;
     synchronized (challengeStoreLock) {
@@ -252,7 +254,7 @@ public class CommandCenterActionService {
         || !challenge.actorId().equals(actorId)
         || challenge.action() != confirmation.action()
         || !clock.instant().isBefore(challenge.expiresAt())) {
-      throw new InvalidRequestException("Action challenge is invalid or expired.");
+      throw new ActionRejectedException(ActionRejection.CHALLENGE_INVALID);
     }
   }
 
@@ -260,10 +262,11 @@ public class CommandCenterActionService {
     try {
       if (password == null || !PasswordUtil.verifyPassword(
           password, actor.getPasswordSalt(), actor.getPasswordHash())) {
-        throw new InvalidRequestException("Password verification failed.");
+        throw new ActionRejectedException(ActionRejection.WRONG_PASSWORD);
       }
     } catch (GeneralSecurityException | IllegalArgumentException | NullPointerException exception) {
-      throw new InvalidRequestException("Password verification failed.");
+      // Unverifiable stored credentials fail closed exactly like a wrong password.
+      throw new ActionRejectedException(ActionRejection.WRONG_PASSWORD);
     }
   }
 
@@ -273,14 +276,14 @@ public class CommandCenterActionService {
     synchronized (attempts) {
       prune(attempts, properties.getActions().getFailedAttemptWindow());
       if (attempts.size() >= properties.getActions().getFailedAttempts()) {
-        throw new InvalidRequestException("Too many failed action confirmations.");
+        throw new ActionRejectedException(ActionRejection.THROTTLED);
       }
       try {
         consumeChallenge(confirmation, actor.getId());
         verifyPassword(actor, confirmation.password());
         if (!confirmation.action().getConfirmationPhrase()
             .equals(confirmation.confirmationPhrase())) {
-          throw new InvalidRequestException("Confirmation phrase did not match.");
+          throw new ActionRejectedException(ActionRejection.PHRASE_MISMATCH);
         }
       } catch (InvalidRequestException exception) {
         attempts.addLast(clock.instant());
@@ -294,7 +297,7 @@ public class CommandCenterActionService {
     synchronized (attempts) {
       prune(attempts, properties.getActions().getFailedAttemptWindow());
       if (attempts.size() >= properties.getActions().getFailedAttempts()) {
-        throw new InvalidRequestException("Too many failed action confirmations.");
+        throw new ActionRejectedException(ActionRejection.THROTTLED);
       }
     }
   }
@@ -315,7 +318,7 @@ public class CommandCenterActionService {
       if (previousAcceptance != null
           && acceptedAt.isBefore(
               previousAcceptance.plus(properties.getActions().getCooldown()))) {
-        throw new InvalidRequestException("Action is in cooldown.");
+        throw new ActionRejectedException(ActionRejection.COOLDOWN);
       }
       if (!isPowerAction(action)) {
         acceptedActions.put(actionKey, acceptedAt);
@@ -323,7 +326,7 @@ public class CommandCenterActionService {
       }
       var reservation = new Reservation(action, acceptedAt, executeAt);
       if (!pendingActions.reserve(reservation, acceptedAt)) {
-        throw new InvalidRequestException("A machine power action is already pending.");
+        throw new ActionRejectedException(ActionRejection.ACTION_PENDING);
       }
       acceptedActions.put(actionKey, acceptedAt);
       return reservation;
@@ -386,7 +389,7 @@ public class CommandCenterActionService {
       Account actor, CommandCenterActionType action, String clientIp, String outcome) {
     adminActivityService.recordForActor(
         actor.getId(), actor.getUsername() == null ? actor.getId() : actor.getUsername(),
-        "COMMAND_CENTER_ACTION_" + outcome.toUpperCase().replace('-', '_'),
+        "COMMAND_CENTER_ACTION_" + outcome.toUpperCase(Locale.ROOT).replace('-', '_'),
         "command-center", action.name(), action.name(),
         "%s requested a protected command-center action.",
         Map.of(
@@ -430,14 +433,9 @@ public class CommandCenterActionService {
   }
 
   private static String rejectionCategory(InvalidRequestException exception) {
-    return switch (exception.getMessage()) {
-      case "Password verification failed." -> "wrong-password";
-      case "Confirmation phrase did not match." -> "phrase-mismatch";
-      case "Too many failed action confirmations." -> "throttled";
-      case "Action is in cooldown." -> "cooldown";
-      case "A machine power action is already pending." -> "action-pending";
-      default -> "invalid-challenge";
-    };
+    return exception instanceof ActionRejectedException rejected
+        ? rejected.rejection().auditOutcome()
+        : ActionRejection.CHALLENGE_INVALID.auditOutcome();
   }
 
   private void pruneExpiredChallenges(Instant now) {
@@ -461,7 +459,7 @@ public class CommandCenterActionService {
   private void removeOldestChallenge(String actorId) {
     challenges.values().stream()
         .filter(challenge -> actorId == null || challenge.actorId().equals(actorId))
-        .min(java.util.Comparator.comparing(StoredChallenge::expiresAt)
+        .min(Comparator.comparing(StoredChallenge::expiresAt)
             .thenComparing(StoredChallenge::id))
         .ifPresent(challenge -> challenges.remove(challenge.id()));
   }

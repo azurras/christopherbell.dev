@@ -19,10 +19,20 @@ public class MongoAdminActivityRepository extends KindScopedRepositorySupport<Ad
   public MongoAdminActivityRepository(DomainMongoOperationsFactory factory) {
     super(factory, AdminActivity.class);
   }
-  @Override public AdminActivity insert(AdminActivity value) { return insertValue(value); }
-  @Override public AdminActivity save(AdminActivity value) { return saveValue(value); }
-  @Override public Optional<AdminActivity> findById(String id) { return findValueById(id); }
-  @Override public List<AdminActivity> findTop25ByOrderByCreatedOnDesc() {
+  @Override
+  public AdminActivity insert(AdminActivity value) {
+    return insertValue(value);
+  }
+  @Override
+  public AdminActivity save(AdminActivity value) {
+    return saveValue(value);
+  }
+  @Override
+  public Optional<AdminActivity> findById(String id) {
+    return findValueById(id);
+  }
+  @Override
+  public List<AdminActivity> findTop25ByOrderByCreatedOnDesc() {
     return find(new Query().with(Sort.by(Sort.Direction.DESC, "createdOn")), PageRequest.of(0, 25));
   }
 }
