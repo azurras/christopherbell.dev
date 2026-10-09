@@ -7,6 +7,7 @@ import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.permission.PermissionService;
 import java.util.EnumSet;
+import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
@@ -46,7 +47,7 @@ public final class MusicAccessService {
     EnumSet<AccountPermission> effective = EnumSet.noneOf(AccountPermission.class);
     if (account.getPermissions() != null) {
       account.getPermissions().stream()
-          .filter(java.util.Objects::nonNull)
+          .filter(Objects::nonNull)
           .forEach(effective::add);
     }
     if (account.getRole() == Role.ADMIN) {

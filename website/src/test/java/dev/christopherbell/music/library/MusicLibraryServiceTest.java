@@ -11,6 +11,7 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicProbeResult;
 import dev.christopherbell.music.catalog.MusicTrack;
+import dev.christopherbell.music.catalog.MusicTrackPreferences;
 import dev.christopherbell.music.catalog.MusicTrackRepository;
 import dev.christopherbell.music.radio.MusicRadioHistoryRepository;
 import dev.christopherbell.music.security.MusicAccessService;
@@ -24,6 +25,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 class MusicLibraryServiceTest {
   private static final Instant NOW = Instant.parse("2026-07-28T12:00:00Z");
+  private static final MusicTrackPreferences NEITHER = new MusicTrackPreferences(false, false);
+  private static final MusicTrackPreferences BOTH = new MusicTrackPreferences(true, true);
 
   @Test
   void listenerReadsOneBoundedGlobalPlaylistList() {
@@ -102,17 +105,17 @@ class MusicLibraryServiceTest {
     var catalog = mock(MusicCatalog.class);
     when(catalog.findReady(before.id())).thenReturn(Optional.of(before), Optional.of(after));
     var tracks = mock(MusicTrackRepository.class);
-    when(tracks.updatePreferences(before.id(), false, false, true, true)).thenReturn(true);
+    when(tracks.updatePreferences(before.id(), NEITHER, BOTH)).thenReturn(true);
     var access = mock(MusicAccessService.class);
     var service = service(mock(MusicPlaylistRepository.class), catalog,
         mock(MusicRadioHistoryRepository.class), access, tracks);
 
-    var result = service.updatePreferences(before.id(), false, false, true, true);
+    var result = service.updatePreferences(before.id(), NEITHER, BOTH);
 
     assertThat(result.favorite()).isTrue();
     assertThat(result.excludedFromRadio()).isTrue();
     verify(access).requireWrite();
-    verify(tracks).updatePreferences(before.id(), false, false, true, true);
+    verify(tracks).updatePreferences(before.id(), NEITHER, BOTH);
   }
 
   private MusicLibraryService service(

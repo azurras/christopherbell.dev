@@ -2,6 +2,7 @@ package dev.christopherbell.music.catalog;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -27,7 +28,7 @@ class MusicCatalogTest {
         track("a.mp3", "Song A", "Artist", "Album", "Rock", 2025),
         track("b.mp3", "Song B", "Artist", "Album", "Rock", 2026)));
     when(boundary.operations.aggregate(any(KindScopedAggregation.class),
-        org.mockito.ArgumentMatchers.eq(Document.class)))
+        eq(Document.class)))
         .thenReturn(List.of(new Document("_id", "Artist")))
         .thenReturn(List.of(new Document("_id", "Album")))
         .thenReturn(List.of(new Document("_id", "Rock")))
@@ -58,7 +59,7 @@ class MusicCatalogTest {
     when(boundary.operations.count(countQuery.capture())).thenReturn(51L);
     when(boundary.operations.find(pageQuery.capture(), any(Pageable.class))).thenReturn(List.of(
         track("last.mp3", "Last Song", "Artist", "Album", "Rock", 2026)));
-    when(boundary.operations.aggregate(any(), org.mockito.ArgumentMatchers.eq(Document.class)))
+    when(boundary.operations.aggregate(any(), eq(Document.class)))
         .thenReturn(List.of());
     var catalog = new MusicCatalog(
         new MongoMusicCatalogQueryRepository(boundary.factory), mock(MusicTrackRepository.class));

@@ -12,6 +12,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -120,7 +121,7 @@ public final class MusicExecutableResolver {
       String expectedHash = json.path(hashField).asText("");
       if (!SHA256.matcher(expectedHash).matches()
           || !MessageDigest.isEqual(
-              expectedHash.toUpperCase(java.util.Locale.ROOT).getBytes(StandardCharsets.US_ASCII),
+              expectedHash.toUpperCase(Locale.ROOT).getBytes(StandardCharsets.US_ASCII),
               sha256(executable).getBytes(StandardCharsets.US_ASCII))) {
         throw new IllegalStateException("Pinned Music media-tools executable hash is invalid.");
       }

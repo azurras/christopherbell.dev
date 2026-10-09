@@ -3,9 +3,10 @@ package dev.christopherbell.music.catalog;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -14,6 +15,7 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.libs.lease.CollectorLeaseGuard;
 import dev.christopherbell.libs.lease.LeaseOwnershipLostException;
 import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -81,7 +83,7 @@ class MusicCatalogReconcilerTest {
     Path outside = Files.writeString(tempDir.resolve("outside.mp3"), "outside");
     try {
       Files.createSymbolicLink(root.resolve("linked.mp3"), outside);
-    } catch (UnsupportedOperationException | java.io.IOException unavailable) {
+    } catch (UnsupportedOperationException | IOException unavailable) {
       return;
     }
     var repository = memoryRepository();
@@ -101,8 +103,8 @@ class MusicCatalogReconcilerTest {
     var probe = mock(MusicProbe.class);
     var coordinator = mock(ScheduledCollectorCoordinator.class);
     when(coordinator.run(
-        org.mockito.ArgumentMatchers.eq("music-catalog-reconcile"),
-        org.mockito.ArgumentMatchers.eq(Duration.ofMinutes(30)),
+        eq("music-catalog-reconcile"),
+        eq(Duration.ofMinutes(30)),
         any()))
         .thenReturn(null);
 
@@ -125,8 +127,8 @@ class MusicCatalogReconcilerTest {
         .when(guard).verifyHeld();
     var coordinator = mock(ScheduledCollectorCoordinator.class);
     when(coordinator.run(
-        org.mockito.ArgumentMatchers.eq("music-catalog-reconcile"),
-        org.mockito.ArgumentMatchers.eq(Duration.ofMinutes(30)),
+        eq("music-catalog-reconcile"),
+        eq(Duration.ofMinutes(30)),
         any()))
         .thenAnswer(invocation -> {
           ScheduledCollectorCoordinator.Work<?> work = invocation.getArgument(2);
@@ -154,8 +156,8 @@ class MusicCatalogReconcilerTest {
         .when(guard).verifyHeld();
     var coordinator = mock(ScheduledCollectorCoordinator.class);
     when(coordinator.run(
-        org.mockito.ArgumentMatchers.eq("music-catalog-reconcile"),
-        org.mockito.ArgumentMatchers.eq(Duration.ofMinutes(30)),
+        eq("music-catalog-reconcile"),
+        eq(Duration.ofMinutes(30)),
         any()))
         .thenAnswer(invocation -> {
           ScheduledCollectorCoordinator.Work<?> work = invocation.getArgument(2);

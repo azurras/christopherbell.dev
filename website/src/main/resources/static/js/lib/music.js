@@ -12,11 +12,16 @@ function optionalText(value) {
 
 /** Validate one catalog track before it reaches markup, URLs, or the player. */
 export function musicTrack(value) {
-  const text = ['title', 'artist', 'albumArtist', 'album', 'genre']
-    .map(key => optionalText(value?.[key]));
+  const text = {
+    title: optionalText(value?.title),
+    artist: optionalText(value?.artist),
+    albumArtist: optionalText(value?.albumArtist),
+    album: optionalText(value?.album),
+    genre: optionalText(value?.genre),
+  };
   if (typeof value?.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(value.id)
       || typeof value.observedToken !== 'string' || !/^[0-9a-f]{64}$/u.test(value.observedToken)
-      || typeof text[0] !== 'string' || text.some(item => item === undefined)
+      || typeof text.title !== 'string' || Object.values(text).some(item => item === undefined)
       || !Number.isFinite(value.durationSeconds) || value.durationSeconds <= 0
       || value.durationSeconds > 604800
       || typeof value.artworkAvailable !== 'boolean'
@@ -24,10 +29,7 @@ export function musicTrack(value) {
       || typeof value.excludedFromRadio !== 'boolean') {
     throw new Error('Music returned an invalid track.');
   }
-  return Object.freeze({
-    ...value,
-    title: text[0], artist: text[1], albumArtist: text[2], album: text[3], genre: text[4],
-  });
+  return Object.freeze({ ...value, ...text });
 }
 
 export function musicCatalog(value) {

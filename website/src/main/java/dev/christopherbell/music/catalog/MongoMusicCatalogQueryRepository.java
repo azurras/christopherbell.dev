@@ -6,8 +6,10 @@ import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.persistence.MongoPersistence;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.bson.Document;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -74,9 +76,9 @@ public class MongoMusicCatalogQueryRepository implements MusicCatalogQueryReposi
     return new MusicFacets(MusicCatalogResultSupport.strings(distinct(request, "artist", String.class)),
         MusicCatalogResultSupport.strings(distinct(request, "album", String.class)),
         MusicCatalogResultSupport.strings(distinct(request, "genre", String.class)),
-        distinct(request, "year", Integer.class).stream().filter(java.util.Objects::nonNull)
-            .collect(java.util.stream.Collectors.collectingAndThen(
-                java.util.stream.Collectors.toCollection(TreeSet::new), List::copyOf)));
+        distinct(request, "year", Integer.class).stream().filter(Objects::nonNull)
+            .collect(Collectors.collectingAndThen(
+                Collectors.toCollection(TreeSet::new), List::copyOf)));
   }
 
   private <T> List<T> distinct(MusicQuery request, String field, Class<T> type) {

@@ -16,8 +16,10 @@ import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
+import java.util.stream.IntStream;
 import org.bson.Document;
 import org.bson.RawBsonDocument;
 import org.junit.jupiter.api.AfterAll;
@@ -90,8 +92,8 @@ class MusicAccessAuditMongoContractTest {
     var barrier = new CyclicBarrier(writerCount);
     var executor = Executors.newFixedThreadPool(writerCount);
     try {
-      var tasks = java.util.stream.IntStream.range(0, writerCount)
-          .<java.util.concurrent.Callable<MusicAccessAttempt>>mapToObj(index -> () -> {
+      var tasks = IntStream.range(0, writerCount)
+          .<Callable<MusicAccessAttempt>>mapToObj(index -> () -> {
             barrier.await();
             return recorder().deniedIp("203.0.113.7", "SIGN_IN_REQUIRED");
           })

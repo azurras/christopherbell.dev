@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -40,7 +41,7 @@ public final class JdkMusicProcessRunner implements MusicProcessRunner {
     }
     Process process;
     try {
-      var resolved = new java.util.ArrayList<>(command);
+      var resolved = new ArrayList<>(command);
       resolved.set(0, executables.resolve(command.getFirst()));
       process = new ProcessBuilder(resolved).start();
     } catch (IOException failure) {
