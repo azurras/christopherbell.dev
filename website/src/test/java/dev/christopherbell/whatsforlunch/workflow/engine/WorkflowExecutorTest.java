@@ -11,6 +11,7 @@ import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowStatus;
 import dev.christopherbell.whatsforlunch.workflow.engine.operation.OperationResult;
 import dev.christopherbell.whatsforlunch.workflow.engine.operation.OperationStatus;
 import dev.christopherbell.whatsforlunch.workflow.engine.retry.RetryPolicy;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -24,7 +25,7 @@ class WorkflowExecutorTest {
   @Test
   @DisplayName("Execute operation stores completed status")
   void executeOperation_whenOperationSucceeds_updatesOperationHistory() {
-    var executor = new WorkflowExecutor();
+    var executor = new WorkflowExecutor(Clock.systemUTC());
     var context = context();
 
     var result = executor.executeOperation(new NamedSuccessfulOperation(), context);
@@ -36,7 +37,7 @@ class WorkflowExecutorTest {
   @Test
   @DisplayName("Execute operation stores failed status when operation throws")
   void executeOperation_whenOperationThrows_returnsFailedResult() {
-    var executor = new WorkflowExecutor();
+    var executor = new WorkflowExecutor(Clock.systemUTC());
     var context = context();
 
     var result = executor.executeOperation(new NamedFailingOperation(), context);
@@ -48,7 +49,7 @@ class WorkflowExecutorTest {
   @Test
   @DisplayName("Execute workflow marks context completed on success")
   void executeWorkflow_whenWorkflowSucceeds_marksContextCompleted() {
-    var executor = new WorkflowExecutor();
+    var executor = new WorkflowExecutor(Clock.systemUTC());
     var context = context();
 
     var result = executor.executeWorkflow(ctx -> WorkflowResult.builder()
@@ -65,7 +66,7 @@ class WorkflowExecutorTest {
   @Test
   @DisplayName("Execute workflow returns retryable failure for retryable exceptions")
   void executeWorkflow_whenWorkflowThrowsRetryable_returnsRetryableFailure() {
-    var result = new WorkflowExecutor().executeWorkflow(
+    var result = new WorkflowExecutor(Clock.systemUTC()).executeWorkflow(
         ctx -> {
           throw new WorkflowRetryableException("retry later");
         },
@@ -79,7 +80,7 @@ class WorkflowExecutorTest {
   void executeWorkflow_whenWorkflowThrowsStop_returnsStopped() {
     var context = context();
 
-    var result = new WorkflowExecutor().executeWorkflow(
+    var result = new WorkflowExecutor(Clock.systemUTC()).executeWorkflow(
         ctx -> {
           throw new WorkflowStopExecutionException("stop");
         },
@@ -92,7 +93,7 @@ class WorkflowExecutorTest {
   @Test
   @DisplayName("Execute workflow returns failed for unexpected exceptions")
   void executeWorkflow_whenWorkflowThrowsUnexpected_returnsFailed() {
-    var result = new WorkflowExecutor().executeWorkflow(
+    var result = new WorkflowExecutor(Clock.systemUTC()).executeWorkflow(
         ctx -> {
           throw new IllegalStateException("unexpected");
         },
@@ -107,7 +108,7 @@ class WorkflowExecutorTest {
     var retryPolicy = retryPolicy(true);
     var context = context();
 
-    var result = new WorkflowExecutor().executeWorkflowWithRetry(
+    var result = new WorkflowExecutor(Clock.systemUTC()).executeWorkflowWithRetry(
         retryPolicy,
         ctx -> completedResult(),
         context);
@@ -136,7 +137,7 @@ class WorkflowExecutorTest {
       }
     };
 
-    var result = new WorkflowExecutor().executeWorkflowWithRetry(retryPolicy, workflow, context);
+    var result = new WorkflowExecutor(Clock.systemUTC()).executeWorkflowWithRetry(retryPolicy, workflow, context);
 
     assertEquals(WorkflowStatus.COMPLETED, result.getStatus());
     assertEquals(3, context.getAttemptCount());
@@ -151,7 +152,7 @@ class WorkflowExecutorTest {
 
     assertThrows(
         WorkflowStopExecutionException.class,
-        () -> new WorkflowExecutor().executeWorkflowWithRetry(retryPolicy, ctx -> completedResult(), context));
+        () -> new WorkflowExecutor(Clock.systemUTC()).executeWorkflowWithRetry(retryPolicy, ctx -> completedResult(), context));
     assertEquals(WorkflowStatus.STOPPED, context.getStatus());
   }
 
