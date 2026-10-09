@@ -15,6 +15,7 @@ public final class ProductionSettingsApplicationContextInitializer
     implements ApplicationContextInitializer<ConfigurableApplicationContext> {
   private static final Pattern EMAIL = Pattern.compile(
       "^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$", Pattern.CASE_INSENSITIVE);
+  private static final int MIN_JWT_SECRET_LENGTH = 32;
   private static final List<String> PLACEHOLDER_FRAGMENTS = List.of(
       "replace-with", "your_resend", "your-verified-domain", "example");
 
@@ -50,14 +51,14 @@ public final class ProductionSettingsApplicationContextInitializer
       if (connectionString.getDatabase() == null || connectionString.getDatabase().isBlank()) {
         violations.add("SPRING_MONGODB_URI must specify a database name.");
       }
-    } catch (RuntimeException ignored) {
+    } catch (RuntimeException unparseable) {
       violations.add("SPRING_MONGODB_URI must be a valid MongoDB connection string.");
     }
   }
 
   private static void validateJwt(Environment environment, List<String> violations) {
     var value = trimmed(environment, "APP_JWT_SECRET");
-    if (value.length() < 32 || isPlaceholder(value)) {
+    if (value.length() < MIN_JWT_SECRET_LENGTH || isPlaceholder(value)) {
       violations.add("APP_JWT_SECRET must be a non-placeholder value of at least 32 characters.");
     }
   }

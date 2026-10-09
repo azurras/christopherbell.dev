@@ -14,6 +14,9 @@ import org.springframework.security.web.util.matcher.IpAddressMatcher;
  */
 public class ClientIpResolver {
   private static final int MAX_FORWARDED_HOPS = 32;
+  private static final int IPV4_PREFIX_BITS = 32;
+  private static final int IPV6_PREFIX_BITS = 128;
+  private static final int MAX_OCTET = 255;
   private final List<IpAddressMatcher> trustedProxies;
 
   public ClientIpResolver(ClientIpProperties properties) {
@@ -43,7 +46,9 @@ public class ClientIpResolver {
     }
     for (int index = hops.size() - 1; index >= 0; index--) {
       var hop = hops.get(index);
-      if (!isTrustedProxy(hop)) return hop;
+      if (!isTrustedProxy(hop)) {
+        return hop;
+      }
     }
     return hops.getFirst();
   }
@@ -66,7 +71,7 @@ public class ClientIpResolver {
       var address = parseLiteral(parts[0]);
       try {
         var prefix = Integer.parseInt(parts[1]);
-        var maximum = address instanceof Inet4Address ? 32 : 128;
+        var maximum = address instanceof Inet4Address ? IPV4_PREFIX_BITS : IPV6_PREFIX_BITS;
         if (prefix < 0 || prefix > maximum) {
           throw new IllegalArgumentException("Trusted proxy CIDR prefix is out of range: "
               + normalized);
@@ -80,16 +85,11 @@ public class ClientIpResolver {
   }
 
   private static boolean isIpLiteral(String value) {
-    if (value == null || value.isBlank()) return false;
-    if (!value.matches("[0-9A-Fa-f:.]+")) return false;
+    if (value == null || value.isBlank() || !value.matches("[0-9A-Fa-f:.]+")) {
+      return false;
+    }
     if (!value.contains(":")) {
-      var octets = value.split("\\.", -1);
-      if (octets.length != 4) return false;
-      for (var octet : octets) {
-        if (!octet.matches("0|[1-9][0-9]{0,2}")) return false;
-        if (Integer.parseInt(octet) > 255) return false;
-      }
-      return true;
+      return isIpv4Literal(value);
     }
     try {
       var parsed = parseLiteral(value);
@@ -97,6 +97,20 @@ public class ClientIpResolver {
     } catch (IllegalArgumentException malformed) {
       return false;
     }
+  }
+
+  /** Four dotted decimal octets without leading zeros, each at most 255. */
+  private static boolean isIpv4Literal(String value) {
+    var octets = value.split("\\.", -1);
+    if (octets.length != 4) {
+      return false;
+    }
+    for (var octet : octets) {
+      if (!octet.matches("0|[1-9][0-9]{0,2}") || Integer.parseInt(octet) > MAX_OCTET) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private static InetAddress parseLiteral(String value) {
