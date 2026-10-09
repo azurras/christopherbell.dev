@@ -6,7 +6,7 @@ import dev.christopherbell.whatsforlunch.workflow.engine.exception.WorkflowStopE
 import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowContext;
 import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowResult;
 import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowStatus;
-import java.time.Instant;
+import java.time.Clock;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 
@@ -16,15 +16,26 @@ import org.springframework.stereotype.Component;
 @Component
 public class WhatsForLunchWorkflow implements Workflow {
 
+  private final Clock clock;
+
+  /**
+   * Creates the workflow with the clock that stamps its results.
+   *
+   * @param clock the application clock
+   */
+  public WhatsForLunchWorkflow(Clock clock) {
+    this.clock = clock;
+  }
+
   @Override
-  public WorkflowResult execute(WorkflowContext ctx) throws WorkflowException {
-    if (!(ctx instanceof WhatsForLunchWorkflowContext whatsForLunchWorkflowContext)) {
+  public WorkflowResult execute(WorkflowContext context) throws WorkflowException {
+    if (!(context instanceof WhatsForLunchWorkflowContext)) {
       throw new WorkflowStopExecutionException(
           "Invalid context type provided to WhatsForLunchWorkflow. Expected WhatsForLunchWorkflowContext."
       );
     }
 
-    var now = Instant.now();
+    var now = clock.instant();
     return WhatsForLunchWorkflowResult.builder()
         .createdAt(now)
         .updatedAt(now)
