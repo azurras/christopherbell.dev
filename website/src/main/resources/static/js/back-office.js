@@ -78,6 +78,28 @@ const sharedRecycleNext = document.getElementById('sharedRecycleNext');
 const sharedRecyclePage = document.getElementById('sharedRecyclePage');
 const musicAccessAuditList = document.getElementById('musicAccessAuditList');
 
+/** The account capability pairs edited from the user drawer. */
+const CAPABILITY_FAMILIES = Object.freeze({
+  sharedFolder: Object.freeze({
+    hostId: 'sharedFolderPermissions',
+    template: sharedFolderPermissionsTemplate,
+    dataAttribute: 'shared-folder-permission',
+    datasetKey: 'sharedFolderPermission',
+    stateOf: sharedFolderPermissionState,
+    updateUrl: API.accounts.updateSharedFolderPermissions,
+    failureMessage: 'Failed to update shared-folder permissions.',
+  }),
+  music: Object.freeze({
+    hostId: 'musicPermissions',
+    template: musicPermissionsTemplate,
+    dataAttribute: 'music-permission',
+    datasetKey: 'musicPermission',
+    stateOf: musicPermissionState,
+    updateUrl: API.accounts.updateMusicPermissions,
+    failureMessage: 'Failed to update Music permissions.',
+  }),
+});
+
 let accounts = [];
 let accountQuery = {
   page: 0,
@@ -131,8 +153,8 @@ let sharedRecycleItems = [];
 let sharedRecyclePageNumber = 0;
 let sharedRecycleHasNext = false;
 
-function showAlert(msg) {
-  renderAlert(alertBox, msg);
+function showAlert(message) {
+  renderAlert(alertBox, message);
 }
 
 function clearAlert() {
@@ -158,10 +180,10 @@ function renderState(container, message) {
   container.innerHTML = `<div class="empty-state">${sanitize(message)}</div>`;
 }
 
-function renderOperationResult(container, content, tone = 'neutral') {
+function renderOperationResult(container, markup, tone = 'neutral') {
   if (!container) return;
   container.className = `operation-result operation-${tone}`;
-  container.innerHTML = content;
+  container.innerHTML = markup;
 }
 
 function statusClass(status) {
@@ -219,8 +241,8 @@ function renderMetrics() {
   };
 
   Object.entries(metrics).forEach(([id, value]) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = String(value);
+    const element = document.getElementById(id);
+    if (element) element.textContent = String(value);
   });
 }
 
@@ -434,8 +456,8 @@ function openDrawer(type, id) {
       : `@${item.username || 'user'}`;
   drawerBody.innerHTML = type === 'report' ? reportDetails(item) : userDetails(item);
   if (type === 'user') {
-    renderSharedFolderPermissions(item);
-    renderMusicPermissions(item);
+    renderCapabilityPermissions(item, CAPABILITY_FAMILIES.sharedFolder);
+    renderCapabilityPermissions(item, CAPABILITY_FAMILIES.music);
   }
   drawer.classList.remove('d-none');
   drawer.setAttribute('aria-hidden', 'false');
@@ -504,31 +526,14 @@ function userDetails(account) {
   `;
 }
 
-function renderSharedFolderPermissions(account) {
-  const host = document.getElementById('sharedFolderPermissions');
-  if (!host || !sharedFolderPermissionsTemplate) return;
+function renderCapabilityPermissions(account, family) {
+  const host = document.getElementById(family.hostId);
+  if (!host || !family.template) return;
 
-  const state = sharedFolderPermissionState(account);
-  const fragment = sharedFolderPermissionsTemplate.content.cloneNode(true);
-  const read = fragment.querySelector('[data-shared-folder-permission="read"]');
-  const write = fragment.querySelector('[data-shared-folder-permission="write"]');
-  [read, write].forEach(input => {
-    input.dataset.account = account.id || '';
-    input.disabled = state.disabled;
-  });
-  read.checked = state.read;
-  write.checked = state.write;
-  host.replaceChildren(fragment);
-}
-
-function renderMusicPermissions(account) {
-  const host = document.getElementById('musicPermissions');
-  if (!host || !musicPermissionsTemplate) return;
-
-  const state = musicPermissionState(account);
-  const fragment = musicPermissionsTemplate.content.cloneNode(true);
-  const read = fragment.querySelector('[data-music-permission="read"]');
-  const write = fragment.querySelector('[data-music-permission="write"]');
+  const state = family.stateOf(account);
+  const fragment = family.template.content.cloneNode(true);
+  const read = fragment.querySelector(`[data-${family.dataAttribute}="read"]`);
+  const write = fragment.querySelector(`[data-${family.dataAttribute}="write"]`);
   [read, write].forEach(input => {
     input.dataset.account = account.id || '';
     input.disabled = state.disabled;
@@ -554,16 +559,8 @@ async function updateAccount(accountId, patch) {
   });
 }
 
-async function updateSharedFolderPermissions(accountId, { read, write }) {
-  return fetchJson(API.accounts.updateSharedFolderPermissions(accountId), {
-    method: 'PATCH',
-    headers: authHeaders(),
-    body: JSON.stringify({ read, write }),
-  });
-}
-
-async function updateMusicPermissions(accountId, { read, write }) {
-  return fetchJson(API.accounts.updateMusicPermissions(accountId), {
+async function updateCapabilityPermissions(family, accountId, { read, write }) {
+  return fetchJson(family.updateUrl(accountId), {
     method: 'PATCH',
     headers: authHeaders(),
     body: JSON.stringify({ read, write }),
@@ -589,11 +586,11 @@ async function refreshDashboard() {
   renderActivityNavigation();
   try {
     await refreshSharedAdministration();
-  } catch (err) {
-    if (err?.status === 401 || err?.status === 403) throw err;
+  } catch (error) {
+    if (error?.status === 401 || error?.status === 403) throw error;
     renderState(sharedAuditList, 'Shared-folder audit is temporarily unavailable.');
     renderState(sharedRecycleList, 'Recycle administration is temporarily unavailable.');
-    showAlert(err?.message || 'Shared-folder administration is temporarily unavailable.');
+    showAlert(error?.message || 'Shared-folder administration is temporarily unavailable.');
   }
 }
 
@@ -1002,8 +999,8 @@ async function handleReportAction(target) {
     await resolveReport(reportId, resolution, reason);
     await refreshDashboard();
     closeDrawer();
-  } catch (err) {
-    showAlert(err.message || 'Failed to resolve report.');
+  } catch (error) {
+    showAlert(error.message || 'Failed to resolve report.');
   } finally {
     target.disabled = false;
   }
@@ -1034,52 +1031,31 @@ async function handleUserAction(target) {
     }
     await refreshDashboard();
     closeDrawer();
-  } catch (err) {
-    showAlert(err.message || 'Failed to update user.');
+  } catch (error) {
+    showAlert(error.message || 'Failed to update user.');
   } finally {
     target.disabled = false;
   }
 }
 
-async function handleSharedFolderPermissionChange(target) {
+async function handleCapabilityPermissionChange(target, family) {
   const accountId = target.dataset.account;
-  const permission = target.dataset.sharedFolderPermission;
+  const permission = target.dataset[family.datasetKey];
   const account = accounts.find(candidate => candidate.id === accountId);
   if (!account || !permission) return;
 
-  const state = sharedFolderPermissionState(account, { [permission]: target.checked });
-  const controls = drawerBody?.querySelectorAll('[data-shared-folder-permission]') || [];
+  const state = family.stateOf(account, { [permission]: target.checked });
+  const controls = drawerBody?.querySelectorAll(`[data-${family.dataAttribute}]`) || [];
   controls.forEach(control => {
     control.disabled = true;
   });
   try {
-    await updateSharedFolderPermissions(accountId, state);
+    await updateCapabilityPermissions(family, accountId, state);
     await refreshDashboard();
     openDrawer('user', accountId);
-  } catch (err) {
-    showAlert(err.message || 'Failed to update shared-folder permissions.');
-    renderSharedFolderPermissions(account);
-  }
-}
-
-async function handleMusicPermissionChange(target) {
-  const accountId = target.dataset.account;
-  const permission = target.dataset.musicPermission;
-  const account = accounts.find(candidate => candidate.id === accountId);
-  if (!account || !permission) return;
-
-  const state = musicPermissionState(account, { [permission]: target.checked });
-  const controls = drawerBody?.querySelectorAll('[data-music-permission]') || [];
-  controls.forEach(control => {
-    control.disabled = true;
-  });
-  try {
-    await updateMusicPermissions(accountId, state);
-    await refreshDashboard();
-    openDrawer('user', accountId);
-  } catch (err) {
-    showAlert(err.message || 'Failed to update Music permissions.');
-    renderMusicPermissions(account);
+  } catch (error) {
+    showAlert(error.message || family.failureMessage);
+    renderCapabilityPermissions(account, family);
   }
 }
 
@@ -1108,11 +1084,32 @@ async function handleOperation(button) {
       button.disabled = true;
       await loadBlogPosts();
     }
-  } catch (err) {
-    showAlert(err.message || 'Operation failed.');
+  } catch (error) {
+    showAlert(error.message || 'Operation failed.');
   } finally {
     button.disabled = false;
   }
+}
+
+/** Wires previous and next buttons that move one page and roll back when loading fails. */
+function wirePager({ previous, next, getQuery, setQuery, totalPages, refresh, noun }) {
+  const move = async (step, direction) => {
+    setQuery({ ...getQuery(), page: getQuery().page + step });
+    try {
+      await refresh();
+    } catch (error) {
+      setQuery({ ...getQuery(), page: getQuery().page - step });
+      showAlert(error?.message || `Failed to load the ${direction} ${noun} page.`);
+    }
+  };
+  previous?.addEventListener('click', async () => {
+    if (getQuery().page <= 0) return;
+    await move(-1, 'previous');
+  });
+  next?.addEventListener('click', async () => {
+    if (getQuery().page + 1 >= totalPages()) return;
+    await move(1, 'next');
+  });
 }
 
 function wireEvents() {
@@ -1128,8 +1125,8 @@ function wireEvents() {
     };
     try {
       await loadRestaurantInventory();
-    } catch (err) {
-      showAlert(err.message || 'Failed to search restaurant inventory.');
+    } catch (error) {
+      showAlert(error.message || 'Failed to search restaurant inventory.');
     }
   });
 
@@ -1139,8 +1136,8 @@ function wireEvents() {
     wflInventoryMore.disabled = true;
     try {
       await loadRestaurantInventory({ append: true });
-    } catch (err) {
-      showAlert(err.message || 'Failed to load more restaurants.');
+    } catch (error) {
+      showAlert(error.message || 'Failed to load more restaurants.');
     } finally {
       wflInventoryMore.disabled = false;
     }
@@ -1156,31 +1153,19 @@ function wireEvents() {
     reportQuery = { ...reportQuery, ...filters, page: 0 };
     try {
       await refreshReports();
-    } catch (err) {
-      showAlert(err?.message || 'Failed to filter reports.');
+    } catch (error) {
+      showAlert(error?.message || 'Failed to filter reports.');
     }
   });
 
-  reportPrevious?.addEventListener('click', async () => {
-    if (reportQuery.page <= 0) return;
-    reportQuery = { ...reportQuery, page: reportQuery.page - 1 };
-    try {
-      await refreshReports();
-    } catch (err) {
-      reportQuery = { ...reportQuery, page: reportQuery.page + 1 };
-      showAlert(err?.message || 'Failed to load the previous report page.');
-    }
-  });
-
-  reportNext?.addEventListener('click', async () => {
-    if (reportQuery.page + 1 >= reportPageState.totalPages) return;
-    reportQuery = { ...reportQuery, page: reportQuery.page + 1 };
-    try {
-      await refreshReports();
-    } catch (err) {
-      reportQuery = { ...reportQuery, page: reportQuery.page - 1 };
-      showAlert(err?.message || 'Failed to load the next report page.');
-    }
+  wirePager({
+    previous: reportPrevious,
+    next: reportNext,
+    getQuery: () => reportQuery,
+    setQuery: query => { reportQuery = query; },
+    totalPages: () => reportPageState.totalPages,
+    refresh: refreshReports,
+    noun: 'report',
   });
 
   activityFilters?.addEventListener('submit', async (event) => {
@@ -1193,31 +1178,19 @@ function wireEvents() {
     activityQuery = { ...activityQuery, ...filters, page: 0 };
     try {
       await refreshActivity();
-    } catch (err) {
-      showAlert(err?.message || 'Failed to filter audit activity.');
+    } catch (error) {
+      showAlert(error?.message || 'Failed to filter audit activity.');
     }
   });
 
-  activityPrevious?.addEventListener('click', async () => {
-    if (activityQuery.page <= 0) return;
-    activityQuery = { ...activityQuery, page: activityQuery.page - 1 };
-    try {
-      await refreshActivity();
-    } catch (err) {
-      activityQuery = { ...activityQuery, page: activityQuery.page + 1 };
-      showAlert(err?.message || 'Failed to load the previous audit page.');
-    }
-  });
-
-  activityNext?.addEventListener('click', async () => {
-    if (activityQuery.page + 1 >= activityPageState.totalPages) return;
-    activityQuery = { ...activityQuery, page: activityQuery.page + 1 };
-    try {
-      await refreshActivity();
-    } catch (err) {
-      activityQuery = { ...activityQuery, page: activityQuery.page - 1 };
-      showAlert(err?.message || 'Failed to load the next audit page.');
-    }
+  wirePager({
+    previous: activityPrevious,
+    next: activityNext,
+    getQuery: () => activityQuery,
+    setQuery: query => { activityQuery = query; },
+    totalPages: () => activityPageState.totalPages,
+    refresh: refreshActivity,
+    noun: 'audit',
   });
 
   userFilters?.addEventListener('submit', async (event) => {
@@ -1234,56 +1207,45 @@ function wireEvents() {
     };
     try {
       await refreshAccounts();
-    } catch (err) {
-      showAlert(err?.message || 'Failed to filter accounts.');
+    } catch (error) {
+      showAlert(error?.message || 'Failed to filter accounts.');
     }
   });
 
-  userPrevious?.addEventListener('click', async () => {
-    if (accountQuery.page <= 0) return;
-    accountQuery = { ...accountQuery, page: accountQuery.page - 1 };
-    try {
-      await refreshAccounts();
-    } catch (err) {
-      accountQuery = { ...accountQuery, page: accountQuery.page + 1 };
-      showAlert(err?.message || 'Failed to load the previous account page.');
-    }
-  });
-
-  userNext?.addEventListener('click', async () => {
-    if (accountQuery.page + 1 >= accountPageState.totalPages) return;
-    accountQuery = { ...accountQuery, page: accountQuery.page + 1 };
-    try {
-      await refreshAccounts();
-    } catch (err) {
-      accountQuery = { ...accountQuery, page: accountQuery.page - 1 };
-      showAlert(err?.message || 'Failed to load the next account page.');
-    }
+  wirePager({
+    previous: userPrevious,
+    next: userNext,
+    getQuery: () => accountQuery,
+    setQuery: query => { accountQuery = query; },
+    totalPages: () => accountPageState.totalPages,
+    refresh: refreshAccounts,
+    noun: 'account',
   });
 
   document.addEventListener('click', (event) => {
     const action = event.target;
     const operationButton = action.closest?.('[data-operation]');
     if (operationButton instanceof HTMLButtonElement) {
-      handleOperation(operationButton);
+      void handleOperation(operationButton);
       return;
     }
 
     const recycleButton = sharedRecycleButton(action, HTMLButtonElement);
     if (recycleButton) {
-      handleSharedRecycleAction(recycleButton);
+      void handleSharedRecycleAction(recycleButton);
       return;
     }
 
     const canesReviewButton = action.closest?.('[data-canes-box-review]');
     if (canesReviewButton instanceof HTMLButtonElement) {
-      reviewCanesBoxMetro(canesReviewButton).catch(err => showAlert(err.message || 'Failed to review price.'));
+      reviewCanesBoxMetro(canesReviewButton).catch(error => showAlert(error.message || 'Failed to review price.'));
       return;
     }
 
     const userPostsButton = action.closest?.('[data-user-posts]');
     if (userPostsButton instanceof HTMLButtonElement) {
-      loadUserPosts(userPostsButton.getAttribute('data-user-posts'));
+      loadUserPosts(userPostsButton.getAttribute('data-user-posts'))
+        .catch(error => showAlert(error?.message || 'Failed to load user posts.'));
       return;
     }
 
@@ -1307,9 +1269,9 @@ function wireEvents() {
   document.addEventListener('change', async (event) => {
     const target = event.target;
     if (target instanceof HTMLInputElement && target.dataset.sharedFolderPermission) {
-      await handleSharedFolderPermissionChange(target);
+      await handleCapabilityPermissionChange(target, CAPABILITY_FAMILIES.sharedFolder);
     } else if (target instanceof HTMLInputElement && target.dataset.musicPermission) {
-      await handleMusicPermissionChange(target);
+      await handleCapabilityPermissionChange(target, CAPABILITY_FAMILIES.music);
     } else if (target instanceof HTMLSelectElement && target.classList.contains('report-action')) {
       await handleReportAction(target);
     } else if (target instanceof HTMLSelectElement && target.classList.contains('user-action')) {
@@ -1326,8 +1288,8 @@ function wireEvents() {
     try {
       await createVehicleFromVin(vin);
       vehicleVinForm.reset();
-    } catch (err) {
-      showAlert(err.message || 'Failed to create vehicle.');
+    } catch (error) {
+      showAlert(error.message || 'Failed to create vehicle.');
     }
   });
 
@@ -1336,8 +1298,8 @@ function wireEvents() {
     clearAlert();
     try {
       await saveManualCanesBoxPrice(canesBoxManualPriceForm);
-    } catch (err) {
-      showAlert(err.message || 'Failed to save manual price.');
+    } catch (error) {
+      showAlert(error.message || 'Failed to save manual price.');
     }
   });
 
@@ -1353,8 +1315,8 @@ function wireEvents() {
     try {
       await createVehiclesFromVins(vins);
       vehicleVinBatchForm.reset();
-    } catch (err) {
-      showAlert(err.message || 'Failed to create vehicle batch.');
+    } catch (error) {
+      showAlert(error.message || 'Failed to create vehicle batch.');
     }
   });
 
@@ -1363,8 +1325,8 @@ function wireEvents() {
     clearAlert();
     try {
       await refreshSharedAdministration(sharedAuditFilters(sharedAuditForm));
-    } catch (err) {
-      showAlert(err.message || 'Failed to load shared-folder administration.');
+    } catch (error) {
+      showAlert(error.message || 'Failed to load shared-folder administration.');
     }
   });
 
@@ -1373,9 +1335,9 @@ function wireEvents() {
     sharedRecyclePageNumber--;
     try {
       await refreshSharedAdministration();
-    } catch (err) {
+    } catch (error) {
       sharedRecyclePageNumber++;
-      showAlert(err?.message || 'Failed to load the previous recycle page.');
+      showAlert(error?.message || 'Failed to load the previous recycle page.');
     }
   });
   sharedRecycleNext?.addEventListener('click', async () => {
@@ -1383,9 +1345,9 @@ function wireEvents() {
     sharedRecyclePageNumber++;
     try {
       await refreshSharedAdministration();
-    } catch (err) {
+    } catch (error) {
       sharedRecyclePageNumber--;
-      showAlert(err?.message || 'Failed to load the next recycle page.');
+      showAlert(error?.message || 'Failed to load the next recycle page.');
     }
   });
 
@@ -1411,12 +1373,12 @@ async function gateBackOffice() {
     setLoading();
     wireEvents();
     await refreshDashboard();
-  } catch (err) {
-    if (err?.message) {
-      showAlert(err.message);
+  } catch (error) {
+    if (error?.message) {
+      showAlert(error.message);
     }
     window.location.replace('/404');
   }
 }
 
-gateBackOffice();
+void gateBackOffice();
