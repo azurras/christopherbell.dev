@@ -12,15 +12,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
+import dev.christopherbell.configuration.ApplicationClockConfiguration;
 import dev.christopherbell.configuration.SharedFolderProperties;
-import dev.christopherbell.configuration.security.SecurityConfig;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
+import dev.christopherbell.configuration.security.SecurityConfig;
 import dev.christopherbell.configuration.security.browser.AuthenticatedBrowserSession;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
 import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
@@ -29,6 +30,7 @@ import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRepository;
+import dev.christopherbell.sharedfolder.radio.SharedFolderRadioService;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import dev.christopherbell.sharedfolder.service.SharedFolderBrowserService;
@@ -37,7 +39,6 @@ import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService;
 import dev.christopherbell.sharedfolder.service.SharedFolderMutationService;
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadService;
-import dev.christopherbell.sharedfolder.radio.SharedFolderRadioService;
 import dev.christopherbell.sharedfolder.web.SharedFolderAdminController;
 import dev.christopherbell.sharedfolder.web.SharedFolderReadController;
 import dev.christopherbell.sharedfolder.web.SharedFolderWriteController;
@@ -76,6 +77,7 @@ import org.springframework.web.context.WebApplicationContext;
 })
 @Import({
     SecurityConfig.class,
+    ApplicationClockConfiguration.class,
     LoginTokensFixture.TestConfigurationWithLoginTokens.class,
     ControllerExceptionHandler.class,
     PermissionService.class,
