@@ -1,7 +1,6 @@
 package dev.christopherbell.configuration.mongo;
 
 import dev.christopherbell.configuration.persistence.MongoBackendComponent;
-
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
