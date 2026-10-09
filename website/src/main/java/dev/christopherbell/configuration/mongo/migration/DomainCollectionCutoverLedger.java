@@ -5,11 +5,14 @@ import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import dev.christopherbell.configuration.persistence.MongoPersistence;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.bson.Document;
 import org.springframework.core.env.Environment;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -40,7 +43,7 @@ public class DomainCollectionCutoverLedger {
       + DomainCollectionManifest.ALL_COLLECTIONS.size();
   private static final Set<String> SOURCE_NAMES = DomainCollectionManifest.ALL_KINDS.stream()
       .flatMap(kind -> kind.legacySource().stream())
-      .collect(java.util.stream.Collectors.toUnmodifiableSet());
+      .collect(Collectors.toUnmodifiableSet());
   private static final String NOT_ACTIVE = "Domain collection schema is not active.";
   private static final String TEST_DATABASE = "test";
   private static final int PRODUCTION_MONGO_PORT = 27017;
@@ -238,7 +241,7 @@ public class DomainCollectionCutoverLedger {
         || leasePayload == null
         || !(fenceToken instanceof Number fenceNumber)
         || fenceNumber.longValue() < 1
-        || !(expiresAt instanceof java.util.Date)
+        || !(expiresAt instanceof Date)
         || (ownerToken != null && !hasOwnerToken)
         || (v015IsRunning && !hasOwnerToken)) {
       throw new IllegalStateException("Test Mongo lease state is not a pristine bootstrap.");
@@ -277,30 +280,40 @@ public class DomainCollectionCutoverLedger {
         || !(payload.get("expectedKindMetrics") instanceof List<?> metrics)) {
       return false;
     }
-    var presentSources = exactSources(sources);
-    if (presentSources == null || !exactMetrics(metrics)) {
-      return false;
-    }
+    return exactMetrics(metrics)
+        && exactSources(sources)
+            .filter(presentSources -> countsMatch(presentSources, publishIndex, dropIndex, legacyDropped))
+            .isPresent();
+  }
+
+  /** Whether the recorded publish and drop progress fits the sources the cutover found. */
+  private static boolean countsMatch(
+      List<String> presentSources,
+      int publishIndex,
+      int dropIndex,
+      boolean legacyDropped
+  ) {
     var publicationCount = DomainCollectionManifest.ALL_COLLECTIONS.size()
         + presentSources.stream().filter(DomainCollectionManifest.ALL_COLLECTIONS::contains).count();
     var dropCount = presentSources.stream()
         .filter(source -> !DomainCollectionManifest.ALL_COLLECTIONS.contains(source)).count()
         + 2L + presentSources.stream().filter(DomainCollectionManifest.ALL_COLLECTIONS::contains).count();
-    return publishIndex.longValue() == publicationCount
-        && dropIndex >= 0 && dropIndex.longValue() <= dropCount
-        && legacyDropped == (dropIndex.longValue() == dropCount);
+    return publishIndex == publicationCount
+        && dropIndex >= 0 && dropIndex <= dropCount
+        && legacyDropped == (dropIndex == dropCount);
   }
 
-  private static List<String> exactSources(List<?> values) {
+  /** The recorded sources when every one is a known name, listed once in sorted order. */
+  private static Optional<List<String>> exactSources(List<?> values) {
     var sources = new ArrayList<String>();
     for (var value : values) {
       if (!(value instanceof String source) || !SOURCE_NAMES.contains(source)) {
-        return null;
+        return Optional.empty();
       }
       sources.add(source);
     }
     var sorted = sources.stream().distinct().sorted().toList();
-    return sources.equals(sorted) ? sources : null;
+    return sources.equals(sorted) ? Optional.of(sources) : Optional.empty();
   }
 
   private static boolean exactMetrics(List<?> values) {

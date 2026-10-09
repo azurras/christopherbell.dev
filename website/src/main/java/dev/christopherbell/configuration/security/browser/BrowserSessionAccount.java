@@ -21,7 +21,9 @@ public record BrowserSessionAccount(
 
   /** Returns whether this current account may continue the snapshotted browser session. */
   public boolean validates(String expectedFingerprint) {
-    if (!AccountStatus.ACTIVE.equals(status)) return false;
+    if (!AccountStatus.ACTIVE.equals(status)) {
+      return false;
+    }
     var account = Account.builder()
         .id(id)
         .passwordHash(passwordHash)

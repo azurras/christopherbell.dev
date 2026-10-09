@@ -1,7 +1,6 @@
 package dev.christopherbell.configuration.mongo.migration;
 
 import dev.christopherbell.configuration.persistence.MongoBackendComponent;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;

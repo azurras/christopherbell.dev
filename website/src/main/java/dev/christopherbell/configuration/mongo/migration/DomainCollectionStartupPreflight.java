@@ -1,7 +1,6 @@
 package dev.christopherbell.configuration.mongo.migration;
 
 import dev.christopherbell.configuration.persistence.MongoBackendComponent;
-
 import java.util.Objects;
 
 /** Recurring target-release gate executed before the first migration-runner mutation. */

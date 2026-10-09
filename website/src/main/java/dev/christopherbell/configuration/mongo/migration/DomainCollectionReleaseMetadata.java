@@ -1,10 +1,10 @@
 package dev.christopherbell.configuration.mongo.migration;
 
-import dev.christopherbell.configuration.persistence.MongoBackendComponent;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -47,7 +47,7 @@ public final class DomainCollectionReleaseMetadata {
     }
     try {
       var root = mapper.readTree(metadata.toFile());
-      var names = new java.util.HashSet<String>();
+      var names = new HashSet<String>();
       root.fieldNames().forEachRemaining(names::add);
       if (!root.isObject() || !names.equals(FIELDS)
           || !expectedRelease.equals(root.path("sha").textValue())) {
