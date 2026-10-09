@@ -197,7 +197,7 @@ export async function initializeWflList({
   async function loadRestaurants() {
     try {
       dataFreshness = await request(API.whatsForLunch.freshness);
-    } catch (_) {
+    } catch {
       dataFreshness = null;
     }
     if (mode === 'favorites' && !isLoggedIn) {
