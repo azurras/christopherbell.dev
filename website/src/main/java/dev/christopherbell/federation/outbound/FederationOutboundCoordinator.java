@@ -11,6 +11,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -72,8 +73,8 @@ final class FederationOutboundCoordinator {
     Instant now = clock.instant();
     var cursor = store.loadCursor();
     var found = posts.findFederationEligibleAfter(
-        cursor == null ? null : cursor.createdOn(),
-        cursor == null ? null : cursor.postId(),
+        cursor.map(FederationScanCursor::createdOn).orElse(null),
+        cursor.map(FederationScanCursor::postId).orElse(null),
         properties.outbound().batchSize());
     for (var post : found) {
       for (var peer : properties.outbound().peers()) {
@@ -97,25 +98,26 @@ final class FederationOutboundCoordinator {
       return;
     }
     FederationDeliveryJob job = claimed.orElseThrow();
-    ControlledPeer peer = configuredPeer(job);
-    if (peer == null) {
+    Optional<ControlledPeer> peer = configuredPeer(job);
+    if (peer.isEmpty()) {
       store.cancel(job.id(), owner, "PEER_REMOVED", now);
       return;
     }
-    Post post = posts.findById(job.postId()).orElse(null);
-    if (!active(post, now)) {
+    Optional<Post> post = posts.findById(job.postId()).filter(found -> active(found, now));
+    if (post.isEmpty()) {
       store.cancel(job.id(), owner, "POST_INELIGIBLE", now);
       return;
     }
-    Account account = accounts.findById(job.accountId()).orElse(null);
-    if (!active(account)) {
+    Optional<Account> account = accounts.findById(job.accountId())
+        .filter(FederationOutboundCoordinator::active);
+    if (account.isEmpty()) {
       store.cancel(job.id(), owner, "AUTHOR_INELIGIBLE", now);
       return;
     }
 
     final FederationDeliveryResult result;
     try {
-      result = gateway.deliver(account, post, peer);
+      result = gateway.deliver(account.orElseThrow(), post.orElseThrow(), peer.orElseThrow());
     } catch (RuntimeException failure) {
       store.dead(job.id(), owner, null, "LOCAL_DELIVERY_FAILURE", now);
       return;
@@ -164,23 +166,20 @@ final class FederationOutboundCoordinator {
         : delay;
   }
 
-  private ControlledPeer configuredPeer(FederationDeliveryJob job) {
+  private Optional<ControlledPeer> configuredPeer(FederationDeliveryJob job) {
     return properties.outbound().peers().stream()
         .filter(peer -> peer.name().equals(job.peerName()))
         .filter(peer -> peer.inbox().toString().equals(job.peerInbox()))
-        .findFirst()
-        .orElse(null);
+        .findFirst();
   }
 
   private static boolean active(Post post, Instant now) {
-    return post != null
-        && post.isFederationOutboundEligible()
+    return post.isFederationOutboundEligible()
         && (post.getExpiresOn() == null || post.getExpiresOn().isAfter(now));
   }
 
   private static boolean active(Account account) {
-    return account != null
-        && account.getStatus() == AccountStatus.ACTIVE
+    return account.getStatus() == AccountStatus.ACTIVE
         && account.isFederationEnabled()
         && account.getFederationIdentity() != null;
   }

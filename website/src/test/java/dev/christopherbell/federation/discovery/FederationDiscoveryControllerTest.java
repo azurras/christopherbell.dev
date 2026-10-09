@@ -1,6 +1,7 @@
 package dev.christopherbell.federation.discovery;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -101,7 +102,7 @@ class FederationDiscoveryControllerTest {
             .value("https://www.w3.org/ns/activitystreams"))
         .andExpect(jsonPath("$.id").value(actorId))
         .andExpect(jsonPath("$.publicKey.id").value(actorId + "#main-key"))
-        .andExpect(content().string(org.hamcrest.Matchers.not(containsString("ciphertext"))));
+        .andExpect(content().string(not(containsString("ciphertext"))));
   }
 
   @Test
@@ -111,13 +112,13 @@ class FederationDiscoveryControllerTest {
 
     mockMvc.perform(get("/ap/users/chris"))
         .andExpect(status().isNotFound())
-        .andExpect(content().string(org.hamcrest.Matchers.not(containsString("account-"))));
+        .andExpect(content().string(not(containsString("account-"))));
   }
 
   @Test
   void outboxAndRelationshipReadsReturnActivityJsonWithoutCaching() throws Exception {
     String outboxId = "https://www.christopherbell.dev/ap/users/chris/outbox";
-    when(collections.outbox("chris", true, "", 20)).thenReturn(
+    when(collections.outboxPage("chris", "", 20)).thenReturn(
         new ActivityPubOrderedCollection<>(
             List.of("https://www.w3.org/ns/activitystreams"),
             outboxId + "?page=true",

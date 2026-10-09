@@ -59,7 +59,7 @@ class FederationCollectionServiceTest {
     when(discovery.actorForAccount(account)).thenReturn(actor("chris"));
     when(outboxQueries.count("account-123", NOW)).thenReturn(42L);
 
-    var collection = collections.outbox("chris", false, "", 20);
+    var collection = collections.outbox("chris");
 
     assertThat(collection.id()).isEqualTo(ACTOR_ID + "/outbox");
     assertThat(collection.type()).isEqualTo("OrderedCollection");
@@ -91,7 +91,7 @@ class FederationCollectionServiceTest {
             post.getCreatedOn(),
             post.getLastUpdatedOn())), null));
 
-    var collection = collections.outbox("chris", true, "", 20);
+    var collection = collections.outboxPage("chris", "", 20);
 
     assertThat(collection.partOf()).isEqualTo(ACTOR_ID + "/outbox");
     assertThat(collection.orderedItems()).singleElement().satisfies(activity -> {

@@ -8,12 +8,13 @@ import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.model.Post;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /** Shared stable-cursor and TTL outbox behavior checks for MongoDB. */
 interface FederationOutboxParityContract {
-  String RUN = java.util.UUID.randomUUID().toString();
+  String RUN = UUID.randomUUID().toString();
   String ACCOUNT_ID = "outbox-parity-account-" + RUN;
   Instant NOW = Instant.parse("2026-08-13T18:00:00Z");
 

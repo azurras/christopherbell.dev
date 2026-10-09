@@ -57,7 +57,7 @@ public final class FederationActivityFactory {
         objectId,
         "Note",
         actorId,
-        HtmlUtils.htmlEscape(String.valueOf(entry.text() == null ? "" : entry.text())),
+        HtmlUtils.htmlEscape(Objects.requireNonNullElse(entry.text(), "")),
         entry.createdOn(),
         entry.lastUpdatedOn(),
         reply,
