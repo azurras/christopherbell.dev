@@ -11,6 +11,9 @@ import {
   visibleThreadAfterCollapsedBranches
 } from './lib/thread-navigation.js';
 
+const EXPIRES_SOON_MS = 24 * 60 * 60 * 1000;
+const MAX_REPLY_INDENT = 5;
+
 let collapsedBranches = new Set();
 let currentPost = null;
 let currentPostId = null;
@@ -24,36 +27,41 @@ function getPostId() {
 }
 
 function setText(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = value ?? '-';
+  const element = document.getElementById(id);
+  if (element) element.textContent = value ?? '-';
+}
+
+function setStatusPill(label, tone) {
+  const statusPill = document.getElementById('threadStatus');
+  if (!statusPill) return;
+  statusPill.textContent = label;
+  statusPill.className = `thread-status-pill is-${tone}`;
 }
 
 function statusFor(post) {
   if (!post.expiresOn) return { label: 'Live', tone: 'live' };
-  const delta = new Date(post.expiresOn).getTime() - Date.now();
-  if (delta <= 0) return { label: 'Expired', tone: 'expired' };
-  if (delta < 24 * 60 * 60 * 1000) return { label: 'Expires soon', tone: 'soon' };
+  const remainingMs = new Date(post.expiresOn).getTime() - Date.now();
+  if (remainingMs <= 0) return { label: 'Expired', tone: 'expired' };
+  if (remainingMs < EXPIRES_SOON_MS) return { label: 'Expires soon', tone: 'soon' };
   return { label: 'Live', tone: 'live' };
+}
+
+function replyCountLabel(count) {
+  return `${count} ${count === 1 ? 'reply' : 'replies'}`;
 }
 
 function renderThreadSummary(post, directReplies) {
   const author = post.username ? `@${post.username}` : '@user';
-  setText('threadReplyPill', `${directReplies.length} ${directReplies.length === 1 ? 'reply' : 'replies'}`);
+  setText('threadReplyPill', replyCountLabel(directReplies.length));
 
   const status = statusFor(post);
-  const statusEl = document.getElementById('threadStatus');
-  if (statusEl) {
-    statusEl.textContent = status.label;
-    statusEl.className = `thread-status-pill is-${status.tone}`;
-  }
+  setStatusPill(status.label, status.tone);
 
   const heroTitle = document.getElementById('postHeroTitle');
   if (heroTitle) heroTitle.textContent = 'Post';
 
   const heroMeta = document.getElementById('postHeroMeta');
-  if (heroMeta) {
-    heroMeta.textContent = `${author} · ${directReplies.length} ${directReplies.length === 1 ? 'reply' : 'replies'}`;
-  }
+  if (heroMeta) heroMeta.textContent = `${author} · ${replyCountLabel(directReplies.length)}`;
 }
 
 function renderExpiredRootState(root) {
@@ -68,11 +76,7 @@ function renderExpiredRootState(root) {
   const heroMeta = document.getElementById('postHeroMeta');
   if (heroMeta) heroMeta.textContent = 'The selected post reached the end of its lifespan.';
 
-  const statusEl = document.getElementById('threadStatus');
-  if (statusEl) {
-    statusEl.textContent = 'Expired';
-    statusEl.className = 'thread-status-pill is-expired';
-  }
+  setStatusPill('Expired', 'expired');
 }
 
 function contextCard(kind, postId) {
@@ -91,31 +95,56 @@ async function fillContext(root, kind, postId) {
   try {
     const context = await fetchJson(API.posts.byId(postId), { headers: authHeaders() });
     const card = root.querySelector(`[data-context-kind="${kind}"]`);
-    const handleEl = card?.querySelector('[data-context-handle]');
-    const textEl = card?.querySelector('[data-context-text]');
-    if (handleEl) {
+    const handle = card?.querySelector('[data-context-handle]');
+    const text = card?.querySelector('[data-context-text]');
+    if (handle) {
       const username = context.username || '';
-      handleEl.textContent = username ? `@${username}` : '@user';
+      handle.textContent = username ? `@${username}` : '@user';
     }
-    if (textEl) textEl.textContent = context.text || '';
-  } catch (_) {
-    const textEl = root.querySelector(`[data-context-kind="${kind}"] [data-context-text]`);
-    if (textEl) textEl.textContent = 'Context unavailable';
+    if (text) text.textContent = context.text || '';
+  } catch {
+    const text = root.querySelector(`[data-context-kind="${kind}"] [data-context-text]`);
+    if (text) text.textContent = 'Context unavailable';
   }
+}
+
+/** A reply below the first level also shows its thread root as context. */
+function showsRootContext(post) {
+  return Boolean(post.rootId) && post.rootId !== post.id && post.rootId !== post.parentId;
+}
+
+/**
+ * Build the shared feed renderer context for the thread page.
+ * @param {{username?:string}|null} viewer signed-in account, or null
+ * @param {Function} [onExpire] called when the rendered post expires
+ */
+function rendererContextFor(viewer, onExpire) {
+  return makeRendererContext({
+    fetchJson,
+    authHeaders,
+    sanitize,
+    formatWhen,
+    isLoggedIn,
+    canDelete: canDeleteFor(viewer),
+    canEdit: canEditFor(viewer),
+    currentUserName: viewer?.username || null,
+    suppressParentContext: true,
+    onExpire
+  });
 }
 
 /**
  * Render the root post (with context cards) using the shared feed renderer.
  * @param {object} post root post feed item
- * @param {{id?:string,role?:string,username?:string}|null} currentUser
+ * @param {{id?:string,role?:string,username?:string}|null} viewer signed-in account, or null
  */
-function renderRoot(post, currentUser) {
+function renderRoot(post, viewer) {
   const root = document.querySelector('#rootPost .thread-root-body');
   if (!root) return;
   root.innerHTML = '';
   const contextStack = document.createElement('div');
   contextStack.className = 'thread-context-stack';
-  if (post.rootId && post.rootId !== post.id && post.rootId !== post.parentId) {
+  if (showsRootContext(post)) {
     contextStack.insertAdjacentHTML('beforeend', contextCard('root', post.rootId));
   }
   if (post.parentId) {
@@ -123,48 +152,36 @@ function renderRoot(post, currentUser) {
   }
   if (contextStack.children.length > 0) root.appendChild(contextStack);
 
-  const ctx = makeRendererContext({
-    fetchJson,
-    authHeaders,
-    sanitize,
-    formatWhen,
-    isLoggedIn,
-    canDelete: canDeleteFor(currentUser),
-    canEdit: canEditFor(currentUser),
-    currentUserName: currentUser?.username || null,
-    suppressParentContext: true,
-    onExpire: () => renderExpiredRootState(root)
-  });
-  const focusedPost = createFeedItem(post, ctx);
+  const focusedPost = createFeedItem(post, rendererContextFor(viewer, () => renderExpiredRootState(root)));
   focusedPost.dataset.postId = post.id;
   focusedPost.classList.add('void-thread-selected-post');
   root.appendChild(focusedPost);
   initLazyMedia(root);
 
   if (post.parentId) {
-    fillContext(root, 'parent', post.parentId);
+    void fillContext(root, 'parent', post.parentId);
   }
 
-  if (post.rootId && post.rootId !== post.id && post.rootId !== post.parentId) {
-    fillContext(root, 'root', post.rootId);
+  if (showsRootContext(post)) {
+    void fillContext(root, 'root', post.rootId);
   }
 }
 
-function showReplyComposer(currentUser) {
+function showReplyComposer(viewer) {
   const composer = document.getElementById('replyComposer');
   const meta = document.getElementById('replyComposerMeta');
   if (!composer) return;
 
   composer.classList.remove('d-none');
   if (meta) {
-    meta.textContent = currentUser
+    meta.textContent = viewer
       ? 'Replies add 24 hours to the entire thread.'
       : 'Log in to reply.';
   }
 
   const replyButton = document.getElementById('replyBtn');
   const replyText = document.getElementById('replyText');
-  if (!currentUser) {
+  if (!viewer) {
     replyText?.setAttribute('disabled', 'disabled');
     replyButton?.setAttribute('disabled', 'disabled');
   } else {
@@ -189,9 +206,9 @@ async function submitReply(parentId) {
       body: JSON.stringify({ text, parentId })
     });
     window.location.reload();
-  } catch (err) {
+  } catch (error) {
     if (alert) {
-      alert.textContent = err.message || 'Could not post reply.';
+      alert.textContent = error.message || 'Could not post reply.';
       alert.classList.remove('d-none');
     }
   } finally {
@@ -216,13 +233,13 @@ function numericLevel(post) {
 }
 
 function descendantPostsForCurrent(visibleThread, currentId) {
-  const byId = new Map(currentThread.filter(post => post?.id).map(post => [post.id, post]));
+  const postsById = new Map(currentThread.filter(post => post?.id).map(post => [post.id, post]));
   return visibleThread.filter(post => {
     if (!post?.id || post.id === currentId) return false;
     let parentId = post.parentId || null;
     while (parentId) {
       if (parentId === currentId) return true;
-      parentId = byId.get(parentId)?.parentId || null;
+      parentId = postsById.get(parentId)?.parentId || null;
     }
     return false;
   });
@@ -254,7 +271,7 @@ function branchTools(post, childIds, relativeDepth) {
 function decorateReplyItem(item, post, childIds, selectedLevel) {
   const relativeDepth = Math.max(1, numericLevel(post) - selectedLevel);
   item.dataset.postId = post.id;
-  item.style.setProperty('--thread-depth', String(Math.min(relativeDepth - 1, 5)));
+  item.style.setProperty('--thread-depth', String(Math.min(relativeDepth - 1, MAX_REPLY_INDENT)));
 
   const content = item.querySelector('.post-content');
   if (!content) return;
@@ -263,7 +280,7 @@ function decorateReplyItem(item, post, childIds, selectedLevel) {
 
 function rerenderThreadReplies() {
   if (!currentPost || !currentPostId) return;
-  const directReplies = renderThread(currentThread, currentUser, currentPostId) || [];
+  const directReplies = renderThread(currentThread, currentUser, currentPostId);
   renderThreadSummary(currentPost, directReplies);
 }
 
@@ -288,15 +305,26 @@ function wireThreadControls() {
   });
 }
 
+function toggleBranch(postId) {
+  if (collapsedBranches.has(postId)) {
+    collapsedBranches.delete(postId);
+  } else {
+    collapsedBranches.add(postId);
+  }
+  rerenderThreadReplies();
+  requestAnimationFrame(() => scrollToPost(postId));
+}
+
 /**
  * Render the replies list, excluding the currentId item if present.
  * @param {Array} items thread feed items
- * @param {{id?:string,role?:string}} currentUser current viewer (optional)
+ * @param {{id?:string,role?:string}|null} viewer signed-in account, or null
  * @param {string} currentId post id to omit from replies
+ * @returns {Array} direct replies to currentId; empty when the page has no reply list
  */
-function renderThread(items, currentUser, currentId) {
+function renderThread(items, viewer, currentId) {
   const list = document.getElementById('threadList');
-  if (!list) return;
+  if (!list) return [];
   list.innerHTML = '';
   const thread = Array.isArray(items) ? items : [];
   const directReplies = thread.filter(threadPost => threadPost.parentId === currentId);
@@ -310,11 +338,11 @@ function renderThread(items, currentUser, currentId) {
       </div>`;
     return directReplies;
   }
-  const ctx = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(currentUser), canEdit: canEditFor(currentUser), currentUserName: currentUser?.username || null, suppressParentContext: true });
+  const rendererContext = rendererContextFor(viewer);
   const childIds = replyIdsWithChildren(thread);
   const selectedLevel = numericLevel(thread.find(post => post?.id === currentId));
   for (const replyPost of visibleReplies) {
-    const item = createFeedItem(replyPost, ctx);
+    const item = createFeedItem(replyPost, rendererContext);
     decorateReplyItem(item, replyPost, childIds, selectedLevel);
     list.appendChild(item);
   }
@@ -323,14 +351,7 @@ function renderThread(items, currentUser, currentId) {
     button.addEventListener('click', event => {
       event.stopPropagation();
       const postId = button.dataset.collapseThread;
-      if (!postId) return;
-      if (collapsedBranches.has(postId)) {
-        collapsedBranches.delete(postId);
-      } else {
-        collapsedBranches.add(postId);
-      }
-      rerenderThreadReplies();
-      requestAnimationFrame(() => scrollToPost(postId));
+      if (postId) toggleBranch(postId);
     });
   });
   return directReplies;
@@ -343,6 +364,35 @@ function renderNavigation(items, currentId) {
   nav.classList.toggle('d-none', !nav.innerHTML.trim());
 }
 
+/** The signed-in account, or null when nobody is signed in or the session has lapsed. */
+async function loadViewer() {
+  if (!isLoggedIn()) return null;
+  try {
+    return await fetchJson(API.accounts.me, { headers: authHeaders() });
+  } catch {
+    // A lapsed session still reads the public thread, without reply or owner actions.
+    return null;
+  }
+}
+
+async function loadThreadPage(id) {
+  const [post, thread] = await Promise.all([
+    fetchJson(API.posts.byId(id), { headers: authHeaders() }),
+    fetchJson(API.posts.thread(id), { headers: authHeaders() })
+  ]);
+  const viewer = await loadViewer();
+  currentPost = post;
+  currentThread = Array.isArray(thread) ? thread : [];
+  currentUser = viewer;
+  collapsedBranches = new Set();
+
+  renderRoot(post, viewer);
+  showReplyComposer(viewer);
+  document.getElementById('replyBtn')?.addEventListener('click', () => submitReply(id));
+  renderNavigation(currentThread, id);
+  renderThreadSummary(post, renderThread(currentThread, viewer, id));
+}
+
 /** Wire page once DOM is ready. */
 document.addEventListener('DOMContentLoaded', async () => {
   initPostImageLightbox();
@@ -352,28 +402,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!id) return;
   currentPostId = id;
   wireThreadControls();
-  const alert = document.getElementById('postAlert');
   try {
-    const [post, thread] = await Promise.all([
-      fetchJson(API.posts.byId(id), { headers: authHeaders() }),
-      fetchJson(API.posts.thread(id), { headers: authHeaders() })
-    ]);
-    let me = null;
-    if (isLoggedIn()) {
-      try { me = await fetchJson(API.accounts.me, { headers: authHeaders() }); } catch (_) {}
+    await loadThreadPage(id);
+  } catch (error) {
+    const alert = document.getElementById('postAlert');
+    if (alert) {
+      alert.textContent = error.message;
+      alert.classList.remove('d-none');
     }
-    currentPost = post;
-    currentThread = Array.isArray(thread) ? thread : [];
-    currentUser = me;
-    collapsedBranches = new Set();
-
-    renderRoot(post, me);
-    showReplyComposer(me);
-    document.getElementById('replyBtn')?.addEventListener('click', () => submitReply(id));
-    renderNavigation(currentThread, id);
-    const directReplies = renderThread(currentThread, me, id) || [];
-    renderThreadSummary(post, directReplies);
-  } catch (err) {
-    if (alert) { alert.textContent = err.message; alert.classList.remove('d-none'); }
   }
 });

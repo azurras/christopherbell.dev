@@ -10,10 +10,10 @@ public interface Operation {
   /**
    * Executes the operation with the provided workflow context.
    *
-   * @param ctx the context to be used for execution
+   * @param context the context to be used for execution
    * @return the result of the operation execution
    */
-  OperationResult execute(WorkflowContext ctx);
+  OperationResult execute(WorkflowContext context);
 
   /**
    * Returns the name of the operation.

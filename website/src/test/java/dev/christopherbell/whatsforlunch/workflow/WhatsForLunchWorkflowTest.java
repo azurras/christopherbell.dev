@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import dev.christopherbell.whatsforlunch.workflow.engine.exception.WorkflowStopExecutionException;
 import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowContext;
 import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowStatus;
+import java.time.Clock;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -15,7 +16,7 @@ class WhatsForLunchWorkflowTest {
   @Test
   @DisplayName("Execute completes with timestamps and id for valid WFL context")
   void execute_whenContextValid_returnsCompletedResult() throws Exception {
-    var result = new WhatsForLunchWorkflow().execute(new WhatsForLunchWorkflowContext());
+    var result = new WhatsForLunchWorkflow(Clock.systemUTC()).execute(new WhatsForLunchWorkflowContext());
 
     assertNotNull(result.getId());
     assertEquals(WorkflowStatus.COMPLETED, result.getStatus());
@@ -29,6 +30,6 @@ class WhatsForLunchWorkflowTest {
   void execute_whenContextInvalid_throwsStopExecutionException() {
     assertThrows(
         WorkflowStopExecutionException.class,
-        () -> new WhatsForLunchWorkflow().execute(new WorkflowContext()));
+        () -> new WhatsForLunchWorkflow(Clock.systemUTC()).execute(new WorkflowContext()));
   }
 }
