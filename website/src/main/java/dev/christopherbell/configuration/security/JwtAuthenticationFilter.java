@@ -1,28 +1,30 @@
 package dev.christopherbell.configuration.security;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.api.LoginTokens;
 import dev.christopherbell.account.auth.AccountSecurityFingerprint;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.configuration.security.browser.AuthenticatedBrowserSession;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
 import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
-import dev.christopherbell.account.api.LoginTokens;
-import java.util.ArrayList;
-import java.util.List;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.context.SecurityContextHolder;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import org.springframework.security.web.util.matcher.RequestMatcher;
-import org.springframework.web.filter.OncePerRequestFilter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.WebUtils;
 
 /**
@@ -98,46 +100,59 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       chain.doFilter(request, response);
       return;
     }
-    Account authenticatedAccount = null;
-    AuthenticatedBrowserSession authenticatedBrowserSession = null;
+    Optional<Authenticated> authenticated;
     try {
-      if (bearerToken != null && accounts != null && loginTokens != null) {
-        var claims = loginTokens.verifiedClaimsOf(bearerToken);
-        authenticatedAccount = accounts.findById(claims.getSubject())
-            .filter(candidate -> candidate.getStatus() == AccountStatus.ACTIVE)
-            .filter(candidate -> AccountSecurityFingerprint.matches(
-                claims.get(AccountSecurityFingerprint.CLAIM, String.class), candidate))
-            .orElse(null);
-      }
-      if (authenticatedAccount == null && cookieToken != null && browserSessions != null) {
-        var resolved = browserSessions.authenticate(
-            cookieToken,
-            interactiveRequests != null && interactiveRequests.matches(request));
-        if (resolved.isPresent()) {
-          authenticatedBrowserSession = resolved.get();
-        }
-      }
-    } catch (RuntimeException e) {
+      authenticated = authenticate(request, bearerToken, cookieToken);
+    } catch (RuntimeException invalidCredential) {
+      rejectCredential(publicRequest, response, chain, request, cookieToken != null);
+      return;
+    }
+    if (authenticated.isEmpty()) {
       rejectCredential(publicRequest, response, chain, request, cookieToken != null);
       return;
     }
 
-    if (authenticatedAccount != null) {
-      SecurityContextHolder.getContext().setAuthentication(
-          getAuthentication(authenticatedAccount, bearerToken));
-      chain.doFilter(request, response);
-      return;
+    var result = authenticated.orElseThrow();
+    SecurityContextHolder.getContext().setAuthentication(result.authentication());
+    if (browserCookies != null) {
+      result.rotatedToken().ifPresent(token -> addCookies(response, browserCookies.authenticated(token)));
     }
-    if (authenticatedBrowserSession != null) {
-      SecurityContextHolder.getContext().setAuthentication(getAuthentication(authenticatedBrowserSession));
-      if (browserCookies != null) {
-        authenticatedBrowserSession.rotatedToken().ifPresent(token -> addCookies(
-            response, browserCookies.authenticated(token)));
+    chain.doFilter(request, response);
+  }
+
+  /**
+   * Authenticates an explicit bearer token first, then a browser session cookie.
+   *
+   * @return the authentication and any rotated session token, or empty when neither credential is valid
+   * @throws RuntimeException when a credential is malformed or cannot be verified
+   */
+  private Optional<Authenticated> authenticate(
+      HttpServletRequest request,
+      String bearerToken,
+      String cookieToken
+  ) {
+    if (bearerToken != null && accounts != null && loginTokens != null) {
+      var bearer = bearerAccount(bearerToken)
+          .map(account -> new Authenticated(getAuthentication(account, bearerToken), Optional.empty()));
+      if (bearer.isPresent()) {
+        return bearer;
       }
-      chain.doFilter(request, response);
-      return;
     }
-    rejectCredential(publicRequest, response, chain, request, cookieToken != null);
+    if (cookieToken != null && browserSessions != null) {
+      var interactive = interactiveRequests != null && interactiveRequests.matches(request);
+      return browserSessions.authenticate(cookieToken, interactive)
+          .map(session -> new Authenticated(getAuthentication(session), session.rotatedToken()));
+    }
+    return Optional.empty();
+  }
+
+  /** The active account whose security fingerprint matches the token's claims. */
+  private Optional<Account> bearerAccount(String bearerToken) {
+    var claims = loginTokens.verifiedClaimsOf(bearerToken);
+    return accounts.findById(claims.getSubject())
+        .filter(candidate -> candidate.getStatus() == AccountStatus.ACTIVE)
+        .filter(candidate -> AccountSecurityFingerprint.matches(
+            claims.get(AccountSecurityFingerprint.CLAIM, String.class), candidate));
   }
 
   private boolean isPublicRequest(HttpServletRequest request) {
@@ -204,7 +219,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
   }
 
-  private void addCookies(HttpServletResponse response, List<org.springframework.http.ResponseCookie> cookies) {
+  private void addCookies(HttpServletResponse response, List<ResponseCookie> cookies) {
     cookies.forEach(cookie -> response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString()));
   }
+
+  /** A successful authentication and the browser session token to rotate to, if any. */
+  private record Authenticated(Authentication authentication, Optional<String> rotatedToken) {}
 }
