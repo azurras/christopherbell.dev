@@ -5,48 +5,50 @@ import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.deletion.AccountDeletionResult;
 import dev.christopherbell.account.deletion.AccountDeletionService;
 import dev.christopherbell.account.follow.AccountFollowService;
-import dev.christopherbell.account.moderation.AccountModerationService;
-import dev.christopherbell.account.model.dto.AccountDetail;
-import dev.christopherbell.account.model.dto.FederationConsentStatus;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
+import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountProfile;
-import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
+import dev.christopherbell.account.model.dto.CapabilityPairUpdate;
+import dev.christopherbell.account.model.dto.FederationConsentStatus;
 import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
-import dev.christopherbell.account.model.AccountLoginRequest;
-import dev.christopherbell.account.model.Role;
-import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
-import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
+import dev.christopherbell.account.moderation.AccountModerationService;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
-import dev.christopherbell.libs.api.exception.InvalidTokenException;
-import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.federation.consent.FederationConsentService;
 import dev.christopherbell.libs.api.exception.InternalServiceException;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.EmailSanitizer;
 import dev.christopherbell.libs.security.PasswordUtil;
 import dev.christopherbell.libs.security.UsernameSanitizer;
-import dev.christopherbell.federation.consent.FederationConsentService;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
-import java.time.Instant;
+import java.time.Clock;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 /**
@@ -74,7 +76,7 @@ public class AccountService {
   private final SharedFolderAccessService sharedFolderAccess;
   private final FederationConsentService federationConsent;
   private final AccountSessionRevoker sessionRevoker;
-
+  private final Clock clock;
   /**
    * Creates a new account.
    *
@@ -91,10 +93,11 @@ public class AccountService {
       federationConsent.prepareNewAccount(account, accountCreateRequest.federationRequested());
       accountRepository.save(account);
       log.info("Successfully created account for username {}", accountCreateRequest.username());
-    } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
-      throw new InternalServiceException("Failed to create account credentials", e);
-    } catch (DuplicateKeyException e) {
-      throw new ResourceExistsException("Account with given email or username already exists.", e);
+    } catch (NoSuchAlgorithmException | InvalidKeySpecException hashingUnavailable) {
+      throw new InternalServiceException("Failed to create account credentials", hashingUnavailable);
+    } catch (DuplicateKeyException duplicateIdentity) {
+      throw new ResourceExistsException(
+          "Account with given email or username already exists.", duplicateIdentity);
     }
     return accountMapper.toAccount(account);
   }
@@ -106,13 +109,14 @@ public class AccountService {
    * @return a new account entity with default settings.
    */
   public Account createAccountEntity(AccountCreateRequest accountCreateRequest) {
+    var now = clock.instant();
     return Account.builder()
         .id(String.valueOf(UUID.randomUUID()))
-        .createdOn(Instant.now())
+        .createdOn(now)
         .email(EmailSanitizer.sanitize(accountCreateRequest.email()))
         .firstName(accountCreateRequest.firstName())
         .lastName(accountCreateRequest.lastName())
-        .lastUpdatedOn(Instant.now())
+        .lastUpdatedOn(now)
         .role(Role.USER)
         .status(AccountStatus.ACTIVE)
         .username(UsernameSanitizer.sanitize(accountCreateRequest.username()))
@@ -301,7 +305,7 @@ public class AccountService {
    * @return a JWT token.
    * @throws InvalidTokenException - if login information is incorrect.
    */
-  public String loginAccount(AccountLoginRequest accountLoginRequest) throws Exception {
+  public String loginAccount(AccountLoginRequest accountLoginRequest) throws InvalidTokenException {
     return accountAuthenticationService.loginAccount(accountLoginRequest);
   }
 
@@ -372,102 +376,64 @@ public class AccountService {
   public AccountDetail updateSharedFolderPermissions(
       String accountId,
       SharedFolderPermissionUpdate request) throws InvalidRequestException, ResourceNotFoundException {
-    String auditResource = safeAuditAccountId(accountId);
-    try {
-      sharedFolderAccess.requireAdmin();
-      if (request == null || request.read() == null || request.write() == null) {
-        throw new InvalidRequestException("Shared-folder permissions are required.");
-      }
-      if (!request.read() && request.write()) {
-        throw new InvalidRequestException("Shared-folder write requires read.");
-      }
-
-      var account = accountRepository.findById(accountId)
-          .orElseThrow(() -> new ResourceNotFoundException("Account not found."));
-      var next = account.getPermissions() == null || account.getPermissions().isEmpty()
-          ? EnumSet.noneOf(AccountPermission.class)
-          : EnumSet.copyOf(account.getPermissions());
-      next.remove(AccountPermission.SHARED_FOLDER_READ);
-      next.remove(AccountPermission.SHARED_FOLDER_WRITE);
-      if (request.read()) {
-        next.add(AccountPermission.SHARED_FOLDER_READ);
-      }
-      if (request.write()) {
-        next.add(AccountPermission.SHARED_FOLDER_WRITE);
-      }
-      boolean permissionsChanged = !next.equals(
-          account.getPermissions() == null ? java.util.Set.of() : account.getPermissions());
-      account.setPermissions(next);
-      var persisted = accountRepository.save(account);
-      if (permissionsChanged) {
-        sessionRevoker.revokeAll(persisted.getId());
-      }
-      AccountDetail saved = accountMapper.toAccount(persisted);
-      sharedFolderAudit.recordCurrent(
-          "PERMISSION_CHANGE", auditResource, null, "accepted", null);
-      return saved;
-    } catch (InvalidRequestException failure) {
-      sharedFolderAudit.recordRejectedOnce(
-          "PERMISSION_CHANGE", auditResource, "invalid_request");
-      throw failure;
-    } catch (ResourceNotFoundException failure) {
-      sharedFolderAudit.recordRejectedOnce(
-          "PERMISSION_CHANGE", auditResource, "not_found");
-      throw failure;
-    } catch (RuntimeException failure) {
-      sharedFolderAudit.recordFailureOnce("PERMISSION_CHANGE", auditResource, failure);
-      throw failure;
-    }
+    return replaceCapabilities(accountId, CapabilityFamily.SHARED_FOLDER, request);
   }
 
   /** Replaces an account's Music capabilities while preserving unrelated capability families. */
   public AccountDetail updateMusicPermissions(
       String accountId,
       MusicPermissionUpdate request) throws InvalidRequestException, ResourceNotFoundException {
+    return replaceCapabilities(accountId, CapabilityFamily.MUSIC, request);
+  }
+
+  /**
+   * Replaces one stored read and write capability pair, revokes the account's sessions when its
+   * stored capabilities change, and audits the outcome.
+   */
+  private AccountDetail replaceCapabilities(
+      String accountId,
+      CapabilityFamily family,
+      CapabilityPairUpdate request) throws InvalidRequestException, ResourceNotFoundException {
     String auditResource = safeAuditAccountId(accountId);
     try {
       sharedFolderAccess.requireAdmin();
       if (request == null || request.read() == null || request.write() == null) {
-        throw new InvalidRequestException("Music permissions are required.");
+        throw new InvalidRequestException(family.label() + " permissions are required.");
       }
       if (!request.read() && request.write()) {
-        throw new InvalidRequestException("Music write requires read.");
+        throw new InvalidRequestException(family.label() + " write requires read.");
       }
-
       var account = accountRepository.findById(accountId)
           .orElseThrow(() -> new ResourceNotFoundException("Account not found."));
       var next = account.getPermissions() == null || account.getPermissions().isEmpty()
           ? EnumSet.noneOf(AccountPermission.class)
           : EnumSet.copyOf(account.getPermissions());
-      next.remove(AccountPermission.MUSIC_READ);
-      next.remove(AccountPermission.MUSIC_WRITE);
+      next.remove(family.read());
+      next.remove(family.write());
       if (request.read()) {
-        next.add(AccountPermission.MUSIC_READ);
+        next.add(family.read());
       }
       if (request.write()) {
-        next.add(AccountPermission.MUSIC_WRITE);
+        next.add(family.write());
       }
       boolean permissionsChanged = !next.equals(
-          account.getPermissions() == null ? java.util.Set.of() : account.getPermissions());
+          account.getPermissions() == null ? Set.of() : account.getPermissions());
       account.setPermissions(next);
       var persisted = accountRepository.save(account);
       if (permissionsChanged) {
         sessionRevoker.revokeAll(persisted.getId());
       }
       AccountDetail saved = accountMapper.toAccount(persisted);
-      sharedFolderAudit.recordCurrent(
-          "MUSIC_PERMISSION_CHANGE", auditResource, null, "accepted", null);
+      sharedFolderAudit.recordCurrent(family.auditAction(), auditResource, null, "accepted", null);
       return saved;
     } catch (InvalidRequestException failure) {
-      sharedFolderAudit.recordRejectedOnce(
-          "MUSIC_PERMISSION_CHANGE", auditResource, "invalid_request");
+      sharedFolderAudit.recordRejectedOnce(family.auditAction(), auditResource, "invalid_request");
       throw failure;
     } catch (ResourceNotFoundException failure) {
-      sharedFolderAudit.recordRejectedOnce(
-          "MUSIC_PERMISSION_CHANGE", auditResource, "not_found");
+      sharedFolderAudit.recordRejectedOnce(family.auditAction(), auditResource, "not_found");
       throw failure;
     } catch (RuntimeException failure) {
-      sharedFolderAudit.recordFailureOnce("MUSIC_PERMISSION_CHANGE", auditResource, failure);
+      sharedFolderAudit.recordFailureOnce(family.auditAction(), auditResource, failure);
       throw failure;
     }
   }
@@ -475,5 +441,42 @@ public class AccountService {
   private String safeAuditAccountId(String accountId) {
     return accountId != null && accountId.length() <= 128
         && accountId.matches("[A-Za-z0-9._-]+") ? accountId : "invalid-account";
+  }
+
+  /** One stored read and write capability pair, with the label and audit action it reports. */
+  private enum CapabilityFamily {
+    SHARED_FOLDER("Shared-folder", "PERMISSION_CHANGE",
+        AccountPermission.SHARED_FOLDER_READ, AccountPermission.SHARED_FOLDER_WRITE),
+    MUSIC("Music", "MUSIC_PERMISSION_CHANGE",
+        AccountPermission.MUSIC_READ, AccountPermission.MUSIC_WRITE);
+
+    private final String label;
+    private final String auditAction;
+    private final AccountPermission read;
+    private final AccountPermission write;
+
+    CapabilityFamily(
+        String label, String auditAction, AccountPermission read, AccountPermission write) {
+      this.label = label;
+      this.auditAction = auditAction;
+      this.read = read;
+      this.write = write;
+    }
+
+    String label() {
+      return label;
+    }
+
+    String auditAction() {
+      return auditAction;
+    }
+
+    AccountPermission read() {
+      return read;
+    }
+
+    AccountPermission write() {
+      return write;
+    }
   }
 }

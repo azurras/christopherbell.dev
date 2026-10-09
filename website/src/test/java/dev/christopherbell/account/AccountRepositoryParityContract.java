@@ -9,10 +9,11 @@ import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 /** Account repository assertions for the disposable MongoDB test database. */
 interface AccountRepositoryParityContract {
@@ -73,7 +74,7 @@ interface AccountRepositoryParityContract {
         .firstName("Parity")
         .passwordHash("hash")
         .role(Role.USER)
-        .permissions(new HashSet<>(java.util.Set.of(AccountPermission.MUSIC_READ)))
+        .permissions(new HashSet<>(Set.of(AccountPermission.MUSIC_READ)))
         .status(AccountStatus.ACTIVE)
         .username("parity-owner")
         .build();

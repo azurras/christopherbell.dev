@@ -5,9 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.MetricStatus;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class NvidiaMetricsProviderTest {
@@ -33,7 +37,7 @@ class NvidiaMetricsProviderTest {
 
   @Test
   void invokesOnlyTheFixedNvidiaQuery() {
-    var commands = new java.util.ArrayList<List<String>>();
+    var commands = new ArrayList<List<String>>();
     var provider = new NvidiaMetricsProvider(
         "nvidia-smi", Duration.ofMillis(250),
         (command, timeout) -> {
@@ -120,12 +124,12 @@ class NvidiaMetricsProviderTest {
 
   private static final class InterruptingProcess extends Process {
     private boolean destroyed;
-    @Override public boolean waitFor(long timeout, java.util.concurrent.TimeUnit unit)
+    @Override public boolean waitFor(long timeout, TimeUnit unit)
         throws InterruptedException { throw new InterruptedException("test"); }
     @Override public Process destroyForcibly() { destroyed = true; return this; }
-    @Override public java.io.OutputStream getOutputStream() { return java.io.OutputStream.nullOutputStream(); }
-    @Override public java.io.InputStream getInputStream() { return java.io.InputStream.nullInputStream(); }
-    @Override public java.io.InputStream getErrorStream() { return java.io.InputStream.nullInputStream(); }
+    @Override public OutputStream getOutputStream() { return OutputStream.nullOutputStream(); }
+    @Override public InputStream getInputStream() { return InputStream.nullInputStream(); }
+    @Override public InputStream getErrorStream() { return InputStream.nullInputStream(); }
     @Override public int waitFor() { return 0; }
     @Override public int exitValue() { return 0; }
     @Override public void destroy() { destroyed = true; }

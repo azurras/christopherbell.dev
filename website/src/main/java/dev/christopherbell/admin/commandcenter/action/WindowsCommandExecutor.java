@@ -2,7 +2,10 @@ package dev.christopherbell.admin.commandcenter.action;
 
 import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
 /** Launches fixed Windows commands selected exclusively by an allowlisted enum. */
@@ -65,15 +68,15 @@ public class WindowsCommandExecutor implements CommandExecutor {
   }
 
   private static boolean isWindowsHost() {
-    return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT)
+    return System.getProperty("os.name", "").toLowerCase(Locale.ROOT)
         .startsWith("windows");
   }
 
-  private static CommandResult runCommand(List<String> command, java.time.Duration timeout)
+  private static CommandResult runCommand(List<String> command, Duration timeout)
       throws IOException {
     var process = new ProcessBuilder(command).start();
     try {
-      if (!process.waitFor(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS)) {
+      if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
         process.destroyForcibly();
         return new CommandResult(false, -1);
       }
@@ -86,7 +89,7 @@ public class WindowsCommandExecutor implements CommandExecutor {
 
   @FunctionalInterface
   interface CommandRunner {
-    CommandResult run(List<String> command, java.time.Duration timeout) throws IOException;
+    CommandResult run(List<String> command, Duration timeout) throws IOException;
   }
 
   record CommandResult(boolean completed, int exitCode) {}

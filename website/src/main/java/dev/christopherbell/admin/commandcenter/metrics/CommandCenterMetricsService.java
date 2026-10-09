@@ -1,12 +1,13 @@
 package dev.christopherbell.admin.commandcenter.metrics;
 
 import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
-import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot;
+import dev.christopherbell.admin.commandcenter.action.CommandCenterActionService;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.Alert;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.HealthStatus;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.MetricPoint;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.MetricReading;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.MetricStatus;
+import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -16,23 +17,25 @@ import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
-import java.util.concurrent.FutureTask;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.info.BuildProperties;
 import org.springframework.beans.factory.annotation.Qualifier;
-import dev.christopherbell.admin.commandcenter.action.CommandCenterActionService;
-import java.util.Optional;
+import org.springframework.boot.info.BuildProperties;
 import org.springframework.stereotype.Service;
 
 /** Collects host metrics into one atomic snapshot with bounded in-memory history. */
@@ -81,7 +84,7 @@ public class CommandCenterMetricsService {
       String applicationVersion,
       MongoPing mongoPing) {
     this(providers, properties, clock, applicationVersion, mongoPing,
-        java.util.concurrent.Executors.newThreadPerTaskExecutor(
+        Executors.newThreadPerTaskExecutor(
             Thread.ofVirtual().name("command-center-provider-test-", 0).factory()),
         Optional::empty);
   }
@@ -165,7 +168,7 @@ public class CommandCenterMetricsService {
         cancel(entry.getValue());
         retainStale(provider, readings);
         alerts.add(new Alert("PROVIDER_ERROR", "WARNING", "Metrics sampling was interrupted."));
-      } catch (Exception failure) {
+      } catch (ExecutionException | RuntimeException failure) {
         inFlightProviders.remove(provider, entry.getValue());
         LOGGER.warn(
             "Command-center metrics provider {} failed.",
@@ -192,7 +195,7 @@ public class CommandCenterMetricsService {
             sampledAt,
             databaseAvailable ? null : backendName + " ping failed or timed out"));
     if (!databaseAvailable) {
-      alerts.add(new Alert(backendName.toUpperCase(java.util.Locale.ROOT) + "_UNAVAILABLE",
+      alerts.add(new Alert(backendName.toUpperCase(Locale.ROOT) + "_UNAVAILABLE",
           "ERROR", backendName + " did not answer the bounded ping."));
     }
 

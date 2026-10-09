@@ -12,8 +12,10 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -184,7 +186,7 @@ public class CommandCenterLogService {
         lineEnd--;
       }
       if (lineEnd > lineStart) {
-        byte[] line = java.util.Arrays.copyOfRange(bytes, lineStart, lineEnd);
+        byte[] line = Arrays.copyOfRange(bytes, lineStart, lineEnd);
         lines.add(new RawLine(absoluteStart + lineStart, line));
       }
       lineStart = index + 1;
@@ -322,7 +324,7 @@ public class CommandCenterLogService {
       digestBuilder.update(ByteBuffer.allocate(Long.BYTES).putLong(offset).array());
       updateContentFingerprint(digestBuilder, path, offset);
       byte[] digest = digestBuilder.digest();
-      return java.util.HexFormat.of().formatHex(digest);
+      return HexFormat.of().formatHex(digest);
     } catch (NoSuchAlgorithmException exception) {
       throw new IllegalStateException("SHA-256 is required for log cursors", exception);
     }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -62,7 +63,7 @@ class WindowsCommandExecutorTest {
     var nonWindowsExecutor = new WindowsCommandExecutor(properties, () -> false);
 
     assertThatThrownBy(() -> nonWindowsExecutor.execute(CommandCenterActionType.RESTART_SITE))
-        .isInstanceOf(java.io.IOException.class)
+        .isInstanceOf(IOException.class)
         .hasMessageContaining("Windows");
   }
 
@@ -103,11 +104,11 @@ class WindowsCommandExecutorTest {
 
     assertThatThrownBy(() -> nonZeroExecutor.execute(
         CommandCenterActionType.RESTART_SITE))
-        .isInstanceOf(java.io.IOException.class)
+        .isInstanceOf(IOException.class)
         .hasMessageContaining("exit code 5");
     assertThatThrownBy(() -> timedOutExecutor.execute(
         CommandCenterActionType.RESTART_COMPUTER))
-        .isInstanceOf(java.io.IOException.class)
+        .isInstanceOf(IOException.class)
         .hasMessageContaining("timed out");
   }
 

@@ -11,6 +11,7 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.AccountDetail;
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import java.util.List;
 import org.bson.Document;
@@ -33,7 +34,7 @@ class AdminAccountQueryServiceTest {
   @BeforeEach
   void setUp() {
     service = new AdminAccountQueryService(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        DomainMongoOperationsTestFactory
             .create(mongoTemplate), accountMapper);
   }
 
@@ -49,7 +50,7 @@ class AdminAccountQueryServiceTest {
     var detail = AccountDetail.builder().id("account-1").username("alpha").build();
     var query = AdminAccountQuery.from(2, 25, "username", "desc", "ACTIVE", "USER", "a.b");
     var accountEnvelope =
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        DomainMongoOperationsTestFactory
             .envelope(mongoTemplate, account);
     when(mongoTemplate.count(any(Query.class), eq(Document.class), eq("accounts"))).thenReturn(51L);
     when(mongoTemplate.find(any(Query.class), eq(Document.class), eq("accounts")))

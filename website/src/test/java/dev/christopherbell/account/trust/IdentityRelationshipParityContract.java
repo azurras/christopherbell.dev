@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.christopherbell.account.follow.AccountFollowStore;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.trust.model.AccountTrustType;
 import java.time.Instant;
 import java.util.List;
@@ -83,8 +85,8 @@ interface IdentityRelationshipParityContract {
 
   private static Account account(String id) {
     return Account.builder().id(id).createdOn(NOW).email(id + "@example.test")
-        .passwordHash("hash").role(dev.christopherbell.account.model.Role.USER)
-        .status(dev.christopherbell.account.model.AccountStatus.ACTIVE).username(id).build();
+        .passwordHash("hash").role(Role.USER)
+        .status(AccountStatus.ACTIVE).username(id).build();
   }
 
   private static AccountTrustRelationship relationship(

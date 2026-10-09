@@ -8,8 +8,10 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
+import java.util.List;
 import java.util.OptionalDouble;
 import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
@@ -141,7 +143,7 @@ class LibreHardwareCpuTemperatureClientTest {
     private int closeCalls;
 
     private FakeProbe(OptionalDouble... values) {
-      this.values.addAll(java.util.List.of(values));
+      this.values.addAll(List.of(values));
     }
 
     @Override
@@ -170,16 +172,16 @@ class LibreHardwareCpuTemperatureClientTest {
     private boolean shutdown;
 
     @Override public void execute(Runnable command) {
-      if (shutdown) throw new java.util.concurrent.RejectedExecutionException();
+      if (shutdown) throw new RejectedExecutionException();
       tasks.add(command);
     }
 
     void runNext() { tasks.remove().run(); }
     int pending() { return tasks.size(); }
     @Override public void shutdown() { shutdown = true; }
-    @Override public java.util.List<Runnable> shutdownNow() {
+    @Override public List<Runnable> shutdownNow() {
       shutdown = true;
-      var pending = java.util.List.copyOf(tasks);
+      var pending = List.copyOf(tasks);
       tasks.clear();
       return pending;
     }
