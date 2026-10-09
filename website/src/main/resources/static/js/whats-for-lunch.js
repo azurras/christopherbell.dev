@@ -425,13 +425,13 @@ function renderLocationPrompt(message) {
   `;
 }
 
-function renderError(err) {
+function renderError(error) {
   mount.innerHTML = `
     ${wflSecondaryNavigation('picks')}
     ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-empty">
       <h2>Could not load lunch picks</h2>
-      <p>${sanitize(err.message || 'Please try again later.')}</p>
+      <p>${sanitize(error.message || 'Please try again later.')}</p>
       ${filtersMarkup()}
       <button type="button" class="btn btn-outline-primary lunch-location-refresh">Try again</button>
     </div>
@@ -500,7 +500,7 @@ async function loadPreferences() {
     });
     selectedCuisines = new Set(Array.isArray(preferences?.cuisines) ? preferences.cuisines : []);
     selectedRadiusMiles = normalizeRadius(preferences?.radiusMiles);
-  } catch (_) {
+  } catch {
     selectedCuisines = new Set();
     selectedRadiusMiles = DEFAULT_RADIUS_MILES;
   }
@@ -525,8 +525,8 @@ async function savePreferences() {
     selectedCuisines = new Set(Array.isArray(preferences?.cuisines) ? preferences.cuisines : []);
     selectedRadiusMiles = normalizeRadius(preferences?.radiusMiles);
     if (status) status.textContent = 'Filters saved.';
-  } catch (err) {
-    if (status) status.textContent = err.message || 'Could not save filters.';
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Could not save filters.';
   } finally {
     if (button) button.disabled = false;
   }
@@ -553,7 +553,7 @@ export function createSessionRecoveryController({
       await loadSession(sessionId, { join: false, storeSession: true });
       const session = getActiveSession();
       if (session && session.active !== false) return true;
-    } catch (_) {
+    } catch {
       // Stored sessions already fall back to normal initialization on lookup failure.
     }
     clearInactiveRestoredSession();
@@ -670,7 +670,7 @@ async function loadStoredAnonymousSession() {
       fetchJson(API.whatsForLunch.restaurant(id), { headers: authHeaders() })));
     renderPicks(restaurants);
     return true;
-  } catch (_) {
+  } catch {
     clearStoredAnonymousSession();
     return false;
   }
@@ -711,7 +711,7 @@ async function loadSoloSession({ forceNew = false } = {}) {
         storeMemberSessionId(activeSession.id);
         renderPicks(Array.isArray(activeSession?.restaurants) ? activeSession.restaurants : picks);
         return;
-      } catch (_) {
+      } catch {
         clearStoredMemberSession();
         activeSession = null;
       }
@@ -719,12 +719,12 @@ async function loadSoloSession({ forceNew = false } = {}) {
       storeAnonymousSession(picks);
     }
     renderPicks(picks);
-  } catch (err) {
+  } catch (error) {
     if (!currentLocation) {
-      renderLocationPrompt(err.message);
+      renderLocationPrompt(error.message);
       return;
     }
-    renderError(err);
+    renderError(error);
   }
 }
 
@@ -748,18 +748,18 @@ async function loadSession(sessionId, { join = true, storeSession = false } = {}
     }
     startSessionPolling();
     renderPicks(Array.isArray(activeSession?.restaurants) ? activeSession.restaurants : []);
-  } catch (err) {
+  } catch (error) {
     activeSession = null;
     stopSessionPolling();
-    throw err;
+    throw error;
   }
 }
 
 async function loadSharedSession(sessionId) {
   try {
     await sessionRecoveryController.loadExplicitSession(sessionId);
-  } catch (err) {
-    renderError(err);
+  } catch (error) {
+    renderError(error);
   }
 }
 
@@ -779,8 +779,8 @@ async function createSession() {
     window.history.replaceState({}, '', `/wfl?session=${encodeURIComponent(activeSession.id)}`);
     startSessionPolling();
     renderPicks(Array.isArray(activeSession?.restaurants) ? activeSession.restaurants : currentPicks);
-  } catch (err) {
-    if (status) status.textContent = err.message || 'Could not start session.';
+  } catch (error) {
+    if (status) status.textContent = error.message || 'Could not start session.';
   } finally {
     if (button) button.disabled = false;
   }
@@ -798,9 +798,9 @@ async function refreshSharedSessionPicks() {
     }
     activeSession = await updateSessionRestaurants(picks);
     renderPicks(Array.isArray(activeSession?.restaurants) ? activeSession.restaurants : picks);
-  } catch (err) {
+  } catch (error) {
     mount.insertAdjacentHTML('afterbegin', `
-      <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not update the shared session.')}</div>
+      <div class="alert alert-danger" role="alert">${sanitize(error.message || 'Could not update the shared session.')}</div>
     `);
   } finally {
     if (button) button.disabled = false;
@@ -841,7 +841,7 @@ async function refreshActiveSession() {
       activeSession = latest;
       renderPicks(Array.isArray(activeSession?.restaurants) ? activeSession.restaurants : currentPicks);
     }
-  } catch (_) {
+  } catch {
     stopSessionPolling();
   } finally {
     sessionPollInFlight = false;
@@ -852,7 +852,7 @@ async function loadLunchPicks() {
   if (!mount) return;
   try {
     dataFreshness = await fetchJson(API.whatsForLunch.freshness);
-  } catch (_) {
+  } catch {
     dataFreshness = null;
   }
   isAdmin = await loadAdminState();
@@ -866,116 +866,49 @@ async function loadLunchPicks() {
   await loadSoloSession();
 }
 
-mount?.addEventListener('click', async (event) => {
-  const refreshButton = event.target instanceof Element
-    ? event.target.closest('.lunch-location-refresh, .lunch-location-request')
-    : null;
-  if (refreshButton) {
-    if (refreshButton.matches('.lunch-location-request')) {
-      currentZipCode = '';
-      currentLocation = null;
-      activeControlPanel = 'location';
+/** The nearest ancestor of the event target matching {@code selector}, or null. */
+function closestTarget(event, selector) {
+  return event.target instanceof Element ? event.target.closest(selector) : null;
+}
+
+async function refreshLocation(button) {
+  if (button.matches('.lunch-location-request')) {
+    currentZipCode = '';
+    currentLocation = null;
+    activeControlPanel = 'location';
+  }
+  await loadNearbyPicks();
+}
+
+async function clearFilters() {
+  selectedCuisines = new Set();
+  selectedRadiusMiles = DEFAULT_RADIUS_MILES;
+  await loadNearbyPicks();
+}
+
+function showControlPanel(tab) {
+  activeControlPanel = tab.dataset.panel || 'filters';
+  renderControlsOnly();
+}
+
+async function copySessionLink(button) {
+  const link = mount.querySelector('.lunch-session-link')?.value || window.location.href;
+  const status = mount.querySelector('.lunch-session-status');
+  button.textContent = 'Copy link';
+  try {
+    const clipboard = navigator.clipboard;
+    if (typeof clipboard?.writeText !== 'function') {
+      throw new Error('Clipboard API is unavailable.');
     }
-    await loadNearbyPicks();
-    return;
+    await clipboard.writeText(link);
+    button.textContent = 'Copied';
+    if (status) status.textContent = 'Link copied.';
+  } catch {
+    if (status) status.textContent = 'Unable to copy link. Select and copy it manually.';
   }
+}
 
-  const clearButton = event.target instanceof Element
-    ? event.target.closest('.lunch-filter-clear')
-    : null;
-  if (clearButton) {
-    selectedCuisines = new Set();
-    selectedRadiusMiles = DEFAULT_RADIUS_MILES;
-    await loadNearbyPicks();
-    return;
-  }
-
-  const toolTab = event.target instanceof Element
-    ? event.target.closest('.lunch-tool-tab')
-    : null;
-  if (toolTab) {
-    activeControlPanel = toolTab.dataset.panel || 'filters';
-    renderControlsOnly();
-    return;
-  }
-
-  const saveButton = event.target instanceof Element
-    ? event.target.closest('.lunch-filter-save')
-    : null;
-  if (saveButton) {
-    await savePreferences();
-    return;
-  }
-
-  const createSessionButton = event.target instanceof Element
-    ? event.target.closest('.lunch-session-create')
-    : null;
-  if (createSessionButton) {
-    await createSession();
-    return;
-  }
-
-  const copySessionButton = event.target instanceof Element
-    ? event.target.closest('.lunch-session-copy')
-    : null;
-  if (copySessionButton) {
-    const link = mount.querySelector('.lunch-session-link')?.value || window.location.href;
-    const status = mount.querySelector('.lunch-session-status');
-    copySessionButton.textContent = 'Copy link';
-    try {
-      const clipboard = navigator.clipboard;
-      if (typeof clipboard?.writeText !== 'function') {
-        throw new Error('Clipboard API is unavailable.');
-      }
-      await clipboard.writeText(link);
-      copySessionButton.textContent = 'Copied';
-      if (status) status.textContent = 'Link copied.';
-    } catch (_) {
-      if (status) status.textContent = 'Unable to copy link. Select and copy it manually.';
-    }
-    return;
-  }
-
-  const voteButton = event.target instanceof Element
-    ? event.target.closest('.lunch-session-vote')
-    : null;
-  if (voteButton) {
-    await voteForRestaurant(voteButton.dataset.restaurantId);
-    return;
-  }
-
-  const restaurantVoteButton = event.target instanceof Element
-    ? event.target.closest('.lunch-vote-button')
-    : null;
-  if (restaurantVoteButton) {
-    await setRestaurantVote(
-      restaurantVoteButton.dataset.restaurantId,
-      restaurantVoteButton.dataset.vote,
-    );
-    return;
-  }
-
-  const favoriteButton = event.target instanceof Element
-    ? event.target.closest('.lunch-favorite-toggle')
-    : null;
-  if (favoriteButton) {
-    await toggleFavorite(favoriteButton.dataset.restaurantId);
-    return;
-  }
-
-  const button = event.target instanceof Element
-    ? event.target.closest('.lunch-pick-delete')
-    : null;
-  if (!button) {
-    const card = event.target instanceof Element ? event.target.closest('.lunch-pick') : null;
-    const action = event.target instanceof Element ? event.target.closest('a, button, input, select, label') : null;
-    const href = card?.dataset.restaurantHref;
-    if (href && !action) {
-      window.location.href = href;
-    }
-    return;
-  }
-
+async function deleteRestaurant(button) {
   const restaurantId = button.dataset.restaurantId;
   if (!restaurantId) return;
 
@@ -987,13 +920,48 @@ mount?.addEventListener('click', async (event) => {
       headers: authHeaders(),
     });
     await loadNearbyPicks();
-  } catch (err) {
+  } catch (error) {
     button.disabled = false;
     button.textContent = 'Delete';
     mount.insertAdjacentHTML('afterbegin', `
-      <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not delete restaurant.')}</div>
+      <div class="alert alert-danger" role="alert">${sanitize(error.message || 'Could not delete restaurant.')}</div>
     `);
   }
+}
+
+/** A click anywhere on a pick card opens its profile, unless the click was on a control. */
+function openPickCard(event) {
+  const card = closestTarget(event, '.lunch-pick');
+  const control = closestTarget(event, 'a, button, input, select, label');
+  const href = card?.dataset.restaurantHref;
+  if (href && !control) {
+    window.location.href = href;
+  }
+}
+
+/** Click actions in priority order: the first selector the target sits inside wins. */
+const CLICK_ACTIONS = [
+  ['.lunch-location-refresh, .lunch-location-request', refreshLocation],
+  ['.lunch-filter-clear', () => clearFilters()],
+  ['.lunch-tool-tab', showControlPanel],
+  ['.lunch-filter-save', () => savePreferences()],
+  ['.lunch-session-create', () => createSession()],
+  ['.lunch-session-copy', copySessionLink],
+  ['.lunch-session-vote', (button) => voteForRestaurant(button.dataset.restaurantId)],
+  ['.lunch-vote-button', (button) => setRestaurantVote(button.dataset.restaurantId, button.dataset.vote)],
+  ['.lunch-favorite-toggle', (button) => toggleFavorite(button.dataset.restaurantId)],
+  ['.lunch-pick-delete', deleteRestaurant],
+];
+
+mount?.addEventListener('click', async (event) => {
+  for (const [selector, action] of CLICK_ACTIONS) {
+    const element = closestTarget(event, selector);
+    if (element) {
+      await action(element);
+      return;
+    }
+  }
+  openPickCard(event);
 });
 
 mount?.addEventListener('submit', async (event) => {
@@ -1032,9 +1000,9 @@ async function voteForRestaurant(restaurantId) {
       body: JSON.stringify({ restaurantId }),
     });
     renderPicks(Array.isArray(activeSession?.restaurants) ? activeSession.restaurants : currentPicks);
-  } catch (err) {
+  } catch (error) {
     mount.insertAdjacentHTML('afterbegin', `
-      <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not save vote.')}</div>
+      <div class="alert alert-danger" role="alert">${sanitize(error.message || 'Could not save vote.')}</div>
     `);
   } finally {
     if (button) button.disabled = false;
@@ -1074,9 +1042,9 @@ export function createPicksVoteController({
           }
           renderPicks(updatedPicks);
         },
-        showError: err => {
+        showError: error => {
           mount?.insertAdjacentHTML('afterbegin', `
-            <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not save vote.')}</div>
+            <div class="alert alert-danger" role="alert">${sanitize(error.message || 'Could not save vote.')}</div>
           `);
         },
       });
@@ -1122,9 +1090,9 @@ async function toggleFavorite(restaurantId) {
       };
     }
     renderPicks(currentPicks);
-  } catch (err) {
+  } catch (error) {
     mount.insertAdjacentHTML('afterbegin', `
-      <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not update favorite.')}</div>
+      <div class="alert alert-danger" role="alert">${sanitize(error.message || 'Could not update favorite.')}</div>
     `);
   } finally {
     if (button) button.disabled = false;

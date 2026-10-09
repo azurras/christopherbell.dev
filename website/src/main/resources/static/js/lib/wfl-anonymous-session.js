@@ -29,7 +29,7 @@ export function readAnonymousWflSession(storage = localStorage, now = Date.now()
   let value;
   try {
     value = JSON.parse(storage.getItem(WFL_ANONYMOUS_SESSION_KEY) || 'null');
-  } catch (_) {
+  } catch {
     return remove(storage);
   }
   const current = validStoredValue(value, now);
