@@ -28,9 +28,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -172,7 +173,7 @@ class RestaurantImportWorkflowServiceTest {
 
   @Test
   void longApplyRenewsLeaseAgainBeforeLaterWrites() throws Exception {
-    var advancingClock = org.mockito.Mockito.mock(Clock.class);
+    var advancingClock = mock(Clock.class);
     when(advancingClock.instant()).thenReturn(
         NOW,
         NOW,
@@ -226,7 +227,7 @@ class RestaurantImportWorkflowServiceTest {
 
     assertEquals("OpenStreetMap", freshness.source());
     assertEquals(true, freshness.current());
-    org.junit.jupiter.api.Assertions.assertTrue(freshness.cityCoverage().contains("Austin, TX"));
+    assertTrue(freshness.cityCoverage().contains("Austin, TX"));
   }
 
   @Test
