@@ -6,11 +6,12 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /** Shared deletion checkpoint and idempotent account-removal behavior for both engines. */
 interface AccountDeletionParityContract {
-  String RUN = java.util.UUID.randomUUID().toString();
+  String RUN = UUID.randomUUID().toString();
   String ACCOUNT_ID = "deletion-parity-account-" + RUN;
   String PSEUDONYM = "deleted-parity-" + RUN;
 
@@ -22,8 +23,9 @@ interface AccountDeletionParityContract {
 
   @Test
   default void roundTripsAResumableDeletionCheckpoint() {
-    var started = jobs().save(AccountDeletionJob.started(PSEUDONYM));
-    started.fail("shared-contract");
+    var startedOn = Instant.parse("2026-10-09T12:00:00Z");
+    var started = jobs().save(AccountDeletionJob.started(PSEUDONYM, startedOn));
+    started.fail("shared-contract", startedOn.plusSeconds(1));
     var failed = jobs().save(started);
 
     var reloaded = jobs().findById(PSEUDONYM).orElseThrow();

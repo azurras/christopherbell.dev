@@ -112,13 +112,14 @@ public final class LoginTokens {
       String configuredSecret,
       boolean isProductionProfile,
       Map<String, String> environmentVariables) {
-    Optional<String> explicitSecret = firstNonBlank(
+    return firstNonBlank(
         configuredSecret,
         environmentVariables.get("APP_JWT_SECRET"),
-        environmentVariables.get("JWT_SECRET"));
-    if (explicitSecret.isPresent()) {
-      return explicitSecret.get();
-    }
+        environmentVariables.get("JWT_SECRET"))
+        .orElseGet(() -> developmentSecret(isProductionProfile));
+  }
+
+  private static String developmentSecret(boolean isProductionProfile) {
     if (isProductionProfile) {
       throw new IllegalStateException(
           "Production JWT secret must be configured with app.jwt.secret or APP_JWT_SECRET.");

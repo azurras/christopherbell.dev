@@ -17,8 +17,7 @@ public class AccountDeletionJob {
   private Instant lastUpdatedOn;
   private Instant completedOn;
 
-  public static AccountDeletionJob started(String pseudonym) {
-    var now = Instant.now();
+  public static AccountDeletionJob started(String pseudonym, Instant now) {
     var job = new AccountDeletionJob();
     job.id = pseudonym;
     job.status = AccountDeletionStatus.ACTIVE;
@@ -28,34 +27,33 @@ public class AccountDeletionJob {
     return job;
   }
 
-  public void resume() {
+  public void resume(Instant now) {
     status = AccountDeletionStatus.ACTIVE;
     failureCategory = null;
-    lastUpdatedOn = Instant.now();
+    lastUpdatedOn = now;
   }
 
-  public void advance() {
+  public void advance(Instant now) {
     int following = nextStep.ordinal() + 1;
     failureCategory = null;
-    lastUpdatedOn = Instant.now();
+    lastUpdatedOn = now;
     if (following >= AccountDeletionStep.values().length) {
-      complete();
+      complete(now);
       return;
     }
     nextStep = AccountDeletionStep.values()[following];
   }
 
-  public void fail(String category) {
+  public void fail(String category, Instant now) {
     status = AccountDeletionStatus.FAILED;
     failureCategory = category;
-    lastUpdatedOn = Instant.now();
+    lastUpdatedOn = now;
   }
-
-  public void complete() {
+  public void complete(Instant now) {
     status = AccountDeletionStatus.COMPLETE;
     nextStep = null;
     failureCategory = null;
-    completedOn = Instant.now();
+    completedOn = now;
     lastUpdatedOn = completedOn;
   }
 

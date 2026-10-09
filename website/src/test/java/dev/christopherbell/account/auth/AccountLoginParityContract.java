@@ -7,12 +7,13 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /** Shared conditional-login behavior checks for MongoDB-backed accounts. */
 interface AccountLoginParityContract {
-  String RUN = java.util.UUID.randomUUID().toString();
+  String RUN = UUID.randomUUID().toString();
   String ACCOUNT_ID = "login-parity-" + RUN;
   Instant LOGIN_ON = Instant.parse("2026-08-13T18:00:00Z");
 

@@ -7,7 +7,6 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.post.abuse.NewAccountVoidMutationLimiter;
 import dev.christopherbell.post.abuse.VoidMutationKind;
 import java.time.Clock;
-import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -41,7 +40,7 @@ public class AccountFollowService {
         throw exception;
       }
     }
-    return accountProfileService.toPublicProfile(target, Optional.of(self));
+    return accountProfileService.toPublicProfile(target, self);
   }
 
   /**
@@ -51,6 +50,6 @@ public class AccountFollowService {
     var self = accountProfileService.getSelfEntity();
     var target = accountProfileService.findBySanitizedUsername(username);
     follows.unfollow(self.getId(), target.getId());
-    return accountProfileService.toPublicProfile(target, Optional.of(self));
+    return accountProfileService.toPublicProfile(target, self);
   }
 }

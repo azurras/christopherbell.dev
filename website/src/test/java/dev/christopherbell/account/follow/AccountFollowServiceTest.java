@@ -13,7 +13,6 @@ import dev.christopherbell.post.abuse.VoidMutationKind;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,7 +42,7 @@ class AccountFollowServiceTest {
     var profile = AccountProfile.builder().username("target").followedByMe(true).build();
     when(profiles.getSelfEntity()).thenReturn(self);
     when(profiles.findBySanitizedUsername("target")).thenReturn(target);
-    when(profiles.toPublicProfile(target, Optional.of(self))).thenReturn(profile);
+    when(profiles.toPublicProfile(target, self)).thenReturn(profile);
     when(follows.follow("self", "target", Instant.parse("2026-07-29T04:00:00Z")))
         .thenReturn(new AccountFollowStore.FollowTransition(false, false));
 
@@ -60,7 +59,7 @@ class AccountFollowServiceTest {
     var profile = AccountProfile.builder().username("target").followedByMe(false).build();
     when(profiles.getSelfEntity()).thenReturn(self);
     when(profiles.findBySanitizedUsername("target")).thenReturn(target);
-    when(profiles.toPublicProfile(target, Optional.of(self))).thenReturn(profile);
+    when(profiles.toPublicProfile(target, self)).thenReturn(profile);
 
     assertThat(service.unfollowAccount("target").followedByMe()).isFalse();
 

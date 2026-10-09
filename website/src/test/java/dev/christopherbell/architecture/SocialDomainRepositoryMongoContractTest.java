@@ -174,7 +174,7 @@ class SocialDomainRepositoryMongoContractTest {
     var repository = adapter(
         AccountDeletionJobRepository.class,
         "dev.christopherbell.account.deletion.MongoAccountDeletionJobRepository");
-    var job = AccountDeletionJob.started("deletion-pseudonym");
+    var job = AccountDeletionJob.started("deletion-pseudonym", Instant.parse("2026-10-09T12:00:00Z"));
 
     var saved = repository.save(job);
     assertThat(saved.getId()).isEqualTo(job.getId());

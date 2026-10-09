@@ -31,7 +31,9 @@ public class AccountProfileService {
    */
   public AccountProfile getPublicProfile(String username) throws ResourceNotFoundException {
     var account = findBySanitizedUsername(username);
-    return toPublicProfile(account, getOptionalSelfAccount());
+    return getOptionalSelfAccount()
+        .map(viewer -> toPublicProfile(account, viewer))
+        .orElseGet(() -> profile(account, false, false));
   }
 
   /**
@@ -59,12 +61,17 @@ public class AccountProfileService {
                 String.format("Account with id %s not found.", selfId)));
   }
 
-  public AccountProfile toPublicProfile(Account account, Optional<Account> selfAccount) {
-    var self = selfAccount.orElse(null);
+  /** Public profile metadata for {@code account} as seen by the signed-in {@code viewer}. */
+  public AccountProfile toPublicProfile(Account account, Account viewer) {
+    return profile(
+        account,
+        follows.exists(viewer.getId(), account.getId()),
+        viewer.getId().equals(account.getId()));
+  }
+
+  private AccountProfile profile(Account account, boolean followedByMe, boolean isSelf) {
     var following = follows.countFollowing(account.getId());
     var followerCount = follows.countFollowers(account.getId());
-    var followedByMe = self != null && follows.exists(self.getId(), account.getId());
-    var isSelf = self != null && self.getId().equals(account.getId());
     return AccountProfile.builder()
         .id(account.getId())
         .username(account.getUsername())

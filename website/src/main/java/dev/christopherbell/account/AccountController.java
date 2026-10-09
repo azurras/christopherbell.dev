@@ -7,48 +7,51 @@ import static dev.christopherbell.libs.api.APIVersion.V20260717;
 import static dev.christopherbell.libs.api.APIVersion.V20260726;
 import static dev.christopherbell.libs.api.APIVersion.V20260728;
 
-import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.deletion.AccountDeletionResult;
-import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
+import dev.christopherbell.account.model.dto.AccountCreateRequest;
+import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountProfile;
+import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
+import dev.christopherbell.account.model.dto.FederationConsentStatus;
+import dev.christopherbell.account.model.dto.FederationConsentUpdate;
 import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
-import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
-import dev.christopherbell.account.model.dto.AccountUpdateRequest;
-import dev.christopherbell.account.model.dto.FederationConsentUpdate;
-import dev.christopherbell.account.model.dto.FederationConsentStatus;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.InvalidTokenException;
+import dev.christopherbell.libs.api.exception.ResourceExistsException;
+import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
-import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.util.WebUtils;
 
 /**
@@ -86,7 +89,8 @@ public class AccountController {
    *
    * @param accountCreateRequest the account creation request payload
    * @return HTTP 201 with the created account and its canonical resource location
-   * @throws Exception if validation fails or creation cannot be completed
+   * @throws ResourceExistsException if the email or username is already taken
+   * @throws InvalidRequestException if the request is invalid
    */
   @PostMapping(
       value = V20241215 + "/create",
@@ -95,7 +99,7 @@ public class AccountController {
   )
   public ResponseEntity<Response<AccountDetail>> createAccount(
       @Valid @RequestBody AccountCreateRequest accountCreateRequest
-  ) throws Exception {
+  ) throws ResourceExistsException, InvalidRequestException {
     var account = accountService.createAccount(accountCreateRequest);
     var location = URI.create("/api/accounts" + V20250903 + "/" + account.getId());
     return ResponseEntity.created(location)
@@ -112,7 +116,8 @@ public class AccountController {
    *
    * @param accountId the ID of the account to delete
    * @return HTTP 200 with the deleted {@link AccountDetail} in the response payload
-   * @throws Exception if deletion fails or the account cannot be found
+   * @throws InvalidRequestException if the account id is invalid
+   * @throws ResourceNotFoundException if the account cannot be found
    */
   @DeleteMapping(
       value = V20250903 + "/{accountId}",
@@ -121,7 +126,7 @@ public class AccountController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<AccountDetail>> deleteAccount(
       @PathVariable String accountId
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     var account = accountService.getAccountById(accountId);
     accountService.deleteAccount(accountId);
     return new ResponseEntity<>(
@@ -139,7 +144,7 @@ public class AccountController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<AccountDeletionResult>> deleteAccountResumably(
       @PathVariable String accountId
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<AccountDeletionResult>builder()
             .payload(accountService.deleteAccount(accountId))
@@ -154,7 +159,7 @@ public class AccountController {
    *
    * @param email the email address of the account to retrieve
    * @return HTTP 200 with the matching {@link AccountDetail} in the response payload
-   * @throws Exception if lookup fails or no account matches the email
+   * @throws ResourceNotFoundException if no account matches the email
    */
   @GetMapping(
       value = V20241215 + "/email/{email}",
@@ -163,7 +168,7 @@ public class AccountController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<AccountDetail>> getAccountByEmail(
       @PathVariable String email
-  ) throws Exception {
+  ) throws ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<AccountDetail>builder()
             .payload(accountService.getAccountByEmail(email))
@@ -178,7 +183,7 @@ public class AccountController {
    *
    * @param id the ID of the account to retrieve
    * @return HTTP 200 with the matching {@link AccountDetail} in the response payload
-   * @throws Exception if lookup fails or the account cannot be found
+   * @throws ResourceNotFoundException if the account cannot be found
    */
   @GetMapping(
       value = V20250903 + "/{id}",
@@ -187,7 +192,7 @@ public class AccountController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<AccountDetail>> getAccountById(
       @PathVariable String id
-  ) throws Exception {
+  ) throws ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<AccountDetail>builder()
             .payload(accountService.getAccountById(id))
@@ -202,7 +207,7 @@ public class AccountController {
    *
    * @param username the username of the account to retrieve
    * @return HTTP 200 with the matching {@link AccountDetail} in the response payload
-   * @throws Exception if lookup fails or the account cannot be found
+   * @throws ResourceNotFoundException if the account cannot be found
    */
   @GetMapping(
       value = V20250903 + "/username/{username}",
@@ -211,7 +216,7 @@ public class AccountController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<AccountDetail>> getAccountByUsername(
       @PathVariable String username
-  ) throws Exception {
+  ) throws ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<AccountDetail>builder()
             .payload(accountService.getAccountByUsername(username))
@@ -265,7 +270,7 @@ public class AccountController {
    * Retrieves the account of the currently authenticated user.
    *
    * @return HTTP 200 with the caller's {@link AccountDetail} in the response payload
-   * @throws Exception if the account cannot be resolved for the current user
+   * @throws ResourceNotFoundException if the account cannot be resolved for the current user
    */
   @GetMapping(
       value = V20250903 + "/me",
@@ -273,7 +278,7 @@ public class AccountController {
   )
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<AccountDetail>> getMyAccount(
-  ) throws Exception {
+  ) throws ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<AccountDetail>builder()
             .payload(accountService.getSelfAccount())
@@ -288,7 +293,7 @@ public class AccountController {
       produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<AccountDetail>> updateFederationConsent(
-      @Valid @RequestBody FederationConsentUpdate request) throws Exception {
+      @Valid @RequestBody FederationConsentUpdate request) throws InvalidRequestException, ResourceNotFoundException {
     return ResponseEntity.ok(Response.<AccountDetail>builder()
         .payload(accountService.setFederationEnabled(
             permissionService.getSelfId(), request.requestedState()))
@@ -302,7 +307,7 @@ public class AccountController {
       produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<FederationConsentStatus>> getFederationConsent()
-      throws Exception {
+      throws ResourceNotFoundException {
     return ResponseEntity.ok(Response.<FederationConsentStatus>builder()
         .payload(accountService.getFederationConsent(permissionService.getSelfId()))
         .success(true)
@@ -314,7 +319,7 @@ public class AccountController {
    *
    * @param username the username to retrieve
    * @return HTTP 200 with public profile metadata
-   * @throws Exception if the account cannot be found
+   * @throws ResourceNotFoundException if the account cannot be found
    */
   @GetMapping(
       value = V20250914 + "/profile/{username}",
@@ -322,7 +327,7 @@ public class AccountController {
   )
   public ResponseEntity<Response<AccountProfile>> getPublicProfile(
       @PathVariable String username
-  ) throws Exception {
+  ) throws ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<AccountProfile>builder()
             .payload(accountService.getPublicProfile(username))
@@ -336,7 +341,7 @@ public class AccountController {
    * @param username partial username typed by the caller
    * @param limit maximum number of suggestions to return
    * @return HTTP 200 with public-safe username suggestions
-   * @throws Exception if the current caller cannot be resolved
+   * @throws ResourceNotFoundException if the current caller cannot be resolved
    */
   @GetMapping(
       value = V20250914 + "/search",
@@ -346,7 +351,7 @@ public class AccountController {
   public ResponseEntity<Response<List<AccountUsernameSuggestion>>> searchAccountsByUsername(
       @RequestParam(name = "username", required = false) String username,
       @RequestParam(name = "limit", required = false) Integer limit
-  ) throws Exception {
+  ) throws ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<List<AccountUsernameSuggestion>>builder()
             .payload(accountService.searchUsernameSuggestions(username, limit))
@@ -359,7 +364,8 @@ public class AccountController {
    *
    * @param username username to follow
    * @return HTTP 200 with updated public profile metadata
-   * @throws Exception if the account cannot be followed
+   * @throws ResourceNotFoundException if either account cannot be found
+   * @throws InvalidRequestException if the caller tries to follow themself
    */
   @PostMapping(
       value = V20250914 + "/profile/{username}/follow",
@@ -368,7 +374,7 @@ public class AccountController {
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<AccountProfile>> followAccount(
       @PathVariable String username
-  ) throws Exception {
+  ) throws ResourceNotFoundException, InvalidRequestException {
     return new ResponseEntity<>(
         Response.<AccountProfile>builder()
             .payload(accountService.followAccount(username))
@@ -381,7 +387,7 @@ public class AccountController {
    *
    * @param username username to unfollow
    * @return HTTP 200 with updated public profile metadata
-   * @throws Exception if the account cannot be unfollowed
+   * @throws ResourceNotFoundException if either account cannot be found
    */
   @DeleteMapping(
       value = V20250914 + "/profile/{username}/follow",
@@ -390,7 +396,7 @@ public class AccountController {
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<AccountProfile>> unfollowAccount(
       @PathVariable String username
-  ) throws Exception {
+  ) throws ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<AccountProfile>builder()
             .payload(accountService.unfollowAccount(username))
@@ -404,7 +410,7 @@ public class AccountController {
    * @param accountLoginRequest account credentials
    * @param sessionMode {@code cookie} for an HttpOnly browser session, otherwise legacy bearer mode
    * @return a JWT payload for API clients or an opaque cookie with no payload for browser mode
-   * @throws Exception if there is an error logging in the account.
+   * @throws InvalidTokenException if the credentials are rejected
    */
   @PostMapping(
       value = V20241215 + "/login",
@@ -414,7 +420,7 @@ public class AccountController {
   public ResponseEntity<Response<String>> loginAccount(
       @Valid @RequestBody AccountLoginRequest accountLoginRequest,
       @RequestHeader(name = BROWSER_SESSION_HEADER, defaultValue = "") String sessionMode
-  ) throws Exception {
+  ) throws InvalidTokenException {
     var token = accountService.loginAccount(accountLoginRequest);
     var browserSession = "cookie".equalsIgnoreCase(sessionMode.trim());
     var body = Response.<String>builder()
@@ -469,7 +475,8 @@ public class AccountController {
    *
    * @param request password reset token and new password
    * @return HTTP 200 with a confirmation message
-   * @throws Exception if the token is invalid or the request is malformed
+   * @throws InvalidRequestException if the request is malformed
+   * @throws InvalidTokenException if the token is invalid or expired
    */
   @PostMapping(
       value = V20241215 + "/password-reset/confirm",
@@ -478,7 +485,7 @@ public class AccountController {
   )
   public ResponseEntity<Response<String>> resetPassword(
       @Valid @RequestBody AccountPasswordResetConfirmRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, InvalidTokenException {
     accountService.resetPassword(request);
     return new ResponseEntity<>(Response.<String>builder()
         .payload("Your password has been reset.")
@@ -493,7 +500,9 @@ public class AccountController {
    *
    * @param request the account update request payload
    * @return HTTP 202 with the updated {@link AccountDetail} in the response payload
-   * @throws Exception if validation fails or update cannot be completed
+   * @throws InvalidRequestException if the request or id is invalid
+   * @throws ResourceNotFoundException if the account cannot be found
+   * @throws ResourceExistsException if the email or username is already taken
    */
   @PutMapping(
       value = V20250914,
@@ -503,7 +512,7 @@ public class AccountController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<AccountDetail>> updateAccount(
       @RequestBody AccountUpdateRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException, ResourceExistsException {
     return new ResponseEntity<>(
         Response.<AccountDetail>builder()
             .payload(accountService.updateAccount(request))
@@ -520,7 +529,8 @@ public class AccountController {
    * @param accountId target account id
    * @param request requested read and write state
    * @return the saved account detail in the standard response envelope
-   * @throws Exception if validation or the account update fails
+   * @throws InvalidRequestException if the request is malformed or enables write without read
+   * @throws ResourceNotFoundException if the account cannot be found
    */
   @PatchMapping(
       value = V20260717 + "/{accountId}/shared-folder-permissions",
@@ -528,7 +538,7 @@ public class AccountController {
       produces = MediaType.APPLICATION_JSON_VALUE)
   public ResponseEntity<Response<AccountDetail>> updateSharedFolderPermissions(
       @PathVariable String accountId,
-      @RequestBody SharedFolderPermissionUpdate request) throws Exception {
+      @RequestBody SharedFolderPermissionUpdate request) throws InvalidRequestException, ResourceNotFoundException {
     return ResponseEntity.ok(Response.<AccountDetail>builder()
         .payload(accountService.updateSharedFolderPermissions(accountId, request))
         .success(true)
@@ -542,7 +552,7 @@ public class AccountController {
       produces = MediaType.APPLICATION_JSON_VALUE)
   public ResponseEntity<Response<AccountDetail>> updateMusicPermissions(
       @PathVariable String accountId,
-      @RequestBody MusicPermissionUpdate request) throws Exception {
+      @RequestBody MusicPermissionUpdate request) throws InvalidRequestException, ResourceNotFoundException {
     return ResponseEntity.ok(Response.<AccountDetail>builder()
         .payload(accountService.updateMusicPermissions(accountId, request))
         .success(true)

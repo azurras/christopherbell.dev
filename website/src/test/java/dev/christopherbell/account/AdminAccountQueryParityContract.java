@@ -6,13 +6,15 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import java.time.Instant;
+import java.util.Locale;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Sort;
 
 /** Shared admin account query behavior checks for MongoDB. */
 interface AdminAccountQueryParityContract {
-  String RUN = java.util.UUID.randomUUID().toString();
+  String RUN = UUID.randomUUID().toString();
   String FIRST = "admin-query-a-" + RUN;
   String SECOND = "admin-query-b-" + RUN;
 
@@ -35,7 +37,7 @@ interface AdminAccountQueryParityContract {
         Sort.Direction.ASC,
         AccountStatus.ACTIVE,
         Role.USER,
-        ("SHAREDQUERY" + RUN).toUpperCase(java.util.Locale.ROOT)));
+        ("SHAREDQUERY" + RUN).toUpperCase(Locale.ROOT)));
 
     assertThat(page.items()).extracting("id").containsExactly(FIRST, SECOND);
     assertThat(page.totalElements()).isEqualTo(2);
