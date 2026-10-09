@@ -62,9 +62,10 @@ public class MusicCatalogConfiguration {
       MusicTrackRepository tracks,
       MusicProbe probe,
       MusicArtworkService artwork,
-      ScheduledCollectorCoordinator scheduledCollectors) {
+      ScheduledCollectorCoordinator scheduledCollectors,
+      Clock clock) {
     return new MusicCatalogReconciler(
-        properties, tracks, probe, artwork, scheduledCollectors, Clock.systemUTC());
+        properties, tracks, probe, artwork, scheduledCollectors, clock);
   }
 
   @Bean
@@ -76,8 +77,9 @@ public class MusicCatalogConfiguration {
   @Bean
   public MusicMetadataFileStore musicMetadataFileStore(
       MusicMetadataProperties properties,
-      MusicProperties music) {
-    return new MusicMetadataFileStore(properties, music.root());
+      MusicProperties music,
+      Clock clock) {
+    return new MusicMetadataFileStore(properties, music.root(), clock);
   }
 
   @Bean
@@ -104,9 +106,10 @@ public class MusicCatalogConfiguration {
       MusicMetadataEditRepository edits,
       MusicAccessService access,
       LeaseService leases,
-      ScheduledCollectorCoordinator scheduledCollectors) {
+      ScheduledCollectorCoordinator scheduledCollectors,
+      Clock clock) {
     return new MusicMetadataService(
         music, metadata, catalog, tracks, probe, artwork, tagProcess, files, edits, access,
-        leases, scheduledCollectors, Clock.systemUTC());
+        leases, scheduledCollectors, clock);
   }
 }

@@ -20,25 +20,32 @@ public class MongoMusicTrackRepository extends KindScopedRepositorySupport<Music
     super(factory, MusicTrack.class);
   }
 
-  @Override public MusicTrack save(MusicTrack track) { return saveValue(track); }
-  @Override public Optional<MusicTrack> findById(String id) { return findValueById(id); }
-  @Override public Optional<MusicTrack> findByPath(String path) {
+  @Override
+  public MusicTrack save(MusicTrack track) {
+    return saveValue(track);
+  }
+  @Override
+  public Optional<MusicTrack> findById(String id) {
+    return findValueById(id);
+  }
+  @Override
+  public Optional<MusicTrack> findByPath(String path) {
     return findOne(Query.query(Criteria.where("path").is(path)));
   }
-  @Override public List<MusicTrack> findAllByMissingSinceIsNull() {
+  @Override
+  public List<MusicTrack> findAllByMissingSinceIsNull() {
     return find(Query.query(Criteria.where("missingSince").is(null)));
   }
-  @Override public boolean updatePreferences(
-      String id,
-      boolean expectedFavorite,
-      boolean expectedExcluded,
-      boolean favorite,
-      boolean excluded) {
+  @Override
+  public boolean updatePreferences(
+      String id, MusicTrackPreferences expected, MusicTrackPreferences desired) {
     return mongo.updateFirst(
         Query.query(Criteria.where("id").is(id)
-            .and("favorite").is(expectedFavorite)
-            .and("excludedFromRadio").is(expectedExcluded)),
-        new Update().set("favorite", favorite).set("excludedFromRadio", excluded))
+            .and("favorite").is(expected.favorite())
+            .and("excludedFromRadio").is(expected.excludedFromRadio())),
+        new Update()
+            .set("favorite", desired.favorite())
+            .set("excludedFromRadio", desired.excludedFromRadio()))
         .getMatchedCount() == 1;
   }
 }

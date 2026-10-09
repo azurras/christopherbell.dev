@@ -6,8 +6,10 @@ import dev.christopherbell.music.security.MusicAccessService;
 import dev.christopherbell.music.web.MusicTrackView;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -72,10 +74,10 @@ public final class MusicQueueService {
         || new HashSet<>(safeIds).size() != safeIds.size()) {
       throw invalidOrder();
     }
-    var byId = new java.util.HashMap<String, MusicQueueState.Entry>();
+    var byId = new HashMap<String, MusicQueueState.Entry>();
     current.entries().forEach(entry -> byId.put(entry.id(), entry));
     List<MusicQueueState.Entry> reordered = safeIds.stream().map(byId::get).toList();
-    if (reordered.stream().anyMatch(java.util.Objects::isNull)) {
+    if (reordered.stream().anyMatch(Objects::isNull)) {
       throw invalidOrder();
     }
     return view(save(new MusicQueueState(MusicQueueState.ID, reordered, current.version())));

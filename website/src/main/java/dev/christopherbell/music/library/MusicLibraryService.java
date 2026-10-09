@@ -2,6 +2,7 @@ package dev.christopherbell.music.library;
 
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicTrack;
+import dev.christopherbell.music.catalog.MusicTrackPreferences;
 import dev.christopherbell.music.catalog.MusicTrackRepository;
 import dev.christopherbell.music.radio.MusicRadioHistoryEvent;
 import dev.christopherbell.music.radio.MusicRadioHistoryRepository;
@@ -93,15 +94,10 @@ public final class MusicLibraryService {
   }
 
   public MusicTrackView updatePreferences(
-      String trackId,
-      boolean expectedFavorite,
-      boolean expectedExcluded,
-      boolean favorite,
-      boolean excluded) {
+      String trackId, MusicTrackPreferences expected, MusicTrackPreferences desired) {
     access.requireWrite();
     MusicTrack current = catalog.findReady(trackId).orElseThrow(this::trackNotFound);
-    if (!tracks.updatePreferences(
-        current.id(), expectedFavorite, expectedExcluded, favorite, excluded)) {
+    if (!tracks.updatePreferences(current.id(), expected, desired)) {
       if (catalog.findReady(trackId).isEmpty()) {
         throw trackNotFound();
       }

@@ -8,7 +8,6 @@ import java.time.Duration;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Atomically aggregates denied Music entry attempts without logging credentials. */
@@ -18,12 +17,7 @@ public class MusicAccessAuditRecorder {
   private final MusicAccessAttemptRepository attempts;
   private final Clock clock;
 
-  @Autowired
-  public MusicAccessAuditRecorder(MusicAccessAttemptRepository attempts) {
-    this(attempts, Clock.systemUTC());
-  }
-
-  MusicAccessAuditRecorder(MusicAccessAttemptRepository attempts, Clock clock) {
+  public MusicAccessAuditRecorder(MusicAccessAttemptRepository attempts, Clock clock) {
     this.attempts = attempts;
     this.clock = clock;
   }

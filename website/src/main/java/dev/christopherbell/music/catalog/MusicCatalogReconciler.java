@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -134,7 +135,7 @@ public class MusicCatalogReconciler {
     return root;
   }
 
-  private java.util.List<Path> discover(Path root) {
+  private List<Path> discover(Path root) {
     try (var paths = Files.walk(root, 64)) {
       return paths
           .filter(path -> !path.equals(root))

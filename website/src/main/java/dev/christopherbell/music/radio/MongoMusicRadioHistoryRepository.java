@@ -21,13 +21,16 @@ public class MongoMusicRadioHistoryRepository
     super(factory, MusicRadioHistoryEvent.class);
   }
 
-  @Override public MusicRadioHistoryEvent save(MusicRadioHistoryEvent event) {
+  @Override
+  public MusicRadioHistoryEvent save(MusicRadioHistoryEvent event) {
     return saveValue(event);
   }
-  @Override public boolean existsById(String id) {
+  @Override
+  public boolean existsById(String id) {
     return mongo.exists(Query.query(Criteria.where("id").is(id)));
   }
-  @Override public List<MusicRadioHistoryEvent> findTop100ByOrderByStationSequenceDesc() {
+  @Override
+  public List<MusicRadioHistoryEvent> findTop100ByOrderByStationSequenceDesc() {
     return find(new Query().with(Sort.by(Sort.Direction.DESC, "stationSequence")),
         PageRequest.of(0, 100));
   }

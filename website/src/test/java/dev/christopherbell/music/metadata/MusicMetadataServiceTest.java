@@ -3,8 +3,12 @@ package dev.christopherbell.music.metadata;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -75,7 +79,7 @@ class MusicMetadataServiceTest {
     assertThat(undone.observedToken()).isNotEqualTo(changed.observedToken());
     assertThat(applied.get().backupSha256()).hasSize(64);
     assertThat(Files.readString(source)).isEqualTo("original-audio");
-    verify(tracks, org.mockito.Mockito.times(2)).save(any());
+    verify(tracks, times(2)).save(any());
 
     when(edits.findTop100ByExpiresAtBeforeOrderByExpiresAtAsc(any()))
         .thenReturn(List.of(applied.get()));
@@ -131,8 +135,8 @@ class MusicMetadataServiceTest {
     var edits = mock(MusicMetadataEditRepository.class);
     var coordinator = mock(ScheduledCollectorCoordinator.class);
     when(coordinator.run(
-        org.mockito.ArgumentMatchers.eq("music-metadata-cleanup"),
-        org.mockito.ArgumentMatchers.eq(Duration.ofMinutes(10)),
+        eq("music-metadata-cleanup"),
+        eq(Duration.ofMinutes(10)),
         any()))
         .thenReturn(null);
     var service = service(
@@ -152,7 +156,7 @@ class MusicMetadataServiceTest {
     var edits = mock(MusicMetadataEditRepository.class);
     when(edits.findTop100ByExpiresAtBeforeOrderByExpiresAtAsc(any())).thenReturn(List.of(edit));
     var guard = mock(CollectorLeaseGuard.class);
-    org.mockito.Mockito.doThrow(new LeaseOwnershipLostException("music-metadata-cleanup"))
+    doThrow(new LeaseOwnershipLostException("music-metadata-cleanup"))
         .when(guard).verifyHeld();
     var service = service(
         mock(MusicCatalog.class), mock(MusicTrackRepository.class),
@@ -172,7 +176,7 @@ class MusicMetadataServiceTest {
     var edits = mock(MusicMetadataEditRepository.class);
     when(edits.findTop100ByExpiresAtBeforeOrderByExpiresAtAsc(any())).thenReturn(List.of(edit));
     var guard = mock(CollectorLeaseGuard.class);
-    org.mockito.Mockito.doNothing()
+    doNothing()
         .doThrow(new LeaseOwnershipLostException("music-metadata-cleanup"))
         .when(guard).verifyHeld();
     var service = service(
@@ -210,7 +214,8 @@ class MusicMetadataServiceTest {
     var properties = metadataProperties();
     return new MusicMetadataService(
         musicProperties(), properties, catalog, tracks, probe, mock(MusicArtworkService.class),
-        process, new MusicMetadataFileStore(properties, temporary.resolve("music")),
+        process, new MusicMetadataFileStore(
+            properties, temporary.resolve("music"), Clock.fixed(NOW, ZoneOffset.UTC)),
         edits, access, leases, scheduledCollectors, Clock.fixed(NOW, ZoneOffset.UTC));
   }
 

@@ -22,13 +22,24 @@ public class MongoMusicPlaylistRepository extends KindScopedRepositorySupport<Mu
     super(factory, MusicPlaylist.class);
   }
 
-  @Override public MusicPlaylist save(MusicPlaylist playlist) { return saveValue(playlist); }
-  @Override public Optional<MusicPlaylist> findById(String id) { return findValueById(id); }
-  @Override public List<MusicPlaylist> findTop100ByOrderByNormalizedNameAsc() {
+  @Override
+  public MusicPlaylist save(MusicPlaylist playlist) {
+    return saveValue(playlist);
+  }
+  @Override
+  public Optional<MusicPlaylist> findById(String id) {
+    return findValueById(id);
+  }
+  @Override
+  public List<MusicPlaylist> findTop100ByOrderByNormalizedNameAsc() {
     return find(new Query().with(Sort.by("normalizedName")), PageRequest.of(0, 100));
   }
-  @Override public long count() { return mongo.count(new Query()); }
-  @Override public void delete(MusicPlaylist playlist) {
+  @Override
+  public long count() {
+    return mongo.count(new Query());
+  }
+  @Override
+  public void delete(MusicPlaylist playlist) {
     var query = Query.query(Criteria.where("id").is(playlist.id()));
     if (playlist.version() != null) query.addCriteria(Criteria.where("version").is(playlist.version()));
     if (mongo.remove(query).getDeletedCount() != 1) {

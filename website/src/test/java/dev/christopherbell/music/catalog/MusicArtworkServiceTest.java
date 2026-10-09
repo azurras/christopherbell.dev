@@ -3,6 +3,7 @@ package dev.christopherbell.music.catalog;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.awt.image.BufferedImage;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -71,7 +72,7 @@ class MusicArtworkServiceTest {
         } else {
           ImageIO.write(new BufferedImage(10, 10, BufferedImage.TYPE_INT_RGB), "jpg", output.toFile());
         }
-      } catch (java.io.IOException failure) {
+      } catch (IOException failure) {
         throw new IllegalStateException(failure);
       }
       return new MusicProcessResult("", "", 0, false, false);

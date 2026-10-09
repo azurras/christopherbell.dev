@@ -16,14 +16,18 @@ import dev.christopherbell.music.library.MusicLibraryService;
 import dev.christopherbell.music.playback.MusicPlaybackSelection;
 import dev.christopherbell.music.playback.MusicPlaybackService;
 import java.io.ByteArrayInputStream;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 class MusicReadControllerTest {
@@ -91,18 +95,18 @@ class MusicReadControllerTest {
   void controllerDefinesNoMusicDownloadRoute() {
     boolean hasDownloadRoute = Arrays.stream(MusicReadController.class.getDeclaredMethods())
         .flatMap(method -> {
-          var mapping = method.getAnnotation(org.springframework.web.bind.annotation.GetMapping.class);
-          return mapping == null ? java.util.stream.Stream.<String>empty()
+          var mapping = method.getAnnotation(GetMapping.class);
+          return mapping == null ? Stream.<String>empty()
               : Arrays.stream(mapping.value());
         })
-        .anyMatch(path -> path.toLowerCase(java.util.Locale.ROOT).contains("download"));
+        .anyMatch(path -> path.toLowerCase(Locale.ROOT).contains("download"));
 
     assertThat(hasDownloadRoute).isFalse();
   }
 
   private MusicProperties properties() {
     return new MusicProperties(
-        java.nio.file.Path.of("Music"), java.nio.file.Path.of("artwork"),
+        Path.of("Music"), Path.of("artwork"),
         "ffprobe", "ffmpeg", 100, Duration.ofMinutes(1), Duration.ofSeconds(10),
         1024 * 1024, 5 * 1024 * 1024, 1024, true);
   }

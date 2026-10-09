@@ -2,6 +2,8 @@ package dev.christopherbell.music.catalog;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -43,8 +45,8 @@ public final class FfprobeMusicProbe implements MusicProbe {
       JsonNode root = objectMapper.readTree(probeResult.stdout());
       JsonNode format = root.path("format");
       JsonNode streams = root.path("streams");
-      JsonNode audio = firstStream(streams, "audio");
-      if (audio == null) throw new MusicProbeException("FFprobe found no audio stream.");
+      JsonNode audio = firstStream(streams, "audio")
+          .orElseThrow(() -> new MusicProbeException("FFprobe found no audio stream."));
       double duration = duration(format, audio);
       String codec = clean(audio.path("codec_name").asText(null));
       if (codec == null) throw new MusicProbeException("FFprobe audio codec is missing.");
@@ -71,12 +73,12 @@ public final class FfprobeMusicProbe implements MusicProbe {
     }
   }
 
-  private JsonNode firstStream(JsonNode streams, String type) {
-    if (!streams.isArray()) return null;
+  private Optional<JsonNode> firstStream(JsonNode streams, String type) {
+    if (!streams.isArray()) return Optional.empty();
     for (JsonNode stream : streams) {
-      if (type.equals(stream.path("codec_type").asText())) return stream;
+      if (type.equals(stream.path("codec_type").asText())) return Optional.of(stream);
     }
-    return null;
+    return Optional.empty();
   }
 
   private boolean hasArtwork(JsonNode streams) {
@@ -107,7 +109,7 @@ public final class FfprobeMusicProbe implements MusicProbe {
   private String tag(JsonNode tags, String tagName) {
     String rawTagValue = tags.path(tagName).asText(null);
     if (rawTagValue == null) {
-      rawTagValue = tags.path(tagName.toUpperCase(java.util.Locale.ROOT)).asText(null);
+      rawTagValue = tags.path(tagName.toUpperCase(Locale.ROOT)).asText(null);
     }
     return clean(rawTagValue);
   }

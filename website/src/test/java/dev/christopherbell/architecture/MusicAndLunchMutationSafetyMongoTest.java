@@ -13,6 +13,7 @@ import dev.christopherbell.configuration.mongo.domain.MalformedDomainDocumentExc
 import dev.christopherbell.music.catalog.MongoMusicTrackRepository;
 import dev.christopherbell.music.catalog.MusicIndexStatus;
 import dev.christopherbell.music.catalog.MusicTrack;
+import dev.christopherbell.music.catalog.MusicTrackPreferences;
 import dev.christopherbell.music.metadata.MongoMusicMetadataEditRepository;
 import dev.christopherbell.music.metadata.MusicMetadataEdit;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
@@ -88,7 +89,8 @@ class MusicAndLunchMutationSafetyMongoTest {
     var before = rawBytes("music", "music_track", "track-1");
 
     assertThatThrownBy(() -> new MongoMusicTrackRepository(factory)
-        .updatePreferences("track-1", false, false, true, true))
+        .updatePreferences(
+            "track-1", new MusicTrackPreferences(false, false), new MusicTrackPreferences(true, true)))
         .isInstanceOf(MalformedDomainDocumentException.class);
 
     assertThat(rawBytes("music", "music_track", "track-1")).isEqualTo(before);

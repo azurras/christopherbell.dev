@@ -9,16 +9,19 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.util.HexFormat;
 
 /** Constrains all metadata backup and staging effects to one private same-volume root. */
 public final class MusicMetadataFileStore {
   private final MusicMetadataProperties properties;
   private final Path musicRoot;
+  private final Clock clock;
 
-  public MusicMetadataFileStore(MusicMetadataProperties properties, Path musicRoot) {
+  public MusicMetadataFileStore(MusicMetadataProperties properties, Path musicRoot, Clock clock) {
     this.properties = properties;
     this.musicRoot = musicRoot.toAbsolutePath().normalize();
+    this.clock = clock;
   }
 
   public Prepared prepare(Path source, String editId, String extension, byte[] artwork) {
@@ -83,7 +86,7 @@ public final class MusicMetadataFileStore {
   /** Gives an atomic replacement a revision timestamp distinct from the observed source. */
   public void markReplacement(Path stage, long previousModifiedMillis) {
     try {
-      long next = Math.max(System.currentTimeMillis(), Math.addExact(previousModifiedMillis, 2_000));
+      long next = Math.max(clock.millis(), Math.addExact(previousModifiedMillis, 2_000));
       Files.setLastModifiedTime(stage, FileTime.fromMillis(next));
     } catch (IOException | ArithmeticException | SecurityException failure) {
       throw new IllegalStateException("Music metadata replacement revision cannot be prepared.", failure);

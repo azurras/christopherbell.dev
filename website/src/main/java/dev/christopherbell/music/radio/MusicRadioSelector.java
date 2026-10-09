@@ -6,9 +6,11 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.DoubleSupplier;
 import java.util.function.IntUnaryOperator;
+import java.util.stream.Collectors;
 
 /** Pure smart-radio policy with deterministic randomness injected at the boundary. */
 public final class MusicRadioSelector {
@@ -64,7 +66,7 @@ public final class MusicRadioSelector {
         .filter(event -> event.outcome() == MusicRadioHistoryEvent.Outcome.PLAYED)
         .limit(properties.trackCooldown())
         .map(MusicRadioHistoryEvent::trackId)
-        .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+        .collect(Collectors.toCollection(HashSet::new));
     List<MusicTrack> filtered = tracks.stream()
         .filter(track -> !recentIds.contains(track.id())).toList();
     return filtered.isEmpty() ? tracks : filtered;
@@ -80,9 +82,9 @@ public final class MusicRadioSelector {
         .filter(event -> event.outcome() == MusicRadioHistoryEvent.Outcome.PLAYED)
         .limit(properties.artistCooldown())
         .map(MusicRadioHistoryEvent::artist)
-        .filter(java.util.Objects::nonNull)
+        .filter(Objects::nonNull)
         .map(this::normalizeArtist)
-        .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+        .collect(Collectors.toCollection(HashSet::new));
     List<MusicTrack> filtered = tracks.stream()
         .filter(track -> !recentArtists.contains(normalizeArtist(track.artist()))).toList();
     return filtered.isEmpty() ? tracks : filtered;
