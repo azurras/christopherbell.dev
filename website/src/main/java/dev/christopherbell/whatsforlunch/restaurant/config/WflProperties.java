@@ -72,6 +72,8 @@ public class WflProperties {
   /** Remote import, lease, and preview settings. */
   @Data
   public static class RestaurantImport {
+    private static final Duration REMOTE_REQUEST_MARGIN = Duration.ofSeconds(20);
+
     @Valid
     @NotNull
     private Monthly monthly = new Monthly();
@@ -93,7 +95,7 @@ public class WflProperties {
       return leaseDuration == null
           || osm == null
           || osm.getTimeout() == null
-          || leaseDuration.compareTo(osm.getTimeout().plusSeconds(20)) >= 0;
+          || leaseDuration.compareTo(osm.getTimeout().plus(REMOTE_REQUEST_MARGIN)) >= 0;
     }
   }
 
