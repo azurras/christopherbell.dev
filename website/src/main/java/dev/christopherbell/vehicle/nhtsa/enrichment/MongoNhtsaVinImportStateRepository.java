@@ -13,7 +13,17 @@ import org.springframework.stereotype.Repository;
 public class MongoNhtsaVinImportStateRepository
     extends KindScopedRepositorySupport<NhtsaVinImportState>
     implements NhtsaVinImportStateRepository {
-  public MongoNhtsaVinImportStateRepository(DomainMongoOperationsFactory factory) { super(factory, NhtsaVinImportState.class); }
-  @Override public Optional<NhtsaVinImportState> findById(String id) { return findValueById(id); }
-  @Override public NhtsaVinImportState save(NhtsaVinImportState value) { return saveValue(value); }
+  public MongoNhtsaVinImportStateRepository(DomainMongoOperationsFactory factory) {
+    super(factory, NhtsaVinImportState.class);
+  }
+
+  @Override
+  public Optional<NhtsaVinImportState> findById(String id) {
+    return findValueById(id);
+  }
+
+  @Override
+  public NhtsaVinImportState save(NhtsaVinImportState state) {
+    return saveValue(state);
+  }
 }

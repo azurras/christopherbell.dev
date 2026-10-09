@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -388,7 +389,7 @@ public class VehicleServiceTest {
     var vehicle = VehicleStub.getVehicleStub(VehicleStub.ID);
     var failure = new DataAccessResourceFailureException("database-secret");
     when(vehicleRepository.findById(VehicleStub.ID)).thenReturn(Optional.of(vehicle));
-    org.mockito.Mockito.doThrow(failure).when(vehicleRepository).delete(vehicle);
+    doThrow(failure).when(vehicleRepository).delete(vehicle);
 
     var exception = assertThrows(
         ServiceUnavailableException.class,

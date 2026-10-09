@@ -327,12 +327,12 @@ public class RandomVinImportServiceTest {
     givenRobotsAllowed();
     givenNoImportState();
     when(randomVinClient.getVin()).thenReturn(VehicleStub.VIN);
-    when(vehicleRepository.save(org.mockito.ArgumentMatchers.any()))
+    when(vehicleRepository.save(any()))
         .thenThrow(DuplicateKeyException.class);
 
     randomVinImportService.importRandomVin();
 
-    verify(vehicleRepository).save(org.mockito.ArgumentMatchers.any());
+    verify(vehicleRepository).save(any());
   }
 
   @Test

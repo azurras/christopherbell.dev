@@ -37,10 +37,11 @@ public class VehicleCrudService {
     try {
       var savedVehicle = vehicleRepository.save(vehicle);
       return vehicleMapper.toVehicleDetail(savedVehicle);
-    } catch (DuplicateKeyException e) {
-      throw new ResourceExistsException("Vehicle already exists for VIN: " + request.getVin(), e);
-    } catch (DataAccessException e) {
-      throw new ServiceUnavailableException("Failed to save vehicle", e);
+    } catch (DuplicateKeyException duplicateVin) {
+      throw new ResourceExistsException(
+          "Vehicle already exists for VIN: " + request.getVin(), duplicateVin);
+    } catch (DataAccessException storageFailure) {
+      throw new ServiceUnavailableException("Failed to save vehicle", storageFailure);
     }
   }
 
@@ -56,8 +57,9 @@ public class VehicleCrudService {
 
     try {
       vehicleRepository.delete(vehicle);
-    } catch (DataAccessException e) {
-      throw new ServiceUnavailableException("Failed to delete vehicle with id: " + id, e);
+    } catch (DataAccessException storageFailure) {
+      throw new ServiceUnavailableException(
+          "Failed to delete vehicle with id: " + id, storageFailure);
     }
 
     return vehicleMapper.toVehicleDetail(vehicle);
@@ -118,10 +120,12 @@ public class VehicleCrudService {
     try {
       var savedVehicle = vehicleRepository.save(vehicleToUpdate);
       return vehicleMapper.toVehicleDetail(savedVehicle);
-    } catch (DuplicateKeyException e) {
-      throw new ResourceExistsException("Vehicle already exists for VIN: " + request.vin(), e);
-    } catch (DataAccessException e) {
-      throw new ServiceUnavailableException("Failed to update vehicle with id: " + id, e);
+    } catch (DuplicateKeyException duplicateVin) {
+      throw new ResourceExistsException(
+          "Vehicle already exists for VIN: " + request.vin(), duplicateVin);
+    } catch (DataAccessException storageFailure) {
+      throw new ServiceUnavailableException(
+          "Failed to update vehicle with id: " + id, storageFailure);
     }
   }
 

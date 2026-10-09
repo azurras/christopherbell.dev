@@ -1,11 +1,12 @@
 package dev.christopherbell.vehicle.randomvin.importing;
 
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.lease.CollectorLeaseGuard;
 import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
-import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.Vehicle;
 import dev.christopherbell.vehicle.model.VehicleProperties;
+import dev.christopherbell.vehicle.model.VehicleVins;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinRobotsPolicyState;
 import dev.christopherbell.vehicle.randomvin.policy.RandomVinRobotsPolicy;
@@ -13,15 +14,14 @@ import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.Optional;
+import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataAccessException;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -32,7 +32,6 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class RandomVinImportService {
   public static final String LEASE_NAME = "vehicle-randomvin-import";
-  private static final Pattern VIN_PATTERN = Pattern.compile("^[A-HJ-NPR-Z0-9]{17}$");
 
   private final RandomVinClient randomVinClient;
   private final RandomVinImportStateRepository randomVinImportStateRepository;
@@ -155,17 +154,17 @@ public class RandomVinImportService {
       recordVinsProcessed(state, 1);
       leaseGuard.verifyHeld();
       saveVin(vin);
-    } catch (DuplicateKeyException e) {
+    } catch (DuplicateKeyException duplicateVin) {
       log.info("RandomVIN returned a VIN that already exists.");
-    } catch (InvalidRequestException e) {
-      log.warn("RandomVIN import skipped: {}", e.getMessage());
-    } catch (IOException e) {
-      log.warn("RandomVIN import skipped because VIN fetch failed.", e);
-    } catch (InterruptedException e) {
+    } catch (InvalidRequestException skipped) {
+      log.warn("RandomVIN import skipped: {}", skipped.getMessage());
+    } catch (IOException fetchFailure) {
+      log.warn("RandomVIN import skipped because VIN fetch failed.", fetchFailure);
+    } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
-      log.warn("RandomVIN import interrupted.", e);
-    } catch (DataAccessException e) {
-      log.error("RandomVIN import failed while saving vehicle.", e);
+      log.warn("RandomVIN import interrupted.", interrupted);
+    } catch (DataAccessException storageFailure) {
+      log.error("RandomVIN import failed while saving vehicle.", storageFailure);
     } finally {
       log.info("RandomVIN import job completed.");
     }
@@ -184,9 +183,9 @@ public class RandomVinImportService {
       throws IOException, InterruptedException, InvalidRequestException {
     try {
       return randomVinClient.getVin();
-    } catch (RandomVinClientException e) {
-      handleClientFailure(state, e);
-      throw new InvalidRequestException(e.getMessage(), e);
+    } catch (RandomVinClientException httpFailure) {
+      handleClientFailure(state, httpFailure);
+      throw new InvalidRequestException(httpFailure.getMessage(), httpFailure);
     }
   }
 
@@ -245,7 +244,7 @@ public class RandomVinImportService {
    * @return true when no more RandomVIN calls should be made today
    */
   private boolean hasReachedDailyCap(RandomVinImportState state) {
-    return Optional.ofNullable(state.getCallsToday()).orElse(0) >= properties.getMaxCallsPerDay();
+    return Objects.requireNonNullElse(state.getCallsToday(), 0) >= properties.getMaxCallsPerDay();
   }
 
   /**
@@ -255,8 +254,8 @@ public class RandomVinImportService {
    */
   private void recordAttempt(RandomVinImportState state) {
     state.setLastAttemptOn(Instant.now(clock));
-    state.setCallsToday(Optional.ofNullable(state.getCallsToday()).orElse(0) + 1);
-    state.setLifetimeCalls(Optional.ofNullable(state.getLifetimeCalls()).orElse(0L) + 1);
+    state.setCallsToday(Objects.requireNonNullElse(state.getCallsToday(), 0) + 1);
+    state.setLifetimeCalls(Objects.requireNonNullElse(state.getLifetimeCalls(), 0L) + 1);
     state.setCallsOnDate(LocalDate.now(clock));
     state.setNotes(properties.getStateNote());
     randomVinImportStateRepository.save(state);
@@ -286,9 +285,10 @@ public class RandomVinImportService {
    * @param vinsProcessed the number of VINs processed by this scheduler run
    */
   private void recordVinsProcessed(RandomVinImportState state, int vinsProcessed) {
-    state.setVinsProcessedToday(Optional.ofNullable(state.getVinsProcessedToday()).orElse(0) + vinsProcessed);
+    state.setVinsProcessedToday(
+        Objects.requireNonNullElse(state.getVinsProcessedToday(), 0) + vinsProcessed);
     state.setLifetimeVinsProcessed(
-        Optional.ofNullable(state.getLifetimeVinsProcessed()).orElse(0L) + vinsProcessed);
+        Objects.requireNonNullElse(state.getLifetimeVinsProcessed(), 0L) + vinsProcessed);
     state.setNotes(properties.getStateNote());
     randomVinImportStateRepository.save(state);
   }
@@ -297,22 +297,22 @@ public class RandomVinImportService {
    * Applies RandomVIN HTTP failure guards and records the failure in persisted state.
    *
    * @param state the persisted RandomVIN import state to update
-   * @param e the client exception containing the HTTP status
+   * @param httpFailure the client exception containing the HTTP status
    */
-  private void handleClientFailure(RandomVinImportState state, RandomVinClientException e) {
+  private void handleClientFailure(RandomVinImportState state, RandomVinClientException httpFailure) {
     var now = Instant.now(clock);
     state.setLastFailureOn(now);
-    state.setLastFailureStatus(e.getStatusCode());
+    state.setLastFailureStatus(httpFailure.getStatusCode());
     state.setNotes(properties.getStateNote());
-    if (e.getStatusCode() == 403) {
+    if (httpFailure.getStatusCode() == 403) {
       state.setForbiddenOn(now);
       state.setPermanentlyDisabled(true);
       state.setDisabledUntil(null);
-    } else if (e.getStatusCode() == 429) {
+    } else if (httpFailure.getStatusCode() == 429) {
       state.setDisabledUntil(now.plus(properties.getCooldown()));
     }
     randomVinImportStateRepository.save(state);
-    log.warn("RandomVIN import failed with HTTP status {}.", e.getStatusCode());
+    log.warn("RandomVIN import failed with HTTP status {}.", httpFailure.getStatusCode());
   }
 
   /**
@@ -350,8 +350,8 @@ public class RandomVinImportService {
       throw new InvalidRequestException("RandomVIN response was empty.");
     }
 
-    var vin = rawVin.trim().toUpperCase();
-    if (!VIN_PATTERN.matcher(vin).matches()) {
+    var vin = VehicleVins.normalize(rawVin);
+    if (!VehicleVins.isValid(vin)) {
       throw new InvalidRequestException("RandomVIN response did not contain a valid VIN.");
     }
 

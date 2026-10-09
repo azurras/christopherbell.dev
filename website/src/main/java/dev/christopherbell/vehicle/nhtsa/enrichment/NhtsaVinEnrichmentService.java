@@ -1,13 +1,14 @@
 package dev.christopherbell.vehicle.nhtsa.enrichment;
 
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.lease.CollectorLeaseGuard;
 import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
-import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.Vehicle;
 import dev.christopherbell.vehicle.model.VehicleProperties;
-import dev.christopherbell.vehicle.nhtsa.decode.NhtsaVinClient;
+import dev.christopherbell.vehicle.model.VehicleVins;
 import dev.christopherbell.vehicle.nhtsa.decode.NhtsaVinClient.NhtsaVinDecodeRequest;
+import dev.christopherbell.vehicle.nhtsa.decode.NhtsaVinClient;
 import dev.christopherbell.vehicle.nhtsa.decode.NhtsaVinClientException;
 import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
 import java.io.IOException;
@@ -17,11 +18,12 @@ import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.Objects;
+import java.util.function.Consumer;
 import java.util.stream.IntStream;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataAccessException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -166,17 +168,17 @@ public class NhtsaVinEnrichmentService {
         vehicleRepository.save(vehicle);
         log.info("Enriched vehicle VIN {} with NHTSA details.", vehicle.getVin());
       }
-    } catch (InvalidRequestException e) {
-      log.warn("NHTSA batch enrichment skipped: {}", e.getMessage());
-    } catch (NhtsaVinClientException e) {
-      handleClientFailure(state, e);
-    } catch (IOException e) {
-      log.warn("NHTSA batch enrichment failed while fetching VINs.", e);
-    } catch (InterruptedException e) {
+    } catch (InvalidRequestException skipped) {
+      log.warn("NHTSA batch enrichment skipped: {}", skipped.getMessage());
+    } catch (NhtsaVinClientException httpFailure) {
+      handleClientFailure(state, httpFailure);
+    } catch (IOException fetchFailure) {
+      log.warn("NHTSA batch enrichment failed while fetching VINs.", fetchFailure);
+    } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
-      log.warn("NHTSA batch enrichment interrupted.", e);
-    } catch (DataAccessException e) {
-      log.error("NHTSA batch enrichment failed while saving VIN details.", e);
+      log.warn("NHTSA batch enrichment interrupted.", interrupted);
+    } catch (DataAccessException storageFailure) {
+      log.error("NHTSA batch enrichment failed while saving VIN details.", storageFailure);
     }
   }
 
@@ -246,11 +248,12 @@ public class NhtsaVinEnrichmentService {
    */
   private void recordAttempt(NhtsaVinImportState state, int vinsProcessed) {
     state.setLastAttemptOn(Instant.now(clock));
-    state.setCallsToday(Optional.ofNullable(state.getCallsToday()).orElse(0) + 1);
-    state.setLifetimeCalls(Optional.ofNullable(state.getLifetimeCalls()).orElse(0L) + 1);
-    state.setVinsProcessedToday(Optional.ofNullable(state.getVinsProcessedToday()).orElse(0) + vinsProcessed);
+    state.setCallsToday(Objects.requireNonNullElse(state.getCallsToday(), 0) + 1);
+    state.setLifetimeCalls(Objects.requireNonNullElse(state.getLifetimeCalls(), 0L) + 1);
+    state.setVinsProcessedToday(
+        Objects.requireNonNullElse(state.getVinsProcessedToday(), 0) + vinsProcessed);
     state.setLifetimeVinsProcessed(
-        Optional.ofNullable(state.getLifetimeVinsProcessed()).orElse(0L) + vinsProcessed);
+        Objects.requireNonNullElse(state.getLifetimeVinsProcessed(), 0L) + vinsProcessed);
     state.setCallsOnDate(LocalDate.now(clock));
     state.setNotes(properties.getStateNote());
     nhtsaVinImportStateRepository.save(state);
@@ -260,22 +263,22 @@ public class NhtsaVinEnrichmentService {
    * Applies NHTSA HTTP failure guards and records the failure in persisted state.
    *
    * @param state the persisted NHTSA import state to update
-   * @param e the client exception containing the HTTP status
+   * @param httpFailure the client exception containing the HTTP status
    */
-  private void handleClientFailure(NhtsaVinImportState state, NhtsaVinClientException e) {
+  private void handleClientFailure(NhtsaVinImportState state, NhtsaVinClientException httpFailure) {
     var now = Instant.now(clock);
     state.setLastFailureOn(now);
-    state.setLastFailureStatus(e.getStatusCode());
+    state.setLastFailureStatus(httpFailure.getStatusCode());
     state.setNotes(properties.getStateNote());
-    if (e.getStatusCode() == 403) {
+    if (httpFailure.getStatusCode() == 403) {
       state.setForbiddenOn(now);
       state.setPermanentlyDisabled(true);
       state.setDisabledUntil(null);
-    } else if (e.getStatusCode() == 429) {
+    } else if (httpFailure.getStatusCode() == 429) {
       state.setDisabledUntil(now.plus(properties.getCooldown()));
     }
     nhtsaVinImportStateRepository.save(state);
-    log.warn("NHTSA batch enrichment failed with HTTP status {}.", e.getStatusCode());
+    log.warn("NHTSA batch enrichment failed with HTTP status {}.", httpFailure.getStatusCode());
   }
 
   /**
@@ -327,7 +330,7 @@ public class NhtsaVinEnrichmentService {
    * @return the normalized VIN, or null when no VIN was provided
    */
   private String normalizeVin(String vin) {
-    return vin == null ? null : vin.trim().toUpperCase();
+    return VehicleVins.normalize(vin);
   }
 
   /**
@@ -436,7 +439,7 @@ public class NhtsaVinEnrichmentService {
    * @param newValue the decoded value to apply
    * @param setter the vehicle setter for the field
    */
-  private void setIfBlank(String currentValue, String newValue, java.util.function.Consumer<String> setter) {
+  private void setIfBlank(String currentValue, String newValue, Consumer<String> setter) {
     if (isBlank(currentValue) && !isBlank(newValue)) {
       setter.accept(newValue);
     }
@@ -454,7 +457,7 @@ public class NhtsaVinEnrichmentService {
     }
     try {
       return Integer.valueOf(value);
-    } catch (NumberFormatException e) {
+    } catch (NumberFormatException notANumber) {
       return null;
     }
   }

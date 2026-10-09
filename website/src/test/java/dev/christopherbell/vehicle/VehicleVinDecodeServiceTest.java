@@ -28,6 +28,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -35,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 @ExtendWith(MockitoExtension.class)
 class VehicleVinDecodeServiceTest {
@@ -213,7 +215,7 @@ class VehicleVinDecodeServiceTest {
         Map.of("VIN", REMOTE_VIN, "Make", "FORD")
     ));
 
-    var submitted = java.util.Arrays.asList(
+    var submitted = Arrays.asList(
         VehicleStub.VIN,
         "bad",
         null,
@@ -254,7 +256,7 @@ class VehicleVinDecodeServiceTest {
   void testDecodeBatch_whenCacheReadFails_returnsSpecificEntryError() throws Exception {
     var service = service();
     when(cacheRepository.findById(VehicleStub.VIN))
-        .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("mongo unavailable"));
+        .thenThrow(new DataAccessResourceFailureException("mongo unavailable"));
 
     var result = service.decodeBatch(
         new VehicleVinDecodeBatchRequest(List.of(VehicleStub.VIN)), CLIENT_KEY);
