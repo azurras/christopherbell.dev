@@ -13,7 +13,17 @@ import org.springframework.stereotype.Repository;
 public class MongoVehicleVinDecodeCacheRepository
     extends KindScopedRepositorySupport<VehicleVinDecodeCache>
     implements VehicleVinDecodeCacheRepository {
-  public MongoVehicleVinDecodeCacheRepository(DomainMongoOperationsFactory factory) { super(factory, VehicleVinDecodeCache.class); }
-  @Override public Optional<VehicleVinDecodeCache> findById(String id) { return findValueById(id); }
-  @Override public VehicleVinDecodeCache save(VehicleVinDecodeCache value) { return saveValue(value); }
+  public MongoVehicleVinDecodeCacheRepository(DomainMongoOperationsFactory factory) {
+    super(factory, VehicleVinDecodeCache.class);
+  }
+
+  @Override
+  public Optional<VehicleVinDecodeCache> findById(String vin) {
+    return findValueById(vin);
+  }
+
+  @Override
+  public VehicleVinDecodeCache save(VehicleVinDecodeCache cache) {
+    return saveValue(cache);
+  }
 }

@@ -30,6 +30,7 @@ import dev.christopherbell.vehicle.model.VehicleUpdateRequest;
 import dev.christopherbell.vehicle.model.VehicleVinBatchRequest;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeRequest;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchEntry;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchFailure;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchRequest;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchResponse;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeResponse;
@@ -39,6 +40,7 @@ import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinRobotsPolicyState;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -161,7 +163,7 @@ public class VehicleControllerTest {
         .plantCity("MARYSVILLE")
         .plantState("OHIO")
         .plantCountry("UNITED STATES (USA)")
-        .rawDecodedValues(java.util.Map.of("VIN", VehicleStub.VIN))
+        .rawDecodedValues(Map.of("VIN", VehicleStub.VIN))
         .build();
 
     when(vehicleVinDecodeService.decode(eq(requestObject), anyString())).thenReturn(response);
@@ -197,7 +199,7 @@ public class VehicleControllerTest {
         .make(VehicleStub.MAKE)
         .model(VehicleStub.MODEL)
         .year(VehicleStub.YEAR)
-        .rawDecodedValues(java.util.Map.of("VIN", VehicleStub.VIN))
+        .rawDecodedValues(Map.of("VIN", VehicleStub.VIN))
         .build();
 
     when(vehicleVinDecodeService.decode(eq(requestObject), anyString())).thenReturn(response);
@@ -246,7 +248,7 @@ public class VehicleControllerTest {
     var response = VehicleVinDecodeBatchResponse.from(List.of(
         VehicleVinDecodeBatchEntry.success(0, VehicleStub.VIN, VehicleStub.VIN, decoded),
         VehicleVinDecodeBatchEntry.error(
-            1, invalid, null, "INVALID_VIN", "VIN must be 17 valid VIN characters.")
+            1, invalid, null, VehicleVinDecodeBatchFailure.INVALID_VIN)
     ));
     when(vehicleVinDecodeService.decodeBatch(eq(requestObject), anyString())).thenReturn(response);
 
