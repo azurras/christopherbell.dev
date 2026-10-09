@@ -56,7 +56,7 @@ public class PostFeedService {
 
     var posts = postRepository.findByAccountIdOrderByCreatedOnDesc(selfId, LEGACY_HISTORY_PAGE);
     return posts.stream()
-        .filter(p -> !postExpirationService.isExpired(p))
+        .filter(post -> !postExpirationService.isExpired(post))
         .map(postMapper::toDetail)
         .toList();
   }
@@ -131,7 +131,7 @@ public class PostFeedService {
 
     var posts = postRepository.findByAccountIdOrderByCreatedOnDesc(accountId, LEGACY_HISTORY_PAGE);
     return posts.stream()
-        .filter(p -> !postExpirationService.isExpired(p))
+        .filter(post -> !postExpirationService.isExpired(post))
         .map(postMapper::toDetail)
         .toList();
   }

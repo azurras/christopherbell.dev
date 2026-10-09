@@ -1,10 +1,9 @@
 package dev.christopherbell.post.feed;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
-import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.model.Post;
@@ -13,7 +12,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.bson.Document;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
@@ -33,16 +34,19 @@ public class PostFeedQueryRepository implements PostFeedQueryPort {
   }
 
   /** Reads a global stable page. */
+  @Override
   public PostFeedSlice global(Optional<StableCursor> cursor, int requestedSize) {
     return global(cursor, requestedSize, PostFeedVisibility.unrestricted());
   }
 
+  @Override
   public PostFeedSlice global(
       Optional<StableCursor> cursor, int requestedSize, PostFeedVisibility visibility) {
     return page(new Criteria(), cursor, requestedSize, visibility);
   }
 
   /** Reads a stable page for one author. */
+  @Override
   public PostFeedSlice account(
       String accountId,
       Optional<StableCursor> cursor,
@@ -51,6 +55,7 @@ public class PostFeedQueryRepository implements PostFeedQueryPort {
     return account(accountId, cursor, requestedSize, PostFeedVisibility.unrestricted());
   }
 
+  @Override
   public PostFeedSlice account(
       String accountId,
       Optional<StableCursor> cursor,
@@ -61,6 +66,7 @@ public class PostFeedQueryRepository implements PostFeedQueryPort {
   }
 
   /** Reads a stable page for a bounded set of followed authors. */
+  @Override
   public PostFeedSlice accounts(
       Collection<String> accountIds,
       Optional<StableCursor> cursor,
@@ -74,6 +80,7 @@ public class PostFeedQueryRepository implements PostFeedQueryPort {
   }
 
   /** Reads followed authors through the edge collection without materializing an ID graph. */
+  @Override
   public PostFeedSlice following(
       String followerId,
       Optional<StableCursor> cursor,
@@ -91,7 +98,7 @@ public class PostFeedQueryRepository implements PostFeedQueryPort {
                 new Document("$eq", List.of("$payload.followedAccountId", "$$authorId")))))),
             new Document("$limit", 1)))
         .append("as", "matchingFollow");
-    var aggregation = org.springframework.data.mongodb.core.aggregation.Aggregation.newAggregation(
+    var aggregation = Aggregation.newAggregation(
         context -> new Document("$match", criteria.getCriteriaObject()),
         context -> new Document("$lookup", lookup),
         context -> new Document("$match", new Document("matchingFollow.0", new Document("$exists", true))),
@@ -113,7 +120,7 @@ public class PostFeedQueryRepository implements PostFeedQueryPort {
     var query = new Query(criteria)
         .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
         .limit(size + 1);
-    return slice(posts.find(query, org.springframework.data.domain.Pageable.unpaged()), size);
+    return slice(posts.find(query, Pageable.unpaged()), size);
   }
 
   private Criteria visible(
@@ -125,15 +132,11 @@ public class PostFeedQueryRepository implements PostFeedQueryPort {
     if (!scope.getCriteriaObject().isEmpty()) {
       clauses.add(scope);
     }
-    if (cursor.isPresent()) {
-      var boundary = cursor.get();
-      var before = new Criteria().orOperator(
-          Criteria.where("createdOn").lt(boundary.timestamp()),
-          new Criteria().andOperator(
-              Criteria.where("createdOn").is(boundary.timestamp()),
-              Criteria.where("id").lt(boundary.id())));
-      clauses.add(before);
-    }
+    cursor.ifPresent(boundary -> clauses.add(new Criteria().orOperator(
+        Criteria.where("createdOn").lt(boundary.timestamp()),
+        new Criteria().andOperator(
+            Criteria.where("createdOn").is(boundary.timestamp()),
+            Criteria.where("id").lt(boundary.id())))));
     visibility.expiresAfter().ifPresent(cutoff ->
         clauses.add(Criteria.where("expiresOn").gt(cutoff)));
     if (!visibility.excludedAccountIds().isEmpty()) {
@@ -152,7 +155,7 @@ public class PostFeedQueryRepository implements PostFeedQueryPort {
     var posts = loaded.stream().limit(size).toList();
     String nextCursor = null;
     if (hasNext && !posts.isEmpty()) {
-      var boundary = posts.get(posts.size() - 1);
+      var boundary = posts.getLast();
       nextCursor = cursorCodec.encode(new StableCursor(boundary.getCreatedOn(), boundary.getId()));
     }
     return new PostFeedSlice(posts, nextCursor);

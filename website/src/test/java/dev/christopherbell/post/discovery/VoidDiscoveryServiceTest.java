@@ -21,6 +21,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,7 +59,7 @@ class VoidDiscoveryServiceTest {
         .thenReturn(List.of(Account.builder().id("a1").username("artist").build()));
     when(engagement.replyCounts(List.of("p1"))).thenReturn(Map.of("p1", 2));
     when(likes.counts(List.of("p1"))).thenReturn(Map.of());
-    when(likes.likedPostIds(null, List.of("p1"))).thenReturn(java.util.Set.of());
+    when(likes.likedPostIds(null, List.of("p1"))).thenReturn(Set.of());
 
     var page = service.newArrivals("", 12);
 

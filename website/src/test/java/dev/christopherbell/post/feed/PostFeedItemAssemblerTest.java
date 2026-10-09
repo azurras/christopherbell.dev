@@ -9,6 +9,8 @@ import dev.christopherbell.post.model.Post;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -23,7 +25,7 @@ class PostFeedItemAssemblerTest {
   @ParameterizedTest
   @ValueSource(ints = {1, 50, 100})
   void assemblesEverySupportedPageSizeWithThreeBatchedQueries(int size) {
-    var posts = java.util.stream.IntStream.range(0, size)
+    var posts = IntStream.range(0, size)
         .mapToObj(index -> Post.builder()
             .id("p" + index)
             .accountId("a" + index)
@@ -31,7 +33,7 @@ class PostFeedItemAssemblerTest {
             .build())
         .toList();
     var ids = posts.stream().map(Post::getId).toList();
-    var usernames = posts.stream().collect(java.util.stream.Collectors.toMap(
+    var usernames = posts.stream().collect(Collectors.toMap(
         Post::getAccountId,
         post -> "user-" + post.getAccountId()));
     when(engagement.replyCounts(ids)).thenReturn(Map.of("p0", 3));

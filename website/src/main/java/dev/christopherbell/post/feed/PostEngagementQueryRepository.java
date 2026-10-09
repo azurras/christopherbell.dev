@@ -23,6 +23,7 @@ public class PostEngagementQueryRepository implements PostEngagementQueryPort {
     this.posts = factory.forType(Post.class);
   }
 
+  @Override
   public Map<String, Integer> replyCounts(Collection<String> postIds) {
     if (postIds == null || postIds.isEmpty()) {
       return Map.of();

@@ -4,16 +4,20 @@ import static dev.christopherbell.libs.api.APIVersion.V20250914;
 import static dev.christopherbell.libs.api.APIVersion.V20260726;
 import static dev.christopherbell.libs.api.APIVersion.V20260729;
 
+import dev.christopherbell.libs.api.APIVersion;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.post.editing.PostEditRequest;
+import dev.christopherbell.post.editing.PostEditingService;
+import dev.christopherbell.post.feed.PostDetailPage;
+import dev.christopherbell.post.feed.PostFeedPage;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
-import dev.christopherbell.post.feed.PostFeedPage;
-import dev.christopherbell.post.feed.PostDetailPage;
-import dev.christopherbell.post.editing.PostEditRequest;
-import dev.christopherbell.post.editing.PostEditingService;
 import jakarta.validation.Valid;
+import java.time.Instant;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -22,8 +26,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -35,7 +39,7 @@ import org.springframework.web.bind.annotation.RestController;
  * REST controller exposing endpoints to create and retrieve posts.
  *
  * <p>All routes are versioned under {@code /api/posts} with API version suffixes
- * from {@link dev.christopherbell.libs.api.APIVersion}. Access is controlled via
+ * from {@link APIVersion}. Access is controlled via
  * Spring Security authorities.</p>
  */
 @RequiredArgsConstructor
@@ -51,7 +55,8 @@ public class PostController {
    *
    * @param request the post creation payload
    * @return HTTP 201 with the created {@link PostDetail}
-   * @throws Exception if validation fails or the account cannot be resolved
+   * @throws InvalidRequestException if the post text or parent is invalid
+   * @throws ResourceNotFoundException if the account or parent post cannot be found
    */
   @PostMapping(
       value = V20250914 + "/create",
@@ -59,7 +64,7 @@ public class PostController {
       produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<PostDetail>> createPost(@Valid @RequestBody PostCreateRequest request)
-      throws Exception {
+      throws InvalidRequestException, ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<PostDetail>builder()
             .payload(postService.createPost(request))
@@ -72,11 +77,11 @@ public class PostController {
    * Retrieves posts authored by the authenticated user.
    *
    * @return HTTP 200 with a list of {@link PostDetail}
-   * @throws Exception if the account cannot be resolved
+   * @throws ResourceNotFoundException if the account cannot be found
    */
   @GetMapping(value = V20250914 + "/me", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
-  public ResponseEntity<Response<List<PostDetail>>> getMyPosts() throws Exception {
+  public ResponseEntity<Response<List<PostDetail>>> getMyPosts() throws ResourceNotFoundException {
     return ResponseEntity.ok()
         .header("Deprecation", "true")
         .header("Link", "</api/posts/2026-07-29/me>; rel=\"successor-version\"")
@@ -92,7 +97,7 @@ public class PostController {
   public ResponseEntity<Response<PostDetailPage>> getMyPostsPage(
       @RequestParam(value = "cursor", required = false) String cursor,
       @RequestParam(value = "size", required = false, defaultValue = "20") int size
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     return ResponseEntity.ok(Response.<PostDetailPage>builder()
         .payload(postService.getMyPostsPage(cursor, size))
         .success(true)
@@ -105,9 +110,9 @@ public class PostController {
   @GetMapping(value = V20250914 + "/me/feed", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<List<PostFeedItem>>> getMyFeed(
-      @RequestParam(value = "before", required = false) java.time.Instant before,
+      @RequestParam(value = "before", required = false) Instant before,
       @RequestParam(value = "limit", required = false, defaultValue = "20") int limit
-  ) throws Exception {
+  ) throws ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<List<PostFeedItem>>builder()
             .payload(postService.getMyFeed(before, limit))
@@ -121,7 +126,7 @@ public class PostController {
   public ResponseEntity<Response<PostFeedPage>> getMyFeedPage(
       @RequestParam(value = "cursor", required = false) String cursor,
       @RequestParam(value = "size", required = false, defaultValue = "20") int size
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     return ResponseEntity.ok(Response.<PostFeedPage>builder()
         .payload(postService.getMyFeedPage(cursor, size))
         .success(true)
@@ -134,9 +139,9 @@ public class PostController {
   @GetMapping(value = V20250914 + "/following/feed", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<List<PostFeedItem>>> getFollowingFeed(
-      @RequestParam(value = "before", required = false) java.time.Instant before,
+      @RequestParam(value = "before", required = false) Instant before,
       @RequestParam(value = "limit", required = false, defaultValue = "20") int limit
-  ) throws Exception {
+  ) throws ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<List<PostFeedItem>>builder()
             .payload(postService.getFollowingFeed(before, limit))
@@ -150,7 +155,7 @@ public class PostController {
   public ResponseEntity<Response<PostFeedPage>> getFollowingFeedPage(
       @RequestParam(value = "cursor", required = false) String cursor,
       @RequestParam(value = "size", required = false, defaultValue = "20") int size
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     return ResponseEntity.ok(Response.<PostFeedPage>builder()
         .payload(postService.getFollowingFeedPage(cursor, size))
         .success(true)
@@ -162,12 +167,13 @@ public class PostController {
    *
    * @param accountId the account id to filter posts by
    * @return HTTP 200 with a list of {@link PostDetail}
-   * @throws Exception if the request is invalid or the account does not exist
+   * @throws InvalidRequestException if the account id is blank
+   * @throws ResourceNotFoundException if the account does not exist
    */
   @GetMapping(value = V20250914 + "/account/{accountId}", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<List<PostDetail>>> getPostsByAccountId(@PathVariable String accountId)
-      throws Exception {
+      throws InvalidRequestException, ResourceNotFoundException {
     return ResponseEntity.ok()
         .header("Deprecation", "true")
         .header(
@@ -186,7 +192,7 @@ public class PostController {
       @PathVariable String accountId,
       @RequestParam(value = "cursor", required = false) String cursor,
       @RequestParam(value = "size", required = false, defaultValue = "20") int size
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     return ResponseEntity.ok(Response.<PostDetailPage>builder()
         .payload(postService.getPostsByAccountPage(accountId, cursor, size))
         .success(true)
@@ -201,7 +207,7 @@ public class PostController {
    */
   @GetMapping(value = V20250914 + "/feed", produces = MediaType.APPLICATION_JSON_VALUE)
   public ResponseEntity<Response<List<PostFeedItem>>> getGlobalFeed(
-      @RequestParam(value = "before", required = false) java.time.Instant before,
+      @RequestParam(value = "before", required = false) Instant before,
       @RequestParam(value = "limit", required = false, defaultValue = "20") int limit
   ) {
     return new ResponseEntity<>(
@@ -216,7 +222,7 @@ public class PostController {
   public ResponseEntity<Response<PostFeedPage>> getGlobalFeedPage(
       @RequestParam(value = "cursor", required = false) String cursor,
       @RequestParam(value = "size", required = false, defaultValue = "20") int size
-  ) throws Exception {
+  ) throws InvalidRequestException {
     return ResponseEntity.ok(Response.<PostFeedPage>builder()
         .payload(postService.getGlobalFeedPage(cursor, size))
         .success(true)
@@ -229,9 +235,9 @@ public class PostController {
   @GetMapping(value = V20250914 + "/user/{username}/feed", produces = MediaType.APPLICATION_JSON_VALUE)
   public ResponseEntity<Response<List<PostFeedItem>>> getUserFeed(
       @PathVariable String username,
-      @RequestParam(value = "before", required = false) java.time.Instant before,
+      @RequestParam(value = "before", required = false) Instant before,
       @RequestParam(value = "limit", required = false, defaultValue = "20") int limit
-  ) throws Exception {
+  ) throws ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<List<PostFeedItem>>builder()
             .payload(postService.getUserFeed(username, before, limit))
@@ -245,7 +251,7 @@ public class PostController {
       @PathVariable String username,
       @RequestParam(value = "cursor", required = false) String cursor,
       @RequestParam(value = "size", required = false, defaultValue = "20") int size
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     return ResponseEntity.ok(Response.<PostFeedPage>builder()
         .payload(postService.getUserFeedPage(username, cursor, size))
         .success(true)
@@ -261,7 +267,7 @@ public class PostController {
   public ResponseEntity<Response<PostDetail>> editPost(
       @PathVariable String postId,
       @Valid @RequestBody PostEditRequest request
-  ) throws Exception {
+  ) throws InvalidRequestException, ResourceNotFoundException {
     return ResponseEntity.ok(Response.<PostDetail>builder()
         .payload(postEditingService.edit(
             postId,
@@ -276,7 +282,7 @@ public class PostController {
    */
   @DeleteMapping(value = V20250914 + "/{postId}", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
-  public ResponseEntity<Response<PostDetail>> deletePost(@PathVariable String postId) throws Exception {
+  public ResponseEntity<Response<PostDetail>> deletePost(@PathVariable String postId) throws ResourceNotFoundException, InvalidRequestException {
     return new ResponseEntity<>(
         Response.<PostDetail>builder()
             .payload(postService.deletePost(postId))
@@ -288,7 +294,7 @@ public class PostController {
   /** Likes/unlikes a post for the current user and returns the updated post feed item. */
   @PostMapping(value = V20250914 + "/{postId}/like", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
-  public ResponseEntity<Response<PostFeedItem>> toggleLike(@PathVariable String postId) throws Exception {
+  public ResponseEntity<Response<PostFeedItem>> toggleLike(@PathVariable String postId) throws ResourceNotFoundException, InvalidRequestException {
     return new ResponseEntity<>(
         Response.<PostFeedItem>builder()
             .payload(postService.toggleLike(postId))
@@ -300,7 +306,7 @@ public class PostController {
   /** Idempotently records the current user's desired liked state. */
   @PutMapping(value = V20260729 + "/{postId}/like", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
-  public ResponseEntity<Response<PostFeedItem>> like(@PathVariable String postId) throws Exception {
+  public ResponseEntity<Response<PostFeedItem>> like(@PathVariable String postId) throws ResourceNotFoundException, InvalidRequestException {
     return ResponseEntity.ok(Response.<PostFeedItem>builder()
         .payload(postService.setLiked(postId, true))
         .success(true)
@@ -310,7 +316,7 @@ public class PostController {
   /** Idempotently removes the current user's like edge. */
   @DeleteMapping(value = V20260729 + "/{postId}/like", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
-  public ResponseEntity<Response<PostFeedItem>> unlike(@PathVariable String postId) throws Exception {
+  public ResponseEntity<Response<PostFeedItem>> unlike(@PathVariable String postId) throws ResourceNotFoundException, InvalidRequestException {
     return ResponseEntity.ok(Response.<PostFeedItem>builder()
         .payload(postService.setLiked(postId, false))
         .success(true)
@@ -321,7 +327,7 @@ public class PostController {
    * Gets a single post by id (public).
    */
   @GetMapping(value = V20250914 + "/{postId}", produces = MediaType.APPLICATION_JSON_VALUE)
-  public ResponseEntity<Response<PostFeedItem>> getPost(@PathVariable String postId) throws Exception {
+  public ResponseEntity<Response<PostFeedItem>> getPost(@PathVariable String postId) throws ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<PostFeedItem>builder()
             .payload(postService.getPostById(postId))
@@ -334,7 +340,7 @@ public class PostController {
    * Gets a flat thread for a post (root + replies), public.
    */
   @GetMapping(value = V20250914 + "/{postId}/thread", produces = MediaType.APPLICATION_JSON_VALUE)
-  public ResponseEntity<Response<List<PostFeedItem>>> getThread(@PathVariable String postId) throws Exception {
+  public ResponseEntity<Response<List<PostFeedItem>>> getThread(@PathVariable String postId) throws ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<List<PostFeedItem>>builder()
             .payload(postService.getThread(postId))
