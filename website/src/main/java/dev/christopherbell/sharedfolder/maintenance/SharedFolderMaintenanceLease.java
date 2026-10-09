@@ -1,10 +1,10 @@
 package dev.christopherbell.sharedfolder.maintenance;
 
+import dev.christopherbell.libs.lease.LeaseGrant;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
-import dev.christopherbell.libs.lease.LeaseGrant;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;

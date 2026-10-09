@@ -3,6 +3,7 @@ package dev.christopherbell.sharedfolder.maintenance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -99,7 +100,7 @@ class MongoSharedFolderMaintenanceLeaseStoreTest {
     assertThat(store.release(grant)).isTrue();
 
     ArgumentCaptor<Query> queries = ArgumentCaptor.forClass(Query.class);
-    verify(mongo, org.mockito.Mockito.times(2)).findAndUpdateDatabaseLease(
+    verify(mongo, times(2)).findAndUpdateDatabaseLease(
         queries.capture(), any(MongoDatabaseLeaseMutation.class));
     assertThat(queries.getAllValues()).allSatisfy(query ->
         assertThat(query.getQueryObject().toString())

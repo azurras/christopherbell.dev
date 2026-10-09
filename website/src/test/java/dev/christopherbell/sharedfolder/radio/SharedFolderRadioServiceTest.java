@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
@@ -17,6 +18,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
@@ -30,8 +32,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.web.server.ResponseStatusException;
 
 class SharedFolderRadioServiceTest {
   private static final Instant START = Instant.parse("2026-07-25T12:00:00Z");
@@ -177,7 +179,7 @@ class SharedFolderRadioServiceTest {
         1, "../song.mp3", 120)))
         .isInstanceOfSatisfying(ResponseStatusException.class,
             exception -> assertThat(exception.getStatusCode().value()).isEqualTo(400));
-    org.mockito.Mockito.verifyNoInteractions(catalog);
+    verifyNoInteractions(catalog);
   }
 
   @Test
@@ -339,8 +341,8 @@ class SharedFolderRadioServiceTest {
     SharedFolderCatalogService catalog = mock(SharedFolderCatalogService.class);
     when(catalog.audioTracksBelowMusic()).thenAnswer(ignored -> List.copyOf(tracks.get()));
     SharedFolderRadioDurationResolver resolver = mock(SharedFolderRadioDurationResolver.class);
-    when(resolver.resolve(original)).thenReturn(30.0);
-    when(resolver.resolve(replacement)).thenReturn(null);
+    when(resolver.resolve(original)).thenReturn(Optional.of(30.0));
+    when(resolver.resolve(replacement)).thenReturn(Optional.empty());
     SharedFolderRadioService service = new SharedFolderRadioService(
         catalog, repository.repository(), resolver, new MutableClock(START), bound -> 0);
     SharedFolderRadioResponse initial = service.current();
@@ -496,7 +498,7 @@ class SharedFolderRadioServiceTest {
     when(repository.save(any())).thenAnswer(invocation -> {
       SharedFolderRadioDocument candidate = invocation.getArgument(0);
       SharedFolderRadioDocument current = stored.get();
-      if (!java.util.Objects.equals(candidate.version(), current.version())) {
+      if (!Objects.equals(candidate.version(), current.version())) {
         throw new OptimisticLockingFailureException("radio version changed");
       }
       SharedFolderRadioDocument saved = new SharedFolderRadioDocument(
@@ -558,7 +560,7 @@ class SharedFolderRadioServiceTest {
 
   private SharedFolderRadioDurationResolver trustedDurations(double seconds) {
     SharedFolderRadioDurationResolver resolver = mock(SharedFolderRadioDurationResolver.class);
-    when(resolver.resolve(any())).thenReturn(seconds);
+    when(resolver.resolve(any())).thenReturn(Optional.of(seconds));
     return resolver;
   }
 

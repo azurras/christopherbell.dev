@@ -5,6 +5,7 @@ import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.media.MediaPlaybackService;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadService;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.extern.slf4j.Slf4j;
@@ -46,7 +47,9 @@ public final class SharedFolderMaintenanceService {
   /** Runs one non-overlapping maintenance pass; returns false when disabled or already active. */
   @Scheduled(fixedDelayString = "${app.shared-folder.maintenance-delay:PT15M}")
   public boolean maintain() {
-    if (!properties.enabled() || !running.compareAndSet(false, true)) return false;
+    if (!properties.enabled() || !running.compareAndSet(false, true)) {
+      return false;
+    }
     Optional<SharedFolderMaintenanceHostLock.Handle> hostLockHandle = Optional.empty();
     boolean acquired = false;
     try {
@@ -56,30 +59,51 @@ public final class SharedFolderMaintenanceService {
         recordFailure("MAINTENANCE_HOST_LOCK_FAILED", failure);
         return false;
       }
-      if (hostLockHandle.isEmpty()) return false;
+      if (hostLockHandle.isEmpty()) {
+        return false;
+      }
       try {
         acquired = lease.acquire();
       } catch (RuntimeException failure) {
         recordFailure("MAINTENANCE_LEASE_FAILED", failure);
         return false;
       }
-      if (!acquired) return false;
-      step("MAINTENANCE_UPLOAD_EXPIRY_FAILED", uploads::expireAbandoned);
-      if (!renewLease()) return false;
-      step("MAINTENANCE_RECYCLE_FAILED", recycle::cleanupExpired);
-      if (!renewLease()) return false;
-      step("MAINTENANCE_MEDIA_CLEANUP_FAILED", media::cleanupTerminalJobs);
-      if (!renewLease()) return false;
-      step("MAINTENANCE_CACHE_FAILED", media::evictReadyCache);
-      if (!renewLease()) return false;
-      step("MAINTENANCE_WORKER_FAILED", media::reconcileWorkerStatuses);
-      return true;
+      if (!acquired) {
+        return false;
+      }
+      return runStepsRenewingBetween(List.of(
+          new MaintenanceStep("MAINTENANCE_UPLOAD_EXPIRY_FAILED", uploads::expireAbandoned),
+          new MaintenanceStep("MAINTENANCE_RECYCLE_FAILED", recycle::cleanupExpired),
+          new MaintenanceStep("MAINTENANCE_MEDIA_CLEANUP_FAILED", media::cleanupTerminalJobs),
+          new MaintenanceStep("MAINTENANCE_CACHE_FAILED", media::evictReadyCache),
+          new MaintenanceStep("MAINTENANCE_WORKER_FAILED", media::reconcileWorkerStatuses)));
     } finally {
-      if (acquired) releaseLease();
+      if (acquired) {
+        releaseLease();
+      }
       hostLockHandle.ifPresent(this::releaseHostLock);
       running.set(false);
     }
   }
+
+  /**
+   * Runs each step in order, renewing the lease before every step after the first.
+   *
+   * @return false when a renewal fails, which stops the pass
+   */
+  private boolean runStepsRenewingBetween(List<MaintenanceStep> steps) {
+    for (int index = 0; index < steps.size(); index++) {
+      if (index > 0 && !renewLease()) {
+        return false;
+      }
+      var maintenanceStep = steps.get(index);
+      step(maintenanceStep.failureAction(), maintenanceStep.work());
+    }
+    return true;
+  }
+
+  /** One isolated maintenance step and the audit action recorded when it fails. */
+  private record MaintenanceStep(String failureAction, Runnable work) {}
 
   private void step(String action, Runnable work) {
     try {
@@ -100,7 +124,9 @@ public final class SharedFolderMaintenanceService {
 
   private void releaseLease() {
     try {
-      if (!lease.release()) log.warn("Shared-folder maintenance lease release was not owned");
+      if (!lease.release()) {
+        log.warn("Shared-folder maintenance lease release was not owned");
+      }
     } catch (RuntimeException releaseFailure) {
       try {
         audit.recordSystemFailure(
@@ -123,7 +149,9 @@ public final class SharedFolderMaintenanceService {
 
   private boolean renewLease() {
     try {
-      if (lease.renew()) return true;
+      if (lease.renew()) {
+        return true;
+      }
       recordFailure(
           "MAINTENANCE_LEASE_RENEW_FAILED",
           new IllegalStateException("Shared-folder maintenance lease was lost"));
