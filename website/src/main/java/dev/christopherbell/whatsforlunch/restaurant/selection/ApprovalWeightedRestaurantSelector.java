@@ -16,6 +16,11 @@ import org.springframework.stereotype.Component;
 public final class ApprovalWeightedRestaurantSelector {
   private static final double PRIOR_UP_VOTES = 1.5;
   private static final double PRIOR_VOTE_COUNT = 3.0;
+  /** Weight of an unvoted restaurant and of one with exactly even approval. */
+  private static final double NEUTRAL_WEIGHT = 1.0;
+  private static final double MIN_WEIGHT = 0.35;
+  private static final double MAX_WEIGHT = 2.0;
+  private static final double NEUTRAL_APPROVAL = 0.5;
 
   /** Selects at most {@code requestedCount} candidates without replacement. */
   public List<Restaurant> select(
@@ -85,20 +90,22 @@ public final class ApprovalWeightedRestaurantSelector {
 
   static double weightFor(RestaurantVoteSummary summary) {
     if (summary == null || summary.voteCount() == 0) {
-      return 1.0;
+      return NEUTRAL_WEIGHT;
     }
     double adjustedApproval =
         (summary.upVotes() + PRIOR_UP_VOTES) / (summary.voteCount() + PRIOR_VOTE_COUNT);
     return interpolateWeight(adjustedApproval);
   }
 
+  /** Maps approval linearly to MIN..NEUTRAL weight below even approval and NEUTRAL..MAX above it. */
   static double interpolateWeight(double approval) {
     if (!Double.isFinite(approval) || approval < 0.0 || approval > 1.0) {
       throw new IllegalArgumentException("adjusted approval must be in [0, 1]");
     }
-    return approval <= 0.5
-        ? 0.35 + (1.0 - 0.35) * (approval / 0.5)
-        : 1.0 + (2.0 - 1.0) * ((approval - 0.5) / 0.5);
+    return approval <= NEUTRAL_APPROVAL
+        ? MIN_WEIGHT + (NEUTRAL_WEIGHT - MIN_WEIGHT) * (approval / NEUTRAL_APPROVAL)
+        : NEUTRAL_WEIGHT
+            + (MAX_WEIGHT - NEUTRAL_WEIGHT) * ((approval - NEUTRAL_APPROVAL) / (1.0 - NEUTRAL_APPROVAL));
   }
 
   private record WeightedRestaurant(Restaurant restaurant, double weight) {}

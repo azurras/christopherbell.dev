@@ -1,10 +1,9 @@
 package dev.christopherbell.whatsforlunch.restaurant.vote;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVote;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteValue;
 import java.util.Collection;
@@ -12,8 +11,9 @@ import java.util.List;
 import java.util.Objects;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
-import org.springframework.data.mongodb.core.aggregation.ConditionalOperators;
 import org.springframework.data.mongodb.core.aggregation.AggregationExpression;
+import org.springframework.data.mongodb.core.aggregation.ConditionalOperators;
+import org.springframework.data.mongodb.core.aggregation.GroupOperation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.stereotype.Repository;
 
@@ -44,30 +44,20 @@ public class RestaurantVoteQueryRepository implements RestaurantVoteQueryPort {
     if (restaurantIds.isEmpty()) {
       return List.of();
     }
-    AggregationExpression up = voteCountExpression(RestaurantVoteValue.UP);
-    AggregationExpression down = voteCountExpression(RestaurantVoteValue.DOWN);
     var aggregation = Aggregation.newAggregation(
         Aggregation.match(Criteria.where("restaurantId").in(restaurantIds)
             .and("vote").in(RestaurantVoteValue.UP.name(), RestaurantVoteValue.DOWN.name())),
-        Aggregation.group("restaurantId")
-            .sum(up).as("upVotes")
-            .sum(down).as("downVotes")
-            .count().as("voteCount"),
+        voteTotalsByRestaurant(),
         Aggregation.project("upVotes", "downVotes", "voteCount").and("_id").as("restaurantId"));
     return votes.aggregate(
         KindScopedAggregation.local(aggregation), RestaurantVoteSummary.class);
   }
 
   private static Aggregation leaderboardAggregation(int limit) {
-    AggregationExpression up = voteCountExpression(RestaurantVoteValue.UP);
-    AggregationExpression down = voteCountExpression(RestaurantVoteValue.DOWN);
     return Aggregation.newAggregation(
         Aggregation.match(Criteria.where("vote")
             .in(RestaurantVoteValue.UP.name(), RestaurantVoteValue.DOWN.name())),
-        Aggregation.group("restaurantId")
-            .sum(up).as("upVotes")
-            .sum(down).as("downVotes")
-            .count().as("voteCount"),
+        voteTotalsByRestaurant(),
         Aggregation.project("upVotes", "downVotes", "voteCount")
             .and("_id").as("restaurantId")
             .andExpression("upVotes * 1.0 / voteCount").as("approvalRatio"),
@@ -76,6 +66,14 @@ public class RestaurantVoteQueryRepository implements RestaurantVoteQueryPort {
             Sort.Order.desc("voteCount"),
             Sort.Order.asc("restaurantId"))),
         Aggregation.limit(limit));
+  }
+
+  /** Groups binary votes per restaurant into up, down and total counts. */
+  private static GroupOperation voteTotalsByRestaurant() {
+    return Aggregation.group("restaurantId")
+        .sum(voteCountExpression(RestaurantVoteValue.UP)).as("upVotes")
+        .sum(voteCountExpression(RestaurantVoteValue.DOWN)).as("downVotes")
+        .count().as("voteCount");
   }
 
   private static AggregationExpression voteCountExpression(RestaurantVoteValue vote) {
