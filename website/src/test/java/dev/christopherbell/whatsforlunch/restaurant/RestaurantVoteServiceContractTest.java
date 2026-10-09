@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
@@ -46,7 +47,7 @@ class RestaurantVoteServiceContractTest {
   @Mock private RestaurantVoteQueryRepository restaurantVoteQueryRepository;
   @Mock private ApprovalWeightedRestaurantSelector restaurantSelector;
   @Mock private RestaurantRepository restaurantRepository;
-  @Mock private dev.christopherbell.libs.lease.ScheduledCollectorCoordinator scheduledCollectors;
+  @Mock private ScheduledCollectorCoordinator scheduledCollectors;
   @Mock private WhatsForLunchPreferenceRepository whatsForLunchPreferenceRepository;
   @Mock private ZipCoordinateService zipCoordinateService;
   @Mock private WflProperties wflProperties;

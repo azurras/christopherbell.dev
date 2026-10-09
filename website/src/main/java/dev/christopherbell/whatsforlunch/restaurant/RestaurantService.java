@@ -6,31 +6,32 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.libs.lease.CollectorLeaseGuard;
 import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
-import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
+import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository;
-import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportLeaseGuard;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportSnapshot;
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeResult;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeApplyRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeCandidate;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeConfirmation;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeGroupPreview;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupePreview;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeResult;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantInventoryPage;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportResult;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantInventoryPage;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVote;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteValue;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreference;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
@@ -50,31 +51,47 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+/**
+ * Owns restaurants, daily and nearby lunch picks, votes, favorites, preferences, duplicate cleanup
+ * and OpenStreetMap import classification for What's for Lunch.
+ */
 @RequiredArgsConstructor
 @Service
 @Slf4j
 public class RestaurantService {
   private static final double EARTH_RADIUS_MILES = 3958.7613;
+  private static final int ADMIN_LIST_PAGE_SIZE = 100;
+  private static final int DUPLICATE_CLEANUP_PAGE_SIZE = 100;
+  private static final int DUPLICATE_PREVIEW_PAGE_SIZE = 25;
+  private static final int DEFAULT_TOP_LIKED_LIMIT = 10;
+  private static final int MAX_TOP_LIKED_LIMIT = 50;
+  private static final int MAX_REPRESENTATIVE_CHANGES = 10;
+  private static final Set<String> UNITED_STATES_NAMES = Set.of("us", "usa", "unitedstates");
   private static final int NEARBY_LUNCH_PICK_COUNT = 3;
   private static final int DEFAULT_NEARBY_LUNCH_RADIUS_MILES = 15;
   private static final List<Integer> ALLOWED_NEARBY_LUNCH_RADII_MILES = List.of(1, 5, 10, 15, 20);
@@ -102,10 +119,13 @@ public class RestaurantService {
    * Creates a new restaurant based on the provided request.
    *
    * @param request containing the details of the restaurant to be created.
-   * @return a WhatsForLunchResponse containing the created restaurant details.
-   * @throws Exception if there is an error during the creation process.
+   * @return the created restaurant details
+   * @throws InvalidRequestException if the name is blank or the website is not an HTTP(S) URL
+   * @throws ResourceExistsException if another restaurant already uses the same normalized name
+   * @throws ServiceUnavailableException if persistence fails
    */
-  public RestaurantDetail createRestaurant(RestaurantCreateRequest request) throws Exception {
+  public RestaurantDetail createRestaurant(RestaurantCreateRequest request)
+      throws InvalidRequestException, ResourceExistsException {
     var restaurant = restaurantMapper.toRestaurant(request);
     restaurant.setWebsite(RestaurantWebsiteUrlPolicy.requireSafe(restaurant.getWebsite()));
     applyNormalizedName(restaurant);
@@ -114,10 +134,10 @@ public class RestaurantService {
     try {
       var savedRestaurant = restaurantRepository.save(restaurant);
       return toVoteDetail(savedRestaurant);
-    } catch (DuplicateKeyException e) {
-      throw new ResourceExistsException("Restaurant already exists", e);
-    } catch (DataAccessException e) {
-      throw new ServiceUnavailableException("Failed to save restaurant", e);
+    } catch (DuplicateKeyException duplicate) {
+      throw new ResourceExistsException("Restaurant already exists", duplicate);
+    } catch (DataAccessException failure) {
+      throw new ServiceUnavailableException("Failed to save restaurant", failure);
     }
   }
 
@@ -142,8 +162,8 @@ public class RestaurantService {
 
     try {
       restaurantRepository.delete(restaurant);
-    } catch (DataAccessException e) {
-      throw new ServiceUnavailableException("Failed to delete restaurant with id: " + id, e);
+    } catch (DataAccessException failure) {
+      throw new ServiceUnavailableException("Failed to delete restaurant with id: " + id, failure);
     }
     return toVoteDetail(restaurant);
   }
@@ -156,7 +176,7 @@ public class RestaurantService {
   public List<RestaurantDetail> getRestaurants() {
     var restaurants = restaurantRepository.findAll(PageRequest.of(
         0,
-        100,
+        ADMIN_LIST_PAGE_SIZE,
         Sort.by(Sort.Order.asc("normalizedName"), Sort.Order.asc("id")))).getContent();
     return toVoteDetails(restaurants);
   }
@@ -180,7 +200,7 @@ public class RestaurantService {
    * @return up to the configured number of supported metro restaurant picks
    */
   public List<RestaurantDetail> getTodaysLunchPicks() {
-    var today = LocalDate.now(getRestaurantOfTheDayZone());
+    var today = today();
     var existing = dailyLunchPicksRepository.findById(today.toString())
         .orElseGet(() -> refreshDailyLunchPicks(today));
     var picks = getRestaurantsForPick(existing);
@@ -280,8 +300,8 @@ public class RestaurantService {
       throws InvalidRequestException {
     try {
       return zipCoordinateService.findCoordinateForZip(zipCode);
-    } catch (ResourceNotFoundException e) {
-      throw new InvalidRequestException("ZIP code must match an imported US ZIP coordinate.", e);
+    } catch (ResourceNotFoundException missingZip) {
+      throw new InvalidRequestException("ZIP code must match an imported US ZIP coordinate.", missingZip);
     }
   }
 
@@ -292,7 +312,7 @@ public class RestaurantService {
       int radiusMiles,
       List<Restaurant> restaurants
   ) {
-    var candidates = Optional.ofNullable(restaurants).orElseGet(List::of).stream()
+    var candidates = restaurants.stream()
         .filter(restaurant -> restaurant.getId() != null && !restaurant.getId().isBlank())
         .filter(this::hasCoordinates)
         .filter(restaurant -> matchesCuisineFilters(restaurant, cuisineFilters))
@@ -315,10 +335,7 @@ public class RestaurantService {
   public WhatsForLunchPreferenceDetail getMyPreferences() {
     var accountId = permissionService.getSelfId();
     return whatsForLunchPreferenceRepository.findById(accountId)
-        .map(preference -> WhatsForLunchPreferenceDetail.builder()
-            .cuisines(List.copyOf(Optional.ofNullable(preference.getCuisines()).orElseGet(List::of)))
-            .radiusMiles(resolveSavedRadiusMiles(preference.getRadiusMiles()))
-            .build())
+        .map(this::toPreferenceDetail)
         .orElseGet(this::defaultPreferences);
   }
 
@@ -328,15 +345,9 @@ public class RestaurantService {
    * @return saved preferences for authenticated users, or defaults for anonymous visitors
    */
   public WhatsForLunchPreferenceDetail getPreferencesForCurrentViewer() {
-    var accountId = getSelfIdOrNull();
-    if (accountId == null) {
-      return defaultPreferences();
-    }
-    return whatsForLunchPreferenceRepository.findById(accountId)
-        .map(preference -> WhatsForLunchPreferenceDetail.builder()
-            .cuisines(List.copyOf(Optional.ofNullable(preference.getCuisines()).orElseGet(List::of)))
-            .radiusMiles(resolveSavedRadiusMiles(preference.getRadiusMiles()))
-            .build())
+    return selfId()
+        .flatMap(whatsForLunchPreferenceRepository::findById)
+        .map(this::toPreferenceDetail)
         .orElseGet(this::defaultPreferences);
   }
 
@@ -360,10 +371,7 @@ public class RestaurantService {
         .cuisines(cuisines)
         .radiusMiles(radiusMiles)
         .build());
-    return WhatsForLunchPreferenceDetail.builder()
-        .cuisines(List.copyOf(Optional.ofNullable(saved.getCuisines()).orElseGet(List::of)))
-        .radiusMiles(resolveSavedRadiusMiles(saved.getRadiusMiles()))
-        .build();
+    return toPreferenceDetail(saved);
   }
 
   /**
@@ -449,20 +457,12 @@ public class RestaurantService {
    */
   public List<RestaurantDetail> getMyFavoriteRestaurants() {
     var accountId = permissionService.getSelfId();
-    var favorites = Optional.ofNullable(restaurantFavoriteRepository.findByAccountIdOrderByCreatedOnDesc(accountId))
-        .orElseGet(List::of);
-    var restaurantIds = favorites.stream()
+    var restaurantIds = restaurantFavoriteRepository.findByAccountIdOrderByCreatedOnDesc(accountId).stream()
         .map(RestaurantFavorite::getRestaurantId)
         .filter(id -> id != null && !id.isBlank())
         .distinct()
         .toList();
-    var restaurantsById = new java.util.LinkedHashMap<String, Restaurant>();
-    restaurantRepository.findAllById(restaurantIds)
-        .forEach(restaurant -> restaurantsById.put(restaurant.getId(), restaurant));
-    return toVoteDetails(restaurantIds.stream()
-        .map(restaurantsById::get)
-        .filter(restaurant -> restaurant != null)
-        .toList());
+    return toVoteDetails(restaurantsInOrder(restaurantIds));
   }
 
   /**
@@ -472,17 +472,11 @@ public class RestaurantService {
    * @return top liked restaurant details sorted by approval and vote count
    */
   public List<RestaurantDetail> getTopLikedRestaurants(Integer limit) {
-    var pageSize = Math.max(1, Math.min(limit == null ? 10 : limit, 50));
-    var summaries = Optional.ofNullable(restaurantVoteQueryRepository.topLiked(pageSize))
-        .orElseGet(List::of);
-    var restaurantIds = summaries.stream().map(summary -> summary.restaurantId()).toList();
-    var restaurantsById = new java.util.LinkedHashMap<String, Restaurant>();
-    restaurantRepository.findAllById(restaurantIds)
-        .forEach(restaurant -> restaurantsById.put(restaurant.getId(), restaurant));
-    return toVoteDetails(restaurantIds.stream()
-        .map(restaurantsById::get)
-        .filter(restaurant -> restaurant != null)
-        .toList());
+    var pageSize = Math.max(1, Math.min(limit == null ? DEFAULT_TOP_LIKED_LIMIT : limit, MAX_TOP_LIKED_LIMIT));
+    var restaurantIds = restaurantVoteQueryRepository.topLiked(pageSize).stream()
+        .map(RestaurantVoteSummary::restaurantId)
+        .toList();
+    return toVoteDetails(restaurantsInOrder(restaurantIds));
   }
 
   /**
@@ -503,8 +497,8 @@ public class RestaurantService {
 
     try {
       restaurantRepository.delete(restaurant);
-    } catch (DataAccessException e) {
-      throw new ServiceUnavailableException("Failed to delete restaurant with id: " + id, e);
+    } catch (DataAccessException failure) {
+      throw new ServiceUnavailableException("Failed to delete restaurant with id: " + id, failure);
     }
 
     log.info("Deleted today's lunch restaurant id: {}.", id);
@@ -525,23 +519,11 @@ public class RestaurantService {
     var groupCount = 0;
     String cursor = null;
     do {
-      var page = restaurantDuplicateQueries.find(cursor, 100);
-      var groups = groupsFor(page.keys(), page.members());
-      for (var duplicateGroup : groups) {
-        var normalizedName = duplicateGroup.getKey();
-        var group = duplicateGroup.getValue();
-        var survivor = chooseDuplicateSurvivor(group);
-        var duplicates = group.stream()
-            .filter(restaurant -> !restaurant.getId().equals(survivor.getId()))
-            .toList();
-        restaurantRepository.deleteAll(duplicates);
-        duplicates.forEach(restaurant -> deletedIds.add(restaurant.getId()));
-        if (!normalizedName.equals(survivor.getNormalizedName())) {
-          survivor.setNormalizedName(normalizedName);
-          restaurantRepository.save(survivor);
+      var page = restaurantDuplicateQueries.find(cursor, DUPLICATE_CLEANUP_PAGE_SIZE);
+      for (var duplicateGroup : groupsFor(page.keys(), page.members())) {
+        if (collapseDuplicateGroup(duplicateGroup.getKey(), duplicateGroup.getValue(), keptIds, deletedIds)) {
           updatedSurvivors++;
         }
-        keptIds.add(survivor.getId());
         groupCount++;
       }
       cursor = page.nextCursor();
@@ -570,7 +552,7 @@ public class RestaurantService {
 
   /** Calculates duplicate groups and stable survivors without mutating data. */
   public RestaurantDedupePreview previewDuplicateNamedRestaurants() {
-    return previewDuplicateNamedRestaurants(null, 25);
+    return previewDuplicateNamedRestaurants(null, DUPLICATE_PREVIEW_PAGE_SIZE);
   }
 
   /** Calculates one indexed page of duplicate groups without mutating data. */
@@ -588,15 +570,15 @@ public class RestaurantService {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Duplicate group confirmation is required");
     }
     var confirmedKeys = request.groups().stream()
-        .map(dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeConfirmation::normalizedName)
-        .filter(java.util.Objects::nonNull)
+        .map(RestaurantDedupeConfirmation::normalizedName)
+        .filter(Objects::nonNull)
         .distinct()
         .toList();
     var currentGroups = groupsFor(
         confirmedKeys,
         restaurantRepository.findByDedupeKeyIn(confirmedKeys)).stream()
         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-    var confirmedNames = new java.util.HashSet<String>();
+    var confirmedNames = new HashSet<String>();
     for (var confirmation : request.groups()) {
       if (confirmation == null || confirmation.normalizedName() == null
           || !confirmedNames.add(confirmation.normalizedName())) {
@@ -612,19 +594,10 @@ public class RestaurantService {
     var deletedIds = new ArrayList<String>();
     var updatedSurvivors = 0;
     for (var confirmation : request.groups()) {
-      var group = currentGroups.get(confirmation.normalizedName());
-      var survivor = chooseDuplicateSurvivor(group);
-      var duplicates = group.stream()
-          .filter(restaurant -> !restaurant.getId().equals(survivor.getId()))
-          .toList();
-      restaurantRepository.deleteAll(duplicates);
-      duplicates.forEach(restaurant -> deletedIds.add(restaurant.getId()));
-      if (!confirmation.normalizedName().equals(survivor.getNormalizedName())) {
-        survivor.setNormalizedName(confirmation.normalizedName());
-        restaurantRepository.save(survivor);
+      var normalizedName = confirmation.normalizedName();
+      if (collapseDuplicateGroup(normalizedName, currentGroups.get(normalizedName), keptIds, deletedIds)) {
         updatedSurvivors++;
       }
-      keptIds.add(survivor.getId());
     }
     return RestaurantDedupeResult.builder()
         .duplicateGroups(request.groups().size())
@@ -635,11 +608,37 @@ public class RestaurantService {
         .build();
   }
 
+  /**
+   * Deletes every duplicate except the stable survivor and records both sides.
+   *
+   * @return whether the survivor's normalized name had to be updated
+   */
+  private boolean collapseDuplicateGroup(
+      String normalizedName,
+      List<Restaurant> group,
+      List<String> keptIds,
+      List<String> deletedIds
+  ) {
+    var survivor = chooseDuplicateSurvivor(group);
+    var duplicates = group.stream()
+        .filter(restaurant -> !restaurant.getId().equals(survivor.getId()))
+        .toList();
+    restaurantRepository.deleteAll(duplicates);
+    duplicates.forEach(restaurant -> deletedIds.add(restaurant.getId()));
+    keptIds.add(survivor.getId());
+    if (normalizedName.equals(survivor.getNormalizedName())) {
+      return false;
+    }
+    survivor.setNormalizedName(normalizedName);
+    restaurantRepository.save(survivor);
+    return true;
+  }
+
   private List<Map.Entry<String, List<Restaurant>>> groupsFor(
       List<String> keys,
       List<Restaurant> members
   ) {
-    var byKey = Optional.ofNullable(members).orElseGet(List::of).stream()
+    var byKey = members.stream()
         .filter(restaurant -> restaurant.getDedupeKey() != null)
         .collect(Collectors.groupingBy(
             Restaurant::getDedupeKey,
@@ -673,7 +672,7 @@ public class RestaurantService {
   }
 
   private boolean matchesConfirmation(
-      dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeConfirmation confirmation,
+      RestaurantDedupeConfirmation confirmation,
       List<Restaurant> group
   ) {
     var preview = toDedupeGroupPreview(confirmation.normalizedName(), group);
@@ -712,25 +711,16 @@ public class RestaurantService {
         continue;
       }
       applyNormalizedName(restaurant);
-      var existingById = restaurantRepository.findById(restaurant.getId());
-      if (existingById.isPresent()
-          && hasConflictingNormalizedNameOwner(existingById.get(), restaurant)) {
-        unchanged++;
-        continue;
-      }
-      var existing = existingById
-          .or(() -> findRestaurantByNormalizedName(restaurant.getNormalizedName()));
-      if (existing.isEmpty()) {
-        created++;
-        addRepresentativeChange(representativeChanges, "CREATE", restaurant);
-      } else if (hasSameImportValues(existing.get(), restaurant)) {
-        unchanged++;
-      } else if (existing.get().getId().equals(restaurant.getId())
-          || hasSameNameAndAddress(existing.get(), restaurant)) {
-        updated++;
-        addRepresentativeChange(representativeChanges, "UPDATE", restaurant);
-      } else {
-        unchanged++;
+      switch (classifyImport(restaurant)) {
+        case CREATE -> {
+          created++;
+          addRepresentativeChange(representativeChanges, "CREATE", restaurant);
+        }
+        case UPDATE -> {
+          updated++;
+          addRepresentativeChange(representativeChanges, "UPDATE", restaurant);
+        }
+        case UNCHANGED -> unchanged++;
       }
     }
 
@@ -766,48 +756,11 @@ public class RestaurantService {
       applyNormalizedName(restaurant);
 
       try {
-      var existingById = restaurantRepository.findById(restaurant.getId());
-      if (existingById.isPresent()) {
-        if (hasConflictingNormalizedNameOwner(existingById.get(), restaurant)) {
-          skippedExisting++;
-          log.debug(
-              "Skipping OpenStreetMap restaurant id {} because normalized name {} belongs to another restaurant.",
-              restaurant.getId(), restaurant.getNormalizedName());
-        } else if (mergeImportedRestaurant(existingById.get(), restaurant, true)) {
-          restaurantRepository.save(existingById.get());
-          updated++;
-          log.info("Updated existing OpenStreetMap restaurant id: {}, name: {}",
-              existingById.get().getId(), existingById.get().getName());
-        } else {
-          skippedExisting++;
-          log.debug("Skipping unchanged OpenStreetMap restaurant id: {}", restaurant.getId());
+        switch (applyImportedRestaurant(restaurant)) {
+          case CREATE -> imported++;
+          case UPDATE -> updated++;
+          case UNCHANGED -> skippedExisting++;
         }
-        continue;
-      }
-
-      var existingByName = findRestaurantByNormalizedName(restaurant.getNormalizedName());
-      if (existingByName.isPresent()) {
-        if (hasSameNameAndAddress(existingByName.get(), restaurant)) {
-          if (mergeImportedRestaurant(existingByName.get(), restaurant, true)) {
-            restaurantRepository.save(existingByName.get());
-            updated++;
-            log.info("Updated existing restaurant id: {}, name: {} from OpenStreetMap import",
-                existingByName.get().getId(), existingByName.get().getName());
-          } else {
-            skippedExisting++;
-            log.debug("Skipping unchanged OpenStreetMap restaurant name: {}", restaurant.getName());
-          }
-        } else {
-          skippedExisting++;
-          log.debug("Skipping duplicate OpenStreetMap restaurant name with different address: {}",
-              restaurant.getName());
-        }
-        continue;
-      }
-
-      restaurantRepository.save(restaurant);
-      imported++;
-      log.info("Saved OpenStreetMap restaurant id: {}, name: {}", restaurant.getId(), restaurant.getName());
       } catch (DuplicateKeyException concurrentOwner) {
         skippedExisting++;
         log.info(
@@ -829,12 +782,77 @@ public class RestaurantService {
         .build();
   }
 
+  /** Saves, merges or skips one valid, normalized candidate and reports which it did. */
+  private ImportChange applyImportedRestaurant(Restaurant restaurant) throws InvalidRequestException {
+    // The merge throws a checked exception, so presence is tested directly rather than in a lambda.
+    var existingById = restaurantRepository.findById(restaurant.getId());
+    if (existingById.isPresent()) {
+      var existing = existingById.orElseThrow();
+      if (hasConflictingNormalizedNameOwner(existing, restaurant)) {
+        log.debug(
+            "Skipping OpenStreetMap restaurant id {} because normalized name {} belongs to another restaurant.",
+            restaurant.getId(), restaurant.getNormalizedName());
+        return ImportChange.UNCHANGED;
+      }
+      if (!mergeImportedRestaurant(existing, restaurant, true)) {
+        log.debug("Skipping unchanged OpenStreetMap restaurant id: {}", restaurant.getId());
+        return ImportChange.UNCHANGED;
+      }
+      restaurantRepository.save(existing);
+      log.info("Updated existing OpenStreetMap restaurant id: {}, name: {}", existing.getId(), existing.getName());
+      return ImportChange.UPDATE;
+    }
+
+    var existingByName = findRestaurantByNormalizedName(restaurant.getNormalizedName());
+    if (existingByName.isPresent()) {
+      var existing = existingByName.orElseThrow();
+      if (!hasSameNameAndAddress(existing, restaurant)) {
+        log.debug("Skipping duplicate OpenStreetMap restaurant name with different address: {}",
+            restaurant.getName());
+        return ImportChange.UNCHANGED;
+      }
+      if (!mergeImportedRestaurant(existing, restaurant, true)) {
+        log.debug("Skipping unchanged OpenStreetMap restaurant name: {}", restaurant.getName());
+        return ImportChange.UNCHANGED;
+      }
+      restaurantRepository.save(existing);
+      log.info("Updated existing restaurant id: {}, name: {} from OpenStreetMap import",
+          existing.getId(), existing.getName());
+      return ImportChange.UPDATE;
+    }
+
+    restaurantRepository.save(restaurant);
+    log.info("Saved OpenStreetMap restaurant id: {}, name: {}", restaurant.getId(), restaurant.getName());
+    return ImportChange.CREATE;
+  }
+
+  /** What applying one valid, normalized candidate would do, without mutating anything. */
+  private enum ImportChange { CREATE, UPDATE, UNCHANGED }
+
+  private ImportChange classifyImport(Restaurant restaurant) {
+    var existingById = restaurantRepository.findById(restaurant.getId());
+    if (existingById.filter(existing -> hasConflictingNormalizedNameOwner(existing, restaurant)).isPresent()) {
+      return ImportChange.UNCHANGED;
+    }
+    return existingById
+        .or(() -> findRestaurantByNormalizedName(restaurant.getNormalizedName()))
+        .map(existing -> {
+          if (hasSameImportValues(existing, restaurant)) {
+            return ImportChange.UNCHANGED;
+          }
+          return existing.getId().equals(restaurant.getId()) || hasSameNameAndAddress(existing, restaurant)
+              ? ImportChange.UPDATE
+              : ImportChange.UNCHANGED;
+        })
+        .orElse(ImportChange.CREATE);
+  }
+
   private void addRepresentativeChange(
       List<String> changes,
       String operation,
       Restaurant restaurant
   ) {
-    if (changes.size() < 10) {
+    if (changes.size() < MAX_REPRESENTATIVE_CHANGES) {
       changes.add(operation + ": " + restaurant.getName());
     }
   }
@@ -930,9 +948,9 @@ public class RestaurantService {
     try {
       var saved = restaurantRepository.save(restaurantToUpdate);
       return toVoteDetail(saved);
-    } catch (DataAccessException e) {
+    } catch (DataAccessException failure) {
       throw new ServiceUnavailableException(
-          "Failed to update restaurant with id: " + request.id(), e);
+          "Failed to update restaurant with id: " + request.id(), failure);
     }
   }
 
@@ -948,7 +966,7 @@ public class RestaurantService {
       return;
     }
     scheduledCollectors.run("wfl-daily-picks", DAILY_PICK_LEASE_DURATION, guard -> {
-      var today = LocalDate.now(getRestaurantOfTheDayZone());
+      var today = today();
       var picks = refreshDailyLunchPicks(today, guard);
       log.info("Restaurant of the day selected {} picks for {}.", picks.getRestaurantIds().size(), today);
       return null;
@@ -971,20 +989,24 @@ public class RestaurantService {
         .id(pickDate.toString())
         .pickDate(pickDate.toString())
         .restaurantIds(restaurantIds)
-        .generatedOn(Instant.now())
+        .generatedOn(Instant.now(clock))
         .build();
     guard.verifyHeld();
     return dailyLunchPicksRepository.save(pick);
   }
 
   private DailyLunchPicks replaceDeletedRestaurantInTodaysPick(String deletedRestaurantId) {
-    var today = LocalDate.now(getRestaurantOfTheDayZone());
-    var existing = dailyLunchPicksRepository.findById(today.toString())
-        .orElse(null);
-    if (existing == null) {
-      return refreshDailyLunchPicks(today);
-    }
+    var today = today();
+    return dailyLunchPicksRepository.findById(today.toString())
+        .map(existing -> replaceDeletedRestaurant(existing, deletedRestaurantId, today))
+        .orElseGet(() -> refreshDailyLunchPicks(today));
+  }
 
+  private DailyLunchPicks replaceDeletedRestaurant(
+      DailyLunchPicks existing,
+      String deletedRestaurantId,
+      LocalDate today
+  ) {
     var selectedIds = getExistingPickIdsWithoutDeletedRestaurant(existing, deletedRestaurantId);
     if (selectedIds.size() < dailyPickCount()) {
       int replacementCount = dailyPickCount() - selectedIds.size();
@@ -1000,7 +1022,7 @@ public class RestaurantService {
         .id(today.toString())
         .pickDate(today.toString())
         .restaurantIds(List.copyOf(selectedIds))
-        .generatedOn(Instant.now())
+        .generatedOn(Instant.now(clock))
         .build();
     log.info("Updated today's lunch picks after deleting restaurant id: {}. Pick count: {}.",
         deletedRestaurantId, pick.getRestaurantIds().size());
@@ -1031,12 +1053,11 @@ public class RestaurantService {
       return null;
     }
     var details = toVoteDetails(List.of(restaurant));
-    return details.isEmpty() ? null : details.get(0);
+    return details.isEmpty() ? null : details.getFirst();
   }
 
   private List<RestaurantDetail> toVoteDetails(List<Restaurant> restaurants) {
-    var safeRestaurants = Optional.ofNullable(restaurants).orElseGet(List::of);
-    var details = safeRestaurants.stream()
+    var details = restaurants.stream()
         .map(restaurantMapper::toRestaurantDetail)
         .toList();
     details.forEach(detail -> detail.setWebsite(
@@ -1063,17 +1084,12 @@ public class RestaurantService {
       detail.setMyVote(null);
       detail.setMyFavorite(false);
     });
-    var votes = restaurantVoteRepository == null
-        ? List.<RestaurantVote>of()
-        : Optional.ofNullable(restaurantVoteRepository.findByRestaurantIdIn(restaurantIds)).orElseGet(List::of);
-    var votesByRestaurantId = votes.stream()
+    var votesByRestaurantId = restaurantVoteRepository.findByRestaurantIdIn(restaurantIds).stream()
         .collect(Collectors.groupingBy(RestaurantVote::getRestaurantId));
-    var selfId = getSelfIdOrNull();
-    var favoriteIds = selfId == null || restaurantFavoriteRepository == null
-        ? java.util.Set.<String>of()
-        : Optional.ofNullable(restaurantFavoriteRepository.findByRestaurantIdInAndAccountId(restaurantIds, selfId))
-            .orElseGet(List::of)
-            .stream()
+    var selfId = selfId().orElse(null);
+    Set<String> favoriteIds = selfId == null
+        ? Set.of()
+        : restaurantFavoriteRepository.findByRestaurantIdInAndAccountId(restaurantIds, selfId).stream()
             .map(RestaurantFavorite::getRestaurantId)
             .collect(Collectors.toSet());
 
@@ -1122,7 +1138,7 @@ public class RestaurantService {
         .flatMap(metro -> metro.getCities().stream()
             .map(city -> normalizeCity(metro.getState()) + ":" + normalizeCity(city)))
         .collect(Collectors.toSet());
-    return Optional.ofNullable(restaurantRepository.findAll()).orElseGet(List::of).stream()
+    return restaurantRepository.findAll().stream()
         .filter(restaurant -> restaurant.getId() != null && !restaurant.getId().isBlank())
         .filter(restaurant -> restaurant.getAddress() != null)
         .filter(restaurant -> cityStates.contains(
@@ -1165,8 +1181,8 @@ public class RestaurantService {
         .map(cuisines -> {
           try {
             return normalizeCuisineFilters(cuisines);
-          } catch (InvalidRequestException e) {
-            log.warn("Ignoring invalid saved WFL cuisine filters.", e);
+          } catch (InvalidRequestException invalidSavedFilters) {
+            log.warn("Ignoring invalid saved WFL cuisine filters.", invalidSavedFilters);
             return List.<String>of();
           }
         })
@@ -1194,17 +1210,20 @@ public class RestaurantService {
     if (!useSavedPreferences) {
       return Optional.empty();
     }
-    var accountId = getSelfIdOrNull();
-    if (accountId == null) {
-      return Optional.empty();
-    }
-    return whatsForLunchPreferenceRepository.findById(accountId);
+    return selfId().flatMap(whatsForLunchPreferenceRepository::findById);
   }
 
   private int resolveSavedRadiusMiles(Integer radiusMiles) {
     return ALLOWED_NEARBY_LUNCH_RADII_MILES.contains(radiusMiles)
         ? radiusMiles
         : DEFAULT_NEARBY_LUNCH_RADIUS_MILES;
+  }
+
+  private WhatsForLunchPreferenceDetail toPreferenceDetail(WhatsForLunchPreference preference) {
+    return WhatsForLunchPreferenceDetail.builder()
+        .cuisines(preference.getCuisines() == null ? List.of() : List.copyOf(preference.getCuisines()))
+        .radiusMiles(resolveSavedRadiusMiles(preference.getRadiusMiles()))
+        .build();
   }
 
   private WhatsForLunchPreferenceDetail defaultPreferences() {
@@ -1274,11 +1293,12 @@ public class RestaurantService {
         .toList();
   }
 
-  private String getSelfIdOrNull() {
+  /** The signed-in account id, or empty for an anonymous request. */
+  private Optional<String> selfId() {
     try {
-      return permissionService.getSelfId();
-    } catch (IllegalStateException e) {
-      return null;
+      return Optional.ofNullable(permissionService.getSelfId());
+    } catch (IllegalStateException anonymous) {
+      return Optional.empty();
     }
   }
 
@@ -1286,11 +1306,16 @@ public class RestaurantService {
     if (pick == null || pick.getRestaurantIds() == null || pick.getRestaurantIds().isEmpty()) {
       return List.of();
     }
-    Map<String, Restaurant> restaurantsById = restaurantRepository.findAllById(pick.getRestaurantIds()).stream()
+    return restaurantsInOrder(pick.getRestaurantIds());
+  }
+
+  /** Loads restaurants in the order of {@code restaurantIds}, skipping ids that no longer exist. */
+  private List<Restaurant> restaurantsInOrder(List<String> restaurantIds) {
+    Map<String, Restaurant> restaurantsById = restaurantRepository.findAllById(restaurantIds).stream()
         .collect(Collectors.toMap(Restaurant::getId, Function.identity(), (left, ignored) -> left));
-    return pick.getRestaurantIds().stream()
+    return restaurantIds.stream()
         .map(restaurantsById::get)
-        .filter(restaurant -> restaurant != null)
+        .filter(Objects::nonNull)
         .toList();
   }
 
@@ -1300,6 +1325,11 @@ public class RestaurantService {
 
   private String nullSafe(String value) {
     return value == null ? "" : value;
+  }
+
+  /** Today's date in the restaurant-of-the-day zone, from the application clock. */
+  private LocalDate today() {
+    return LocalDate.ofInstant(clock.instant(), getRestaurantOfTheDayZone());
   }
 
   private ZoneId getRestaurantOfTheDayZone() {
@@ -1352,7 +1382,7 @@ public class RestaurantService {
 
   private boolean isUnitedStates(String value) {
     var normalized = normalizeCity(value).replaceAll("[^a-z]", "");
-    return List.of("us", "usa", "unitedstates").contains(normalized);
+    return UNITED_STATES_NAMES.contains(normalized);
   }
 
   private boolean mergeImportedRestaurant(
@@ -1431,8 +1461,8 @@ public class RestaurantService {
   }
 
   private boolean copyStringIfPresent(
-      java.util.function.Supplier<String> existingValue,
-      java.util.function.Consumer<String> setter,
+      Supplier<String> existingValue,
+      Consumer<String> setter,
       String importedValue
   ) {
     if (importedValue == null || importedValue.isBlank()) {
@@ -1447,8 +1477,8 @@ public class RestaurantService {
   }
 
   private boolean copyDoubleIfPresent(
-      java.util.function.Supplier<Double> existingValue,
-      java.util.function.Consumer<Double> setter,
+      Supplier<Double> existingValue,
+      Consumer<Double> setter,
       Double importedValue
   ) {
     if (importedValue == null || importedValue.isNaN() || importedValue.isInfinite()) {
@@ -1497,12 +1527,11 @@ public class RestaurantService {
       int radiusMiles
   ) {
     var bounds = coordinateBounds(latitude, longitude, radiusMiles);
-    return Optional.ofNullable(restaurantRepository.findByCoordinateBounds(
+    return restaurantRepository.findByCoordinateBounds(
         bounds.minLatitude(),
         bounds.maxLatitude(),
         bounds.minLongitude(),
-        bounds.maxLongitude()))
-        .orElseGet(List::of);
+        bounds.maxLongitude());
   }
 
   private CoordinateBounds coordinateBounds(double latitude, double longitude, int radiusMiles) {
@@ -1607,8 +1636,10 @@ public class RestaurantService {
 
   private void ensureRestaurantNameUnique(String normalizedName, String selfId)
       throws ResourceExistsException {
-    var owner = findRestaurantByNormalizedName(normalizedName);
-    if (owner.isPresent() && (selfId == null || !selfId.equals(owner.get().getId()))) {
+    var ownedByAnother = findRestaurantByNormalizedName(normalizedName)
+        .filter(owner -> selfId == null || !selfId.equals(owner.getId()))
+        .isPresent();
+    if (ownedByAnother) {
       throw new ResourceExistsException("Restaurant with that name already exists.");
     }
   }
@@ -1618,22 +1649,19 @@ public class RestaurantService {
       Restaurant persistedById,
       Restaurant imported
   ) {
-    if (java.util.Objects.equals(
+    if (Objects.equals(
         persistedById.getNormalizedName(), imported.getNormalizedName())) {
       return false;
     }
     return findRestaurantByNormalizedName(imported.getNormalizedName()).stream()
-        .anyMatch(owner -> !java.util.Objects.equals(owner.getId(), persistedById.getId()));
+        .anyMatch(owner -> !Objects.equals(owner.getId(), persistedById.getId()));
   }
 
   private Optional<Restaurant> findRestaurantByNormalizedName(String normalizedName) {
-    var indexedOwner = restaurantRepository.findByNormalizedName(normalizedName);
-    if (indexedOwner.isPresent()) {
-      return indexedOwner;
-    }
-    return restaurantRepository.findAll().stream()
-        .filter(restaurant -> normalizedName.equals(normalizeRestaurantName(nullSafe(restaurant.getName()))))
-        .findFirst();
+    return restaurantRepository.findByNormalizedName(normalizedName)
+        .or(() -> restaurantRepository.findAll().stream()
+            .filter(restaurant -> normalizedName.equals(normalizeRestaurantName(nullSafe(restaurant.getName()))))
+            .findFirst());
   }
 
   private String normalizeRestaurantName(String name) {
