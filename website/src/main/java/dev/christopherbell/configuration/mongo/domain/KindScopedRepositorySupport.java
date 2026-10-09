@@ -3,6 +3,7 @@ package dev.christopherbell.configuration.mongo.domain;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -68,7 +69,7 @@ public abstract class KindScopedRepositorySupport<T> {
     mongo.remove(Query.query(Criteria.where("id").is(id)));
   }
 
-  protected final void deleteAllValues(Iterable<T> values, java.util.function.Function<T, ?> id) {
+  protected final void deleteAllValues(Iterable<T> values, Function<T, ?> id) {
     var ids = new ArrayList<>();
     values.forEach(value -> ids.add(id.apply(value)));
     if (!ids.isEmpty()) {

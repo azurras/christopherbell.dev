@@ -5,6 +5,7 @@ import java.math.BigInteger;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
@@ -85,6 +86,7 @@ final class DomainDocumentCodec<T> {
     }
   }
 
+  /** The value's mapped Mongo id, or null when the value has no id set. */
   Object mappedIdFromSource(T value) {
     try {
       var sourceId = entity.getPropertyAccessor(value).getProperty(idProperty());
@@ -164,7 +166,7 @@ final class DomainDocumentCodec<T> {
   T decode(Document envelope) {
     try {
       if (envelope == null
-          || !java.util.Set.copyOf(envelope.keySet()).equals(java.util.Set.copyOf(ENVELOPE_FIELDS))) {
+          || !Set.copyOf(envelope.keySet()).equals(Set.copyOf(ENVELOPE_FIELDS))) {
         throw new MalformedDomainDocumentException();
       }
       if (!kind.kind().equals(envelope.get("_kind"))
@@ -188,6 +190,7 @@ final class DomainDocumentCodec<T> {
     }
   }
 
+  /** The envelope's optimistic-lock version, or null when the kind has no version property. */
   Object version(Document envelope) {
     if (versionProperty == null) {
       return null;

@@ -3,8 +3,10 @@ package dev.christopherbell.configuration.mongo.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -206,8 +208,8 @@ class DomainCollectionManifestTest {
       assertThat(index.sparse()).isFalse();
       assertThat(index.partialFilterExpression()).isEqualTo(sparsePartial(kind, field));
 
-      var absent = new java.util.HashMap<String, Object>();
-      var explicitNull = new java.util.HashMap<String, Object>();
+      var absent = new HashMap<String, Object>();
+      var explicitNull = new HashMap<String, Object>();
       explicitNull.put(field, null);
       var firstPresent = Map.<String, Object>of(field, "same-value");
       var duplicatePresent = Map.<String, Object>of(field, "same-value");
@@ -334,7 +336,7 @@ class DomainCollectionManifestTest {
     var field = index.keys().getFirst().path();
     return participates(index, firstKind, firstFields)
         && participates(index, secondKind, secondFields)
-        && java.util.Objects.equals(firstFields.get(field), secondFields.get(field));
+        && Objects.equals(firstFields.get(field), secondFields.get(field));
   }
 
   private record ExpectedKind(

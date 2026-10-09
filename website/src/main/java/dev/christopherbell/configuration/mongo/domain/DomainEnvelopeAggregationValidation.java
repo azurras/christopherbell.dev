@@ -1,6 +1,7 @@
 package dev.christopherbell.configuration.mongo.domain;
 
 import com.mongodb.MongoException;
+import java.util.Arrays;
 import java.util.List;
 import org.bson.Document;
 
@@ -98,7 +99,7 @@ final class DomainEnvelopeAggregationValidation {
   }
 
   private static Document notEqual(Object left, Object right) {
-    return new Document("$ne", java.util.Arrays.asList(left, right));
+    return new Document("$ne", Arrays.asList(left, right));
   }
 
   private static Document controlledFailure() {

@@ -69,14 +69,37 @@ public final class MongoDatabaseLeaseMutation {
         DeadlineExpectation.UNEXPIRED, null, null, false, advanceVersion);
   }
 
-  Update update() { return update; }
-  String deadlineField() { return deadlineField; }
-  Duration duration() { return duration; }
-  DeadlineExpectation expectation() { return expectation; }
-  String sameOwnerField() { return sameOwnerField; }
-  Object sameOwnerValue() { return sameOwnerValue; }
-  boolean upsert() { return upsert; }
-  boolean advanceVersion() { return advanceVersion; }
+  Update update() {
+    return update;
+  }
+
+  String deadlineField() {
+    return deadlineField;
+  }
+
+  Duration duration() {
+    return duration;
+  }
+
+  DeadlineExpectation expectation() {
+    return expectation;
+  }
+
+  String sameOwnerField() {
+    return sameOwnerField;
+  }
+
+  Object sameOwnerValue() {
+    return sameOwnerValue;
+  }
+
+  boolean upsert() {
+    return upsert;
+  }
+
+  boolean advanceVersion() {
+    return advanceVersion;
+  }
 
   private static String requireField(String field) {
     if (field == null || field.isBlank()) {

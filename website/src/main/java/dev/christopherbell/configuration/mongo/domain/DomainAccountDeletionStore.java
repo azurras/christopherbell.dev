@@ -2,6 +2,7 @@ package dev.christopherbell.configuration.mongo.domain;
 
 import java.util.Arrays;
 import java.util.regex.Pattern;
+import org.bson.Document;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -67,7 +68,7 @@ public final class DomainAccountDeletionStore {
 
   public void removePrivateData(String accountId) {
     surviveWorlds.updateMulti(exact("players.accountId", accountId),
-        new Update().pull("players", new org.bson.Document("accountId", accountId)));
+        new Update().pull("players", new Document("accountId", accountId)));
     for (int slot = 0; slot < 10; slot++) {
       var query = exact("id", "pilot-" + slot);
       query.addCriteria(Criteria.where("accountId").is(accountId));
