@@ -19,6 +19,6 @@ public enum WhatsForLunchWorkflowType implements WorkflowType {
    */
   @Override
   public String getType() {
-    return WHATS_FOR_LUNCH_WORKFLOW.name();
+    return name();
   }
 }
