@@ -1,5 +1,6 @@
 package dev.christopherbell.whatsforlunch.restaurant.importing;
 
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.lease.LeaseService;
 import dev.christopherbell.libs.lease.RenewingLease;
 import dev.christopherbell.permission.PermissionService;
@@ -8,22 +9,26 @@ import dev.christopherbell.whatsforlunch.restaurant.RestaurantService;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportResult;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState;
+import java.io.IOException;
+import java.net.http.HttpTimeoutException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
-import org.springframework.context.event.EventListener;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Coordinates previewed and scheduled restaurant imports behind one durable lease. */
@@ -34,6 +39,8 @@ public class RestaurantImportWorkflowService {
   public static final String LEASE_NAME = "wfl-openstreetmap-import";
   public static final String STATE_ID = "openstreetmap-monthly";
   private static final int PUBLIC_FRESHNESS_DAYS = 45;
+  private static final String SOURCE_NAME = "OpenStreetMap";
+  private static final String SYSTEM_ACTOR = "system";
 
   private final Clock clock;
   private final LeaseService leases;
@@ -44,7 +51,8 @@ public class RestaurantImportWorkflowService {
   private final WflProperties properties;
 
   /** Builds a non-mutating preview and binds its token to the current operator. */
-  public RestaurantImportPreviewResponse previewOpenStreetMapImport() throws Exception {
+  public RestaurantImportPreviewResponse previewOpenStreetMapImport()
+      throws IOException, InterruptedException, InvalidRequestException {
     var actor = requireActor();
     var snapshot = restaurantService.prepareConfiguredMetroImport();
     var createdOn = Instant.now(clock);
@@ -67,7 +75,8 @@ public class RestaurantImportWorkflowService {
   }
 
   /** Applies a previously reviewed preview after re-fetching and verifying the source checksum. */
-  public RestaurantImportRunDetail applyOpenStreetMapImport(String token) throws Exception {
+  public RestaurantImportRunDetail applyOpenStreetMapImport(String token)
+      throws IOException, InterruptedException, InvalidRequestException {
     if (token == null || token.isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Import preview token is required");
     }
@@ -82,19 +91,17 @@ public class RestaurantImportWorkflowService {
 
   /** Returns a public freshness view without operator, error, token, or lease details. */
   public RestaurantDataFreshness getPublicFreshness() {
-    var refreshedOn = states.findById(STATE_ID)
-        .map(RestaurantImportState::getLastCompletedOn)
-        .orElse(null);
-    var currentAfter = Instant.now(clock).minus(java.time.Duration.ofDays(PUBLIC_FRESHNESS_DAYS));
+    var refreshedOn = states.findById(STATE_ID).map(RestaurantImportState::getLastCompletedOn);
+    var currentAfter = Instant.now(clock).minus(Duration.ofDays(PUBLIC_FRESHNESS_DAYS));
     var cities = properties.getRestaurantImport().getOsm().getMetros().stream()
         .flatMap(metro -> metro.getCities().stream()
             .map(city -> city + ", " + metro.getState()))
         .sorted()
         .toList();
     return new RestaurantDataFreshness(
-        "OpenStreetMap",
-        refreshedOn,
-        refreshedOn != null && !refreshedOn.isBefore(currentAfter),
+        SOURCE_NAME,
+        refreshedOn.orElse(null),
+        refreshedOn.filter(completedOn -> !completedOn.isBefore(currentAfter)).isPresent(),
         PUBLIC_FRESHNESS_DAYS,
         cities);
   }
@@ -119,11 +126,29 @@ public class RestaurantImportWorkflowService {
       return;
     }
     var now = Instant.now(clock);
-    var state = states.findById(STATE_ID).orElse(null);
-    if (state == null || !isFailedMonthlyRetryDue(state, now)) {
+    var retryDue = states.findById(STATE_ID)
+        .filter(state -> isFailedMonthlyRetryDue(state, now))
+        .isPresent();
+    if (retryDue) {
+      runScheduled("scheduled-daily-retry");
+    }
+  }
+
+  /** Runs a missed monthly import at startup; with no recorded state, the first import is due. */
+  @EventListener(
+      value = ApplicationReadyEvent.class,
+      condition = "!@environment.acceptsProfiles('deploy-smoke')")
+  public void runMissedMonthlyOpenStreetMapImport() {
+    if (!properties.getRestaurantImport().getMonthly().isEnabled()) {
       return;
     }
-    runScheduled("scheduled-daily-retry");
+    var now = Instant.now(clock);
+    var catchUpDue = states.findById(STATE_ID)
+        .map(state -> isMonthlyCatchUpDue(state, now) && !hasUnresolvedMonthlyFailureToday(state, now))
+        .orElse(true);
+    if (catchUpDue) {
+      runScheduled("startup-catch-up");
+    }
   }
 
   private boolean isFailedMonthlyRetryDue(RestaurantImportState state, Instant now) {
@@ -143,52 +168,37 @@ public class RestaurantImportWorkflowService {
     if (!hasUnresolvedMonthlyFailure(state)) {
       return false;
     }
-    var zone = ZoneId.of(properties.getRestaurantImport().getMonthly().getZone());
+    var zone = monthlyZone();
     return state.getLastFailedOn().atZone(zone).toLocalDate().equals(now.atZone(zone).toLocalDate());
   }
 
-  @EventListener(
-      value = ApplicationReadyEvent.class,
-      condition = "!@environment.acceptsProfiles('deploy-smoke')")
-  public void runMissedMonthlyOpenStreetMapImport() {
-    if (!properties.getRestaurantImport().getMonthly().isEnabled()) {
-      return;
-    }
-    var state = states.findById(STATE_ID).orElse(null);
-    var now = Instant.now(clock);
-    if (state == null
-        || (isMonthlyCatchUpDue(state, now)
-            && !hasUnresolvedMonthlyFailureToday(state, now))) {
-      runScheduled("startup-catch-up");
-    }
-  }
-
+  /**
+   * A monthly run is due when the schedule fired after the last completion. Without a completion
+   * time, the end of the last completed month stands in; with neither, a run is due.
+   */
   private boolean isMonthlyCatchUpDue(RestaurantImportState state, Instant now) {
-    var zone = ZoneId.of(properties.getRestaurantImport().getMonthly().getZone());
+    var zone = monthlyZone();
     var lastCompletedOn = state.getLastCompletedOn();
     if (lastCompletedOn != null) {
-      var cron = CronExpression.parse(properties.getRestaurantImport().getMonthly().getCron());
-      var nextScheduledOn = cron.next(lastCompletedOn.atZone(zone));
-      return nextScheduledOn != null && !nextScheduledOn.toInstant().isAfter(now);
+      return isScheduledRunDue(lastCompletedOn.atZone(zone), now);
     }
+    return parseYearMonth(state.getLastCompletedMonth())
+        .map(completedMonth -> completedMonth.atEndOfMonth().atTime(LocalTime.MAX).atZone(zone))
+        .map(endOfCompletedMonth -> isScheduledRunDue(endOfCompletedMonth, now))
+        .orElse(true);
+  }
 
-    var completedMonth = parseYearMonth(state.getLastCompletedMonth()).orElse(null);
-    if (completedMonth == null) {
-      return true;
-    }
-
+  private boolean isScheduledRunDue(ZonedDateTime after, Instant now) {
     var cron = CronExpression.parse(properties.getRestaurantImport().getMonthly().getCron());
-    var lastInstantOfCompletedMonth = completedMonth.atEndOfMonth()
-        .atTime(LocalTime.MAX)
-        .atZone(zone);
-    var nextScheduledOn = cron.next(lastInstantOfCompletedMonth);
+    var nextScheduledOn = cron.next(after);
     return nextScheduledOn != null && !nextScheduledOn.toInstant().isAfter(now);
   }
 
   private void runScheduled(String trigger) {
     try {
-      runWithLease(trigger, "system", null);
+      runWithLease(trigger, SYSTEM_ACTOR, null);
     } catch (Exception failure) {
+      // A scheduled run has no caller to report to; its state is already recorded.
       log.error("OpenStreetMap import failed. Trigger: {}.", trigger, failure);
     }
   }
@@ -197,7 +207,7 @@ public class RestaurantImportWorkflowService {
       String trigger,
       String actor,
       String previewToken
-  ) throws Exception {
+  ) throws IOException, InterruptedException, InvalidRequestException {
     var startedOn = Instant.now(clock);
     var ownerToken = UUID.randomUUID().toString();
     var expiresOn = startedOn.plus(properties.getRestaurantImport().getLeaseDuration());
@@ -242,6 +252,7 @@ public class RestaurantImportWorkflowService {
       saveState(succeeded, actor);
       return succeeded;
     } catch (Exception failure) {
+      // Every failure, checked or not, is recorded before it propagates unchanged.
       if (failure instanceof InterruptedException interruptedFailure) {
         interruption = interruptedFailure;
       }
@@ -326,10 +337,10 @@ public class RestaurantImportWorkflowService {
     if (failure instanceof ResponseStatusException status) {
       return "HTTP_" + status.getStatusCode().value();
     }
-    if (failure instanceof java.net.http.HttpTimeoutException) {
+    if (failure instanceof HttpTimeoutException) {
       return "REMOTE_TIMEOUT";
     }
-    if (failure instanceof java.io.IOException) {
+    if (failure instanceof IOException) {
       return "REMOTE_IO";
     }
     if (failure instanceof InterruptedException) {
@@ -338,9 +349,12 @@ public class RestaurantImportWorkflowService {
     return "IMPORT_FAILED";
   }
 
+  private ZoneId monthlyZone() {
+    return ZoneId.of(properties.getRestaurantImport().getMonthly().getZone());
+  }
+
   private YearMonth currentMonth() {
-    var zone = ZoneId.of(properties.getRestaurantImport().getMonthly().getZone());
-    return YearMonth.now(clock.withZone(zone));
+    return YearMonth.now(clock.withZone(monthlyZone()));
   }
 
   private Optional<YearMonth> parseYearMonth(String persistedMonth) {
