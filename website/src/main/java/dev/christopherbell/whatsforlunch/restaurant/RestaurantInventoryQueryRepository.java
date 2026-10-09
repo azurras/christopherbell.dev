@@ -1,15 +1,15 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -24,6 +24,8 @@ import org.springframework.web.server.ResponseStatusException;
 @Repository
 public class RestaurantInventoryQueryRepository implements RestaurantInventoryQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
+  private static final int MAX_FILTER_LENGTH = 100;
+
   private final KindScopedMongoOperations<Restaurant> restaurants;
 
   public RestaurantInventoryQueryRepository(DomainMongoOperationsFactory factory) {
@@ -40,21 +42,17 @@ public class RestaurantInventoryQueryRepository implements RestaurantInventoryQu
       int size
   ) {
     if (size < 1 || size > MAX_PAGE_SIZE) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Inventory page size must be 1 through 100");
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "Inventory page size must be 1 through " + MAX_PAGE_SIZE);
     }
-    var normalizedName = normalized(name);
-    var normalizedCity = normalized(city);
-    var normalizedState = normalized(state);
-    var after = decodeCursor(cursor);
+    var filters = new Filters(normalized(name), normalized(city), normalized(state));
 
-    var query = query(normalizedName, normalizedCity, normalizedState);
-    if (after != null) {
-      query.addCriteria(new Criteria().orOperator(
-          Criteria.where("dedupeKey").gt(after.name()),
-          new Criteria().andOperator(
-              Criteria.where("dedupeKey").is(after.name()),
-              Criteria.where("id").gt(after.id()))));
-    }
+    var query = query(filters);
+    decodeCursor(cursor).ifPresent(after -> query.addCriteria(new Criteria().orOperator(
+        Criteria.where("dedupeKey").gt(after.name()),
+        new Criteria().andOperator(
+            Criteria.where("dedupeKey").is(after.name()),
+            Criteria.where("id").gt(after.id())))));
     query.with(Sort.by(
         Sort.Order.asc("dedupeKey"),
         Sort.Order.asc("id"))).limit(size + 1);
@@ -62,33 +60,34 @@ public class RestaurantInventoryQueryRepository implements RestaurantInventoryQu
     var hasMore = found.size() > size;
     var items = List.copyOf(found.subList(0, Math.min(size, found.size())));
     var nextCursor = hasMore && !items.isEmpty() ? encodeCursor(items.getLast()) : null;
-    var total = restaurants.count(query(normalizedName, normalizedCity, normalizedState));
+    var total = restaurants.count(query(filters));
     return new Page(items, nextCursor, total);
   }
 
-  private Query query(String name, String city, String state) {
+  private Query query(Filters filters) {
     var criteria = new ArrayList<Criteria>();
-    if (name != null) {
+    if (filters.name() != null) {
       criteria.add(Criteria.where("dedupeKey")
-          .regex("^" + Pattern.quote(name)));
+          .regex("^" + Pattern.quote(filters.name())));
     }
-    if (city != null) {
-      criteria.add(Criteria.where("searchCity").is(city));
+    if (filters.city() != null) {
+      criteria.add(Criteria.where("searchCity").is(filters.city()));
     }
-    if (state != null) {
-      criteria.add(Criteria.where("searchState").is(state));
+    if (filters.state() != null) {
+      criteria.add(Criteria.where("searchState").is(filters.state()));
     }
     return criteria.isEmpty()
         ? new Query()
         : new Query(new Criteria().andOperator(criteria.toArray(Criteria[]::new)));
   }
 
+  /** Normalizes one filter value; a missing or blank value is null, meaning unfiltered. */
   private String normalized(String value) {
     if (value == null || value.isBlank()) {
       return null;
     }
     var normalized = value.strip().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
-    if (normalized.length() > 100) {
+    if (normalized.length() > MAX_FILTER_LENGTH) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Inventory filter is too long");
     }
     return normalized;
@@ -100,9 +99,9 @@ public class RestaurantInventoryQueryRepository implements RestaurantInventoryQu
         .encodeToString(value.getBytes(StandardCharsets.UTF_8));
   }
 
-  private Cursor decodeCursor(String cursor) {
+  private Optional<Cursor> decodeCursor(String cursor) {
     if (cursor == null || cursor.isBlank()) {
-      return null;
+      return Optional.empty();
     }
     try {
       var decoded = new String(
@@ -111,13 +110,16 @@ public class RestaurantInventoryQueryRepository implements RestaurantInventoryQu
       if (separator < 1 || separator == decoded.length() - 1) {
         throw new IllegalArgumentException("invalid cursor");
       }
-      return new Cursor(decoded.substring(0, separator), decoded.substring(separator + 1));
+      return Optional.of(new Cursor(decoded.substring(0, separator), decoded.substring(separator + 1)));
     } catch (IllegalArgumentException invalid) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Inventory cursor is invalid");
     }
   }
 
   private record Cursor(String name, String id) {}
+
+  /** Normalized inventory filters; a null component is unfiltered. */
+  private record Filters(String name, String city, String state) {}
 
   /** One stable inventory slice and its filtered total. */
   public record Page(List<Restaurant> items, String nextCursor, long total) {}

@@ -4,18 +4,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import tools.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
-import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
+import dev.christopherbell.libs.http.BodyLimitExceededException;
 import dev.christopherbell.testsupport.HeadersThenStallServer;
+import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
+import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
 
 class OpenStreetMapRestaurantClientTest {
   private static final int MAXIMUM_RESPONSE_BYTES = 16 * 1024 * 1024;
@@ -65,7 +68,7 @@ class OpenStreetMapRestaurantClientTest {
         """;
 
     @SuppressWarnings("unchecked")
-    var restaurants = (java.util.List<dev.christopherbell.whatsforlunch.restaurant.model.Restaurant>)
+    var restaurants = (List<Restaurant>)
         method.invoke(client, body);
 
     assertEquals(1, restaurants.size());
@@ -118,10 +121,10 @@ class OpenStreetMapRestaurantClientTest {
         }
         """);
 
-    assertEquals(java.util.List.of("Austin", "Oakland", "Metairie", "Plano"), restaurants.stream()
+    assertEquals(List.of("Austin", "Oakland", "Metairie", "Plano"), restaurants.stream()
         .map(restaurant -> restaurant.getAddress().getCity())
         .toList());
-    assertEquals(java.util.List.of("TX", "CA", "LA", "TX"), restaurants.stream()
+    assertEquals(List.of("TX", "CA", "LA", "TX"), restaurants.stream()
         .map(restaurant -> restaurant.getAddress().getState())
         .toList());
     assertTrue(restaurants.stream()
@@ -141,7 +144,7 @@ class OpenStreetMapRestaurantClientTest {
         }
         """);
 
-    assertEquals(java.util.List.of("CA", "TX"), restaurants.stream()
+    assertEquals(List.of("CA", "TX"), restaurants.stream()
         .map(restaurant -> restaurant.getAddress().getState())
         .toList());
   }
@@ -161,10 +164,10 @@ class OpenStreetMapRestaurantClientTest {
         }
         """);
 
-    assertEquals(java.util.List.of("Fort Worth", "Livermore", "New Orleans"), restaurants.stream()
+    assertEquals(List.of("Fort Worth", "Livermore", "New Orleans"), restaurants.stream()
         .map(restaurant -> restaurant.getAddress().getCity())
         .toList());
-    assertEquals(java.util.List.of("TX", "CA", "LA"), restaurants.stream()
+    assertEquals(List.of("TX", "CA", "LA"), restaurants.stream()
         .map(restaurant -> restaurant.getAddress().getState())
         .toList());
   }
@@ -250,7 +253,7 @@ class OpenStreetMapRestaurantClientTest {
     startServer(200, paddedJson(MAXIMUM_RESPONSE_BYTES + 1));
 
     assertThrows(
-        dev.christopherbell.libs.http.BodyLimitExceededException.class,
+        BodyLimitExceededException.class,
         () -> client(serverUri()).getConfiguredMetroRestaurants());
   }
 
@@ -293,11 +296,11 @@ class OpenStreetMapRestaurantClientTest {
   }
 
   @SuppressWarnings("unchecked")
-  private java.util.List<dev.christopherbell.whatsforlunch.restaurant.model.Restaurant>
+  private List<Restaurant>
       parseRestaurants(String body) throws Exception {
     var method = OpenStreetMapRestaurantClient.class.getDeclaredMethod("parseRestaurants", String.class);
     method.setAccessible(true);
-    return (java.util.List<dev.christopherbell.whatsforlunch.restaurant.model.Restaurant>)
+    return (List<Restaurant>)
         method.invoke(client(), body);
   }
 
@@ -308,7 +311,7 @@ class OpenStreetMapRestaurantClientTest {
   private OpenStreetMapRestaurantClient client(URI endpoint) {
     var properties = new WflProperties();
     properties.getRestaurantImport().getOsm().setEndpoint(endpoint);
-    properties.getRestaurantImport().getOsm().setTimeout(java.time.Duration.ofSeconds(25));
+    properties.getRestaurantImport().getOsm().setTimeout(Duration.ofSeconds(25));
     properties.getRestaurantImport().getOsm().setResultLimit(500);
     return new OpenStreetMapRestaurantClient(new ObjectMapper(), properties);
   }
