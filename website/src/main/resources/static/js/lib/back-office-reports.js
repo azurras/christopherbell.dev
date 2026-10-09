@@ -1,24 +1,13 @@
+import { parseServerPage, serverPageNavigation } from './back-office-paging.js';
+
 /** Validate one server report page before it reaches Back Office rendering. */
 export function parseReportPage(payload) {
-  if (!payload || !Array.isArray(payload.items)
-      || !Number.isInteger(payload.page) || payload.page < 0
-      || !Number.isInteger(payload.size) || payload.size < 1
-      || !Number.isFinite(payload.totalElements) || payload.totalElements < 0
-      || !Number.isInteger(payload.totalPages) || payload.totalPages < 0) {
-    throw new Error('Invalid report page response.');
-  }
-  return { ...payload, items: [...payload.items] };
+  return parseServerPage(payload, 'Invalid report page response.');
 }
 
 /** Derive exact navigation state from authoritative report totals. */
 export function reportPageNavigation(reportPage) {
-  const totalPages = Math.max(0, Number(reportPage?.totalPages || 0));
-  const currentPageIndex = Math.max(0, Number(reportPage?.page || 0));
-  return {
-    previousDisabled: currentPageIndex <= 0,
-    nextDisabled: totalPages === 0 || currentPageIndex + 1 >= totalPages,
-    label: totalPages === 0 ? 'Page 0 of 0' : `Page ${currentPageIndex + 1} of ${totalPages}`,
-  };
+  return serverPageNavigation(reportPage);
 }
 
 /** Convert local date controls to the inclusive Instant query contract. */

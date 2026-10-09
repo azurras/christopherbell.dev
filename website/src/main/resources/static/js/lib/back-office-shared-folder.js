@@ -1,11 +1,4 @@
-function escapeHtml(value) {
-  return String(value ?? '')
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
-}
+import { sanitize } from './util.js';
 
 function when(value) {
   if (!value) return '—';
@@ -20,15 +13,15 @@ export function sharedAuditMarkup(events) {
   return events.map(event => `
     <article class="queue-card shared-audit-card">
       <div class="queue-card-main">
-        <strong>${escapeHtml(event.action || 'UNKNOWN')}</strong>
-        <span>${escapeHtml(event.relativePath || 'unknown')}</span>
+        <strong>${sanitize(event.action || 'UNKNOWN')}</strong>
+        <span>${sanitize(event.relativePath || 'unknown')}</span>
       </div>
       <div class="queue-card-meta">
-        <span>${escapeHtml(event.accountId || 'unknown')}</span>
-        <span>${escapeHtml(event.outcome || 'unknown')}</span>
-        <span>Failure: ${escapeHtml(event.failureCategory || '—')}</span>
-        <span>Client: ${escapeHtml(event.clientIp || 'unknown')}</span>
-        <time>${escapeHtml(when(event.occurredAt))}</time>
+        <span>${sanitize(event.accountId || 'unknown')}</span>
+        <span>${sanitize(event.outcome || 'unknown')}</span>
+        <span>Failure: ${sanitize(event.failureCategory || '—')}</span>
+        <span>Client: ${sanitize(event.clientIp || 'unknown')}</span>
+        <time>${sanitize(when(event.occurredAt))}</time>
       </div>
     </article>
   `).join('');
@@ -48,16 +41,16 @@ export function sharedRecycleMarkup(items) {
     return '<div class="empty-state">The recycle area is empty.</div>';
   }
   return items.map(item => {
-    const id = escapeHtml(item.id);
+    const id = sanitize(item.id);
     return `
       <article class="queue-card shared-recycle-card" data-recycle-id="${id}">
         <div class="queue-card-main">
-          <strong>${escapeHtml(item.originalPath || 'unknown')}</strong>
-          <span>${escapeHtml(item.size ?? 0)} bytes · deleted by ${escapeHtml(item.deletedByAccountId || 'unknown')}</span>
+          <strong>${sanitize(item.originalPath || 'unknown')}</strong>
+          <span>${sanitize(item.size ?? 0)} bytes · deleted by ${sanitize(item.deletedByAccountId || 'unknown')}</span>
         </div>
         <div class="queue-card-meta">
-          <span>Deleted ${escapeHtml(when(item.deletedAt))}</span>
-          <span>Expires ${escapeHtml(when(item.expiresAt))}</span>
+          <span>Deleted ${sanitize(when(item.deletedAt))}</span>
+          <span>Expires ${sanitize(when(item.expiresAt))}</span>
         </div>
         <div class="operation-actions">
           <button class="btn btn-sm btn-outline-primary" type="button" data-shared-recycle-action="restore" data-id="${id}">Restore</button>
@@ -149,8 +142,8 @@ export function createSharedRecycleActionHandler({
         }),
       });
       if (completed) await refresh();
-    } catch (err) {
-      showAlert(err?.message || 'Shared-folder administration failed.');
+    } catch (error) {
+      showAlert(error?.message || 'Shared-folder administration failed.');
     } finally {
       button.disabled = false;
     }
