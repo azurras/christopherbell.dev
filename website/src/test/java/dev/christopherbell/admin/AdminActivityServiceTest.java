@@ -63,7 +63,7 @@ class AdminActivityServiceTest {
     when(permissionService.getSelfId()).thenReturn("account-1");
     when(accountRepository.findById(eq("account-1")))
         .thenReturn(Optional.of(Account.builder().id("account-1").username("cbell").build()));
-    when(adminActivityRepository.save(org.mockito.ArgumentMatchers.any(AdminActivity.class)))
+    when(adminActivityRepository.save(any(AdminActivity.class)))
         .thenReturn(saved);
 
     var result = service.record(
@@ -96,7 +96,7 @@ class AdminActivityServiceTest {
 
     when(permissionService.getSelfId()).thenReturn("account-2");
     when(accountRepository.findById(eq("account-2"))).thenReturn(Optional.empty());
-    when(adminActivityRepository.save(org.mockito.ArgumentMatchers.any(AdminActivity.class)))
+    when(adminActivityRepository.save(any(AdminActivity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     var result = service.record(
@@ -120,7 +120,7 @@ class AdminActivityServiceTest {
     when(permissionService.getSelfId()).thenReturn("account-3");
     when(accountRepository.findById(eq("account-3")))
         .thenReturn(Optional.of(Account.builder().id("account-3").build()));
-    when(adminActivityRepository.save(org.mockito.ArgumentMatchers.any(AdminActivity.class)))
+    when(adminActivityRepository.save(any(AdminActivity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     var result = service.record(
@@ -139,7 +139,7 @@ class AdminActivityServiceTest {
   @DisplayName("Explicit actor records do not require request security context")
   void recordForActor_savesWithoutReadingCurrentRequestActor() {
     var service = service();
-    when(adminActivityRepository.save(org.mockito.ArgumentMatchers.any(AdminActivity.class)))
+    when(adminActivityRepository.save(any(AdminActivity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     var result = service.recordForActor(
@@ -156,7 +156,7 @@ class AdminActivityServiceTest {
     assertEquals("captured-admin", result.getActorUsername());
     assertEquals("captured-admin launched a protected action.", result.getMessage());
     assertEquals(NOW, result.getCreatedOn());
-    verify(adminActivityRepository).save(org.mockito.ArgumentMatchers.any(AdminActivity.class));
+    verify(adminActivityRepository).save(any(AdminActivity.class));
     verifyNoMoreInteractions(accountRepository, adminActivityRepository, permissionService);
   }
 

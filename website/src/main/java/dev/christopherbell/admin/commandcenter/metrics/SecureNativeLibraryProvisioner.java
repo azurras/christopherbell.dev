@@ -7,9 +7,12 @@ import com.sun.jna.platform.win32.Win32Exception;
 import com.sun.jna.platform.win32.WinNT;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -20,10 +23,16 @@ import java.nio.file.attribute.AclEntryFlag;
 import java.nio.file.attribute.AclEntryPermission;
 import java.nio.file.attribute.AclEntryType;
 import java.nio.file.attribute.AclFileAttributeView;
-import java.nio.file.attribute.FileOwnerAttributeView;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileOwnerAttributeView;
+import java.nio.file.attribute.UserPrincipal;
+import java.nio.file.attribute.UserPrincipalLookupService;
+import java.nio.file.attribute.UserPrincipalNotFoundException;
+import java.security.DigestInputStream;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.List;
@@ -31,6 +40,8 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /** Extracts checksum-pinned native libraries only into an ACL-restricted fresh directory. */
 final class SecureNativeLibraryProvisioner {
@@ -40,11 +51,11 @@ final class SecureNativeLibraryProvisioner {
   private static final String STAGING_SUFFIX = "-staging";
   private static final String LEASE_FILE = "librehardwaremonitor.lock";
   private static final String VALID_DIRECTORY_NAME =
-      java.util.regex.Pattern.quote(DIRECTORY_PREFIX) + "[A-Za-z0-9-]{1,64}";
+      Pattern.quote(DIRECTORY_PREFIX) + "[A-Za-z0-9-]{1,64}";
   private static final String VALID_STAGING_NAME =
-      java.util.regex.Pattern.quote(STAGING_PREFIX)
+      Pattern.quote(STAGING_PREFIX)
           + "[A-Za-z0-9-]{1,64}"
-          + java.util.regex.Pattern.quote(STAGING_SUFFIX);
+          + Pattern.quote(STAGING_SUFFIX);
   private final Path baseDirectory;
   private final List<ResourceSpec> resources;
   private final AclPolicy aclPolicy;
@@ -194,7 +205,7 @@ final class SecureNativeLibraryProvisioner {
       }
     }
     for (List<Path> tree : trees) {
-      tree.sort(java.util.Comparator.reverseOrder());
+      tree.sort(Comparator.reverseOrder());
       for (Path path : tree) {
         Files.delete(path);
       }
@@ -204,7 +215,7 @@ final class SecureNativeLibraryProvisioner {
   private void deleteOwnedTreeStrict(Path directory) throws IOException {
     var tree = new ArrayList<Path>();
     collectTrustedTree(directory, tree);
-    tree.sort(java.util.Comparator.reverseOrder());
+    tree.sort(Comparator.reverseOrder());
     for (Path path : tree) {
       Files.delete(path);
     }
@@ -233,7 +244,7 @@ final class SecureNativeLibraryProvisioner {
     } else {
       try {
         Files.createFile(leasePath);
-      } catch (java.nio.file.FileAlreadyExistsException ignored) {
+      } catch (FileAlreadyExistsException ignored) {
         verifyNotLinkOrReparsePoint(leasePath);
       }
     }
@@ -278,13 +289,13 @@ final class SecureNativeLibraryProvisioner {
     Files.writeString(
         stagingMarker,
         owner,
-        java.nio.charset.StandardCharsets.US_ASCII,
+        StandardCharsets.US_ASCII,
         StandardOpenOption.CREATE_NEW,
         StandardOpenOption.WRITE);
     verifyNotLinkOrReparsePoint(stagingMarker);
     aclPolicy.hardenAndVerify(stagingMarker);
     if (!owner.equals(Files.readString(
-        stagingMarker, java.nio.charset.StandardCharsets.US_ASCII))) {
+        stagingMarker, StandardCharsets.US_ASCII))) {
       throw new SecurityException("CPU sensor owner marker changed before publication.");
     }
     Files.move(stagingMarker, ownerMarker, StandardCopyOption.ATOMIC_MOVE);
@@ -317,16 +328,11 @@ final class SecureNativeLibraryProvisioner {
   }
 
   private static String sha256(Path path) throws IOException {
-    try (InputStream input = Files.newInputStream(path)) {
-      var digest = MessageDigest.getInstance("SHA-256");
-      input.transferTo(new java.io.OutputStream() {
-        @Override public void write(int value) { digest.update((byte) value); }
-        @Override public void write(byte[] bytes, int offset, int length) {
-          digest.update(bytes, offset, length);
-        }
-      });
-      return HexFormat.of().formatHex(digest.digest());
-    } catch (java.security.NoSuchAlgorithmException impossible) {
+    try (var input = new DigestInputStream(
+        Files.newInputStream(path), MessageDigest.getInstance("SHA-256"))) {
+      input.transferTo(OutputStream.nullOutputStream());
+      return HexFormat.of().formatHex(input.getMessageDigest().digest());
+    } catch (NoSuchAlgorithmException impossible) {
       throw new IllegalStateException(impossible);
     }
   }
@@ -334,10 +340,16 @@ final class SecureNativeLibraryProvisioner {
   private static void deleteTree(Path directory) {
     if (directory == null || !Files.exists(directory)) return;
     try (var paths = Files.walk(directory)) {
-      paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
-        try { Files.deleteIfExists(path); } catch (IOException ignored) { }
+      paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+        try {
+          Files.deleteIfExists(path);
+        } catch (IOException ignored) {
+          // Best effort at close; the next provisioning removes stale owned directories.
+        }
       });
-    } catch (IOException ignored) { }
+    } catch (IOException ignored) {
+      // Best effort at close; the next provisioning removes stale owned directories.
+    }
   }
 
   record ResourceSpec(String fileName, String expectedSha256, Supplier<InputStream> input) {}
@@ -413,10 +425,12 @@ final class SecureNativeLibraryProvisioner {
       try {
         if (lock.isValid()) lock.release();
       } catch (IOException ignored) {
+        // Closing the channel below releases the lock as well.
       } finally {
         try {
           channel.close();
         } catch (IOException ignored) {
+          // The operating system releases the lock when the process exits.
         }
       }
     }
@@ -468,7 +482,7 @@ final class SecureNativeLibraryProvisioner {
       view.setAcl(entries);
       protectDacl(path);
       Set<String> allowed = principals.stream()
-          .map(principal -> principal.getName().toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toSet());
+          .map(principal -> principal.getName().toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
       for (var entry : view.getAcl()) {
         if (entry.type() == AclEntryType.ALLOW
             && !allowed.contains(entry.principal().getName().toLowerCase(Locale.ROOT))
@@ -507,15 +521,15 @@ final class SecureNativeLibraryProvisioner {
       }
     }
 
-    private static java.nio.file.attribute.UserPrincipal lookupPrincipal(
-        java.nio.file.attribute.UserPrincipalLookupService lookup,
+    private static UserPrincipal lookupPrincipal(
+        UserPrincipalLookupService lookup,
         String qualified,
         String fallback,
         boolean group) throws IOException {
       try {
         return group ? lookup.lookupPrincipalByGroupName(qualified)
             : lookup.lookupPrincipalByName(qualified);
-      } catch (java.nio.file.attribute.UserPrincipalNotFoundException failure) {
+      } catch (UserPrincipalNotFoundException failure) {
         return group ? lookup.lookupPrincipalByGroupName(fallback)
             : lookup.lookupPrincipalByName(fallback);
       }

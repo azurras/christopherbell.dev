@@ -3,6 +3,7 @@ package dev.christopherbell.admin.commandcenter.metrics;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.abort;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import com.sun.jna.platform.win32.Advapi32Util;
@@ -18,11 +19,12 @@ import java.nio.file.attribute.AclEntryType;
 import java.nio.file.attribute.AclFileAttributeView;
 import java.security.MessageDigest;
 import java.util.EnumSet;
+import java.util.HexFormat;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 
 class SecureNativeLibraryProvisionerTest {
   @TempDir Path tempDir;
@@ -89,7 +91,7 @@ class SecureNativeLibraryProvisionerTest {
     try {
       Files.createSymbolicLink(stale.resolve("linked.txt"), outside);
     } catch (UnsupportedOperationException | IOException failure) {
-      org.junit.jupiter.api.Assumptions.abort(
+      abort(
           "Symbolic links unavailable: " + failure.getMessage());
     }
     Path fresh = tempDir.resolve("librehardwaremonitor-0.9.6-rollback-fresh");
@@ -235,7 +237,7 @@ class SecureNativeLibraryProvisionerTest {
     try {
       Files.createSymbolicLink(linked, target);
     } catch (UnsupportedOperationException | IOException failure) {
-      org.junit.jupiter.api.Assumptions.abort("Symbolic links unavailable: " + failure.getMessage());
+      abort("Symbolic links unavailable: " + failure.getMessage());
     }
     var provisioner = new SecureNativeLibraryProvisioner(
         linked, List.of(), path -> {}, () -> "linked");
@@ -253,7 +255,7 @@ class SecureNativeLibraryProvisionerTest {
     try {
       Files.createSymbolicLink(stale.resolve("linked.txt"), outside);
     } catch (UnsupportedOperationException | IOException failure) {
-      org.junit.jupiter.api.Assumptions.abort(
+      abort(
           "Symbolic links unavailable: " + failure.getMessage());
     }
     var provisioner = provisionerWithLibraryCompanionAndScript(
@@ -281,7 +283,7 @@ class SecureNativeLibraryProvisionerTest {
 
   private static String hash(String value) {
     try {
-      return java.util.HexFormat.of().formatHex(
+      return HexFormat.of().formatHex(
           MessageDigest.getInstance("SHA-256").digest(value.getBytes(UTF_8)));
     } catch (Exception failure) {
       throw new AssertionError(failure);

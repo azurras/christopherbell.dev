@@ -48,11 +48,15 @@ public class MongoPendingActionStore implements PendingActionStore {
 
   @Override
   public Optional<Reservation> active(Instant now) {
-    var reservation = findReservation();
-    if (reservation.isEmpty() || now.isBefore(reservation.get().executeAt())) {
-      return reservation;
+    var found = findReservation();
+    if (found.isEmpty()) {
+      return found;
     }
-    if (clear(reservation.get())) {
+    var reservation = found.orElseThrow();
+    if (now.isBefore(reservation.executeAt())) {
+      return found;
+    }
+    if (clear(reservation)) {
       return Optional.empty();
     }
     return findReservation().filter(current -> now.isBefore(current.executeAt()));

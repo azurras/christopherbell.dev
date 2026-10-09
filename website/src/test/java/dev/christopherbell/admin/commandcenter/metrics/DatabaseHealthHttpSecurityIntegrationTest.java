@@ -1,7 +1,8 @@
 package dev.christopherbell.admin.commandcenter.metrics;
 
-import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -58,8 +59,8 @@ class DatabaseHealthHttpSecurityIntegrationTest {
         .andExpect(jsonPath("$.components.database.details.database").value("test"))
         .andExpect(jsonPath("$.components.database.details.schemaVersion").value("legacy"))
         .andExpect(jsonPath("$.components.database.details", not(hasKey("username"))))
-        .andExpect(content().string(not(org.hamcrest.Matchers.containsString("password"))))
-        .andExpect(content().string(not(org.hamcrest.Matchers.containsString("connectionString"))));
+        .andExpect(content().string(not(containsString("password"))))
+        .andExpect(content().string(not(containsString("connectionString"))));
   }
 
   @Test

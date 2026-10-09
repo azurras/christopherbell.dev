@@ -4,27 +4,30 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.christopherbell.admin.commandcenter.action.SimulatedCommandExecutor;
 import dev.christopherbell.admin.commandcenter.action.WindowsCommandExecutor;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import jakarta.validation.ConstraintViolation;
-import jakarta.validation.Validation;
-import jakarta.validation.Validator;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.io.ClassPathResource;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 class CommandCenterPropertiesTest {
 
@@ -47,12 +50,12 @@ class CommandCenterPropertiesTest {
     var actions = configuration.commandCenterActionScheduler();
     try {
       assertThat(general).isNotSameAs(metrics).isNotSameAs(actions);
-      assertThat(((org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler) general)
+      assertThat(((ThreadPoolTaskScheduler) general)
           .getThreadNamePrefix()).isEqualTo("application-scheduled-");
     } finally {
-      ((org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler) general).shutdown();
-      ((org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler) metrics).shutdown();
-      ((org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler) actions).shutdown();
+      ((ThreadPoolTaskScheduler) general).shutdown();
+      ((ThreadPoolTaskScheduler) metrics).shutdown();
+      ((ThreadPoolTaskScheduler) actions).shutdown();
     }
   }
 
@@ -62,7 +65,7 @@ class CommandCenterPropertiesTest {
         .withUserConfiguration(CommandCenterConfiguration.class, SchedulingProbeConfiguration.class)
         .run(context -> {
           var probe = context.getBean(SchedulingProbe.class);
-          assertThat(probe.ran.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+          assertThat(probe.ran.await(2, TimeUnit.SECONDS)).isTrue();
           assertThat(probe.threadName).startsWith("application-scheduled-");
         });
   }
@@ -76,7 +79,7 @@ class CommandCenterPropertiesTest {
   }
 
   static class SchedulingProbe {
-    private final java.util.concurrent.CountDownLatch ran = new java.util.concurrent.CountDownLatch(1);
+    private final CountDownLatch ran = new CountDownLatch(1);
     private volatile String threadName;
     @Scheduled(fixedDelay = 60_000)
     void run() {
