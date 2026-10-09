@@ -21,18 +21,9 @@ public class WflSessionExceptionHandler {
         .success(false)
         .messages(List.of(Message.builder()
             .code(conflict.code())
-            .description(description(conflict.code()))
+            .description(conflict.conflict().description())
             .build()))
         .build();
     return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
-  }
-
-  private String description(String code) {
-    return switch (code) {
-      case "WFL_SESSION_FULL" -> "This lunch session is full.";
-      case "WFL_SESSION_EXPIRED" -> "This lunch session is archived and cannot be changed.";
-      case "WFL_SESSION_CHANGED" -> "This lunch session changed. Refresh and try again.";
-      default -> "This lunch session cannot be changed.";
-    };
   }
 }

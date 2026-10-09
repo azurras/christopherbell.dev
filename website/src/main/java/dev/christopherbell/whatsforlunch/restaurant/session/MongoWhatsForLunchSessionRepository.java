@@ -1,9 +1,8 @@
 package dev.christopherbell.whatsforlunch.restaurant.session;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import java.time.Instant;
 import java.util.List;
@@ -23,13 +22,19 @@ public class MongoWhatsForLunchSessionRepository
   public MongoWhatsForLunchSessionRepository(DomainMongoOperationsFactory factory) {
     super(factory, WhatsForLunchSession.class);
   }
-  @Override public WhatsForLunchSession save(WhatsForLunchSession session) {
+
+  @Override
+  public WhatsForLunchSession save(WhatsForLunchSession session) {
     return saveValue(session);
   }
-  @Override public Optional<WhatsForLunchSession> findById(String id) {
+
+  @Override
+  public Optional<WhatsForLunchSession> findById(String id) {
     return findValueById(id);
   }
-  @Override public List<WhatsForLunchSession>
+
+  @Override
+  public List<WhatsForLunchSession>
       findByParticipantAccountIdsContainingAndDeleteOnAfterOrderByCreatedOnDesc(
           String accountId, Instant now, Pageable pageable) {
     return find(Query.query(Criteria.where("participantAccountIds").is(accountId)

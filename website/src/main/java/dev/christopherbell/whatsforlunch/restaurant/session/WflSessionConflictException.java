@@ -1,15 +1,19 @@
 package dev.christopherbell.whatsforlunch.restaurant.session;
 
-/** Stable public conflict code for a bounded WFL session mutation. */
+/** Signals a bounded WFL session mutation conflict with a stable public code. */
 public final class WflSessionConflictException extends RuntimeException {
-  private final String code;
+  private final WflSessionConflict conflict;
 
-  public WflSessionConflictException(String code) {
-    super(code);
-    this.code = code;
+  public WflSessionConflictException(WflSessionConflict conflict) {
+    super(conflict.code());
+    this.conflict = conflict;
+  }
+
+  public WflSessionConflict conflict() {
+    return conflict;
   }
 
   public String code() {
-    return code;
+    return conflict.code();
   }
 }
