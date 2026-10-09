@@ -31,7 +31,9 @@ public final class SharedFolderMaintenanceHostLock {
   }
 
   public SharedFolderMaintenanceHostLock(Path systemRoot) {
-    if (systemRoot == null) throw new IllegalArgumentException(INVALID_ROOT_MESSAGE);
+    if (systemRoot == null) {
+      throw new IllegalArgumentException(INVALID_ROOT_MESSAGE);
+    }
     try {
       this.systemRoot = systemRoot.toAbsolutePath().normalize();
       this.lockPath = this.systemRoot.resolve(LOCK_FILE_NAME).normalize();
@@ -46,7 +48,9 @@ public final class SharedFolderMaintenanceHostLock {
   /** Attempts the host-wide lock without waiting; absence means another process owns it. */
   public Optional<Handle> tryAcquire() {
     try {
-      if (!Files.isDirectory(systemRoot, LinkOption.NOFOLLOW_LINKS)) throw unavailable();
+      if (!Files.isDirectory(systemRoot, LinkOption.NOFOLLOW_LINKS)) {
+        throw unavailable();
+      }
     } catch (RuntimeException failure) {
       throw unavailable();
     }
@@ -101,7 +105,9 @@ public final class SharedFolderMaintenanceHostLock {
 
     @Override
     public synchronized void close() {
-      if (closed) return;
+      if (closed) {
+        return;
+      }
       closed = true;
       boolean failed = false;
       try {
@@ -115,7 +121,9 @@ public final class SharedFolderMaintenanceHostLock {
           failed = true;
         }
       }
-      if (failed) throw unavailable();
+      if (failed) {
+        throw unavailable();
+      }
     }
   }
 }

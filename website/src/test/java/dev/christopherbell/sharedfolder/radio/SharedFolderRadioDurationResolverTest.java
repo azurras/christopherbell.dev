@@ -25,7 +25,7 @@ class SharedFolderRadioDurationResolverTest {
     SharedFolderRadioDurationResolver resolver = new SharedFolderRadioDurationResolver(tracks);
 
     assertThat(resolver.resolve(entry("Music/Album/song.mp3", "revision-1")))
-        .isEqualTo(123.5);
+        .contains(123.5);
   }
 
   @Test
@@ -39,9 +39,9 @@ class SharedFolderRadioDurationResolverTest {
             .markMissing(NOW)));
     SharedFolderRadioDurationResolver resolver = new SharedFolderRadioDurationResolver(tracks);
 
-    assertThat(resolver.resolve(entry("Music/Album/song.mp3", "forged-revision"))).isNull();
-    assertThat(resolver.resolve(entry("Music/Album/missing.mp3", "revision-2"))).isNull();
-    assertThat(resolver.resolve(entry("Other/song.mp3", "revision-1"))).isNull();
+    assertThat(resolver.resolve(entry("Music/Album/song.mp3", "forged-revision"))).isEmpty();
+    assertThat(resolver.resolve(entry("Music/Album/missing.mp3", "revision-2"))).isEmpty();
+    assertThat(resolver.resolve(entry("Other/song.mp3", "revision-1"))).isEmpty();
   }
 
   private SharedDirectoryEntry entry(String path, String token) {
