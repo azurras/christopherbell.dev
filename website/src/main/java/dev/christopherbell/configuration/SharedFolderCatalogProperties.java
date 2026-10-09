@@ -19,6 +19,7 @@ public record SharedFolderCatalogProperties(
   private static final int MAX_DEPTH_LIMIT = 128;
   private static final Duration MAX_SCAN_LIMIT = Duration.ofMinutes(10);
   private static final Duration MAX_REFRESH_LIMIT = Duration.ofHours(1);
+  private static final int MAX_PAGE_SIZE_LIMIT = 100;
 
   /** Rejects unsafe or accidentally unbounded scan settings during configuration binding. */
   public SharedFolderCatalogProperties {
@@ -27,7 +28,7 @@ public record SharedFolderCatalogProperties(
     requireRange(maxDepth, 0, MAX_DEPTH_LIMIT, "depth limit");
     requireDuration(maxScanDuration, MAX_SCAN_LIMIT, "scan duration");
     requireDuration(refreshAfter, MAX_REFRESH_LIMIT, "refresh age");
-    requireRange(defaultPageSize, 1, 100, "default page size");
+    requireRange(defaultPageSize, 1, MAX_PAGE_SIZE_LIMIT, "default page size");
   }
 
   private static void requireRange(int value, int minimum, int maximum, String label) {

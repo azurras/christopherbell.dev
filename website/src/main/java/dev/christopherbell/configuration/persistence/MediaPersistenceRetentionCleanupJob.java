@@ -26,8 +26,9 @@ public final class MediaPersistenceRetentionCleanupJob {
   @Autowired
   public MediaPersistenceRetentionCleanupJob(
       MusicAccessRetention musicAccessAttempts,
-      SharedFolderAuditRetention sharedAuditEvents) {
-    this(musicAccessAttempts, sharedAuditEvents, Clock.systemUTC(), DEFAULT_BATCH_LIMIT);
+      SharedFolderAuditRetention sharedAuditEvents,
+      Clock clock) {
+    this(musicAccessAttempts, sharedAuditEvents, clock, DEFAULT_BATCH_LIMIT);
   }
 
   MediaPersistenceRetentionCleanupJob(
@@ -38,7 +39,9 @@ public final class MediaPersistenceRetentionCleanupJob {
     this.musicAccessAttempts = Objects.requireNonNull(musicAccessAttempts, "musicAccessAttempts");
     this.sharedAuditEvents = Objects.requireNonNull(sharedAuditEvents, "sharedAuditEvents");
     this.clock = Objects.requireNonNull(clock, "clock");
-    if (batchLimit <= 0) throw new IllegalArgumentException("Batch limit must be positive.");
+    if (batchLimit <= 0) {
+      throw new IllegalArgumentException("Batch limit must be positive.");
+    }
     this.batchLimit = batchLimit;
   }
 

@@ -3,9 +3,10 @@ package dev.christopherbell.configuration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
@@ -14,6 +15,8 @@ import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantRepository;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -40,7 +43,7 @@ class PublicSitemapServiceTest {
     service = new PublicSitemapService(
         accounts, posts, restaurants, Clock.fixed(now, ZoneOffset.UTC), false, 10);
     when(accounts.countByStatus(AccountStatus.ACTIVE)).thenReturn(2L);
-    org.mockito.Mockito.lenient().when(posts.count()).thenReturn(1L);
+    lenient().when(posts.count()).thenReturn(1L);
     when(restaurants.count()).thenReturn(1L);
   }
 
@@ -124,8 +127,8 @@ class PublicSitemapServiceTest {
 
   private static void assertXml(String xml, String rootName) throws Exception {
     var builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
-    var document = builder.parse(new java.io.ByteArrayInputStream(
-        xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    var document = builder.parse(new ByteArrayInputStream(
+        xml.getBytes(StandardCharsets.UTF_8)));
     assertThat(document.getDocumentElement().getNodeName()).isEqualTo(rootName);
   }
 }
