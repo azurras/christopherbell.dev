@@ -1,26 +1,15 @@
+import { parseServerPage, serverPageNavigation } from './back-office-paging.js';
+
 const AUDIT_STATE_KEYS = ['role', 'status', 'resolution'];
 
 /** Validate one server audit page before it reaches Back Office rendering. */
 export function parseActivityPage(payload) {
-  if (!payload || !Array.isArray(payload.items)
-      || !Number.isInteger(payload.page) || payload.page < 0
-      || !Number.isInteger(payload.size) || payload.size < 1
-      || !Number.isFinite(payload.totalElements) || payload.totalElements < 0
-      || !Number.isInteger(payload.totalPages) || payload.totalPages < 0) {
-    throw new Error('Invalid audit page response.');
-  }
-  return { ...payload, items: [...payload.items] };
+  return parseServerPage(payload, 'Invalid audit page response.');
 }
 
 /** Derive exact navigation state from authoritative audit totals. */
 export function activityPageNavigation(page) {
-  const totalPages = Math.max(0, Number(page?.totalPages || 0));
-  const current = Math.max(0, Number(page?.page || 0));
-  return {
-    previousDisabled: current <= 0,
-    nextDisabled: totalPages === 0 || current + 1 >= totalPages,
-    label: totalPages === 0 ? 'Page 0 of 0' : `Page ${current + 1} of ${totalPages}`,
-  };
+  return serverPageNavigation(page);
 }
 
 /** Convert audit form controls to the inclusive Instant query contract. */
