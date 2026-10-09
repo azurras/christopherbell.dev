@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.model.Post;
@@ -36,7 +37,7 @@ class VoidDiscoveryQueryRepositoryTest {
   void setUp() {
     cursors = new StableCursorCodec();
     repository = new VoidDiscoveryQueryRepository(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo),
+        DomainMongoOperationsTestFactory.create(mongo),
         cursors);
   }
 
@@ -45,9 +46,9 @@ class VoidDiscoveryQueryRepositoryTest {
     var boundary = post("p2", NOW.minusSeconds(20));
     var extra = post("p1", NOW.minusSeconds(30));
     var documents = List.of(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        DomainMongoOperationsTestFactory
             .envelope(mongo, boundary),
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        DomainMongoOperationsTestFactory
             .envelope(mongo, extra));
     when(mongo.find(any(Query.class), eq(Document.class), eq("content"))).thenReturn(documents);
 

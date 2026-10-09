@@ -7,9 +7,7 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
-/**
- * Spring Data Mongo repository for {@link dev.christopherbell.post.model.Post} entities.
- */
+/** Persistence port for {@link Post} documents. */
 public interface PostRepository {
   Post save(Post post);
   Optional<Post> findById(String id);

@@ -1,10 +1,9 @@
 package dev.christopherbell.post.discovery;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
-import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.model.Post;
@@ -15,6 +14,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 import org.bson.Document;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
@@ -131,7 +131,7 @@ public class VoidDiscoveryQueryRepository implements VoidDiscoveryQueryPort {
     var items = loaded.stream().limit(size).toList();
     String nextCursor = null;
     if (hasNext && !items.isEmpty()) {
-      var boundary = items.get(items.size() - 1);
+      var boundary = items.getLast();
       nextCursor = cursors.encode(new StableCursor(boundary.activityOn(), boundary.canonical()));
     }
     return new VoidDiscoveryPage<>(items, nextCursor);
@@ -146,18 +146,17 @@ public class VoidDiscoveryQueryRepository implements VoidDiscoveryQueryPort {
       boolean requireRevival
   ) {
     int size = pageSize(requestedSize);
-    var criteria = rootCriteria(now, requireRevival);
-    if (cursor.isPresent()) {
-      criteria = new Criteria().andOperator(
-          criteria,
-          cursorBoundary(timestampField, direction, cursor.get()));
-    }
+    var roots = rootCriteria(now, requireRevival);
+    var criteria = cursor
+        .map(boundary -> new Criteria().andOperator(
+            roots, cursorBoundary(timestampField, direction, boundary)))
+        .orElse(roots);
     var query = new Query(criteria)
         .with(Sort.by(
             new Sort.Order(direction, timestampField),
             new Sort.Order(direction, "id")))
         .limit(size + 1);
-    var loaded = posts.find(query, org.springframework.data.domain.Pageable.unpaged());
+    var loaded = posts.find(query, Pageable.unpaged());
     return postPage(loaded, size, post -> timestamp(post, timestampField));
   }
 
@@ -167,7 +166,7 @@ public class VoidDiscoveryQueryRepository implements VoidDiscoveryQueryPort {
     var items = loaded.stream().limit(size).toList();
     String nextCursor = null;
     if (hasNext && !items.isEmpty()) {
-      var boundary = items.get(items.size() - 1);
+      var boundary = items.getLast();
       nextCursor = cursors.encode(new StableCursor(timestamp.apply(boundary), boundary.getId()));
     }
     return new VoidDiscoveryPage<>(items, nextCursor);
@@ -204,7 +203,7 @@ public class VoidDiscoveryQueryRepository implements VoidDiscoveryQueryPort {
       Optional<StableCursor> cursor,
       Instant now
   ) {
-    var clauses = new java.util.ArrayList<Document>();
+    var clauses = new ArrayList<Document>();
     clauses.add(new Document("parentId", null));
     clauses.add(new Document("expiresOn", new Document("$gt", Date.from(now))));
     cursor.ifPresent(boundary -> clauses.add(rawBoundary(timestampField, direction, boundary)));

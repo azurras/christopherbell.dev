@@ -1,11 +1,12 @@
 package dev.christopherbell.post;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.verify;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import dev.christopherbell.post.model.PostLinkPreview;
 import dev.christopherbell.post.preview.PostLinkPreviewClient;
@@ -93,7 +94,7 @@ class PostLinkPreviewServiceTest {
         properties).resolveForText("https://one.example/ https://two.example/");
 
     verify(postLinkPreviewClient).fetch("https://one.example/");
-    verify(postLinkPreviewClient, org.mockito.Mockito.never()).fetch("https://two.example/");
+    verify(postLinkPreviewClient, never()).fetch("https://two.example/");
   }
 
   private PostLinkPreviewService service(Instant now) {

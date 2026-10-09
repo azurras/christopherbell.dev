@@ -3,9 +3,11 @@ package dev.christopherbell.post.feed;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.model.Post;
@@ -36,7 +38,7 @@ class PostFeedQueryRepositoryTest {
   void setUp() {
     cursorCodec = new StableCursorCodec();
     repository = new PostFeedQueryRepository(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo),
+        DomainMongoOperationsTestFactory.create(mongo),
         cursorCodec);
   }
 
@@ -47,9 +49,9 @@ class PostFeedQueryRepositoryTest {
     var boundary = post("p2", timestamp);
     var extra = post("p1", timestamp.minusSeconds(1));
     var documents = List.of(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        DomainMongoOperationsTestFactory
             .envelope(mongo, boundary),
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        DomainMongoOperationsTestFactory
             .envelope(mongo, extra));
     when(mongo.find(any(Query.class), eq(Document.class), eq("content"))).thenReturn(documents);
 
@@ -75,7 +77,7 @@ class PostFeedQueryRepositoryTest {
     repository.accounts(List.of("account-1", "account-2"), Optional.empty(), 20);
 
     var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo, org.mockito.Mockito.times(2)).find(
+    verify(mongo, times(2)).find(
         query.capture(), eq(Document.class), eq("content"));
     assertThat(query.getAllValues().get(0).getQueryObject().toString())
         .contains("_kind=post", "payload.accountId=account-1");
