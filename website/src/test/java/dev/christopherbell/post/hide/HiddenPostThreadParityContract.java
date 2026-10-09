@@ -3,6 +3,8 @@ package dev.christopherbell.post.hide;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.account.model.Role;
 import dev.christopherbell.post.model.Post;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,8 +42,8 @@ interface HiddenPostThreadParityContract {
 
   private static Account account() {
     return Account.builder().id(ACCOUNT).createdOn(NOW).email(ACCOUNT + "@example.test")
-        .passwordHash("hash").role(dev.christopherbell.account.model.Role.USER)
-        .status(dev.christopherbell.account.model.AccountStatus.ACTIVE).username(ACCOUNT).build();
+        .passwordHash("hash").role(Role.USER)
+        .status(AccountStatus.ACTIVE).username(ACCOUNT).build();
   }
 
   private static Post post() {

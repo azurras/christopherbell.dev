@@ -1,19 +1,20 @@
 package dev.christopherbell.post.discovery;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
-import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
-import dev.christopherbell.post.model.Post;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.post.like.PostLikeStore;
+import dev.christopherbell.post.model.Post;
 import java.time.Instant;
 import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Stream;
 import org.bson.Document;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -46,8 +47,8 @@ public class VoidPeopleDiscoveryQueryRepository implements VoidPeopleDiscoveryQu
         .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
         .limit(MAX_INTEREST_POSTS);
     var interests = new LinkedHashSet<String>();
-    posts.find(query, org.springframework.data.domain.Pageable.unpaged()).stream()
-        .flatMap(post -> post.getTopics() == null ? java.util.stream.Stream.empty() : post.getTopics().stream())
+    posts.find(query, Pageable.unpaged()).stream()
+        .flatMap(post -> post.getTopics() == null ? Stream.empty() : post.getTopics().stream())
         .filter(Objects::nonNull)
         .map(topic -> topic.canonical())
         .forEach(interests::add);

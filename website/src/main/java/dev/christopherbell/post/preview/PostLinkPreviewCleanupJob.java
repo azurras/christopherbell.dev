@@ -19,8 +19,8 @@ public final class PostLinkPreviewCleanupJob {
   private final int batchLimit;
 
   @Autowired
-  public PostLinkPreviewCleanupJob(PostLinkPreviewCacheRepository cache) {
-    this(cache, Clock.systemUTC(), DEFAULT_BATCH_LIMIT);
+  public PostLinkPreviewCleanupJob(PostLinkPreviewCacheRepository cache, Clock clock) {
+    this(cache, clock, DEFAULT_BATCH_LIMIT);
   }
 
   PostLinkPreviewCleanupJob(
