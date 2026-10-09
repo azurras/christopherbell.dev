@@ -214,8 +214,8 @@ class FederationOutboundCoordinatorTest {
     private Instant retryAt;
 
     @Override
-    public FederationScanCursor loadCursor() {
-      return cursor;
+    public Optional<FederationScanCursor> loadCursor() {
+      return Optional.ofNullable(cursor);
     }
 
     @Override
