@@ -289,13 +289,17 @@ public class SharedFolderRecycleService {
     for (SharedFolderRecycleItem item : batch) {
       try {
         purgeInternal(item);
-        if (audit != null) audit.recordSystem(
-            "RETENTION_PURGE", item.originalPath(), item.size(), "accepted", null);
+        if (audit != null) {
+          audit.recordSystem(
+              "RETENTION_PURGE", item.originalPath(), item.size(), "accepted", null);
+        }
         purged++;
       } catch (RuntimeException failure) {
         deferMaintenance(item);
-        if (audit != null) audit.recordSystemFailure(
-            "RETENTION_PURGE", item.originalPath(), item.size(), failure);
+        if (audit != null) {
+          audit.recordSystemFailure(
+              "RETENTION_PURGE", item.originalPath(), item.size(), failure);
+        }
         log.warn("Shared-folder retention purge deferred for item {}", item.id());
       }
     }
@@ -326,8 +330,10 @@ public class SharedFolderRecycleService {
         }
       } catch (RuntimeException failure) {
         deferMaintenance(item);
-        if (audit != null) audit.recordSystemFailure(
-            recoveryAction(item), item.originalPath(), item.size(), failure);
+        if (audit != null) {
+          audit.recordSystemFailure(
+              recoveryAction(item), item.originalPath(), item.size(), failure);
+        }
         log.warn("Shared-folder recycle reconciliation deferred for item {}", item.id());
       }
     }
@@ -783,11 +789,15 @@ public class SharedFolderRecycleService {
   }
 
   private void requireMutationCapacity(Account account) {
-    if (mutationLimiter != null) mutationLimiter.requireMutation(account);
+    if (mutationLimiter != null) {
+      mutationLimiter.requireMutation(account);
+    }
   }
 
   private void recordFor(Account account, String action, String path, long size) {
-    if (audit != null) audit.recordFor(account, action, path, size, "accepted", null);
+    if (audit != null) {
+      audit.recordFor(account, action, path, size, "accepted", null);
+    }
   }
 
   private ResponseStatusException badRequest() {
