@@ -1,9 +1,9 @@
 # Survive
 
 Java browser adaptation of [azurras/survive](https://github.com/azurras/survive),
-inspected at `24d50be92e1609e6e983b7dda9231bd77777b3d1` (GPL-3.0).
-The ported gameplay in this package is distributed under GPL-3.0; the upstream
-license is served at `/licenses/survive-GPL-3.0.txt`. No Python process is used.
+inspected at `24d50be92e1609e6e983b7dda9231bd77777b3d1`.
+Survive and the ported gameplay in this package are distributed under the MIT
+license, which is served at `/licenses/survive-MIT.txt`. No Python process is used.
 
 ## One authoritative world
 

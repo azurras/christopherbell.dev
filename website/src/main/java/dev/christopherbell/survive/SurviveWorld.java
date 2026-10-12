@@ -17,7 +17,7 @@ import java.util.function.IntSupplier;
 
 /**
  * One authoritative world: survivors own their supplies while camp structures and events are shared.
- * Adapted from azurras/survive (GPL-3.0); see README.md for source and completed mechanics.
+ * Adapted from azurras/survive (MIT); see README.md for source and completed mechanics.
  * The service serializes all access, allowing a future transport to reuse the same commands.
  */
 final class SurviveWorld {

@@ -19,9 +19,10 @@ class SecurityConfigTest {
   void surviveExposesOnlyItsPageAndExactGameCommands() throws Exception {
     var matchers = publicMatchers();
     for (var path : List.of("/survive", "/survive/", "/api/survive/v1/game",
-        "/licenses/survive-GPL-3.0.txt")) {
+        "/licenses/survive-MIT.txt")) {
       assertTrue(matchers.stream().anyMatch(matcher -> matcher.matches(request("GET", path))));
     }
+    assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("GET", "/licenses/survive-GPL-3.0.txt"))));
     for (var path : List.of("/api/survive/v1/game", "/api/survive/v1/actions")) {
       assertTrue(matchers.stream().anyMatch(matcher -> matcher.matches(request("POST", path))));
       assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("DELETE", path))));
