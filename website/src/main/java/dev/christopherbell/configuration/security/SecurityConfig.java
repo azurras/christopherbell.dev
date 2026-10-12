@@ -87,7 +87,7 @@ public class SecurityConfig {
       "GET:/site-monitor",
       "GET:/survive",
       "GET:/survive/",
-      "GET:/licenses/survive-GPL-3.0.txt",
+      "GET:/licenses/survive-MIT.txt",
       "GET:/api/survive/v1/game",
       "POST:/api/survive/v1/game",
       "POST:/api/survive/v1/actions",
