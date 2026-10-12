@@ -1,9 +1,8 @@
 package dev.christopherbell.sharedfolder.recycle;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -19,23 +18,43 @@ import org.springframework.stereotype.Repository;
 public class MongoSharedFolderRecycleRepository
     extends KindScopedRepositorySupport<SharedFolderRecycleItem>
     implements SharedFolderRecycleRepository {
-  public MongoSharedFolderRecycleRepository(DomainMongoOperationsFactory factory) { super(factory, SharedFolderRecycleItem.class); }
-  @Override public SharedFolderRecycleItem save(SharedFolderRecycleItem value) { return saveValue(value); }
-  @Override public Optional<SharedFolderRecycleItem> findById(String id) { return findValueById(id); }
-  @Override public void deleteById(String id) { super.deleteById(id); }
-  @Override public Slice<SharedFolderRecycleItem> findByStateOrderByDeletedAtDescIdDesc(
+  public MongoSharedFolderRecycleRepository(DomainMongoOperationsFactory factory) {
+    super(factory, SharedFolderRecycleItem.class);
+  }
+
+  @Override
+  public SharedFolderRecycleItem save(SharedFolderRecycleItem value) {
+    return saveValue(value);
+  }
+
+  @Override
+  public Optional<SharedFolderRecycleItem> findById(String id) {
+    return findValueById(id);
+  }
+
+  @Override
+  public void deleteById(String id) {
+    super.deleteById(id);
+  }
+
+  @Override
+  public Slice<SharedFolderRecycleItem> findByStateOrderByDeletedAtDescIdDesc(
       SharedFolderRecycleState state, Pageable page) {
     return slice(Query.query(Criteria.where("state").is(state))
         .with(Sort.by(Sort.Order.desc("deletedAt"), Sort.Order.desc("id"))), page);
   }
-  @Override public List<SharedFolderRecycleItem>
+
+  @Override
+  public List<SharedFolderRecycleItem>
       findByStateAndExpiresAtBeforeAndRetryAfterLessThanEqualOrderByExpiresAtAscIdAsc(
           SharedFolderRecycleState state, Instant cutoff, Instant retryDue, Pageable page) {
     return find(Query.query(Criteria.where("state").is(state).and("expiresAt").lt(cutoff)
         .and("retryAfter").lte(retryDue))
         .with(Sort.by(Sort.Order.asc("expiresAt"), Sort.Order.asc("id"))), page);
   }
-  @Override public List<SharedFolderRecycleItem>
+
+  @Override
+  public List<SharedFolderRecycleItem>
       findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(
           List<SharedFolderRecycleState> states, Instant retryDue, Pageable page) {
     return find(Query.query(Criteria.where("state").in(states).and("retryAfter").lte(retryDue))

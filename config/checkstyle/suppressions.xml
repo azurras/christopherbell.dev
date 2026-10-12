@@ -8,8 +8,6 @@
   else belongs here.
 -->
 <suppressions>
-  <!-- Slice 19d: shared-folder recycle bin. -->
-  <suppress files="[\/]sharedfolder[\/]recycle[\/]" checks=".*"/>
   <!-- Slice 19e: shared-folder media. -->
   <suppress files="[\/]sharedfolder[\/]media[\/]" checks=".*"/>
   <!-- Slice 19f: shared-folder upload. -->

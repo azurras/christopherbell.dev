@@ -2,6 +2,7 @@ package dev.christopherbell.sharedfolder.recycle;
 
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.configuration.SharedFolderProperties;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
@@ -13,9 +14,8 @@ import dev.christopherbell.sharedfolder.model.SharedDirectoryEntryType;
 import dev.christopherbell.sharedfolder.model.SharedFolderDeleteRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
-import dev.christopherbell.sharedfolder.service.SharedFolderObservedItemTokens;
 import dev.christopherbell.sharedfolder.service.SharedFolderAccountMutationLimiter;
-import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import dev.christopherbell.sharedfolder.service.SharedFolderObservedItemTokens;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -25,15 +25,17 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
-import java.util.UUID;
 import java.util.Base64;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.http.HttpStatus;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -41,6 +43,18 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 @Slf4j
 public class SharedFolderRecycleService {
+  /**
+   * Native statuses meaning another item is in the way: object name collision (0xC0000035),
+   * sharing violation (0xC0000043, Win32 32), file exists (Win32 80), already exists (Win32 183)
+   * and directory not empty (0xC0000101).
+   */
+  private static final Set<Integer> CONFLICT_STATUSES =
+      Set.of(0xC0000035, 0xC0000043, 32, 80, 183, 0xC0000101);
+  /**
+   * Native statuses meaning the item is gone: object name not found (0xC0000034), object path not
+   * found (0xC000003A), and Win32 file (2) and path (3) not found.
+   */
+  private static final Set<Integer> MISSING_STATUSES = Set.of(0xC0000034, 0xC000003A, 2, 3);
   private static final String RECYCLE_DIRECTORY = "shared-folder-recycle";
   private static final String REPLACED_DIRECTORY = "shared-folder-recycle-replaced";
   private static final int ADMIN_LIST_LIMIT = 200;
@@ -161,7 +175,9 @@ public class SharedFolderRecycleService {
   public SharedFolderRecyclePage listPage(int page) {
     access.requireAdmin();
     requireEnabled();
-    if (page < 0 || page > MAX_ADMIN_LIST_PAGE) throw badRequest();
+    if (page < 0 || page > MAX_ADMIN_LIST_PAGE) {
+      throw badRequest();
+    }
     var result = repository.findByStateOrderByDeletedAtDescIdDesc(
         SharedFolderRecycleState.RECYCLED, PageRequest.of(page, ADMIN_LIST_LIMIT));
     return new SharedFolderRecyclePage(
@@ -196,7 +212,9 @@ public class SharedFolderRecycleService {
       String replacementKey = null;
       String replacementFingerprint = null;
       if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
-        if (!replace) throw conflict();
+        if (!replace) {
+          throw conflict();
+        }
         Path existing = resolver.existing(item.originalPath());
         resolver.recheckForMutation(existing);
         replacementKey = UUID.randomUUID().toString();
@@ -227,7 +245,7 @@ public class SharedFolderRecycleService {
       } catch (IOException | RuntimeException failure) {
         try {
           reconcileItem(restoring);
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException reconciliationFailure) {
           // The durable RESTORING record remains for startup/scheduled reconciliation.
         }
         throw failure;
@@ -258,7 +276,9 @@ public class SharedFolderRecycleService {
 
   /** Purges only recycle entries whose configured retention deadline has elapsed. */
   public synchronized int cleanupExpired() {
-    if (!properties.enabled()) return 0;
+    if (!properties.enabled()) {
+      return 0;
+    }
     reconcilePending();
     int purged = 0;
     Instant now = clock.instant();
@@ -269,13 +289,17 @@ public class SharedFolderRecycleService {
     for (SharedFolderRecycleItem item : batch) {
       try {
         purgeInternal(item);
-        if (audit != null) audit.recordSystem(
-            "RETENTION_PURGE", item.originalPath(), item.size(), "accepted", null);
+        if (audit != null) {
+          audit.recordSystem(
+              "RETENTION_PURGE", item.originalPath(), item.size(), "accepted", null);
+        }
         purged++;
       } catch (RuntimeException failure) {
         deferMaintenance(item);
-        if (audit != null) audit.recordSystemFailure(
-            "RETENTION_PURGE", item.originalPath(), item.size(), failure);
+        if (audit != null) {
+          audit.recordSystemFailure(
+              "RETENTION_PURGE", item.originalPath(), item.size(), failure);
+        }
         log.warn("Shared-folder retention purge deferred for item {}", item.id());
       }
     }
@@ -287,7 +311,9 @@ public class SharedFolderRecycleService {
       value = ApplicationReadyEvent.class,
       condition = "!@environment.acceptsProfiles('deploy-smoke')")
   public synchronized int reconcilePending() {
-    if (!properties.enabled()) return 0;
+    if (!properties.enabled()) {
+      return 0;
+    }
     int reconciled = 0;
     Instant now = clock.instant();
     List<SharedFolderRecycleItem> batch = repository
@@ -304,8 +330,10 @@ public class SharedFolderRecycleService {
         }
       } catch (RuntimeException failure) {
         deferMaintenance(item);
-        if (audit != null) audit.recordSystemFailure(
-            recoveryAction(item), item.originalPath(), item.size(), failure);
+        if (audit != null) {
+          audit.recordSystemFailure(
+              recoveryAction(item), item.originalPath(), item.size(), failure);
+        }
         log.warn("Shared-folder recycle reconciliation deferred for item {}", item.id());
       }
     }
@@ -360,9 +388,13 @@ public class SharedFolderRecycleService {
       try {
         target = nativeBoundary.metadata(item.originalPath());
       } catch (NativeBoundaryException missing) {
-        if (!isNativeMissing(missing)) throw missing;
+        if (!isNativeMissing(missing)) {
+          throw missing;
+        }
       }
-      if (target != null && !replace) throw conflict();
+      if (target != null && !replace) {
+        throw conflict();
+      }
       String replacementKey = target == null ? null : UUID.randomUUID().toString();
       String replacementFingerprint = target == null ? null : nativeFingerprint(target);
       SharedFolderRecycleItem restoring = repository.save(
@@ -376,7 +408,7 @@ public class SharedFolderRecycleService {
       } catch (RuntimeException failure) {
         try {
           reconcileItem(restoring);
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException reconciliationFailure) {
           // The durable RESTORING record remains for startup/scheduled reconciliation.
         }
         throw failure;
@@ -448,7 +480,9 @@ public class SharedFolderRecycleService {
   }
 
   private boolean reconcilePortable(SharedFolderRecycleItem item) throws IOException {
-    if (!nativeBoundary.testOnlyPortableMode()) throw unavailable();
+    if (!nativeBoundary.testOnlyPortableMode()) {
+      throw unavailable();
+    }
     SharedFolderPathResolver resolver = new SharedFolderPathResolver(properties.root());
     Path target = resolver.newChild(parentPath(item.originalPath()), leafName(item.originalPath()));
     boolean visible = Files.exists(target, LinkOption.NOFOLLOW_LINKS);
@@ -487,10 +521,14 @@ public class SharedFolderRecycleService {
           }
           if (!replacement) {
             if (item.replacementKey() != null) {
-              if (!visible) yield false;
+              if (!visible) {
+                yield false;
+              }
               String visibleFingerprint = SharedFolderObservedItemTokens.token(
                   item.originalPath(), resolver.readHandle(target).attributes());
-              if (!item.replacementFingerprint().equals(visibleFingerprint)) yield false;
+              if (!item.replacementFingerprint().equals(visibleFingerprint)) {
+                yield false;
+              }
             }
             repository.save(item.recycledAgain());
             yield true;
@@ -535,7 +573,9 @@ public class SharedFolderRecycleService {
           yield true;
         }
         if (payload == null && visible != null) {
-          if (!nativeStableIdentity(visible).equals(item.sourceIdentity())) yield false;
+          if (!nativeStableIdentity(visible).equals(item.sourceIdentity())) {
+            yield false;
+          }
           repository.deleteById(item.id());
           yield true;
         }
@@ -586,12 +626,18 @@ public class SharedFolderRecycleService {
     };
   }
 
+  /**
+   * Reconciliation treats each native lookup as a presence fact, so a missing file is null rather
+   * than an exception; any other native failure propagates.
+   */
   private NativeFileMetadata nativeMetadataOrNull(String key, boolean replacement) {
     try {
       return replacement ? nativeBoundary.recycleReplacementMetadata(key)
           : nativeBoundary.recycleMetadata(key);
     } catch (NativeBoundaryException exception) {
-      if (isNativeMissing(exception)) return null;
+      if (isNativeMissing(exception)) {
+        return null;
+      }
       throw exception;
     }
   }
@@ -600,7 +646,9 @@ public class SharedFolderRecycleService {
     try {
       return nativeBoundary.metadata(path);
     } catch (NativeBoundaryException exception) {
-      if (isNativeMissing(exception)) return null;
+      if (isNativeMissing(exception)) {
+        return null;
+      }
       throw exception;
     }
   }
@@ -614,14 +662,18 @@ public class SharedFolderRecycleService {
       String expected, String directory, String key, String relative) throws IOException {
     String current = SharedFolderObservedItemTokens.token(
         relative, privateBoundary.metadata(directory, key).attributes());
-    if (!SharedFolderObservedItemTokens.matches(expected, current)) throw conflict();
+    if (!SharedFolderObservedItemTokens.matches(expected, current)) {
+      throw conflict();
+    }
   }
 
   private void requirePortableIdentity(
       String expected, String directory, String key) throws IOException {
     var metadata = privateBoundary.metadata(directory, key);
     String current = portableIdentity(metadata.stableIdentity(), metadata.attributes());
-    if (!expected.equals(current)) throw conflict();
+    if (!expected.equals(current)) {
+      throw conflict();
+    }
   }
 
   private String portableIdentity(Path path, BasicFileAttributes attributes) throws IOException {
@@ -636,7 +688,7 @@ public class SharedFolderRecycleService {
       String id, String path, Account account, Instant now, String key, long size,
       boolean directory, String fingerprint, String sourceIdentity) {
     if (account == null || account.getId() == null || account.getId().isBlank()) {
-      throw new org.springframework.security.access.AccessDeniedException(
+      throw new AccessDeniedException(
           "Shared-folder access denied");
     }
     return new SharedFolderRecycleItem(
@@ -700,18 +752,24 @@ public class SharedFolderRecycleService {
 
   private void requireNativeFingerprint(
       SharedFolderRecycleItem item, NativeFileMetadata metadata) {
-    if (!item.sourceFingerprint().equals(nativeFingerprint(metadata))) throw conflict();
+    if (!item.sourceFingerprint().equals(nativeFingerprint(metadata))) {
+      throw conflict();
+    }
   }
 
   private void requireNativeIdentity(
       SharedFolderRecycleItem item, NativeFileMetadata metadata) {
-    if (!item.sourceIdentity().equals(nativeStableIdentity(metadata))) throw conflict();
+    if (!item.sourceIdentity().equals(nativeStableIdentity(metadata))) {
+      throw conflict();
+    }
   }
 
   private void requireNativeReplacementFingerprint(
       SharedFolderRecycleItem item, NativeFileMetadata metadata) {
     if (item.replacementFingerprint() == null
-        || !item.replacementFingerprint().equals(nativeFingerprint(metadata))) throw conflict();
+        || !item.replacementFingerprint().equals(nativeFingerprint(metadata))) {
+      throw conflict();
+    }
   }
 
   private String parentPath(String relative) {
@@ -725,15 +783,21 @@ public class SharedFolderRecycleService {
   }
 
   private void requireEnabled() {
-    if (!properties.enabled()) throw unavailable();
+    if (!properties.enabled()) {
+      throw unavailable();
+    }
   }
 
   private void requireMutationCapacity(Account account) {
-    if (mutationLimiter != null) mutationLimiter.requireMutation(account);
+    if (mutationLimiter != null) {
+      mutationLimiter.requireMutation(account);
+    }
   }
 
   private void recordFor(Account account, String action, String path, long size) {
-    if (audit != null) audit.recordFor(account, action, path, size, "accepted", null);
+    if (audit != null) {
+      audit.recordFor(account, action, path, size, "accepted", null);
+    }
   }
 
   private ResponseStatusException badRequest() {
@@ -754,17 +818,22 @@ public class SharedFolderRecycleService {
   }
 
   private ResponseStatusException nativeFailure(NativeBoundaryException exception) {
-    if (exception.kind() == NativeBoundaryException.Kind.CONFLICT) return conflict();
-    if (exception.kind() == NativeBoundaryException.Kind.UNAVAILABLE) return unavailable();
-    if (isNativeMissing(exception)) return notFound();
-    int status = exception.ntStatus();
-    if (status == 0xC0000035 || status == 0xC0000043 || status == 32
-        || status == 80 || status == 183 || status == 0xC0000101) return conflict();
+    if (exception.kind() == NativeBoundaryException.Kind.CONFLICT) {
+      return conflict();
+    }
+    if (exception.kind() == NativeBoundaryException.Kind.UNAVAILABLE) {
+      return unavailable();
+    }
+    if (isNativeMissing(exception)) {
+      return notFound();
+    }
+    if (CONFLICT_STATUSES.contains(exception.ntStatus())) {
+      return conflict();
+    }
     return unavailable();
   }
 
   private boolean isNativeMissing(NativeBoundaryException exception) {
-    int status = exception.ntStatus();
-    return status == 0xC0000034 || status == 0xC000003A || status == 2 || status == 3;
+    return MISSING_STATUSES.contains(exception.ntStatus());
   }
 }
