@@ -8,7 +8,9 @@ Starts mongod on an OS-selected loopback port with a fresh data directory, then 
 website\build\libs\website.jar with exactly profile test, database test, a fresh JWT secret and
 a short JDK socket directory. With -WithTestAdministrator it also generates a username, email and
 random password for the test-profile ADMIN account, passes them only to the candidate, and writes
-them to test-administrator.json inside the disposable MongoDB root, never to the console. Waits for readiness and writes a JSON state file that
+them to test-administrator.json inside the disposable MongoDB root, never to the console. With
+-EnableSharedFolder it enables the shared folder with its shared and system roots inside that same
+disposable root and a 1GB free-space floor. Waits for readiness and writes a JSON state file that
 Stop-Candidate.ps1 uses to stop and clean up only what this script created. The candidate's
 settings never leak into the caller's environment. Build the jar first with
 .\ops\local\Invoke-Gradle.ps1 :website:bootJar.
@@ -22,6 +24,7 @@ param(
     [string]$MongodPath,
     [switch]$EnableFederationDiscovery,
     [switch]$WithTestAdministrator,
+    [switch]$EnableSharedFolder,
     [int]$ReadinessTimeoutSeconds = 180
 )
 
@@ -96,6 +99,19 @@ try {
         APP_TESTADMINISTRATOR_USERNAME = $null
         APP_TESTADMINISTRATOR_EMAIL = $null
         APP_TESTADMINISTRATOR_PASSWORD = $null
+        APP_SHAREDFOLDER_ENABLED = $null
+        APP_SHAREDFOLDER_ROOT = $null
+        APP_SHAREDFOLDER_SYSTEMROOT = $null
+        APP_SHAREDFOLDER_MINIMUMFREESPACE = $null
+    }
+    if ($EnableSharedFolder) {
+        $sharedRoot = Join-Path $testMongoRoot 'shared-folder\shared'
+        $systemRoot = Join-Path $testMongoRoot 'shared-folder\system'
+        New-Item -ItemType Directory -Path $sharedRoot, $systemRoot -Force | Out-Null
+        $candidateEnvironment.APP_SHAREDFOLDER_ENABLED = 'true'
+        $candidateEnvironment.APP_SHAREDFOLDER_ROOT = $sharedRoot
+        $candidateEnvironment.APP_SHAREDFOLDER_SYSTEMROOT = $systemRoot
+        $candidateEnvironment.APP_SHAREDFOLDER_MINIMUMFREESPACE = '1GB'
     }
     if ($WithTestAdministrator) {
         $administrator = [ordered]@{
