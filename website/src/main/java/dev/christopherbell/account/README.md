@@ -67,6 +67,15 @@ subfeature services own the larger account workflows.
   As a safety fallback for split-write failures, ordinary cookie authentication
   also validates the session fingerprint against minimal current account security
   state joined in the session lookup.
+- `bootstrap` holds `TestAdministratorBootstrap`, which exists only under the
+  exact `test` profile. When `app.test-administrator.username`, `.email` and
+  `.password` are all set, it creates that account through `AccountService` on
+  application ready, then stores it as ADMIN. It writes only after
+  `IsolatedTestDatabase` proves the connection is the loopback `test` database
+  on a port other than 27017. With some settings missing, or any other
+  database, startup fails. Local candidates get the settings from
+  `ops/local/Start-Candidate.ps1 -WithTestAdministrator`. No route ever creates
+  or promotes the first administrator.
 - Account DTOs and persistence models under `model`.
 
 ## Update This Doc

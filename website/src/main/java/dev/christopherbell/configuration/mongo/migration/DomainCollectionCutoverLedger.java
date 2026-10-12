@@ -1,9 +1,8 @@
 package dev.christopherbell.configuration.mongo.migration;
 
-import com.mongodb.ConnectionString;
 import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
+import dev.christopherbell.configuration.persistence.IsolatedTestDatabase;
 import dev.christopherbell.configuration.persistence.MongoPersistence;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
@@ -45,8 +44,6 @@ public class DomainCollectionCutoverLedger {
       .flatMap(kind -> kind.legacySource().stream())
       .collect(Collectors.toUnmodifiableSet());
   private static final String NOT_ACTIVE = "Domain collection schema is not active.";
-  private static final String TEST_DATABASE = "test";
-  private static final int PRODUCTION_MONGO_PORT = 27017;
   private static final Set<String> MIGRATION_RUNNER_COLLECTIONS =
       Set.of(COLLECTION, "application_runtime");
   private final MongoTemplate mongo;
@@ -59,8 +56,8 @@ public class DomainCollectionCutoverLedger {
 
   /** Requires a completed target cutover or a pristine isolated test database. */
   public void requireTargetSchemaReady() {
-    if (isExplicitTestProfile()) {
-      requireSafeTestDatabaseConnection();
+    if (IsolatedTestDatabase.isExplicitTestProfile(environment)) {
+      IsolatedTestDatabase.requireConnection(environment, mongo);
       var hasActiveCutoverLedger =
           isActive(findStoredLedger(), DomainCollectionManifest.DIGEST);
       requireEmptyTestDatabase(hasActiveCutoverLedger);
@@ -90,10 +87,6 @@ public class DomainCollectionCutoverLedger {
     return mongo.findOne(query, Document.class, COLLECTION);
   }
 
-  private boolean isExplicitTestProfile() {
-    return List.of(environment.getActiveProfiles()).equals(List.of("test"));
-  }
-
   private void requireEmptyTestDatabase(boolean hasActiveCutoverLedger) {
     var allowedCollections = new HashSet<>(DomainCollectionManifest.ALL_COLLECTIONS);
     allowedCollections.addAll(SOURCE_NAMES);
@@ -110,40 +103,6 @@ public class DomainCollectionCutoverLedger {
     }
     var v015IsRunning = requireOnlyMigrationRecords(hasActiveCutoverLedger);
     requireOnlyMigrationLease(v015IsRunning);
-  }
-
-  private void requireSafeTestDatabaseConnection() {
-    var connectionUri = environment.getProperty("spring.mongodb.uri");
-    if (connectionUri == null || !connectionUri.startsWith("mongodb://")) {
-      throw new IllegalStateException("Test Mongo URI must use one explicit loopback server.");
-    }
-    final ConnectionString connectionString;
-    final URI serverUri;
-    try {
-      connectionString = new ConnectionString(connectionUri);
-      serverUri = URI.create(connectionUri);
-    } catch (IllegalArgumentException malformedUri) {
-      throw new IllegalStateException("Test Mongo URI is invalid.");
-    }
-    var configuredHosts = connectionString.getHosts();
-    var configuredDatabase = connectionString.getDatabase();
-    var connectedDatabase = mongo.getDb().getName();
-    if (!TEST_DATABASE.equals(configuredDatabase)
-        || !TEST_DATABASE.equals(connectedDatabase)
-        || configuredHosts.size() != 1) {
-      throw new IllegalStateException("Test Mongo connection must target the isolated test database.");
-    }
-
-    var serverHost = serverUri.getHost();
-    if (serverHost == null) {
-      throw new IllegalStateException("Test Mongo URI must identify one loopback server.");
-    }
-    serverHost = serverHost.replace("[", "").replace("]", "");
-    var serverPort = serverUri.getPort();
-    if (!Set.of("127.0.0.1", "::1").contains(serverHost)
-        || serverPort < 1 || serverPort > 65535 || serverPort == PRODUCTION_MONGO_PORT) {
-      throw new IllegalStateException("Test Mongo connection must use a non-production loopback port.");
-    }
   }
 
   private boolean requireOnlyMigrationRecords(boolean hasActiveCutoverLedger) {
