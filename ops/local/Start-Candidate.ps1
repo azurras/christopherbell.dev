@@ -94,10 +94,13 @@ try {
         $candidateEnvironment.APP_FEDERATION_DISCOVERYENABLED = 'true'
         $candidateEnvironment.APP_FEDERATION_KEYENCRYPTIONSECRET = New-CandidateSecret
     }
+    # cmd redirects the logs. Start-Process -RedirectStandardOutput would make java inherit this
+    # script's own output handles, and a caller capturing that output would then wait for java.
+    $javaCommand = "`"$javaExe`" -jar `"$candidateJar`" --server.address=127.0.0.1 --server.port=$candidatePort" +
+        " > `"$($state.candidateLog)`" 2> `"$($state.candidateErrorLog)`""
     $candidate = Invoke-WithEnvironment -Variables $candidateEnvironment -Action {
-        Start-Process -FilePath $javaExe -WorkingDirectory $checkoutPath -WindowStyle Hidden -PassThru `
-            -RedirectStandardOutput $state.candidateLog -RedirectStandardError $state.candidateErrorLog `
-            -ArgumentList @('-jar', "`"$candidateJar`"", '--server.address=127.0.0.1', "--server.port=$candidatePort")
+        Start-Process -FilePath $env:ComSpec -WorkingDirectory $checkoutPath -WindowStyle Hidden -PassThru `
+            -ArgumentList "/d /s /c `"$javaCommand`""
     }
     $state.candidatePid = $candidate.Id
     Save-CandidateState
