@@ -160,6 +160,15 @@ $stateFile = Join-Path $env:TEMP 'christopherbell-candidate.json'
   can clean up.
 - Accepts `-EnableFederationDiscovery`, which also enables federation discovery
   with a fresh key-encryption secret.
+- Accepts `-WithTestAdministrator`, which creates one ADMIN account on startup
+  through the test-profile `TestAdministratorBootstrap`, so admin routes and
+  shared-folder grants can be exercised. The generated credentials go only to
+  the candidate and to `test-administrator.json` inside the disposable MongoDB
+  root, whose path the state file records. The stop script removes that file
+  with the root.
+- Accepts `-EnableSharedFolder`, which enables the shared folder with its
+  shared and system roots inside the disposable root and a 1GB free-space floor,
+  so shared-folder reads, grants and the recycle bin work locally.
 
 `Stop-Candidate.ps1` does the following:
 

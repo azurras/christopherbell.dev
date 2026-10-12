@@ -6,7 +6,11 @@ Starts the built candidate against a disposable, isolated MongoDB and records it
 .DESCRIPTION
 Starts mongod on an OS-selected loopback port with a fresh data directory, then starts
 website\build\libs\website.jar with exactly profile test, database test, a fresh JWT secret and
-a short JDK socket directory. Waits for readiness and writes a JSON state file that
+a short JDK socket directory. With -WithTestAdministrator it also generates a username, email and
+random password for the test-profile ADMIN account, passes them only to the candidate, and writes
+them to test-administrator.json inside the disposable MongoDB root, never to the console. With
+-EnableSharedFolder it enables the shared folder with its shared and system roots inside that same
+disposable root and a 1GB free-space floor. Waits for readiness and writes a JSON state file that
 Stop-Candidate.ps1 uses to stop and clean up only what this script created. The candidate's
 settings never leak into the caller's environment. Build the jar first with
 .\ops\local\Invoke-Gradle.ps1 :website:bootJar.
@@ -19,6 +23,8 @@ param(
     [string]$Checkout = (Join-Path $PSScriptRoot '..\..'),
     [string]$MongodPath,
     [switch]$EnableFederationDiscovery,
+    [switch]$WithTestAdministrator,
+    [switch]$EnableSharedFolder,
     [int]$ReadinessTimeoutSeconds = 180
 )
 
@@ -50,6 +56,7 @@ $state = [ordered]@{
     javaSocketRoot = $javaSocketRoot
     candidateLog = Join-Path $testMongoRoot 'candidate.out.log'
     candidateErrorLog = Join-Path $testMongoRoot 'candidate.err.log'
+    testAdministratorFile = $null
     databaseName = $null
     ready = $false
 }
@@ -89,6 +96,34 @@ try {
         JAVA_TOOL_OPTIONS = Get-JdkSocketToolOptions -ExistingOptions '' -SocketDirectory $javaSocketRoot
         APP_FEDERATION_DISCOVERYENABLED = $null
         APP_FEDERATION_KEYENCRYPTIONSECRET = $null
+        APP_TESTADMINISTRATOR_USERNAME = $null
+        APP_TESTADMINISTRATOR_EMAIL = $null
+        APP_TESTADMINISTRATOR_PASSWORD = $null
+        APP_SHAREDFOLDER_ENABLED = $null
+        APP_SHAREDFOLDER_ROOT = $null
+        APP_SHAREDFOLDER_SYSTEMROOT = $null
+        APP_SHAREDFOLDER_MINIMUMFREESPACE = $null
+    }
+    if ($EnableSharedFolder) {
+        $sharedRoot = Join-Path $testMongoRoot 'shared-folder\shared'
+        $systemRoot = Join-Path $testMongoRoot 'shared-folder\system'
+        New-Item -ItemType Directory -Path $sharedRoot, $systemRoot -Force | Out-Null
+        $candidateEnvironment.APP_SHAREDFOLDER_ENABLED = 'true'
+        $candidateEnvironment.APP_SHAREDFOLDER_ROOT = $sharedRoot
+        $candidateEnvironment.APP_SHAREDFOLDER_SYSTEMROOT = $systemRoot
+        $candidateEnvironment.APP_SHAREDFOLDER_MINIMUMFREESPACE = '1GB'
+    }
+    if ($WithTestAdministrator) {
+        $administrator = [ordered]@{
+            username = 'candidate-admin'
+            email = 'candidate-admin@example.test'
+            password = New-CandidateSecret
+        }
+        $state.testAdministratorFile = Join-Path $testMongoRoot 'test-administrator.json'
+        $administrator | ConvertTo-Json | Set-Content -LiteralPath $state.testAdministratorFile -Encoding utf8
+        $candidateEnvironment.APP_TESTADMINISTRATOR_USERNAME = $administrator.username
+        $candidateEnvironment.APP_TESTADMINISTRATOR_EMAIL = $administrator.email
+        $candidateEnvironment.APP_TESTADMINISTRATOR_PASSWORD = $administrator.password
     }
     if ($EnableFederationDiscovery) {
         $candidateEnvironment.APP_FEDERATION_DISCOVERYENABLED = 'true'

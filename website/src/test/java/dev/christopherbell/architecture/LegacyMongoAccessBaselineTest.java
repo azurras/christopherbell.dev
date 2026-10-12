@@ -52,7 +52,8 @@ class LegacyMongoAccessBaselineTest {
       "dev.christopherbell.configuration.mongo.migration.V012RetainSharedFolderWork",
       "dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes",
       "dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState",
-      "dev.christopherbell.configuration.mongo.migration.V015RequireDomainCollectionSchema");
+      "dev.christopherbell.configuration.mongo.migration.V015RequireDomainCollectionSchema",
+      "dev.christopherbell.configuration.persistence.IsolatedTestDatabase");
   @Test
   void runtimeDomainModelsDoNotOwnPhysicalMongoCollections() throws IOException {
     assertThat(ownerTypesMatching(DOCUMENT_USAGE)).isEmpty();
