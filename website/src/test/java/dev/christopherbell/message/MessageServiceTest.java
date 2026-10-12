@@ -34,6 +34,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -251,13 +252,13 @@ public class MessageServiceTest {
     when(permissionService.getSelfId()).thenReturn("self");
     when(accountRepository.findById("self")).thenReturn(Optional.of(self));
     when(accountRepository.findByUsername("alex")).thenReturn(Optional.of(other));
-    when(conversationArchives.archive("self", "other:self", java.util.Set.of("self", "other")))
+    when(conversationArchives.archive("self", "other:self", Set.of("self", "other")))
         .thenReturn(archived);
 
     assertEquals(archived, service().archiveConversationWith("alex"));
 
     verify(conversationArchives).archive(
-        "self", "other:self", java.util.Set.of("self", "other"));
+        "self", "other:self", Set.of("self", "other"));
   }
 
   private MessageService service() {

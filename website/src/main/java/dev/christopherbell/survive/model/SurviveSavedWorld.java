@@ -44,7 +44,9 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       long revision, String message) {
     public Player {
       UUID.fromString(survivorId);
-      if (accountId == null) UUID.fromString(token);
+      if (accountId == null) {
+        UUID.fromString(token);
+      }
       else if (accountId.isBlank() || accountId.length() > 128 || token != null) {
         throw new IllegalArgumentException("Saved survivor ownership is invalid.");
       }

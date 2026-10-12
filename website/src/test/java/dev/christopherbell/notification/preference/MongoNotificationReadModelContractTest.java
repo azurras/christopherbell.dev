@@ -41,12 +41,16 @@ class MongoNotificationReadModelContractTest implements NotificationReadModelPar
     preferences = new MongoNotificationPreferenceRepository(factory);
   }
 
-  @AfterAll static void disconnect() { if (client != null) client.close(); }
+  @AfterAll static void disconnect() { if (client != null) {
+    client.close();
+  } }
   @Override public NotificationRepository notifications() { return notifications; }
   @Override public NotificationQueryPort queries() { return queries; }
   @Override public NotificationPreferenceRepository preferences() { return preferences; }
   @Override public StableCursorCodec cursors() { return cursors; }
   @Override public void ensureAccount(Account account) {
-    if (accounts.findById(account.getId()).isEmpty()) accounts.save(account);
+    if (accounts.findById(account.getId()).isEmpty()) {
+      accounts.save(account);
+    }
   }
 }

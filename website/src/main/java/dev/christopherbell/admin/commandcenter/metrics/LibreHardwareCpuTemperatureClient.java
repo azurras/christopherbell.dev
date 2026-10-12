@@ -95,7 +95,9 @@ public final class LibreHardwareCpuTemperatureClient implements CpuTemperatureSe
   @Override
   @PreDestroy
   public void close() {
-    if (!closed.compareAndSet(false, true)) return;
+    if (!closed.compareAndSet(false, true)) {
+      return;
+    }
     refreshExecutor.shutdownNow();
     probe.close();
   }

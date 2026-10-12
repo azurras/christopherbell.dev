@@ -110,7 +110,9 @@ public class MongoAccountRepository extends KindScopedRepositorySupport<Account>
   @Override
   public List<Account> findByIdInAndStatusAndFederationEnabledTrueOrderByUsernameAsc(
       Collection<String> ids, AccountStatus status, Pageable pageable) {
-    if (ids.isEmpty()) return List.of();
+    if (ids.isEmpty()) {
+      return List.of();
+    }
     var query = Query.query(Criteria.where("id").in(ids).and("status").is(status)
         .and("federationEnabled").is(true))
         .with(Sort.by(Sort.Direction.ASC, "username"));

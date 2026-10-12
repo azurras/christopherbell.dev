@@ -514,7 +514,9 @@ class BrowserSessionServiceTest {
       when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
       when(sessions.save(saved.capture())).thenAnswer(invocation -> invocation.getArgument(0));
       when(authentications.findById(anyString())).thenAnswer(invocation -> {
-        if (revoked || saved.getAllValues().isEmpty()) return Optional.empty();
+        if (revoked || saved.getAllValues().isEmpty()) {
+          return Optional.empty();
+        }
         var current = session();
         return current.getId().equals(invocation.getArgument(0))
             ? Optional.of(authentication(current, account))
@@ -532,7 +534,9 @@ class BrowserSessionServiceTest {
               revoked = true;
               return Optional.empty();
             }
-            if (rejectRotation) return Optional.empty();
+            if (rejectRotation) {
+              return Optional.empty();
+            }
             var current = session();
             current.setPreviousTokenHash(invocation.getArgument(1));
             current.setPreviousTokenExpiresOn(invocation.getArgument(5));

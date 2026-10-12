@@ -33,7 +33,9 @@ public final class PostLinkPreviewCleanupJob {
   @Scheduled(fixedDelayString = "${app.persistence.cleanup-delay:PT5M}")
   public int cleanup() {
     int deleted = cache.deleteExpired(Instant.now(clock), batchLimit);
-    if (deleted > 0) log.info("Deleted {} expired link-preview cache rows", deleted);
+    if (deleted > 0) {
+      log.info("Deleted {} expired link-preview cache rows", deleted);
+    }
     return deleted;
   }
 }

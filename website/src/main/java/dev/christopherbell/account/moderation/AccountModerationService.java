@@ -16,7 +16,6 @@ import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import dev.christopherbell.libs.security.EmailSanitizer;
 import dev.christopherbell.libs.security.UsernameSanitizer;
 import dev.christopherbell.permission.PermissionService;
-import java.time.Instant;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -101,7 +100,9 @@ public class AccountModerationService {
 
   private Account completePendingAudit(Account account) {
     var pending = account.getPendingModerationAudit();
-    if (pending == null) return account;
+    if (pending == null) {
+      return account;
+    }
     adminActivityService.recordModeration(pending);
     account.setPendingModerationAudit(null);
     return accountRepository.save(account);
@@ -128,14 +129,24 @@ public class AccountModerationService {
   }
 
   private void applyBasicUpdates(Account existing, AccountUpdateRequest request) {
-    if (request.firstName() != null) existing.setFirstName(request.firstName());
-    if (request.lastName() != null) existing.setLastName(request.lastName());
-    if (request.role() != null) existing.setRole(request.role());
-    if (request.status() != null) existing.setStatus(request.status());
+    if (request.firstName() != null) {
+      existing.setFirstName(request.firstName());
+    }
+    if (request.lastName() != null) {
+      existing.setLastName(request.lastName());
+    }
+    if (request.role() != null) {
+      existing.setRole(request.role());
+    }
+    if (request.status() != null) {
+      existing.setStatus(request.status());
+    }
   }
 
   private void updateEmailIfProvided(Account existing, String email) throws ResourceExistsException {
-    if (email == null) return;
+    if (email == null) {
+      return;
+    }
     var sanitized = EmailSanitizer.sanitize(email);
     if (!sanitized.equals(existing.getEmail())) {
       ensureEmailUniqueForUpdate(sanitized, existing.getId());
@@ -145,7 +156,9 @@ public class AccountModerationService {
 
   private void updateUsernameIfProvided(Account existing, String username)
       throws ResourceExistsException {
-    if (username == null) return;
+    if (username == null) {
+      return;
+    }
     var sanitized = UsernameSanitizer.sanitize(username);
     if (!sanitized.equals(existing.getUsername())) {
       ensureUsernameUniqueForUpdate(sanitized, existing.getId());

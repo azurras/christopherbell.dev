@@ -1,11 +1,13 @@
 package dev.christopherbell.sitemonitor.monitor;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import dev.christopherbell.sitemonitor.fetch.MonitorFetchException;
+import dev.christopherbell.sitemonitor.fetch.MonitorGateway;
 import dev.christopherbell.sitemonitor.model.MonitorWorkspace.FindingSeverity;
+import dev.christopherbell.sitemonitor.model.MonitorWorkspace.Page;
 import dev.christopherbell.sitemonitor.model.MonitorWorkspace.ReportStatus;
-import dev.christopherbell.sitemonitor.fetch.*;
-import dev.christopherbell.sitemonitor.model.MonitorWorkspace.*;
-import java.net.URI;
+import dev.christopherbell.sitemonitor.model.MonitorWorkspace.Site;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -31,7 +33,10 @@ class MonitorScannerTest {
   void capturesMetadataAndBoundsAssetsWithoutFetchingExternalUrls() {
     var assets = new AtomicInteger();
     var scanner = new MonitorScanner((uri, origin, deadline, head) -> {
-      if (head) { assets.incrementAndGet(); return new MonitorGateway.Result(200, uri, "", new byte[0]); }
+      if (head) {
+        assets.incrementAndGet();
+        return new MonitorGateway.Result(200, uri, "", new byte[0]);
+      }
       String html = "<title>Client</title><meta name=robots content=noindex><script src=/app.js></script>"
           + "<img src=https://other.example/pixel><img src='/query.png?v=1'>";
       return new MonitorGateway.Result(200, uri, "text/html", html.getBytes(StandardCharsets.UTF_8), "nofollow");

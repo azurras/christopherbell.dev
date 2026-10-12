@@ -32,7 +32,9 @@ class MongoFederationDeliveryContractTest implements FederationDeliveryParityCon
     post = post();
   }
 
-  @AfterAll static void disconnect() { if (client != null) client.close(); }
+  @AfterAll static void disconnect() { if (client != null) {
+    client.close();
+  } }
   @Override public FederationDeliveryStore deliveries() { return deliveries; }
   @Override public Post deliveryPost() { return post; }
 

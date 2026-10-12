@@ -306,11 +306,19 @@ public class PostExpirationService {
         default -> throw new IllegalArgumentException("Unsupported post counter.");
       };
       int next = Math.max(0, current + delta);
-      if (field.equals("likesCount")) fallback.setLikesCount(next);
-      if (field.equals("threadReplyLikesCount")) fallback.setThreadReplyLikesCount(next);
-      if (field.equals("threadReplyCount")) fallback.setThreadReplyCount(next);
+      if (field.equals("likesCount")) {
+        fallback.setLikesCount(next);
+      }
+      if (field.equals("threadReplyLikesCount")) {
+        fallback.setThreadReplyLikesCount(next);
+      }
+      if (field.equals("threadReplyCount")) {
+        fallback.setThreadReplyCount(next);
+      }
       fallback.setLastUpdatedOn(changedOn);
-      if (extended) fallback.setLastExtendedOn(changedOn);
+      if (extended) {
+        fallback.setLastExtendedOn(changedOn);
+      }
       postRepository.save(fallback);
       return fallback;
     }

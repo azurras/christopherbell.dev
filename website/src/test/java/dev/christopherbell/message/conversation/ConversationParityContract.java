@@ -9,12 +9,13 @@ import dev.christopherbell.message.model.Message;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /** Shared conversation query and archive behavior checks for MongoDB. */
 interface ConversationParityContract {
-  String RUN = java.util.UUID.randomUUID().toString();
+  String RUN = UUID.randomUUID().toString();
   String OWNER = "conversation-owner-" + RUN;
   String PEER = "conversation-peer-" + RUN;
   String OTHER = "conversation-other-" + RUN;

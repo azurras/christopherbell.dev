@@ -52,7 +52,9 @@ public class MongoPostLikeStore implements PostLikeStore {
 
   @Override
   public Map<String, Integer> counts(Collection<String> postIds) {
-    if (postIds == null || postIds.isEmpty()) return Map.of();
+    if (postIds == null || postIds.isEmpty()) {
+      return Map.of();
+    }
     var aggregation = Aggregation.newAggregation(
         Aggregation.match(Criteria.where("postId").in(postIds)),
         Aggregation.group("postId").count().as("count"));

@@ -492,7 +492,9 @@ class SharedFolderRadioServiceTest {
     SharedFolderRadioRepository repository = mock(SharedFolderRadioRepository.class);
     when(repository.findById(any())).thenAnswer(ignored -> {
       SharedFolderRadioDocument snapshot = stored.get();
-      if (reads.incrementAndGet() <= 2) initialReads.await(2, TimeUnit.SECONDS);
+      if (reads.incrementAndGet() <= 2) {
+        initialReads.await(2, TimeUnit.SECONDS);
+      }
       return Optional.of(snapshot);
     });
     when(repository.save(any())).thenAnswer(invocation -> {

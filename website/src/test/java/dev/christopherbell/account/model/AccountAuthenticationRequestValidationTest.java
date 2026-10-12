@@ -5,13 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
+import jakarta.validation.ValidatorFactory;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class AccountAuthenticationRequestValidationTest {
-  private static jakarta.validation.ValidatorFactory validatorFactory;
+  private static ValidatorFactory validatorFactory;
   private static Validator validator;
 
   @BeforeAll

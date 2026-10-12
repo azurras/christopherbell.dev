@@ -45,7 +45,9 @@ public class MusicCatalogReconciler {
 
   @Scheduled(fixedDelayString = "${app.music.scan-interval:5m}")
   public void scheduledReconcile() {
-    if (!properties.enabled()) return;
+    if (!properties.enabled()) {
+      return;
+    }
     scheduledCollectors.run("music-catalog-reconcile", SCAN_LEASE_DURATION, guard -> {
       reconcile(guard);
       return null;
@@ -57,7 +59,9 @@ public class MusicCatalogReconciler {
   }
 
   private MusicReconcileResult reconcile(CollectorLeaseGuard guard) {
-    if (!properties.enabled()) return new MusicReconcileResult(0, 0, 0, 0, 0, 0);
+    if (!properties.enabled()) {
+      return new MusicReconcileResult(0, 0, 0, 0, 0, 0);
+    }
     Path root = safeRoot();
     var candidates = discover(root);
     Set<String> presentPaths = new HashSet<>();
@@ -84,7 +88,9 @@ public class MusicCatalogReconciler {
         unchanged++;
         continue;
       }
-      if (probed >= properties.scanBatchSize()) continue;
+      if (probed >= properties.scanBatchSize()) {
+        continue;
+      }
       probed++;
       try {
         var metadata = probe.probe(source.toAbsolutePath().normalize());

@@ -39,7 +39,9 @@ public class MongoMusicMetadataEditRepository
   @Override
   public void delete(MusicMetadataEdit edit) {
     var query = Query.query(Criteria.where("id").is(edit.id()));
-    if (edit.version() != null) query.addCriteria(Criteria.where("version").is(edit.version()));
+    if (edit.version() != null) {
+      query.addCriteria(Criteria.where("version").is(edit.version()));
+    }
     if (mongo.remove(query).getDeletedCount() != 1) {
       throw new OptimisticLockingFailureException("Music metadata edit changed during deletion.");
     }

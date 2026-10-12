@@ -28,7 +28,9 @@ class MongoHiddenPostThreadContractTest implements HiddenPostThreadParityContrac
     hiddenThreads = new MongoHiddenPostThreadRepository(factory);
   }
 
-  @AfterAll static void disconnect() { if (client != null) client.close(); }
+  @AfterAll static void disconnect() { if (client != null) {
+    client.close();
+  } }
   @Override public HiddenPostThreadRepository hiddenThreads() { return hiddenThreads; }
   @Override public void ensureAccountAndPost(Account account, Post post) {}
 }

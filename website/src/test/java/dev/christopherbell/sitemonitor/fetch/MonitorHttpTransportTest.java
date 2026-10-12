@@ -18,10 +18,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.KeyManagerFactory;
@@ -46,7 +42,8 @@ class MonitorHttpTransportTest {
         new InetSocketAddress(address, port));
   }
   @Test void pinnedTlsPreservesHostSniAndRejectsWrongCertificateHostname() throws Exception {
-    var host = new AtomicReference<String>(); var sni = new AtomicReference<String>();
+    var host = new AtomicReference<String>();
+    var sni = new AtomicReference<String>();
     var tls = createTlsMaterial(tempDirectory, "monitor.example");
     var server = HttpServer.create().host("127.0.0.1").port(0)
         .secure(spec -> spec.sslContext(Http11SslContextSpec.forServer(tls.keyManager())
@@ -79,15 +76,19 @@ class MonitorHttpTransportTest {
     var method = new AtomicReference<String>();
     var server = HttpServer.create().host("127.0.0.1").port(0).handle((request, response) -> {
       method.set(request.method().name());
-      if (request.uri().equals("/stall")) return response.header("Content-Type", "text/html").sendString(Mono.never());
+      if (request.uri().equals("/stall")) {
+        return response.header("Content-Type", "text/html").sendString(Mono.never());
+      }
       return response.header("Content-Type", "application/octet-stream")
           .header("Content-Length", "2048").sendString(Mono.just("x".repeat(2048)));
-    }).bindNow(); servers.add(server);
+    }).bindNow();
+    servers.add(server);
     var client = new MonitorHttpTransport(Duration.ofSeconds(1));
     var uri = URI.create("http://pinned.invalid:" + server.port() + "/asset");
     var response = client.get(approved(uri, server.port()), Duration.ofSeconds(1), Map.of(),
         1024, List.of("text/html"), true);
-    assertThat(response.statusCode()).isEqualTo(200); assertThat(response.body()).isEmpty();
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.body()).isEmpty();
     assertThat(method).hasValue("HEAD");
     assertThatThrownBy(() -> client.get(approved(uri, server.port()), Duration.ofSeconds(1), Map.of(),
         1024, List.of("application/octet-stream"), false)).isInstanceOf(MonitorFetchException.class)

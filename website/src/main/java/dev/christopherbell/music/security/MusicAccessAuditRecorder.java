@@ -39,7 +39,9 @@ public class MusicAccessAuditRecorder {
   }
 
   private static String bounded(String value, int maximum) {
-    if (value == null || value.isBlank()) return "unknown";
+    if (value == null || value.isBlank()) {
+      return "unknown";
+    }
     String clean = value.strip().replaceAll("[\\p{Cc}\\p{Cf}]", "");
     return clean.length() <= maximum ? clean : clean.substring(0, maximum);
   }

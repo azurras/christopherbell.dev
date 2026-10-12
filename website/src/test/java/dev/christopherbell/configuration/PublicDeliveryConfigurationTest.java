@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import dev.christopherbell.configuration.filter.VersionedStaticAssetCacheFilter;
 import dev.christopherbell.configuration.security.SecurityConfig;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -212,7 +213,7 @@ class PublicDeliveryConfigurationTest {
     request.setServletPath(path);
     var response = new MockHttpServletResponse();
     filter.doFilter(request, response, (ignoredRequest, downstreamResponse) ->
-        ((jakarta.servlet.http.HttpServletResponse) downstreamResponse)
+        ((HttpServletResponse) downstreamResponse)
             .setHeader("Cache-Control", "max-age=3600, public"));
     return response;
   }

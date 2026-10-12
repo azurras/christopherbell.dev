@@ -99,17 +99,23 @@ public final class SharedFolderAuditRecorder {
       Instant previous = logicalAccess.get(key);
       shouldRecord = previous == null || !previous.plus(LOGICAL_ACCESS_WINDOW).isAfter(now);
       if (shouldRecord) {
-        if (previous != null) logicalAccess.remove(key);
+        if (previous != null) {
+          logicalAccess.remove(key);
+        }
         while (logicalAccess.size() >= MAX_LOGICAL_ACCESS_ENTRIES) {
           var oldest = logicalAccess.entrySet().iterator();
-          if (!oldest.hasNext()) break;
+          if (!oldest.hasNext()) {
+            break;
+          }
           oldest.next();
           oldest.remove();
         }
         logicalAccess.put(key, now);
       }
     }
-    if (shouldRecord) record(accountId, action, safeResource, size, "accepted", null);
+    if (shouldRecord) {
+      record(accountId, action, safeResource, size, "accepted", null);
+    }
   }
 
   /** Records at most one matching rejection per client/action/category window. */
@@ -128,12 +134,16 @@ public final class SharedFolderAuditRecorder {
       shouldRecord = rejectedWindowCount < MAX_REJECTED_EVENTS_PER_WINDOW
           && (previous == null || !previous.plus(LOGICAL_ACCESS_WINDOW).isAfter(now));
       if (shouldRecord) {
-        if (previous != null) rejectedAccess.remove(key);
+        if (previous != null) {
+          rejectedAccess.remove(key);
+        }
         rejectedAccess.put(key, now);
         rejectedWindowCount++;
       }
     }
-    if (shouldRecord) recordRejected(action, resource, failureCategory);
+    if (shouldRecord) {
+      recordRejected(action, resource, failureCategory);
+    }
   }
 
   /** Records a rejected attempt without allowing an unsafe raw path into persistence. */

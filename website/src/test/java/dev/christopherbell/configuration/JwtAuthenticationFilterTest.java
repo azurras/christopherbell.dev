@@ -522,7 +522,9 @@ class JwtAuthenticationFilterTest {
           org.mockito.ArgumentMatchers.any()))
           .thenAnswer(invocation -> {
             int rotation = rotations.getAndIncrement();
-            if (rotation == 0 && rejectInitialRotation) return Optional.empty();
+            if (rotation == 0 && rejectInitialRotation) {
+              return Optional.empty();
+            }
             if (rotation > 0) {
               revoked = revokeOnLostRotation;
               return Optional.empty();

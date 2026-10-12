@@ -6,11 +6,12 @@ import dev.christopherbell.federation.configuration.FederationOutboundProperties
 import dev.christopherbell.post.model.Post;
 import java.net.URI;
 import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /** Shared federation cursor, enqueue, claim, and owner-fencing behavior for both engines. */
 interface FederationDeliveryParityContract {
-  String RUN = java.util.UUID.randomUUID().toString();
+  String RUN = UUID.randomUUID().toString();
 
   FederationDeliveryStore deliveries();
 

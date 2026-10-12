@@ -11,6 +11,7 @@ import java.time.Clock;
 import java.time.Instant;
 import dev.christopherbell.location.zip.ZipCoordinateImportStateRepository;
 import dev.christopherbell.location.model.ZipCoordinateImportState;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -81,7 +82,7 @@ class ZipCoordinateServiceTest {
     var coordinates = List.of(coordinate("78701", 30.271128, -97.743699));
     when(zipCoordinateGazetteerReader.readBundledCensusData()).thenReturn(coordinates);
     when(zipCoordinateImportStateRepository.findById(eq("census-zcta")))
-        .thenReturn(java.util.Optional.of(ZipCoordinateImportState.builder()
+        .thenReturn(Optional.of(ZipCoordinateImportState.builder()
             .id("census-zcta")
             .checksum(ZipCoordinateService.datasetChecksum(coordinates))
             .importedOn(Instant.parse("2026-07-25T12:00:00Z"))
@@ -110,7 +111,7 @@ class ZipCoordinateServiceTest {
   @Test
   void lookupNormalizesZipPlusFour() throws Exception {
     when(zipCoordinateRepository.findById(eq("78701")))
-        .thenReturn(java.util.Optional.of(coordinate("78701", 30.271128, -97.743699)));
+        .thenReturn(Optional.of(coordinate("78701", 30.271128, -97.743699)));
 
     var detail = zipCoordinateService.findCoordinateForZip("78701-1234");
 
@@ -128,7 +129,7 @@ class ZipCoordinateServiceTest {
 
   @Test
   void lookupReportsMissingImportedZipCoordinates() {
-    when(zipCoordinateRepository.findById(eq("78701"))).thenReturn(java.util.Optional.empty());
+    when(zipCoordinateRepository.findById(eq("78701"))).thenReturn(Optional.empty());
 
     assertThrows(ResourceNotFoundException.class, () -> zipCoordinateService.findCoordinateForZip("78701"));
   }

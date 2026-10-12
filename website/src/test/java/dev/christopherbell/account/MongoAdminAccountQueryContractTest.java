@@ -28,7 +28,9 @@ class MongoAdminAccountQueryContractTest implements AdminAccountQueryParityContr
     queries = new AdminAccountQueryService(factory, new AccountMapperImpl());
   }
 
-  @AfterAll static void disconnect() { if (client != null) client.close(); }
+  @AfterAll static void disconnect() { if (client != null) {
+    client.close();
+  } }
   @Override public AccountRepository accounts() { return accounts; }
   @Override public AdminAccountQueryPort adminQueries() { return queries; }
 }

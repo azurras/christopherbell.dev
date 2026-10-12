@@ -265,6 +265,22 @@ Run the browser-side JavaScript test suite through Gradle:
 This uses Node's built-in test runner against `website/src/test/js/*.test.js`.
 Set `NODE_EXE=/path/to/node` when Node is not on `PATH`.
 
+### Style Check
+
+`check` runs Checkstyle (`config/checkstyle/checkstyle.xml`) on `website` and
+`cbell-lib` main and test sources. It enforces the mechanical Chris Street Style
+rules:
+
+- braces on every `if`, `else`, `for` and `while` body;
+- one statement per line;
+- no star, redundant or unused imports;
+- imported types instead of `java.`, `javax.` or `jakarta.` names written with
+  their package.
+
+Run it alone with `./gradlew checkstyleMain checkstyleTest`.
+`config/checkstyle/suppressions.xml` lists code whose style migration has not
+merged yet; remove a line when its migration lands, and add nothing else.
+
 ## Backend Architecture
 
 `website` is one Spring Boot deployable organized as a modular monolith. Business

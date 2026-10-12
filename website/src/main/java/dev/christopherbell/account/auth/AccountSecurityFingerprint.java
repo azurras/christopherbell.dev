@@ -30,7 +30,9 @@ public final class AccountSecurityFingerprint {
 
   /** Compares a presented fingerprint without data-dependent string comparison. */
   public static boolean matches(String expected, Account account) {
-    if (expected == null || account == null) return false;
+    if (expected == null || account == null) {
+      return false;
+    }
     return MessageDigest.isEqual(
         expected.getBytes(StandardCharsets.US_ASCII),
         from(account).getBytes(StandardCharsets.US_ASCII));

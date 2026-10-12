@@ -67,8 +67,12 @@ public class MongoMusicCatalogQueryRepository implements MusicCatalogQueryReposi
     exact(filters, "artist", request.artist());
     exact(filters, "album", request.album());
     exact(filters, "genre", request.genre());
-    if (request.favorite() != null) filters.add(Criteria.where("favorite").is(request.favorite()));
-    if (request.trackIds() != null) filters.add(Criteria.where("id").in(request.trackIds()));
+    if (request.favorite() != null) {
+      filters.add(Criteria.where("favorite").is(request.favorite()));
+    }
+    if (request.trackIds() != null) {
+      filters.add(Criteria.where("id").in(request.trackIds()));
+    }
     return new Criteria().andOperator(filters);
   }
 
@@ -89,7 +93,9 @@ public class MongoMusicCatalogQueryRepository implements MusicCatalogQueryReposi
   }
 
   private static void exact(List<Criteria> filters, String field, String value) {
-    if (value != null) filters.add(Criteria.where(field).is(value));
+    if (value != null) {
+      filters.add(Criteria.where(field).is(value));
+    }
   }
 
 }

@@ -19,7 +19,6 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.dao.annotation.PersistenceExceptionTranslationPostProcessor;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 class MongoSharedFolderMaintenanceLeaseStoreTest {

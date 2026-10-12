@@ -57,7 +57,9 @@ public class MongoMusicAccessAttemptRepository implements MusicAccessAttemptRepo
     int deleted = 0;
     for (String id : ids) {
       if (attempts.remove(Query.query(Criteria.where("id").is(id)
-          .and("expiresAt").lte(cutoff))).getDeletedCount() == 1) deleted++;
+          .and("expiresAt").lte(cutoff))).getDeletedCount() == 1) {
+        deleted++;
+      }
     }
     return deleted;
   }

@@ -1,6 +1,7 @@
 package dev.christopherbell.configuration.mongo.domain;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -73,7 +74,8 @@ class SiteMonitorMongoIntegrationTest {
       try {
         String id = service.addSite(new CreateMonitorSite("Client", "https://client.example", List.of("/"), false)).sites().getFirst().id();
         var baseline = service.captureBaseline(id).sites().getFirst();
-        title.set("Changed"); now.set(now.get().plusSeconds(24 * 60 * 60));
+        title.set("Changed");
+        now.set(now.get().plusSeconds(24 * 60 * 60));
         service.checkNextDueSite();
         var changed = new MongoMonitorWorkspaceRepository(factory).findByAccountId("monitor-test-lifecycle").orElseThrow().sites().getFirst();
         assertThat(changed.reports().getFirst().status()).isEqualTo(MonitorWorkspace.ReportStatus.CHANGES);
@@ -81,7 +83,8 @@ class SiteMonitorMongoIntegrationTest {
         assertThat(service.renderReport(id, changed.reports().getFirst().id())).contains("Accepted", "Changed");
         service.checkNextDueSite();
         assertThat(service.currentWorkspace().sites().getFirst().reports()).hasSize(2);
-        now.set(now.get().plusSeconds(16 * 60)); status.set(500);
+        now.set(now.get().plusSeconds(16 * 60));
+        status.set(500);
         var failedCapture = service.captureBaseline(id).sites().getFirst();
         assertThat(failedCapture.reports().getFirst().status()).isEqualTo(MonitorWorkspace.ReportStatus.INCOMPLETE);
         assertThat(failedCapture.baseline()).isEqualTo(baseline.baseline());
@@ -143,7 +146,9 @@ class SiteMonitorMongoIntegrationTest {
         assertThat(mongo.getCollection("application_runtime").listIndexes().into(new ArrayList<>()))
             .extracting(document -> document.getString("name")).containsExactlyElementsOf(indexesBefore);
       } finally {
-        for (int i = 0; i < 10; i++) repository.findByAccountId("monitor-test-" + i).ifPresent(repository::delete);
+        for (int i = 0; i < 10; i++) {
+          repository.findByAccountId("monitor-test-" + i).ifPresent(repository::delete);
+        }
         repository.findByAccountId("monitor-test-bob").ifPresent(repository::delete);
         factory.forType(MonitorSchedule.class)
             .remove(Query.query(

@@ -30,7 +30,9 @@ public record MusicQuery(
   }
 
   private static String bounded(String value, int maximum) {
-    if (value == null || value.isBlank()) return null;
+    if (value == null || value.isBlank()) {
+      return null;
+    }
     String clean = value.strip();
     return clean.length() <= maximum ? clean : clean.substring(0, maximum);
   }

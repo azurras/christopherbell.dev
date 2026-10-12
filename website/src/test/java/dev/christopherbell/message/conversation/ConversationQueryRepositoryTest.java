@@ -13,7 +13,9 @@ import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -71,7 +73,7 @@ class ConversationQueryRepositoryTest {
 
     var counts = repository.unreadCounts("self", List.of("other-a", "other-b"));
 
-    assertThat(counts).containsExactlyEntriesOf(java.util.Map.of("other-a", 2L));
+    assertThat(counts).containsExactlyEntriesOf(Map.of("other-a", 2L));
     assertThatThrownBy(() -> counts.put("other-b", 1L))
         .isInstanceOf(UnsupportedOperationException.class);
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
@@ -137,7 +139,7 @@ class ConversationQueryRepositoryTest {
         .conversationKey(conversationKey)
         .senderAccountId("a")
         .recipientAccountId("b")
-        .participantIds(java.util.Set.of("a", "b"))
+        .participantIds(Set.of("a", "b"))
         .text(id)
         .read(false)
         .createdOn(Instant.parse(createdOn))
