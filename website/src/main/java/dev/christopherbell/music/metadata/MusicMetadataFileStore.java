@@ -120,7 +120,9 @@ public final class MusicMetadataFileStore {
   public void cleanup(Prepared prepared, boolean keepBackup) {
     deletePath(prepared.stage());
     deletePath(prepared.artwork());
-    if (!keepBackup) deletePath(prepared.backup());
+    if (!keepBackup) {
+      deletePath(prepared.backup());
+    }
   }
 
   private Path root(Path source) throws IOException {
@@ -143,7 +145,9 @@ public final class MusicMetadataFileStore {
       throw new IOException("Private metadata file name is unsafe.");
     }
     Path child = root.resolve(name).normalize();
-    if (!child.getParent().equals(root)) throw new IOException("Private metadata path escaped.");
+    if (!child.getParent().equals(root)) {
+      throw new IOException("Private metadata path escaped.");
+    }
     return child;
   }
 
@@ -153,7 +157,9 @@ public final class MusicMetadataFileStore {
       try (var input = Files.newInputStream(source, LinkOption.NOFOLLOW_LINKS)) {
         byte[] buffer = new byte[64 * 1024];
         int read;
-        while ((read = input.read(buffer)) >= 0) digest.update(buffer, 0, read);
+        while ((read = input.read(buffer)) >= 0) {
+          digest.update(buffer, 0, read);
+        }
       }
       return HexFormat.of().formatHex(digest.digest());
     } catch (NoSuchAlgorithmException impossible) {
@@ -162,7 +168,9 @@ public final class MusicMetadataFileStore {
   }
 
   private void deletePath(Path path) {
-    if (path == null) return;
+    if (path == null) {
+      return;
+    }
     try {
       Files.deleteIfExists(path);
     } catch (IOException ignored) {

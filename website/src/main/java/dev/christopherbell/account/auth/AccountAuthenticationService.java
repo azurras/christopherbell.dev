@@ -72,8 +72,12 @@ public class AccountAuthenticationService {
   }
 
   private String rejectionCategory(Account account, boolean verified) {
-    if (account == null) return "unknown-account";
-    if (!verified) return "invalid-password";
+    if (account == null) {
+      return "unknown-account";
+    }
+    if (!verified) {
+      return "invalid-password";
+    }
     return "inactive-account";
   }
 

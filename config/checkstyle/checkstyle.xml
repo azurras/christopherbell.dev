@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC
+    "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+    "https://checkstyle.org/dtds/configuration_1_3.dtd">
+<!--
+  The mechanical subset of Chris Street Style (Builder's write-chris-street-style-code, Java
+  "Settled Decisions"). Review covers the judgment calls; this keeps the mechanical rules from
+  regressing once a package conforms. suppressions.xml lists packages whose migration slice has
+  not landed yet; delete a line when its slice merges.
+-->
+<module name="Checker">
+  <property name="charset" value="UTF-8"/>
+  <property name="severity" value="error"/>
+  <module name="SuppressionFilter">
+    <property name="file" value="${config_loc}/suppressions.xml"/>
+  </module>
+  <module name="TreeWalker">
+    <!-- Every branch and loop body is a braced block, so adding a statement cannot escape it. -->
+    <module name="NeedBraces">
+      <property name="tokens" value="LITERAL_IF, LITERAL_ELSE, LITERAL_FOR, LITERAL_WHILE, LITERAL_DO"/>
+    </module>
+    <module name="OneStatementPerLine"/>
+    <module name="AvoidStarImport"/>
+    <module name="RedundantImport"/>
+    <module name="UnusedImports"/>
+    <!-- Import types instead of naming them by package in code. -->
+    <module name="RegexpSinglelineJava">
+      <property name="id" value="fullyQualifiedName"/>
+      <property name="format"
+          value="^(?!\s*(import|package)\s).*(?&lt;![\w.&quot;])(java|javax|jakarta)\.[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)*\.[A-Z]"/>
+      <property name="ignoreComments" value="true"/>
+      <property name="message" value="Import the type instead of naming it with its package."/>
+    </module>
+  </module>
+</module>

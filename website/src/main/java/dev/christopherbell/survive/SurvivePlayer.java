@@ -39,7 +39,9 @@ final class SurvivePlayer {
 
   void gainGatheringExperience() {
     // Bound exponential thresholds and attack strength without changing early progression.
-    if (strength >= 20) return;
+    if (strength >= 20) {
+      return;
+    }
     experience++;
     if (experience >= experienceToNextLevel) {
       strength++;

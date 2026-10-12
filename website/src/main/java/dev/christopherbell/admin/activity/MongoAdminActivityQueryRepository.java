@@ -24,7 +24,9 @@ public class MongoAdminActivityQueryRepository implements AdminActivityQueryPort
   @Override
   public AdminActivityPage query(AdminActivityQuery request) throws InvalidRequestException {
     var filters = new ArrayList<Criteria>();
-    if (hasText(request.action())) filters.add(Criteria.where("action").is(request.action().strip()));
+    if (hasText(request.action())) {
+      filters.add(Criteria.where("action").is(request.action().strip()));
+    }
     if (hasText(request.targetType())) {
       filters.add(Criteria.where("targetType").is(request.targetType().strip()));
     }

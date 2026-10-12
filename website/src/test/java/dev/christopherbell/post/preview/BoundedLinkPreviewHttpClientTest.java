@@ -17,7 +17,6 @@ import java.security.KeyStore;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -234,7 +233,9 @@ class BoundedLinkPreviewHttpClientTest {
     var client = new BoundedLinkPreviewHttpClient(
         new LinkPreviewHttpTransport(Duration.ofSeconds(2)),
         resolver((uri, timeout) -> {
-          if (uri.equals(initialUri)) return approved(uri, initial.port());
+          if (uri.equals(initialUri)) {
+            return approved(uri, initial.port());
+          }
           throw new IllegalArgumentException("unsafe DNS answer");
         }),
         properties(1024));

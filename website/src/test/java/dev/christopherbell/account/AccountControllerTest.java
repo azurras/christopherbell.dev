@@ -38,7 +38,6 @@ import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.FederationConsentStatus;
-import dev.christopherbell.account.model.dto.FederationConsentUpdate;
 import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
@@ -54,6 +53,7 @@ import dev.christopherbell.libs.test.TestUtil;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
+import jakarta.servlet.http.Cookie;
 import java.net.URI;
 import java.util.List;
 import java.util.Set;
@@ -804,7 +804,7 @@ public class AccountControllerTest {
   @WithMockUser
   void logoutAccount_clearsBrowserAuthenticationCookie() throws Exception {
     mockMvc.perform(post("/api/accounts" + APIVersion.V20241215 + "/logout")
-            .cookie(new jakarta.servlet.http.Cookie("CBELL_AUTH", "session-id.secret"))
+            .cookie(new Cookie("CBELL_AUTH", "session-id.secret"))
             .with(csrf()))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.SET_COOKIE, allOf(

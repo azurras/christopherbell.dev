@@ -1,11 +1,26 @@
 package dev.christopherbell.survive;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveResource;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -75,25 +90,30 @@ class SavedSurviveServiceTest {
     world.joinForOwner(null, "Alice", "alice");
     var bob = world.joinForOwner(null, "Bob", "bob").state();
     var guest = world.join(null, "Guest");
-    var later = new SurviveService(Clock.offset(clock, java.time.Duration.ofHours(3)), () -> 2, 1000, repository);
+    var later = new SurviveService(Clock.offset(clock, Duration.ofHours(3)), () -> 2, 1000, repository);
     assertTrue(later.find(guest.token()).isEmpty());
     var alice = later.findForOwner(null, "alice").orElseThrow();
-    assertEquals(java.util.List.of("Alice"), alice.survivors());
+    assertEquals(List.of("Alice"), alice.survivors());
     assertTrue(alice.recipients().isEmpty());
     assertEquals(bob.survivorId(), later.findForOwner(null, "bob").orElseThrow().survivorId());
     assertEquals(2, later.findForOwner(null, "alice").orElseThrow().survivors().size());
   }
   @Test void competingProcessesCannotOverwriteAnAcknowledgedMove() throws Exception {
-    var loaded = new java.util.concurrent.CountDownLatch(2);
-    var release = new java.util.concurrent.CountDownLatch(1);
-    var racing = new java.util.concurrent.atomic.AtomicBoolean(false);
+    var loaded = new CountDownLatch(2);
+    var release = new CountDownLatch(1);
+    var racing = new AtomicBoolean(false);
     var repository = new InMemorySurviveWorldRepository() {
-      @Override public java.util.Optional<dev.christopherbell.survive.model.SurviveSavedWorld> load() {
+      @Override public Optional<dev.christopherbell.survive.model.SurviveSavedWorld> load() {
         var snapshot = super.load();
         if (racing.get()) {
           loaded.countDown();
-          try { if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("Race not released"); }
-          catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new AssertionError(interrupted); }
+          try { if (!release.await(5, TimeUnit.SECONDS)) {
+            throw new AssertionError("Race not released");
+          } }
+          catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(interrupted);
+          }
         }
         return snapshot;
       }
@@ -102,18 +122,24 @@ class SavedSurviveServiceTest {
     var second = service(repository);
     first.joinForOwner(null, "Alice", "alice");
     racing.set(true);
-    java.util.function.Supplier<Integer> moveFirst = () -> {
-      try { first.actForOwner(null, "alice", SurviveAction.GATHER, 0); return 200; }
+    Supplier<Integer> moveFirst = () -> {
+      try {
+        first.actForOwner(null, "alice", SurviveAction.GATHER, 0);
+        return 200;
+      }
       catch (ResponseStatusException rejected) { return rejected.getStatusCode().value(); }
     };
-    var one = java.util.concurrent.CompletableFuture.supplyAsync(moveFirst);
-    var two = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-      try { second.actForOwner(null, "alice", SurviveAction.GATHER, 0); return 200; }
+    var one = CompletableFuture.supplyAsync(moveFirst);
+    var two = CompletableFuture.supplyAsync(() -> {
+      try {
+        second.actForOwner(null, "alice", SurviveAction.GATHER, 0);
+        return 200;
+      }
       catch (ResponseStatusException rejected) { return rejected.getStatusCode().value(); }
     });
-    try { assertTrue(loaded.await(5, java.util.concurrent.TimeUnit.SECONDS)); }
+    try { assertTrue(loaded.await(5, TimeUnit.SECONDS)); }
     finally { release.countDown(); }
-    assertEquals(java.util.Set.of(200, 409), java.util.Set.of(one.get(5, java.util.concurrent.TimeUnit.SECONDS), two.get(5, java.util.concurrent.TimeUnit.SECONDS)));
+    assertEquals(Set.of(200, 409), Set.of(one.get(5, TimeUnit.SECONDS), two.get(5, TimeUnit.SECONDS)));
     racing.set(false);
     var resumed = service(repository).findForOwner(null, "alice").orElseThrow();
     assertEquals(1, resumed.wood());

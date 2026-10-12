@@ -8,6 +8,7 @@ import dev.christopherbell.federation.configuration.FederationOutboundProperties
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -111,10 +112,10 @@ class FederationPeerAddressPolicyTest {
         .validateAndResolve(peer("https://empty.example/inbox"), publicOrigin, false))
         .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> new FederationPeerAddressPolicy(host -> {
-      throw new java.net.UnknownHostException(host);
+      throw new UnknownHostException(host);
     }).validateAndResolve(peer("https://missing.example/inbox"), publicOrigin, false))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasCauseInstanceOf(java.net.UnknownHostException.class);
+        .hasCauseInstanceOf(UnknownHostException.class);
   }
 
   private static ControlledPeer peer(String inbox) {

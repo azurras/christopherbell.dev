@@ -30,7 +30,9 @@ class MongoNotificationCleanupContractTest implements NotificationCleanupParityC
 
   @AfterAll
   static void disconnect() {
-    if (client != null) client.close();
+    if (client != null) {
+      client.close();
+    }
   }
 
   @Override

@@ -1,6 +1,8 @@
 package dev.christopherbell.sitemonitor.fetch;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 import java.net.InetAddress;
 import java.net.URI;
 import java.time.Duration;

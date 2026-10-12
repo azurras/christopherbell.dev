@@ -12,7 +12,9 @@ public final class MonitorUrls {
   private MonitorUrls() {}
 
   public static URI origin(String value) {
-    if (value == null || value.length() > 300) throw new IllegalArgumentException("Invalid site URL.");
+    if (value == null || value.length() > 300) {
+      throw new IllegalArgumentException("Invalid site URL.");
+    }
     URI candidate = URI.create(value.strip());
     if (!"https".equals(candidate.getScheme()) || candidate.getHost() == null
         || candidate.getHost().contains(":") || candidate.getHost().endsWith(".")

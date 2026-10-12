@@ -90,7 +90,9 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
       }
       var root = OBJECT_MAPPER.readTree(Files.readString(metadata, StandardCharsets.UTF_8));
       var sha = root.get("sha");
-      if (sha == null || !sha.isString()) return Optional.empty();
+      if (sha == null || !sha.isString()) {
+        return Optional.empty();
+      }
       String value = sha.stringValue();
       return value.matches("^[0-9a-f]{40}$") ? Optional.of(value) : Optional.empty();
     } catch (IOException | JacksonException failure) {

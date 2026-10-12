@@ -13,7 +13,9 @@ public enum ReportType {
 
   /** Maps the public reason code to a stable category without accepting arbitrary values. */
   public static ReportType fromReason(String reason) {
-    if (reason == null) return OTHER;
+    if (reason == null) {
+      return OTHER;
+    }
     try {
       return valueOf(reason.strip().toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException unknown) {

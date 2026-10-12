@@ -55,7 +55,9 @@ public final class JdkMusicProcessRunner implements MusicProcessRunner {
       Future<BoundedOutput> stderr = readers.submit(
           () -> readBounded(process.getErrorStream(), maxOutputBytes));
       boolean completed = process.waitFor(Math.max(1, timeout.toMillis()), TimeUnit.MILLISECONDS);
-      if (!completed) terminate(process);
+      if (!completed) {
+        terminate(process);
+      }
       var out = awaitOutput(stdout);
       var err = awaitOutput(stderr);
       return new MusicProcessResult(
@@ -89,9 +91,13 @@ public final class JdkMusicProcessRunner implements MusicProcessRunner {
       int read;
       while ((read = input.read(buffer)) >= 0) {
         int retained = Math.min(read, Math.max(0, limit - total));
-        if (retained > 0) output.write(buffer, 0, retained);
+        if (retained > 0) {
+          output.write(buffer, 0, retained);
+        }
         total += retained;
-        if (retained < read) truncated = true;
+        if (retained < read) {
+          truncated = true;
+        }
       }
       return new BoundedOutput(output.toString(StandardCharsets.UTF_8), truncated);
     }

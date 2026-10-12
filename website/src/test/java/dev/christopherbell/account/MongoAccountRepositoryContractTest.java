@@ -41,7 +41,9 @@ class MongoAccountRepositoryContractTest implements AccountRepositoryParityContr
 
   @AfterAll
   static void disconnect() {
-    if (client != null) client.close();
+    if (client != null) {
+      client.close();
+    }
   }
 
   @Override

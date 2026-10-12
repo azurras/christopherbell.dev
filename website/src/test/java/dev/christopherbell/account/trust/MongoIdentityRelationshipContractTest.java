@@ -36,12 +36,16 @@ class MongoIdentityRelationshipContractTest implements IdentityRelationshipParit
 
   @AfterAll
   static void disconnect() {
-    if (client != null) client.close();
+    if (client != null) {
+      client.close();
+    }
   }
 
   @Override public AccountFollowStore followStore() { return follows; }
   @Override public AccountTrustRepository trustRepository() { return trust; }
   @Override public void ensureAccount(Account account) {
-    if (accounts.findById(account.getId()).isEmpty()) accounts.save(account);
+    if (accounts.findById(account.getId()).isEmpty()) {
+      accounts.save(account);
+    }
   }
 }

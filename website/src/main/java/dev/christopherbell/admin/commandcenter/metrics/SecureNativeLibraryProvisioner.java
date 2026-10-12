@@ -158,7 +158,9 @@ final class SecureNativeLibraryProvisioner {
         combined.addSuppressed(failure);
         throw combined;
       } finally {
-        if (lease != null) lease.close();
+        if (lease != null) {
+          lease.close();
+        }
       }
       if (failure instanceof SecurityException securityException) {
         throw securityException;
@@ -225,7 +227,9 @@ final class SecureNativeLibraryProvisioner {
     verifyNotLinkOrReparsePoint(path);
     aclPolicy.hardenAndVerify(path);
     paths.add(path);
-    if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) return;
+    if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+      return;
+    }
     try (var children = Files.newDirectoryStream(path)) {
       for (Path child : children) {
         Path normalized = child.toAbsolutePath().normalize();
@@ -338,7 +342,9 @@ final class SecureNativeLibraryProvisioner {
   }
 
   private static void deleteTree(Path directory) {
-    if (directory == null || !Files.exists(directory)) return;
+    if (directory == null || !Files.exists(directory)) {
+      return;
+    }
     try (var paths = Files.walk(directory)) {
       paths.sorted(Comparator.reverseOrder()).forEach(path -> {
         try {
@@ -406,8 +412,12 @@ final class SecureNativeLibraryProvisioner {
     Path cpuTemperatureScript() { return cpuTemperatureScript; }
     @Override
     public void close() {
-      if (owned) deleteTree(directory);
-      if (lease != null) lease.close();
+      if (owned) {
+        deleteTree(directory);
+      }
+      if (lease != null) {
+        lease.close();
+      }
     }
   }
 
@@ -423,7 +433,9 @@ final class SecureNativeLibraryProvisioner {
     @Override
     public void close() {
       try {
-        if (lock.isValid()) lock.release();
+        if (lock.isValid()) {
+          lock.release();
+        }
       } catch (IOException ignored) {
         // Closing the channel below releases the lock as well.
       } finally {

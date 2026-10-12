@@ -39,12 +39,18 @@ class MongoReportContractTest implements ReportParityContract {
     queries = new ReportQueryService(factory, reports);
   }
 
-  @AfterAll static void disconnect() { if (client != null) client.close(); }
+  @AfterAll static void disconnect() { if (client != null) {
+    client.close();
+  } }
   @Override public ReportRepository reports() { return reports; }
   @Override public ReportQueryPort queries() { return queries; }
   @Override public void ensureAccountAndPost(Account reported, Account reporter, Post post) {
-    if (accounts.findById(reported.getId()).isEmpty()) accounts.save(reported);
-    if (accounts.findById(reporter.getId()).isEmpty()) accounts.save(reporter);
+    if (accounts.findById(reported.getId()).isEmpty()) {
+      accounts.save(reported);
+    }
+    if (accounts.findById(reporter.getId()).isEmpty()) {
+      accounts.save(reporter);
+    }
     posts.save(post);
   }
 }

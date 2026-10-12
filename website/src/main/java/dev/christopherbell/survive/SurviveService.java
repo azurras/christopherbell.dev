@@ -65,10 +65,14 @@ public class SurviveService {
     if (!replacingPlayer && world.players.size() >= playerCapacity) {
       throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "The camp is full. Please try later.");
     }
-    if (replacingPlayer) world.players.remove(ownerKey);
+    if (replacingPlayer) {
+      world.players.remove(ownerKey);
+    }
     String token = UUID.randomUUID().toString();
     var player = new SurvivePlayer(name, clock.instant(), accountId, UUID.randomUUID().toString());
-    if (accountId != null && existing != null) player.revision = Math.addExact(existing.revision, 1);
+    if (accountId != null && existing != null) {
+      player.revision = Math.addExact(existing.revision, 1);
+    }
     world.players.put(accountId == null ? token : ownerKey, player);
     world.recordEvent(name + " arrived at camp.");
     commitWorld();
@@ -85,7 +89,9 @@ public class SurviveService {
     loadWorld();
     expireInactivePlayers();
     var player = world.players.get(ownerKey(token, accountId));
-    if (player == null) return Optional.empty();
+    if (player == null) {
+      return Optional.empty();
+    }
     player.lastSeen = clock.instant();
     commitWorld();
     return Optional.of(snapshotFor(player));
@@ -101,7 +107,9 @@ public class SurviveService {
     loadWorld();
     expireInactivePlayers();
     var player = world.players.get(ownerKey(token, accountId));
-    if (player == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Your survivor expired. Join the camp again.");
+    if (player == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Your survivor expired. Join the camp again.");
+    }
     if (expectedRevision != player.revision) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "Your survivor changed. Refresh the game before acting again.");
     }
@@ -117,7 +125,9 @@ public class SurviveService {
   private void expireInactivePlayers() {
     var idleDeadline = clock.instant().minus(IDLE_TIMEOUT);
     boolean removed = world.players.values().removeIf(player -> player.accountId == null && !player.lastSeen.isAfter(idleDeadline));
-    if (removed) world.recordEvent("Inactive survivors left camp.");
+    if (removed) {
+      world.recordEvent("Inactive survivors left camp.");
+    }
   }
 
   /** Atomically gives supplies to a public recipient ID; private owner credentials select the sender. */
@@ -132,7 +142,9 @@ public class SurviveService {
     loadWorld();
     expireInactivePlayers();
     var sender = world.players.get(ownerKey(token, accountId));
-    if (sender == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Your survivor expired. Join the camp again.");
+    if (sender == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Your survivor expired. Join the camp again.");
+    }
     if (sender.revision != expectedRevision) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "Your survivor changed. Refresh before giving supplies.");
     }
@@ -145,8 +157,13 @@ public class SurviveService {
     if (sender == recipient || sender.status != Status.EXPLORING || recipient.status != Status.EXPLORING) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Both survivors must be at camp to give supplies to each other.");
     }
-    int available = switch (resource) { case WOOD -> sender.wood; case FOOD -> sender.food; };
-    if (available < quantity) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "You do not have enough supplies to give.");
+    int available = switch (resource) {
+      case WOOD -> sender.wood;
+      case FOOD -> sender.food;
+    };
+    if (available < quantity) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "You do not have enough supplies to give.");
+    }
     if (recipient.wood + recipient.food + quantity > SurviveWorld.INVENTORY_CAPACITY) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That survivor's inventory has no room for this gift.");
     }
@@ -158,8 +175,12 @@ public class SurviveService {
 
   private static String ownerKey(String token, String accountId) {
     // A cookie can never address the account namespace, even if its value is forged.
-    if (accountId != null) return "account:" + accountId;
-    if (token == null) return null;
+    if (accountId != null) {
+      return "account:" + accountId;
+    }
+    if (token == null) {
+      return null;
+    }
     try { return UUID.fromString(token).toString().equals(token) ? token : null; }
     catch (IllegalArgumentException invalidToken) { return null; }
   }

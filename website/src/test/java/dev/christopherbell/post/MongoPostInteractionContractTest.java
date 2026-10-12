@@ -40,7 +40,9 @@ class MongoPostInteractionContractTest implements PostInteractionParityContract 
 
   @AfterAll
   static void disconnect() {
-    if (client != null) client.close();
+    if (client != null) {
+      client.close();
+    }
   }
 
   @Override public AccountRepository accounts() { return accounts; }

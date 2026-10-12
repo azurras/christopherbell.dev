@@ -48,7 +48,9 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
     RequestAttributes previous = RequestContextHolder.getRequestAttributes();
     ServletRequestAttributes bound = previous == null
         ? new ServletRequestAttributes(request) : null;
-    if (bound != null) RequestContextHolder.setRequestAttributes(bound);
+    if (bound != null) {
+      RequestContextHolder.setRequestAttributes(bound);
+    }
     try {
       response.setHeader(HttpHeaders.CACHE_CONTROL, NO_STORE);
       AuditAttempt attempt = attempt(request);
@@ -165,7 +167,9 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
       if (current instanceof ResponseStatusException status) {
         return failureCategory(status.getStatusCode().value());
       }
-      if (current == current.getCause()) break;
+      if (current == current.getCause()) {
+        break;
+      }
       current = current.getCause();
     }
     return "failure";

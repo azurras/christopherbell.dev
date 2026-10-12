@@ -119,7 +119,9 @@ public final class MusicMetadataService {
         return new MusicMetadataResult(
             savedEdit.id(), replacement.token(), savedEdit.expiresAt(), MusicTrackView.from(refreshed));
       } catch (RuntimeException failure) {
-        if (!applied && preparedEdit != null) edits.deleteById(preparedEdit.id());
+        if (!applied && preparedEdit != null) {
+          edits.deleteById(preparedEdit.id());
+        }
         throw failure;
       } finally {
         files.cleanup(prepared, applied);
@@ -132,12 +134,16 @@ public final class MusicMetadataService {
     requireIdentifier(editId);
     MusicMetadataEdit edit = edits.findById(editId).orElseThrow(this::notFound);
     if (edit.status() != MusicMetadataEdit.Status.APPLIED
-        || edit.expiresAt().isBefore(clock.instant())) throw conflict();
+        || edit.expiresAt().isBefore(clock.instant())) {
+      throw conflict();
+    }
     requireRevision(edit.replacementObservedToken(), expectedObservedToken);
     return withTrackLock(edit.trackId(), () -> {
       MusicMetadataEdit currentEdit = edits.findById(edit.id()).orElseThrow(this::notFound);
       if (currentEdit.status() != MusicMetadataEdit.Status.APPLIED
-          || !expectedObservedToken.equals(currentEdit.replacementObservedToken())) throw conflict();
+          || !expectedObservedToken.equals(currentEdit.replacementObservedToken())) {
+        throw conflict();
+      }
       MusicTrack current = ready(currentEdit.trackId());
       requireRevision(current.observedToken(), expectedObservedToken);
       Path source = source(currentEdit.sourcePath());
@@ -235,7 +241,9 @@ public final class MusicMetadataService {
   }
 
   private String text(String value) {
-    if (value == null) return null;
+    if (value == null) {
+      return null;
+    }
     String cleaned = value.strip();
     if (cleaned.length() > 300 || cleaned.codePoints().anyMatch(codePoint -> {
       int type = Character.getType(codePoint);
@@ -254,7 +262,9 @@ public final class MusicMetadataService {
   }
 
   private byte[] artwork(String dataUrl, boolean remove) {
-    if (dataUrl == null || remove) return null;
+    if (dataUrl == null || remove) {
+      return null;
+    }
     String prefix;
     boolean jpeg;
     if (dataUrl.startsWith("data:image/jpeg;base64,")) {
@@ -269,7 +279,9 @@ public final class MusicMetadataService {
     try {
       String encoded = dataUrl.substring(prefix.length());
       long maximumEncoded = ((long) properties.artworkMaxBytes() + 2) / 3 * 4;
-      if (encoded.length() > maximumEncoded) throw badRequest("Music artwork is invalid or too large.");
+      if (encoded.length() > maximumEncoded) {
+        throw badRequest("Music artwork is invalid or too large.");
+      }
       byte[] decoded = Base64.getDecoder().decode(encoded);
       if (decoded.length < 8 || decoded.length > properties.artworkMaxBytes()
           || (jpeg ? !jpegMagic(decoded) : !pngMagic(decoded))) {
@@ -319,7 +331,9 @@ public final class MusicMetadataService {
   }
 
   private void requireDiskRevision(Path source, String expected) {
-    if (!observe(source).token().equals(expected)) throw conflict();
+    if (!observe(source).token().equals(expected)) {
+      throw conflict();
+    }
   }
 
   private MusicFileRevision observe(Path source) {
@@ -349,7 +363,9 @@ public final class MusicMetadataService {
   }
 
   private void requireRevision(String actual, String expected) {
-    if (!token(expected) || !expected.equals(actual)) throw conflict();
+    if (!token(expected) || !expected.equals(actual)) {
+      throw conflict();
+    }
   }
 
   private boolean token(String value) {

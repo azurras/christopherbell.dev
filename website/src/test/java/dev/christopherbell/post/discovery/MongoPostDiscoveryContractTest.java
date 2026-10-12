@@ -43,12 +43,16 @@ class MongoPostDiscoveryContractTest implements PostDiscoveryParityContract {
     people = new VoidPeopleDiscoveryQueryRepository(factory, new MongoPostLikeStore(factory));
   }
 
-  @AfterAll static void disconnect() { if (client != null) client.close(); }
+  @AfterAll static void disconnect() { if (client != null) {
+    client.close();
+  } }
   @Override public PostRepository posts() { return posts; }
   @Override public VoidDiscoveryQueryPort discovery() { return discovery; }
   @Override public VoidPeopleDiscoveryQueryPort people() { return people; }
   @Override public StableCursorCodec cursors() { return cursors; }
   @Override public void ensureAccount(Account account) {
-    if (accounts.findById(account.getId()).isEmpty()) accounts.save(account);
+    if (accounts.findById(account.getId()).isEmpty()) {
+      accounts.save(account);
+    }
   }
 }

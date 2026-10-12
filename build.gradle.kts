@@ -64,6 +64,14 @@ subprojects {
     }
 
     plugins.withType<JavaPlugin> {
+        // The mechanical Chris Street Style rules; config/checkstyle/suppressions.xml lists
+        // packages whose migration slice has not merged yet.
+        apply(plugin = "checkstyle")
+        extensions.configure<CheckstyleExtension> {
+            toolVersion = "14.3.0"
+            configDirectory.set(rootProject.layout.projectDirectory.dir("config/checkstyle"))
+            maxWarnings = 0
+        }
         extensions.configure<JavaPluginExtension> {
             sourceCompatibility = JavaVersion.VERSION_25
             targetCompatibility = JavaVersion.VERSION_25

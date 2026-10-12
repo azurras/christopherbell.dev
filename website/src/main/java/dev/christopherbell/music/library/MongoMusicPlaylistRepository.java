@@ -41,7 +41,9 @@ public class MongoMusicPlaylistRepository extends KindScopedRepositorySupport<Mu
   @Override
   public void delete(MusicPlaylist playlist) {
     var query = Query.query(Criteria.where("id").is(playlist.id()));
-    if (playlist.version() != null) query.addCriteria(Criteria.where("version").is(playlist.version()));
+    if (playlist.version() != null) {
+      query.addCriteria(Criteria.where("version").is(playlist.version()));
+    }
     if (mongo.remove(query).getDeletedCount() != 1) {
       throw new OptimisticLockingFailureException("Music playlist changed during deletion.");
     }

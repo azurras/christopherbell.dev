@@ -35,7 +35,9 @@ public class MusicArtworkService {
     try {
       Path cacheRoot = safeCacheRoot();
       Path destination = cacheRoot.resolve(artworkRevision + ".jpg").normalize();
-      if (!destination.startsWith(cacheRoot)) return Optional.empty();
+      if (!destination.startsWith(cacheRoot)) {
+        return Optional.empty();
+      }
       if (Files.isRegularFile(destination, LinkOption.NOFOLLOW_LINKS)) {
         return Optional.of(artworkRevision);
       }
@@ -61,7 +63,9 @@ public class MusicArtworkService {
       return Optional.empty();
     } finally {
       try {
-        if (temporary != null) Files.deleteIfExists(temporary);
+        if (temporary != null) {
+          Files.deleteIfExists(temporary);
+        }
       } catch (IOException ignored) {
         // A later cache cleanup removes abandoned private temporary files.
       }
@@ -93,9 +97,13 @@ public class MusicArtworkService {
   }
 
   private boolean validImage(Path path) throws IOException {
-    if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) return false;
+    if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+      return false;
+    }
     long size = Files.size(path);
-    if (size < 1 || size > properties.artworkMaxBytes()) return false;
+    if (size < 1 || size > properties.artworkMaxBytes()) {
+      return false;
+    }
     BufferedImage image = ImageIO.read(path.toFile());
     return image != null
         && image.getWidth() > 0

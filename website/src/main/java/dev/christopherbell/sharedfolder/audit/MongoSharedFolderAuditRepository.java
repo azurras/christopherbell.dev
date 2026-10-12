@@ -34,7 +34,9 @@ public class MongoSharedFolderAuditRepository
     int deleted = 0;
     for (String id : ids) {
       if (mongo.remove(Query.query(Criteria.where("id").is(id)
-          .and("expiresAt").lte(cutoff))).getDeletedCount() == 1) deleted++;
+          .and("expiresAt").lte(cutoff))).getDeletedCount() == 1) {
+        deleted++;
+      }
     }
     return deleted;
   }
@@ -44,14 +46,26 @@ public class MongoSharedFolderAuditRepository
       String accountId, String action, String outcome, String relativePath,
       Instant from, Instant to, int limit) {
     var filters = new ArrayList<Criteria>();
-    if (accountId != null) filters.add(Criteria.where("accountId").is(accountId));
-    if (action != null) filters.add(Criteria.where("action").is(action));
-    if (outcome != null) filters.add(Criteria.where("outcome").is(outcome));
-    if (relativePath != null) filters.add(Criteria.where("relativePath").is(relativePath));
+    if (accountId != null) {
+      filters.add(Criteria.where("accountId").is(accountId));
+    }
+    if (action != null) {
+      filters.add(Criteria.where("action").is(action));
+    }
+    if (outcome != null) {
+      filters.add(Criteria.where("outcome").is(outcome));
+    }
+    if (relativePath != null) {
+      filters.add(Criteria.where("relativePath").is(relativePath));
+    }
     if (from != null || to != null) {
       var occurred = Criteria.where("occurredAt");
-      if (from != null) occurred.gte(from);
-      if (to != null) occurred.lte(to);
+      if (from != null) {
+        occurred.gte(from);
+      }
+      if (to != null) {
+        occurred.lte(to);
+      }
       filters.add(occurred);
     }
     var query = filters.isEmpty() ? new Query() : Query.query(new Criteria().andOperator(filters));

@@ -40,12 +40,16 @@ class MongoConversationContractTest implements ConversationParityContract {
     archives = new ConversationArchiveService(factory, Clock.systemUTC());
   }
 
-  @AfterAll static void disconnect() { if (client != null) client.close(); }
+  @AfterAll static void disconnect() { if (client != null) {
+    client.close();
+  } }
   @Override public MessageRepository messages() { return messages; }
   @Override public ConversationQueryPort queries() { return queries; }
   @Override public ConversationArchivePort archives() { return archives; }
   @Override public StableCursorCodec cursors() { return cursors; }
   @Override public void ensureAccount(Account account) {
-    if (accounts.findById(account.getId()).isEmpty()) accounts.save(account);
+    if (accounts.findById(account.getId()).isEmpty()) {
+      accounts.save(account);
+    }
   }
 }

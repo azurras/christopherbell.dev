@@ -219,7 +219,9 @@ public class CommandCenterLogService {
         continue;
       }
       int start = index;
-      while (index < text.length() && text.charAt(index) == '\\') index++;
+      while (index < text.length() && text.charAt(index) == '\\') {
+        index++;
+      }
       int slashCount = index - start;
       if (slashCount == 1 && index < text.length()
           && (text.charAt(index) == '"' || text.charAt(index) == '\'')) {
@@ -254,7 +256,9 @@ public class CommandCenterLogService {
       if (current == '\\') {
         escaped = !escaped;
       } else {
-        if (current == quote && !escaped) return index;
+        if (current == quote && !escaped) {
+          return index;
+        }
         escaped = false;
       }
     }
