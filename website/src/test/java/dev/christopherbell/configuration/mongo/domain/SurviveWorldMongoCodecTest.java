@@ -1,7 +1,10 @@
 package dev.christopherbell.configuration.mongo.domain;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+
 import dev.christopherbell.survive.model.SurviveSavedWorld;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import java.time.Instant;

@@ -80,7 +80,9 @@ public record MusicTrack(
   }
 
   public MusicTrack markMissing(Instant now) {
-    if (missingSince != null) return this;
+    if (missingSince != null) {
+      return this;
+    }
     return new MusicTrack(
         id, path, observedToken, pendingObservedToken, title, artist, albumArtist, album,
         trackNumber, discNumber, genre, year, durationSeconds, audioCodec, container,
@@ -100,7 +102,9 @@ public record MusicTrack(
   }
 
   private static String title(String metadataTitle, String path) {
-    if (metadataTitle != null && !metadataTitle.isBlank()) return metadataTitle;
+    if (metadataTitle != null && !metadataTitle.isBlank()) {
+      return metadataTitle;
+    }
     String name = path.substring(path.lastIndexOf('/') + 1);
     int extension = name.lastIndexOf('.');
     return extension > 0 ? name.substring(0, extension) : name;

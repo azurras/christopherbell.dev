@@ -18,7 +18,9 @@ public class MusicCatalog {
   }
 
   public Optional<MusicTrack> findReady(String id) {
-    if (id == null || id.isBlank()) return Optional.empty();
+    if (id == null || id.isBlank()) {
+      return Optional.empty();
+    }
     return tracks.findById(id).filter(track -> track.indexStatus() == MusicIndexStatus.READY)
         .filter(track -> track.missingSince() == null);
   }

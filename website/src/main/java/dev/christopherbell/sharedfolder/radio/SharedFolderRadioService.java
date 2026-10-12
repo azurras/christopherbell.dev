@@ -3,8 +3,8 @@ package dev.christopherbell.sharedfolder.radio;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedFolderRadioDurationRequest;
-import dev.christopherbell.sharedfolder.model.SharedFolderRadioResponse;
 import dev.christopherbell.sharedfolder.model.SharedFolderRadioResponse.Playback;
+import dev.christopherbell.sharedfolder.model.SharedFolderRadioResponse;
 import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
 import java.time.Clock;
 import java.time.Duration;
@@ -14,9 +14,9 @@ import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.IntUnaryOperator;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -84,17 +84,24 @@ public final class SharedFolderRadioService {
         SharedFolderRadioDocument current = repository
             .findById(SharedFolderRadioDocument.ID)
             .orElseThrow(this::staleReport);
-        if (current.state() == SharedFolderRadioDocument.State.EMPTY) throw staleReport();
+        if (current.state() == SharedFolderRadioDocument.State.EMPTY) {
+          throw staleReport();
+        }
         SharedDirectoryEntry activeTrack = findTrack(tracks, current.path());
         if (activeTrack == null) {
           saveEmpty(current);
           throw staleReport();
         }
         if (request.stationSequence() != current.stationSequence()
-            || !request.path().equals(current.path())) throw staleReport();
-        Double trustedDuration = durations.resolve(activeTrack);
-        if (trustedDuration != null && !durationReportMatches(
-            request.durationSeconds(), trustedDuration)) throw staleReport();
+            || !request.path().equals(current.path())) {
+          throw staleReport();
+        }
+        var contradictsTrustedDuration = durations.resolve(activeTrack)
+            .filter(trusted -> !durationReportMatches(request.durationSeconds(), trusted))
+            .isPresent();
+        if (contradictsTrustedDuration) {
+          throw staleReport();
+        }
         return transition(tracks, current, clock.instant());
       });
     }
@@ -112,6 +119,12 @@ public final class SharedFolderRadioService {
     }
   }
 
+  /**
+   * Moves the station to its state at {@code now}: empty with no tracks, a newly selected track
+   * when there is no current one, or the current track advanced past every elapsed known duration.
+   *
+   * @param current the stored station, or null before the station's first transition
+   */
   private SharedFolderRadioResponse transition(
       List<SharedDirectoryEntry> tracks,
       SharedFolderRadioDocument current,
@@ -129,10 +142,10 @@ public final class SharedFolderRadioService {
       String previousPath = current == null
           || current.state() == SharedFolderRadioDocument.State.EMPTY ? null : current.path();
       SharedDirectoryEntry selected = selectTrack(tracks, previousPath);
-      return saveAndRespond(selected, sequence, now, durations.resolve(selected),
+      return saveAndRespond(selected, sequence, now, durations.resolve(selected).orElse(null),
           current == null ? null : current.version(), now);
     }
-    Double durationSeconds = durations.resolve(activeTrack);
+    Double durationSeconds = durations.resolve(activeTrack).orElse(null);
     SharedFolderRadioDocument resolved = SharedFolderRadioDocument.playing(
         current.stationSequence(), current.path(), current.startedAt(), durationSeconds,
         List.of(), current.version());
@@ -147,7 +160,7 @@ public final class SharedFolderRadioService {
       activeTrack = selectTrack(tracks, resolved.path());
       resolved = SharedFolderRadioDocument.playing(
           Math.incrementExact(resolved.stationSequence()), activeTrack.path(), priorEnd,
-          durations.resolve(activeTrack), List.of(), resolved.version());
+          durations.resolve(activeTrack).orElse(null), List.of(), resolved.version());
       changed = true;
     }
     SharedFolderRadioDocument saved = changed ? repository.save(resolved) : resolved;
@@ -186,6 +199,7 @@ public final class SharedFolderRadioService {
         document.durationSeconds(), track));
   }
 
+  /** The catalog track at {@code path}, or null when the path is missing or no longer listed. */
   private SharedDirectoryEntry findTrack(List<SharedDirectoryEntry> tracks, String path) {
     if (path == null) {
       return null;

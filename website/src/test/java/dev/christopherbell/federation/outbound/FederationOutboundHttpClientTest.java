@@ -19,6 +19,8 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.KeyManagerFactory;
@@ -124,13 +126,13 @@ class FederationOutboundHttpClientTest {
         "peer.example",
         server.port()), request()))
         .isEqualTo(new FederationDeliveryResult.RetryableFailure(
-            java.util.OptionalInt.of(429), java.util.Optional.of(Duration.ofSeconds(120))));
+            OptionalInt.of(429), Optional.of(Duration.ofSeconds(120))));
     assertThat(client.post(target(
         "http://peer.example:" + server.port() + "/failed",
         "peer.example",
         server.port()), request()))
         .isEqualTo(new FederationDeliveryResult.RetryableFailure(
-            java.util.OptionalInt.of(503), java.util.Optional.empty()));
+            OptionalInt.of(503), Optional.empty()));
     assertThat(client.post(target(
         "http://peer.example:" + server.port() + "/rejected",
         "peer.example",
@@ -156,7 +158,7 @@ class FederationOutboundHttpClientTest {
         request());
 
     assertThat(result).isEqualTo(new FederationDeliveryResult.RetryableFailure(
-        java.util.OptionalInt.empty(), java.util.Optional.empty()));
+        OptionalInt.empty(), Optional.empty()));
     assertThat(attempts).hasValue(1);
   }
 

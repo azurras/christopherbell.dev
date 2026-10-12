@@ -172,7 +172,9 @@ class LibreHardwareCpuTemperatureClientTest {
     private boolean shutdown;
 
     @Override public void execute(Runnable command) {
-      if (shutdown) throw new RejectedExecutionException();
+      if (shutdown) {
+        throw new RejectedExecutionException();
+      }
       tasks.add(command);
     }
 

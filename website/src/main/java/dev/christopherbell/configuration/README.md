@@ -9,6 +9,11 @@ Owns application-wide Spring and web infrastructure.
 
 - `mongo` owns MongoDB persistence configuration, shared collection access, fixed-name leases,
   scheduled-collector coordination, and versioned MongoDB migrations.
+- `persistence.IsolatedTestDatabase` proves two things: the active profiles are
+  exactly `test`, and MongoDB is one loopback server on a port other than 27017
+  with database `test`, both as configured and as connected. The cutover ledger
+  uses this proof to accept an empty test database. Test-only fixtures such as
+  the account area's test administrator require it before writing.
 
 - Security configuration and route access rules under `security`.
 - Public static browser assets such as `/favicon.ico`.

@@ -440,7 +440,9 @@ public class AccountController {
   )
   public ResponseEntity<Response<Void>> logoutAccount(HttpServletRequest request) {
     var cookie = WebUtils.getCookie(request, BrowserAuthenticationCookies.AUTH_COOKIE_NAME);
-    if (cookie != null) browserSessions.revoke(cookie.getValue());
+    if (cookie != null) {
+      browserSessions.revoke(cookie.getValue());
+    }
     return new ResponseEntity<>(Response.<Void>builder()
         .success(true)
         .build(), cookieHeaders(browserAuthenticationCookies.cleared()), HttpStatus.OK);

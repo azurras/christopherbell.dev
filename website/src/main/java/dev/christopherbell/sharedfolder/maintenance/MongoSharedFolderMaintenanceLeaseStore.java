@@ -1,10 +1,9 @@
 package dev.christopherbell.sharedfolder.maintenance;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.mongo.domain.MongoDatabaseLeaseMutation;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.libs.lease.LeaseGrant;
 import dev.christopherbell.libs.lease.LeaseIdentity;
 import java.time.Duration;
@@ -21,6 +20,11 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class MongoSharedFolderMaintenanceLeaseStore
     implements SharedFolderMaintenanceLeaseStore {
+  /** Owner of a lease document seeded before its first acquisition. */
+  private static final String UNCLAIMED_OWNER = "unclaimed";
+  /** Owner left behind when a fenced grant is released. */
+  private static final String RELEASED_OWNER = "released";
+
   private final KindScopedMongoOperations<SharedFolderMaintenanceLeaseDocument> mongo;
 
   @Autowired
@@ -43,7 +47,7 @@ public class MongoSharedFolderMaintenanceLeaseStore
         .currentDate("acquiredAt");
     var seed = new SharedFolderMaintenanceLeaseDocument();
     seed.setId(SharedFolderMaintenanceLeaseDocument.ID);
-    seed.setOwnerToken("unclaimed");
+    seed.setOwnerToken(UNCLAIMED_OWNER);
     seed.setFenceToken(0L);
     seed.setAcquiredAt(Instant.EPOCH);
     seed.setExpiresAt(Instant.EPOCH);
@@ -76,7 +80,7 @@ public class MongoSharedFolderMaintenanceLeaseStore
         .and("ownerToken").is(grant.ownerId())
         .and("fenceToken").is(grant.fenceToken()));
     Update update = new Update()
-        .set("ownerToken", "released")
+        .set("ownerToken", RELEASED_OWNER)
         .set("expiresAt", Instant.EPOCH);
     return mongo.findAndUpdateDatabaseLease(query,
         MongoDatabaseLeaseMutation.release(update, "expiresAt", false)).isPresent();

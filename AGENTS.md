@@ -71,10 +71,10 @@ test database can complete V015 through the normal migration runner without a
 fabricated cutover ledger. Other profiles still require the genuine
 `TARGET_ACTIVE` ledger. The test bootstrap rejects populated domain collections,
 unknown collections, malformed migration state, and any URI outside this exact
-test target. For Java 25 on Windows, use the README's generated short Unix
-socket temp directory through `JAVA_TOOL_OPTIONS`; clean up that directory and
-the disposable Mongo directory after the run. Follow the setup steps in
-`README.md`.
+test target. On Windows, run Gradle through `.\ops\local\Invoke-Gradle.ps1`.
+Start and stop the candidate with `.\ops\local\Start-Candidate.ps1` and
+`.\ops\local\Stop-Candidate.ps1`. They own the disposable MongoDB, the JDK
+socket directory and their cleanup. See `README.md`.
 
 ## Architecture Rules
 

@@ -7,6 +7,7 @@ import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntryType;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
 import dev.christopherbell.sharedfolder.model.SharedFolderRadioDurationRequest;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /** Resolves duration only from a present ready Music row for the exact file revision. */
@@ -15,24 +16,31 @@ public final class SharedFolderRadioDurationResolver {
   private final MusicTrackRepository tracks;
 
   public SharedFolderRadioDurationResolver(MusicTrackRepository tracks) {
-    if (tracks == null) throw new IllegalArgumentException("Music track repository is required");
+    if (tracks == null) {
+      throw new IllegalArgumentException("Music track repository is required");
+    }
     this.tracks = tracks;
   }
 
-  /** Returns trusted probe seconds, or null when metadata is absent, stale, or unsafe. */
-  public Double resolve(SharedDirectoryEntry entry) {
+  /** Returns trusted probe seconds, or empty when metadata is absent, stale, or unsafe. */
+  public Optional<Double> resolve(SharedDirectoryEntry entry) {
     if (entry == null || entry.type() != SharedDirectoryEntryType.FILE
         || entry.previewKind() != SharedFolderPreviewKind.AUDIO
-        || entry.observedToken() == null || entry.observedToken().isBlank()) return null;
+        || entry.observedToken() == null || entry.observedToken().isBlank()) {
+      return Optional.empty();
+    }
     String path = entry.path();
     int separator = path == null ? -1 : path.indexOf('/');
-    if (separator < 1 || !path.substring(0, separator).equalsIgnoreCase("Music")) return null;
+    if (separator < 1 || !path.substring(0, separator).equalsIgnoreCase("Music")) {
+      return Optional.empty();
+    }
     String musicPath = path.substring(separator + 1);
-    MusicTrack track = tracks.findByPath(musicPath).orElse(null);
-    if (track == null || track.indexStatus() != MusicIndexStatus.READY || track.missingSince() != null
-        || !musicPath.equals(track.path())
-        || !entry.observedToken().equals(track.observedToken())
-        || !SharedFolderRadioDurationRequest.isValidDuration(track.durationSeconds())) return null;
-    return track.durationSeconds();
+    return tracks.findByPath(musicPath)
+        .filter(track -> track.indexStatus() == MusicIndexStatus.READY
+            && track.missingSince() == null
+            && musicPath.equals(track.path())
+            && entry.observedToken().equals(track.observedToken())
+            && SharedFolderRadioDurationRequest.isValidDuration(track.durationSeconds()))
+        .map(MusicTrack::durationSeconds);
   }
 }

@@ -15,11 +15,15 @@ class MongoNotificationRepositoryContractTest implements NotificationRepositoryP
   private static NotificationRepository notifications;
   @BeforeAll static void connect() {
     var connection = new ConnectionString(System.getenv("SPRING_MONGODB_URI"));
-    if (!"test".equals(connection.getDatabase())) throw new IllegalStateException("Database test required.");
+    if (!"test".equals(connection.getDatabase())) {
+      throw new IllegalStateException("Database test required.");
+    }
     client = MongoClients.create(connection);
     notifications = new MongoNotificationRepository(
         DomainMongoOperationsTestFactory.createForDisposableMongo(new MongoTemplate(client, "test")));
   }
-  @AfterAll static void disconnect() { if (client != null) client.close(); }
+  @AfterAll static void disconnect() { if (client != null) {
+    client.close();
+  } }
   @Override public NotificationRepository parityNotifications() { return notifications; }
 }

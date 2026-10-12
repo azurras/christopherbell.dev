@@ -363,7 +363,9 @@ public class RateLimitFilterTest {
       throws Exception {
     RateLimitProperties properties = new RateLimitProperties();
     properties.getRules().forEach(rule -> {
-      if (ruleName.equals(rule.getName())) rule.setCapacity(1);
+      if (ruleName.equals(rule.getName())) {
+        rule.setCapacity(1);
+      }
     });
     RateLimitFilter filter = new RateLimitFilter(
         new ClientIpResolver(new ClientIpProperties()), properties);
@@ -384,7 +386,9 @@ public class RateLimitFilterTest {
       throws Exception {
     RateLimitProperties properties = new RateLimitProperties();
     properties.getRules().forEach(rule -> {
-      if (ruleName.equals(rule.getName())) rule.setCapacity(1);
+      if (ruleName.equals(rule.getName())) {
+        rule.setCapacity(1);
+      }
     });
     RateLimitFilter filter = new RateLimitFilter(
         new ClientIpResolver(new ClientIpProperties()), properties);

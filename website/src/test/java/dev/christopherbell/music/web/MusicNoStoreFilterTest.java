@@ -3,6 +3,7 @@ package dev.christopherbell.music.web;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -13,7 +14,7 @@ class MusicNoStoreFilterTest {
   @Test
   void appliesSecurityHeadersEvenWhenMusicApiReturnsAnError() throws Exception {
     var response = new MockHttpServletResponse();
-    FilterChain chain = (request, result) -> ((jakarta.servlet.http.HttpServletResponse) result)
+    FilterChain chain = (request, result) -> ((HttpServletResponse) result)
         .setStatus(403);
 
     new MusicNoStoreFilter().doFilter(

@@ -59,7 +59,9 @@ class SharedFolderMaintenanceLeaseTest {
     @Override
     public synchronized Optional<LeaseGrant> tryAcquire(String ownerToken, Duration duration) {
       Instant now = clock.instant();
-      if (owner != null && !owner.equals(ownerToken) && expiresAt.isAfter(now)) return Optional.empty();
+      if (owner != null && !owner.equals(ownerToken) && expiresAt.isAfter(now)) {
+        return Optional.empty();
+      }
       owner = ownerToken;
       expiresAt = now.plus(duration);
       return Optional.of(new LeaseGrant(SharedFolderMaintenanceLeaseDocument.ID,
@@ -69,7 +71,9 @@ class SharedFolderMaintenanceLeaseTest {
     @Override
     public synchronized Optional<LeaseGrant> renew(LeaseGrant grant, Duration duration) {
       if (!grant.ownerId().equals(owner) || grant.fenceToken() != fence
-          || !expiresAt.isAfter(clock.instant())) return Optional.empty();
+          || !expiresAt.isAfter(clock.instant())) {
+        return Optional.empty();
+      }
       expiresAt = clock.instant().plus(duration);
       return Optional.of(new LeaseGrant(grant.leaseName(), owner, fence, expiresAt));
     }
@@ -77,7 +81,9 @@ class SharedFolderMaintenanceLeaseTest {
     @Override
     public synchronized boolean release(LeaseGrant grant) {
       if (!grant.ownerId().equals(owner) || grant.fenceToken() != fence
-          || !expiresAt.isAfter(clock.instant())) return false;
+          || !expiresAt.isAfter(clock.instant())) {
+        return false;
+      }
       owner = null;
       expiresAt = Instant.EPOCH;
       return true;

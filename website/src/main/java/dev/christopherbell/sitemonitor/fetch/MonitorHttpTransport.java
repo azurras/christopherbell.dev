@@ -152,7 +152,9 @@ final class MonitorHttpTransport {
   }
 
   private static boolean isAllowedContentType(String value, List<String> allowedContentTypes) {
-    if (value == null) return false;
+    if (value == null) {
+      return false;
+    }
     var contentType = value.split(";", 2)[0].strip().toLowerCase(Locale.ROOT);
     return allowedContentTypes.stream()
         .map(allowed -> allowed.toLowerCase(Locale.ROOT))
@@ -197,7 +199,9 @@ final class MonitorHttpTransport {
 
   private static <T extends Throwable> T findCause(Throwable failure, Class<T> type) {
     for (var current = Exceptions.unwrap(failure); current != null; current = current.getCause()) {
-      if (type.isInstance(current)) return type.cast(current);
+      if (type.isInstance(current)) {
+        return type.cast(current);
+      }
     }
     return null;
   }

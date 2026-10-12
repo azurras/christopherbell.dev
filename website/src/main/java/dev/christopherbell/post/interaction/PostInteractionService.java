@@ -12,7 +12,6 @@ import dev.christopherbell.post.abuse.VoidMutationKind;
 import dev.christopherbell.post.expiration.PostExpirationService;
 import dev.christopherbell.post.feed.PostFeedItemAssembler;
 import dev.christopherbell.post.like.PostLikeStore;
-import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
 import java.time.Clock;

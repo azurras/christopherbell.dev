@@ -17,12 +17,16 @@ class MongoPostRepositoryContractTest implements PostRepositoryParityContract {
   @BeforeAll
   static void connect() {
     var connection = new ConnectionString(System.getenv("SPRING_MONGODB_URI"));
-    if (!"test".equals(connection.getDatabase())) throw new IllegalStateException("Database test required.");
+    if (!"test".equals(connection.getDatabase())) {
+      throw new IllegalStateException("Database test required.");
+    }
     client = MongoClients.create(connection);
     posts = new MongoPostRepository(DomainMongoOperationsTestFactory.createForDisposableMongo(
         new MongoTemplate(client, "test")));
   }
 
-  @AfterAll static void disconnect() { if (client != null) client.close(); }
+  @AfterAll static void disconnect() { if (client != null) {
+    client.close();
+  } }
   @Override public PostRepository parityPosts() { return posts; }
 }

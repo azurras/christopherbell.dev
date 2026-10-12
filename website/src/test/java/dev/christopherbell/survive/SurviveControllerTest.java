@@ -1,9 +1,14 @@
 package dev.christopherbell.survive;
 
-import static org.hamcrest.Matchers.*;
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.api.LoginTokensFixture;
@@ -15,6 +20,8 @@ import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequ
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.permission.PermissionService;
 import jakarta.servlet.http.Cookie;
+import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -50,8 +57,8 @@ class SurviveControllerTest {
   void accountSurvivorResumesWithoutGuestCookieAndRepeatedJoinCannotReplaceIt() throws Exception {
     var account = dev.christopherbell.account.model.Account.builder().id("saved-owner")
         .role(dev.christopherbell.account.model.Role.USER).status(dev.christopherbell.account.model.AccountStatus.ACTIVE)
-        .permissions(java.util.Set.of()).build();
-    org.mockito.Mockito.when(accounts.findById("saved-owner")).thenReturn(java.util.Optional.of(account));
+        .permissions(Set.of()).build();
+    org.mockito.Mockito.when(accounts.findById("saved-owner")).thenReturn(Optional.of(account));
     String credential = "Bearer " + LoginTokensFixture.localDevelopmentLoginTokens().issueFor(account);
     var joined = mvc.perform(post("/api/survive/v1/game").header("Authorization", credential).with(csrf())
         .contentType("application/json").content("{\"name\":\"Saved survivor\"}"))

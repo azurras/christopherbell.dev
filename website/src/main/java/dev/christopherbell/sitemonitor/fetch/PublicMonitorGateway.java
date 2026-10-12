@@ -60,7 +60,9 @@ public class PublicMonitorGateway implements MonitorGateway {
 
   private static Duration remaining(long deadlineNanos) {
     long remainingNanos = deadlineNanos - System.nanoTime();
-    if (remainingNanos <= 0) throw new MonitorFetchException("TIME_BUDGET");
+    if (remainingNanos <= 0) {
+      throw new MonitorFetchException("TIME_BUDGET");
+    }
     return Duration.ofNanos(Math.min(remainingNanos, Duration.ofSeconds(4).toNanos()));
   }
 }

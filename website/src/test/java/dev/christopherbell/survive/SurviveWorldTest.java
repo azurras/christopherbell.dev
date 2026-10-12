@@ -1,6 +1,9 @@
 package dev.christopherbell.survive;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
@@ -25,7 +28,9 @@ class SurviveWorldTest {
     perform(SurviveAction.GATHER, 1);
     assertEquals(4, player.strength);
     assertEquals(4, player.experienceToNextLevel);
-    for (int count = 0; count < 30; count++) perform(SurviveAction.GATHER, 1);
+    for (int count = 0; count < 30; count++) {
+      perform(SurviveAction.GATHER, 1);
+    }
     assertEquals(10, player.wood);
     assertEquals(30, world.snapshotFor(player).events().size());
     assertTrue(player.message.contains("full"));
@@ -36,7 +41,9 @@ class SurviveWorldTest {
     assertFalse(world.actionsFor(player).contains(SurviveAction.BUILD_SHELTER));
     assertFalse(world.actionsFor(player).contains(SurviveAction.BUILD_BOAT));
     assertFalse(world.actionsFor(player).contains(SurviveAction.REST));
-    for (int count = 0; count < 5; count++) perform(SurviveAction.GATHER, 1);
+    for (int count = 0; count < 5; count++) {
+      perform(SurviveAction.GATHER, 1);
+    }
     perform(SurviveAction.BUILD_SHELTER, 1);
     assertEquals(0, player.wood);
     assertEquals(1, world.snapshotFor(player).shelters());
@@ -45,7 +52,9 @@ class SurviveWorldTest {
     assertEquals(9, player.health);
     perform(SurviveAction.REST, 1);
     assertEquals(10, player.health);
-    for (int count = 0; count < 10; count++) perform(SurviveAction.GATHER, 1);
+    for (int count = 0; count < 10; count++) {
+      perform(SurviveAction.GATHER, 1);
+    }
     perform(SurviveAction.BUILD_BOAT, 1);
     assertEquals(0, player.wood);
     assertEquals(1, world.snapshotFor(player).boats());

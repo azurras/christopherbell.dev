@@ -53,7 +53,9 @@ final class PowerShellCpuTemperatureProbe
 
   @Override
   public OptionalDouble readCelsius() {
-    if (closed.get()) return OptionalDouble.empty();
+    if (closed.get()) {
+      return OptionalDouble.empty();
+    }
     ManagedProcess process = null;
     try {
       var resources = resources();
@@ -98,22 +100,32 @@ final class PowerShellCpuTemperatureProbe
   }
 
   private synchronized SecureNativeLibraryProvisioner.NativeLibraries resources() {
-    if (closed.get()) throw new IllegalStateException("CPU temperature probe is closed.");
-    if (libraries == null) libraries = libraryResolver.resolve();
+    if (closed.get()) {
+      throw new IllegalStateException("CPU temperature probe is closed.");
+    }
+    if (libraries == null) {
+      libraries = libraryResolver.resolve();
+    }
     return libraries;
   }
 
   private static String windowsPowerShell() {
     var systemRoot = System.getenv("SystemRoot");
-    if (systemRoot == null || systemRoot.isBlank()) systemRoot = "C:\\Windows";
+    if (systemRoot == null || systemRoot.isBlank()) {
+      systemRoot = "C:\\Windows";
+    }
     return systemRoot + "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
   }
 
   @Override
   public void close() {
-    if (!closed.compareAndSet(false, true)) return;
+    if (!closed.compareAndSet(false, true)) {
+      return;
+    }
     var process = active.getAndSet(null);
-    if (process != null) process.terminateTree();
+    if (process != null) {
+      process.terminateTree();
+    }
     synchronized (this) {
       if (libraries != null) {
         libraries.close();
@@ -182,7 +194,9 @@ final class PowerShellCpuTemperatureProbe
         Future<BoundedOutput> stderr = readers.submit(
             () -> readBounded(process.getErrorStream(), maxOutputBytes));
         boolean completed = process.waitFor(Math.max(1, timeout.toMillis()), TimeUnit.MILLISECONDS);
-        if (!completed) terminateTree();
+        if (!completed) {
+          terminateTree();
+        }
         var out = PowerShellCpuTemperatureProbe.awaitOutput(stdout);
         var err = PowerShellCpuTemperatureProbe.awaitOutput(stderr);
         return new ProcessResult(
@@ -200,7 +214,9 @@ final class PowerShellCpuTemperatureProbe
 
     @Override
     public void terminateTree() {
-      if (!terminated.compareAndSet(false, true)) return;
+      if (!terminated.compareAndSet(false, true)) {
+        return;
+      }
       var descendants = process.descendants().toList();
       descendants.reversed().forEach(ProcessHandle::destroy);
       process.destroy();
@@ -211,7 +227,9 @@ final class PowerShellCpuTemperatureProbe
       }
       descendants.reversed().stream().filter(ProcessHandle::isAlive)
           .forEach(ProcessHandle::destroyForcibly);
-      if (process.isAlive()) process.destroyForcibly();
+      if (process.isAlive()) {
+        process.destroyForcibly();
+      }
     }
 
     private static BoundedOutput readBounded(InputStream input, int limit) throws IOException {
@@ -221,8 +239,12 @@ final class PowerShellCpuTemperatureProbe
       int read;
       while ((read = input.read(buffer)) >= 0) {
         int remaining = limit - captured.size();
-        if (remaining > 0) captured.write(buffer, 0, Math.min(remaining, read));
-        if (read > remaining) truncated = true;
+        if (remaining > 0) {
+          captured.write(buffer, 0, Math.min(remaining, read));
+        }
+        if (read > remaining) {
+          truncated = true;
+        }
       }
       return new BoundedOutput(captured.toString(StandardCharsets.UTF_8), truncated);
     }

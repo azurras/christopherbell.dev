@@ -37,7 +37,9 @@ interface PostInteractionParityContract {
     posts().deleteById(REPLY);
     posts().deleteById(ROOT);
     for (var id : List.of(ACCOUNT, OTHER_ACCOUNT)) {
-      if (accounts().findById(id).isEmpty()) accounts().save(account(id));
+      if (accounts().findById(id).isEmpty()) {
+        accounts().save(account(id));
+      }
     }
     posts().save(post(ROOT, null, ROOT, 0, NOW));
     posts().save(post(REPLY, ROOT, ROOT, 1, NOW.plusSeconds(1)));

@@ -126,7 +126,10 @@ class NvidiaMetricsProviderTest {
     private boolean destroyed;
     @Override public boolean waitFor(long timeout, TimeUnit unit)
         throws InterruptedException { throw new InterruptedException("test"); }
-    @Override public Process destroyForcibly() { destroyed = true; return this; }
+    @Override public Process destroyForcibly() {
+      destroyed = true;
+      return this;
+    }
     @Override public OutputStream getOutputStream() { return OutputStream.nullOutputStream(); }
     @Override public InputStream getInputStream() { return InputStream.nullInputStream(); }
     @Override public InputStream getErrorStream() { return InputStream.nullInputStream(); }

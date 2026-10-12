@@ -3,6 +3,7 @@ package dev.christopherbell.federation.discovery;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -13,7 +14,7 @@ class FederationNoStoreFilterTest {
   @Test
   void appliesPublicNoStoreAndNosniffEvenWhenDiscoveryReturnsAnError() throws Exception {
     var response = new MockHttpServletResponse();
-    FilterChain chain = (request, result) -> ((jakarta.servlet.http.HttpServletResponse) result)
+    FilterChain chain = (request, result) -> ((HttpServletResponse) result)
         .setStatus(404);
 
     new FederationNoStoreFilter().doFilter(

@@ -39,7 +39,9 @@ interface PostReadModelParityContract {
   default void seedFeed() {
     ensureAccount(account(OWNER));
     ensureAccount(account(OTHER));
-    for (var id : List.of(REPLY_B, REPLY_A, ROOT)) posts().deleteById(id);
+    for (var id : List.of(REPLY_B, REPLY_A, ROOT)) {
+      posts().deleteById(id);
+    }
     posts().save(post(ROOT, OWNER, null, ROOT, 0, NOW));
     posts().save(post(REPLY_A, OTHER, ROOT, ROOT, 1, NOW.plusSeconds(1)));
     posts().save(post(REPLY_B, OWNER, ROOT, ROOT, 1, NOW.plusSeconds(2)));

@@ -1,8 +1,16 @@
 package dev.christopherbell.sitemonitor.fetch;
 
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -24,7 +32,9 @@ class PublicMonitorGatewayTest {
     var calls = new AtomicInteger();
     assertThatThrownBy(() -> new PublicMonitorGateway(policy, transport).fetch(origin, origin,
         System.nanoTime() + 1_000_000_000L, false, () -> {
-          if (calls.incrementAndGet() == 2) throw new IllegalStateException("lease lost");
+          if (calls.incrementAndGet() == 2) {
+            throw new IllegalStateException("lease lost");
+          }
         })).isInstanceOf(IllegalStateException.class);
     verifyNoInteractions(transport);
   }

@@ -6,12 +6,13 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /** Shared repository, authentication-join, and atomic session behavior for both engines. */
 interface BrowserSessionParityContract {
-  String RUN = java.util.UUID.randomUUID().toString();
+  String RUN = UUID.randomUUID().toString();
   String ACCOUNT_ID = "browser-parity-account-" + RUN;
   String SESSION_ID = "browser-parity-session-" + RUN;
   Instant NOW = Instant.parse("2026-08-13T18:00:00Z");

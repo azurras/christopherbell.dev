@@ -50,8 +50,12 @@ public final class MusicExecutableResolver {
 
   public String resolve(String configuredCommand) {
     String resolved = commands.get(configuredCommand);
-    if (resolved != null) return resolved;
-    if (!enabled) return configuredCommand;
+    if (resolved != null) {
+      return resolved;
+    }
+    if (!enabled) {
+      return configuredCommand;
+    }
     throw new IllegalArgumentException("Music media command is outside the configured tool set.");
   }
 
@@ -154,7 +158,9 @@ public final class MusicExecutableResolver {
   private void requireSafeDirectory(Path path, String message) {
     try {
       requireNoLinkOrReparseComponents(path);
-      if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) throw new IOException(message);
+      if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+        throw new IOException(message);
+      }
     } catch (IOException failure) {
       throw new IllegalStateException(message, failure);
     }
@@ -163,7 +169,9 @@ public final class MusicExecutableResolver {
   private void requireSafeRegularFile(Path path, String message) {
     try {
       requireNoLinkOrReparseComponents(path);
-      if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) throw new IOException(message);
+      if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+        throw new IOException(message);
+      }
     } catch (IOException failure) {
       throw new IllegalStateException(message, failure);
     }
@@ -180,7 +188,9 @@ public final class MusicExecutableResolver {
   private void requireNoLinkOrReparseComponents(Path path) throws IOException {
     Path absolute = path.toAbsolutePath().normalize();
     Path current = absolute.getRoot();
-    if (current != null) requireNotLinkOrReparse(current);
+    if (current != null) {
+      requireNotLinkOrReparse(current);
+    }
     for (Path segment : absolute) {
       current = current == null ? segment : current.resolve(segment);
       requireNotLinkOrReparse(current);
@@ -192,7 +202,9 @@ public final class MusicExecutableResolver {
       MessageDigest digest = MessageDigest.getInstance("SHA-256");
       byte[] buffer = new byte[8192];
       int read;
-      while ((read = input.read(buffer)) >= 0) digest.update(buffer, 0, read);
+      while ((read = input.read(buffer)) >= 0) {
+        digest.update(buffer, 0, read);
+      }
       return HexFormat.of().withUpperCase().formatHex(digest.digest());
     } catch (NoSuchAlgorithmException impossible) {
       throw new IllegalStateException("SHA-256 is unavailable.", impossible);

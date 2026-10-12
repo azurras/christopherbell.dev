@@ -132,87 +132,54 @@ domain collections are empty and the remaining database state belongs to the
 migration runner. Production and every other profile still require a genuine
 `TARGET_ACTIVE` ledger.
 
-In PowerShell, locate the installed MongoDB tools, create a private temporary
-root, choose a free port, and start the disposable process:
+`ops/local` automates this with PowerShell 7. Build the candidate, start it,
+exercise it, then stop it:
 
 ```powershell
-$mongodExe = (Get-Command mongod.exe -ErrorAction Stop).Source
-$mongoshExe = (Get-Command mongosh.exe -ErrorAction Stop).Source
-$testMongoRoot = Join-Path ([IO.Path]::GetTempPath()) `
-    ('christopherbell-test-mongo-' + [guid]::NewGuid().ToString('N'))
-$databasePath = Join-Path $testMongoRoot 'db'
-New-Item -ItemType Directory -Path $databasePath -Force | Out-Null
-$mongoPortPicker = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
-try {
-    $mongoPortPicker.Start()
-    $mongoPort = ([Net.IPEndPoint]$mongoPortPicker.LocalEndpoint).Port
-} finally {
-    $mongoPortPicker.Stop()
-}
-$appPortPicker = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
-try {
-    $appPortPicker.Start()
-    $candidatePort = ([Net.IPEndPoint]$appPortPicker.LocalEndpoint).Port
-} finally {
-    $appPortPicker.Stop()
-}
-if ($mongoPort -in 27017, 8080, 8081) { throw 'MongoDB selected a reserved port.' }
-if ($candidatePort -in 27017, 8080, 8081, $mongoPort) {
-    throw 'The candidate web server selected a reserved port.'
-}
-if (Get-NetTCPConnection -State Listen -LocalPort $candidatePort -ErrorAction SilentlyContinue) {
-    throw 'The candidate web server port is already in use.'
-}
-$mongoProcess = Start-Process -FilePath $mongodExe `
-    -ArgumentList @('--dbpath', "`"$databasePath`"", '--port', [string]$mongoPort,
-        '--bind_ip', '127.0.0.1', '--quiet', '--logpath',
-        "`"$(Join-Path $testMongoRoot 'mongod.log')`"") `
-    -WindowStyle Hidden -PassThru
-$mongoReady = $false
-for ($attempt = 0; $attempt -lt 60; $attempt++) {
-    & $mongoshExe '--quiet' '--norc' "mongodb://127.0.0.1:$mongoPort/admin" `
-        '--eval' 'quit(db.runCommand({ping:1}).ok===1?0:1)' 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) { $mongoReady = $true; break }
-    Start-Sleep -Milliseconds 250
-}
-if (-not $mongoReady) { throw 'Disposable MongoDB did not become ready.' }
-$mongoListener = Get-NetTCPConnection -State Listen -LocalPort $mongoPort
-if ($mongoListener.OwningProcess -ne $mongoProcess.Id) {
-    throw 'The disposable MongoDB listener is not owned by the launched process.'
-}
-$javaSocketRoot = Join-Path $env:SystemDrive `
-    ('Temp\cbell-jdk-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $javaSocketRoot -Force | Out-Null
-$env:JAVA_TOOL_OPTIONS = "-Djdk.net.unixdomain.tmpdir=$javaSocketRoot"
+.\ops\local\Invoke-Gradle.ps1 :website:bootJar
+$stateFile = Join-Path $env:TEMP 'christopherbell-candidate.json'
+.\ops\local\Start-Candidate.ps1 -StateFile $stateFile
+# Exercise the baseUrl recorded in the state file.
+.\ops\local\Stop-Candidate.ps1 -StateFile $stateFile -LogDestination <evidence-folder>
 ```
 
-If the listener is not owned by `$mongoProcess.Id`, stop and investigate; do not
-use the endpoint. The second OS-selected port is for the candidate web server.
-Then start the candidate from the repository root:
+`Start-Candidate.ps1` does the following:
 
-```powershell
-$env:SPRING_PROFILES_ACTIVE = 'test'
-$env:SPRING_MONGODB_URI = "mongodb://127.0.0.1:$mongoPort/test"
-$secretBytes = [byte[]]::new(32)
-[Security.Cryptography.RandomNumberGenerator]::Fill($secretBytes)
-$env:APP_JWT_SECRET = [Convert]::ToBase64String($secretBytes)
-.\gradlew.bat :website:bootJar
-$javaExe = (Get-Command java.exe -ErrorAction Stop).Source
-$candidateJar = Join-Path $PWD 'website\build\libs\website.jar'
-& $javaExe -jar $candidateJar '--server.address=127.0.0.1' "--server.port=$candidatePort"
-```
+- Finds `mongod.exe` on PATH or under the newest MongoDB Server install
+  (`-MongodPath` overrides it).
+- Starts it with a new `christopherbell-test-mongo-<guid>` data directory under
+  the temp folder, bound to loopback on an OS-selected port. Ports 27017, 8080 and
+  8081 are never used. It refuses a listener the launched process does not own.
+- Starts `website\build\libs\website.jar` with exactly profile `test`, database
+  `test`, a fresh JWT secret and a `cbell-jdk-<guid>` JDK socket directory.
+  Those settings apply only to the candidate process; the calling shell's
+  environment is restored.
+- Waits for `/actuator/health/readiness` to report `UP`.
+- Writes PIDs, ports, `baseUrl`, the database name, log paths and readiness to
+  the state file. It writes the file even when startup fails, so the stop script
+  can clean up.
+- Accepts `-EnableFederationDiscovery`, which also enables federation discovery
+  with a fresh key-encryption secret.
+- Accepts `-WithTestAdministrator`, which creates one ADMIN account on startup
+  through the test-profile `TestAdministratorBootstrap`, so admin routes and
+  shared-folder grants can be exercised. The generated credentials go only to
+  the candidate and to `test-administrator.json` inside the disposable MongoDB
+  root, whose path the state file records. The stop script removes that file
+  with the root.
+- Accepts `-EnableSharedFolder`, which enables the shared folder with its
+  shared and system roots inside the disposable root and a 1GB free-space floor,
+  so shared-folder reads, grants and the recycle bin work locally.
 
-From another terminal, verify readiness and `GET /` on
-`http://127.0.0.1:$candidatePort`. Stop the Gradle candidate first. Then stop
-only the recorded mongod process, verify its port is no longer listening, and
-remove only `$testMongoRoot` after confirming its resolved path is a direct
-child of `[IO.Path]::GetTempPath()` with the generated
-`christopherbell-test-mongo-<guid>` name. Never run this flow against a restored
-production database or an existing production listener. Remove the temporary
-`SPRING_PROFILES_ACTIVE`, `SPRING_MONGODB_URI`, and `APP_JWT_SECRET` values from
-the shell after the run. Also clear `JAVA_TOOL_OPTIONS` and remove only the
-resolved `$javaSocketRoot` whose parent is `<system-drive>\Temp` and whose name
-matches `cbell-jdk-<guid>`.
+`Stop-Candidate.ps1` does the following:
+
+- Stops only the recorded process trees and reports whether their ports still
+  have listeners.
+- Optionally copies the candidate logs to `-LogDestination`.
+- Removes only the two directories whose names and parents match what the start
+  script generated.
+
+Never point either script at a restored production database or an existing
+production listener.
 
 Database shape changes must be appended through the versioned migration runner;
 never edit an applied migration ID or checksum. See the
@@ -297,6 +264,22 @@ Run the browser-side JavaScript test suite through Gradle:
 
 This uses Node's built-in test runner against `website/src/test/js/*.test.js`.
 Set `NODE_EXE=/path/to/node` when Node is not on `PATH`.
+
+### Style Check
+
+`check` runs Checkstyle (`config/checkstyle/checkstyle.xml`) on `website` and
+`cbell-lib` main and test sources. It enforces the mechanical Chris Street Style
+rules:
+
+- braces on every `if`, `else`, `for` and `while` body;
+- one statement per line;
+- no star, redundant or unused imports;
+- imported types instead of `java.`, `javax.` or `jakarta.` names written with
+  their package.
+
+Run it alone with `./gradlew checkstyleMain checkstyleTest`.
+`config/checkstyle/suppressions.xml` lists code whose style migration has not
+merged yet; remove a line when its migration lands, and add nothing else.
 
 ## Backend Architecture
 
@@ -618,6 +601,17 @@ comparison.
 Run `.\prod.cmd status` first for production failures and `.\prod.cmd logs` for
 application and WinSW wrapper output. Confirm all three Windows services are running
 and `SPRING_MONGODB_URI` targets `mongodb://127.0.0.1:27017`.
+
+Gradle on Windows fails with "A new daemon was started but could not be
+connected to":
+
+- Java 25 creates Unix-domain sockets for NIO pipes under `%TEMP%`, and some
+  shells, such as sandboxed agent shells, cannot use them there.
+- Run Gradle through `.\ops\local\Invoke-Gradle.ps1 <tasks>`. It sets
+  `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=<system-drive>\Temp\jdk-unix-sockets`
+  for that Gradle run only. The daemon and its test JVMs inherit the setting.
+- `GRADLE_OPTS` alone does not help, because it reaches only the Gradle client,
+  not the daemon.
 
 Static JS changes are not visible:
 

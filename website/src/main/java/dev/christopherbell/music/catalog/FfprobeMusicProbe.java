@@ -49,10 +49,14 @@ public final class FfprobeMusicProbe implements MusicProbe {
           .orElseThrow(() -> new MusicProbeException("FFprobe found no audio stream."));
       double duration = duration(format, audio);
       String codec = clean(audio.path("codec_name").asText(null));
-      if (codec == null) throw new MusicProbeException("FFprobe audio codec is missing.");
+      if (codec == null) {
+        throw new MusicProbeException("FFprobe audio codec is missing.");
+      }
       JsonNode tags = format.path("tags");
       String container = clean(format.path("format_name").asText(null));
-      if (container != null && container.contains(",")) container = container.split(",", 2)[0];
+      if (container != null && container.contains(",")) {
+        container = container.split(",", 2)[0];
+      }
       return new MusicProbeResult(
           tag(tags, "title"),
           tag(tags, "artist"),
@@ -74,25 +78,35 @@ public final class FfprobeMusicProbe implements MusicProbe {
   }
 
   private Optional<JsonNode> firstStream(JsonNode streams, String type) {
-    if (!streams.isArray()) return Optional.empty();
+    if (!streams.isArray()) {
+      return Optional.empty();
+    }
     for (JsonNode stream : streams) {
-      if (type.equals(stream.path("codec_type").asText())) return Optional.of(stream);
+      if (type.equals(stream.path("codec_type").asText())) {
+        return Optional.of(stream);
+      }
     }
     return Optional.empty();
   }
 
   private boolean hasArtwork(JsonNode streams) {
-    if (!streams.isArray()) return false;
+    if (!streams.isArray()) {
+      return false;
+    }
     for (JsonNode stream : streams) {
       if ("video".equals(stream.path("codec_type").asText())
-          && stream.path("disposition").path("attached_pic").asInt(0) == 1) return true;
+          && stream.path("disposition").path("attached_pic").asInt(0) == 1) {
+        return true;
+      }
     }
     return false;
   }
 
   private double duration(JsonNode format, JsonNode audio) {
     String rawDuration = format.path("duration").asText(null);
-    if (rawDuration == null) rawDuration = audio.path("duration").asText(null);
+    if (rawDuration == null) {
+      rawDuration = audio.path("duration").asText(null);
+    }
     try {
       double parsedDurationSeconds = Double.parseDouble(rawDuration);
       if (!Double.isFinite(parsedDurationSeconds)
@@ -115,16 +129,22 @@ public final class FfprobeMusicProbe implements MusicProbe {
   }
 
   private String clean(String rawMetadataText) {
-    if (rawMetadataText == null) return null;
+    if (rawMetadataText == null) {
+      return null;
+    }
     var cleaned = rawMetadataText.replaceAll("[\\p{Cc}\\p{Cf}]", " ")
         .replaceAll("\\s+", " ")
         .strip();
-    if (cleaned.isEmpty()) return null;
+    if (cleaned.isEmpty()) {
+      return null;
+    }
     return cleaned.length() <= MAX_TAG_LENGTH ? cleaned : cleaned.substring(0, MAX_TAG_LENGTH);
   }
 
   private Integer number(String rawNumberTag, int minimumValue, int maximumValue) {
-    if (rawNumberTag == null) return null;
+    if (rawNumberTag == null) {
+      return null;
+    }
     try {
       String leadingNumberText = rawNumberTag.split("/", 2)[0].strip();
       int parsedNumber = Integer.parseInt(leadingNumberText);
@@ -135,7 +155,9 @@ public final class FfprobeMusicProbe implements MusicProbe {
   }
 
   private Integer year(String rawDateTag) {
-    if (rawDateTag == null || rawDateTag.length() < 4) return null;
+    if (rawDateTag == null || rawDateTag.length() < 4) {
+      return null;
+    }
     String rawYearText = rawDateTag.substring(0, 4);
     return number(rawYearText, 1000, 9999);
   }

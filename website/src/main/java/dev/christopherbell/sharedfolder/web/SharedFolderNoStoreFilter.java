@@ -2,20 +2,20 @@ package dev.christopherbell.sharedfolder.web;
 
 import static dev.christopherbell.libs.api.APIVersion.V20260717;
 
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
-import org.springframework.http.HttpHeaders;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.http.HttpHeaders;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
-import org.springframework.security.access.AccessDeniedException;
-import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Prevents browser and intermediary caches from retaining any protected shared-folder response. */
@@ -48,7 +48,9 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
     RequestAttributes previous = RequestContextHolder.getRequestAttributes();
     ServletRequestAttributes bound = previous == null
         ? new ServletRequestAttributes(request) : null;
-    if (bound != null) RequestContextHolder.setRequestAttributes(bound);
+    if (bound != null) {
+      RequestContextHolder.setRequestAttributes(bound);
+    }
     try {
       response.setHeader(HttpHeaders.CACHE_CONTROL, NO_STORE);
       AuditAttempt attempt = attempt(request);
@@ -94,13 +96,21 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
     if (path.equals("preview")) {
       return new AuditAttempt("PREVIEW_STARTED", request.getParameter("path"));
     }
-    if (path.equals("folders")) return new AuditAttempt("CREATE_FOLDER", "request");
-    if (path.equals("entries/rename")) return new AuditAttempt("RENAME", "request");
-    if (path.equals("entries/move")) return new AuditAttempt("MOVE", "request");
+    if (path.equals("folders")) {
+      return new AuditAttempt("CREATE_FOLDER", "request");
+    }
+    if (path.equals("entries/rename")) {
+      return new AuditAttempt("RENAME", "request");
+    }
+    if (path.equals("entries/move")) {
+      return new AuditAttempt("MOVE", "request");
+    }
     if (path.equals("entries") && method.equals("DELETE")) {
       return new AuditAttempt("RECYCLE", "request");
     }
-    if (path.equals("uploads")) return new AuditAttempt("UPLOAD_START", "request");
+    if (path.equals("uploads")) {
+      return new AuditAttempt("UPLOAD_START", "request");
+    }
     if (path.matches("uploads/[^/]+/chunks/[^/]+")) {
       return new AuditAttempt("UPLOAD_APPEND", "upload");
     }
@@ -111,8 +121,12 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
       return new AuditAttempt(method.equals("PUT") ? "UPLOAD_APPEND"
           : method.equals("DELETE") ? "UPLOAD_CANCEL" : "UPLOAD_STATUS", "upload");
     }
-    if (path.equals("admin/audit")) return new AuditAttempt("AUDIT_BROWSE", "audit");
-    if (path.equals("admin/recycle")) return new AuditAttempt("RECYCLE_BROWSE", "recycle");
+    if (path.equals("admin/audit")) {
+      return new AuditAttempt("AUDIT_BROWSE", "audit");
+    }
+    if (path.equals("admin/recycle")) {
+      return new AuditAttempt("RECYCLE_BROWSE", "recycle");
+    }
     if (path.matches("admin/recycle/[^/]+/restore")) {
       return new AuditAttempt("RESTORE", "recycle-item");
     }
@@ -153,7 +167,9 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
       if (current instanceof ResponseStatusException status) {
         return failureCategory(status.getStatusCode().value());
       }
-      if (current == current.getCause()) break;
+      if (current == current.getCause()) {
+        break;
+      }
       current = current.getCause();
     }
     return "failure";

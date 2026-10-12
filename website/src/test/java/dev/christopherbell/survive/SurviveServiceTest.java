@@ -1,12 +1,15 @@
 package dev.christopherbell.survive;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveResource;
 import dev.christopherbell.survive.model.SurviveSnapshot;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
-
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -26,7 +29,9 @@ class SurviveServiceTest {
     var alice = service.join(null, "Same name");
     var bob = service.join(null, "Same name");
     var charlie = service.join(null, "Charlie");
-    for (int count = 0; count < 4; count++) act(service, alice.token(), SurviveAction.GATHER);
+    for (int count = 0; count < 4; count++) {
+      act(service, alice.token(), SurviveAction.GATHER);
+    }
     var before = service.find(alice.token()).orElseThrow();
     assertNotEquals(alice.token(), before.survivorId());
     assertNotEquals(bob.token(), bob.state().survivorId());
@@ -66,7 +71,9 @@ class SurviveServiceTest {
         () -> service.giveSupplies(alice.token(), bob.token(), SurviveResource.WOOD, 1, 1)).getStatusCode().value());
     assertEquals(409, assertThrows(ResponseStatusException.class,
         () -> service.giveSupplies(alice.token(), recipient, SurviveResource.WOOD, 1, 0)).getStatusCode().value());
-    for (int count = 0; count < 10; count++) act(service, bob.token(), SurviveAction.GATHER);
+    for (int count = 0; count < 10; count++) {
+      act(service, bob.token(), SurviveAction.GATHER);
+    }
     assertEquals(400, assertThrows(ResponseStatusException.class,
         () -> service.giveSupplies(alice.token(), recipient, SurviveResource.WOOD, 1, 1)).getStatusCode().value());
     assertEquals(1, service.find(alice.token()).orElseThrow().wood());
@@ -86,7 +93,9 @@ class SurviveServiceTest {
     var recipient = service.join(null, "Recipient");
     act(service, alice.token(), SurviveAction.GATHER);
     act(service, bob.token(), SurviveAction.GATHER);
-    for (int count = 0; count < 9; count++) act(service, recipient.token(), SurviveAction.GATHER);
+    for (int count = 0; count < 9; count++) {
+      act(service, recipient.token(), SurviveAction.GATHER);
+    }
     var start = new CountDownLatch(1);
     var first = CompletableFuture.supplyAsync(() -> attemptGift(service, alice.token(), recipient.state().survivorId(), start));
     var second = CompletableFuture.supplyAsync(() -> attemptGift(service, bob.token(), recipient.state().survivorId(), start));
@@ -98,7 +107,9 @@ class SurviveServiceTest {
 
   private int attemptGift(SurviveService service, String token, String recipientId, CountDownLatch start) {
     try {
-      if (!start.await(5, TimeUnit.SECONDS)) throw new AssertionError("Gift start timed out");
+      if (!start.await(5, TimeUnit.SECONDS)) {
+        throw new AssertionError("Gift start timed out");
+      }
       service.giveSupplies(token, recipientId, SurviveResource.WOOD, 1, 1);
       return 1;
     } catch (ResponseStatusException rejected) {
@@ -135,7 +146,9 @@ class SurviveServiceTest {
     var service = new SurviveService(clock, () -> 2, 10, new InMemorySurviveWorldRepository());
     var alice = service.join(null, "Alice");
     var bob = service.join(null, "Bob");
-    for (int count = 0; count < 5; count++) act(service, alice.token(), SurviveAction.GATHER);
+    for (int count = 0; count < 5; count++) {
+      act(service, alice.token(), SurviveAction.GATHER);
+    }
     act(service, alice.token(), SurviveAction.BUILD_SHELTER);
     var bobState = service.find(bob.token()).orElseThrow();
     assertEquals(1, bobState.shelters());
@@ -161,7 +174,9 @@ class SurviveServiceTest {
     assertEquals(503, assertThrows(ResponseStatusException.class,
         () -> service.join(null, "Extra")).getStatusCode().value());
     var replacement = service.join(player.token(), "Replacement");
-    for (int count = 0; count < 5; count++) act(service, replacement.token(), SurviveAction.GATHER);
+    for (int count = 0; count < 5; count++) {
+      act(service, replacement.token(), SurviveAction.GATHER);
+    }
     act(service, replacement.token(), SurviveAction.BUILD_SHELTER);
     when(mutableClock.instant()).thenReturn(clock.instant().plus(Duration.ofHours(2)));
     assertTrue(service.find(replacement.token()).isEmpty());
@@ -174,7 +189,9 @@ class SurviveServiceTest {
     var service = new SurviveService(clock, () -> 2, 10, new InMemorySurviveWorldRepository());
     var alice = service.join(null, "Alice");
     var bob = service.join(null, "Bob");
-    for (int count = 0; count < 10; count++) act(service, alice.token(), SurviveAction.GATHER);
+    for (int count = 0; count < 10; count++) {
+      act(service, alice.token(), SurviveAction.GATHER);
+    }
     act(service, alice.token(), SurviveAction.BUILD_BOAT);
     var start = new CountDownLatch(1);
     var aliceEscape = CompletableFuture.supplyAsync(() -> attemptEscape(service, alice.token(), start));
@@ -187,7 +204,9 @@ class SurviveServiceTest {
 
   private int attemptEscape(SurviveService service, String token, CountDownLatch start) {
     try {
-      if (!start.await(5, TimeUnit.SECONDS)) throw new AssertionError("Escape start timed out");
+      if (!start.await(5, TimeUnit.SECONDS)) {
+        throw new AssertionError("Escape start timed out");
+      }
       act(service, token, SurviveAction.ESCAPE);
       return 1;
     } catch (ResponseStatusException rejected) {

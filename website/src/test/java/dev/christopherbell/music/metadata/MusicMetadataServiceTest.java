@@ -63,7 +63,9 @@ class MusicMetadataServiceTest {
     var applied = new AtomicReference<MusicMetadataEdit>();
     when(edits.save(any())).thenAnswer(invocation -> {
       MusicMetadataEdit edit = invocation.getArgument(0);
-      if (edit.status() == MusicMetadataEdit.Status.APPLIED) applied.set(edit);
+      if (edit.status() == MusicMetadataEdit.Status.APPLIED) {
+        applied.set(edit);
+      }
       return edit;
     });
     when(edits.findById(any())).thenAnswer(ignored -> Optional.ofNullable(applied.get()));

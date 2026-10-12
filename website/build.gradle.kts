@@ -534,9 +534,11 @@ val sharedFolderPesterInputs = rootProject.files(
 val automationPesterFiles = rootProject.files(
     "ops/production/windows/tests/Production.AutoDeploy.Tests.ps1",
     "ops/production/windows/tests/Production.OpsRequests.Tests.ps1",
+    "ops/local/tests",
     ".github/scripts/tests")
 val automationPesterInputs = rootProject.files(
     "ops/production/windows/modules",
+    "ops/local",
     "ops/requests",
     ".github/scripts")
 val requiredPesterVersion = "5.9.0"
@@ -658,7 +660,7 @@ val sharedFolderOperationsPwshPester = tasks.register<Exec>("sharedFolderOperati
 
 val automationPester = tasks.register<Exec>("automationPester") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Runs automatic-deployment and CI script Pester coverage under PowerShell 7."
+    description = "Runs automatic-deployment, local candidate and CI script Pester coverage under PowerShell 7."
     workingDir = rootProject.projectDir
     inputs.files(automationPesterFiles, automationPesterInputs)
     val report = pesterReportDirectory.map { it.file("automation-pwsh7.xml") }

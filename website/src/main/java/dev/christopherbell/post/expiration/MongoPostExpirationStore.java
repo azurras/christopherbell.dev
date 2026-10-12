@@ -41,7 +41,9 @@ public class MongoPostExpirationStore implements PostExpirationStore {
       criteria = new Criteria().andOperator(criteria, Criteria.where(field).gt(0));
     }
     var update = new Update().inc(field, delta).set("lastUpdatedOn", changedOn);
-    if (extended) update.set("lastExtendedOn", changedOn);
+    if (extended) {
+      update.set("lastExtendedOn", changedOn);
+    }
     return posts.findAndUpdate(new Query(criteria), update)
         .or(() -> posts.findById(postId));
   }
