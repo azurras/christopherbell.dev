@@ -30,7 +30,9 @@ function feedList() {
 
 function showSkeleton() {
   const list = feedList();
-  if (!list) return;
+  if (!list) {
+    return;
+  }
   list.innerHTML = Array.from({ length: 4 }).map(() => `
     <div class="feed-skeleton">
       <div class="skeleton-avatar"></div>
@@ -48,7 +50,9 @@ export function renderFeedLoadError(error, {
   alert = document.getElementById('homeAlert'),
   hasRenderedItems = FEED_ITEMS.length > 0,
 } = {}) {
-  if (!hasRenderedItems) list?.replaceChildren();
+  if (!hasRenderedItems) {
+    list?.replaceChildren();
+  }
   const message = error?.message || 'Could not load the feed.';
   const rendered = renderAlert(alert, message);
   feedLoadErrorMessage = rendered ? message : null;
@@ -63,7 +67,9 @@ export function clearFeedLoadError() {
 
 function renderEmpty(message = 'Nothing in the Void yet.') {
   const list = feedList();
-  if (!list) return;
+  if (!list) {
+    return;
+  }
   list.innerHTML = `
     <div class="feed-empty-state">
       <p class="home-kicker mb-2">Quiet</p>
@@ -88,7 +94,9 @@ function filteredItems() {
 
 function renderFeed() {
   const list = feedList();
-  if (!list || !RENDER_CTX) return;
+  if (!list || !RENDER_CTX) {
+    return;
+  }
   const items = filteredItems();
   list.innerHTML = '';
   if (!items.length) {
@@ -178,7 +186,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const showBtn = document.getElementById('showNewPostsBtn');
   if (showBtn) {
     showBtn.addEventListener('click', async () => {
-      if (banner) banner.classList.add('d-none');
+      if (banner) {
+        banner.classList.add('d-none');
+      }
       await reloadFeed();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
@@ -186,7 +196,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const filterButtons = document.querySelectorAll('.feed-filter');
   filterButtons.forEach(button => {
     button.addEventListener('click', async () => {
-      if (button.disabled) return;
+      if (button.disabled) {
+        return;
+      }
       ACTIVE_FILTER = button.dataset.filter || 'all';
       filterButtons.forEach(btn => btn.classList.toggle('active', btn === button));
       if ((ACTIVE_FILTER === 'mine' || ACTIVE_FILTER === 'following') && !isLoggedIn()) {
@@ -209,7 +221,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     fetchPage: async ({ cursor, limit }) => {
       const params = new URLSearchParams();
       params.set('size', String(limit));
-      if (cursor) params.set('cursor', cursor);
+      if (cursor) {
+        params.set('cursor', cursor);
+      }
       const endpoint = ACTIVE_FILTER === 'mine'
         ? API.posts.meFeedPage
         : ACTIVE_FILTER === 'following'
@@ -249,10 +263,14 @@ document.addEventListener('DOMContentLoaded', async () => {
  * - Render each item with user handle, content, parent-context (when reply)
  * - Allow posting (when authenticated), liking, and deleting (owner/admin)
  */
-      if (!top) return;
+      if (!top) {
+        return;
+      }
       const topTs = top.createdOn || top.lastUpdatedOn;
       if (LATEST_TS && new Date(topTs) > new Date(LATEST_TS)) {
-        if (banner) banner.classList.remove('d-none');
+        if (banner) {
+          banner.classList.remove('d-none');
+        }
       }
     } catch (_) { /* ignore polling failures */ }
   }, 15000);

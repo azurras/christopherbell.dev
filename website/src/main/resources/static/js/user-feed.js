@@ -21,7 +21,9 @@ function getUsernameFromPath() {
 }
 
 function initialsFromUsername(username) {
-  if (!username) return '';
+  if (!username) {
+    return '';
+  }
   return username[0].toUpperCase();
 }
 
@@ -33,7 +35,9 @@ let feedLoadErrorMessage = null;
 
 function setText(id, value) {
   const el = document.getElementById(id);
-  if (el) el.textContent = value ?? '';
+  if (el) {
+    el.textContent = value ?? '';
+  }
 }
 
 function renderProfile(profile) {
@@ -61,7 +65,9 @@ function renderActivityStats(profile) {
 
 function renderFollowButton(profile) {
   const button = document.getElementById('followBtn');
-  if (!button) return;
+  if (!button) {
+    return;
+  }
   if (!profile || profile.self) {
     button.classList.add('d-none');
     return;
@@ -74,7 +80,9 @@ function renderFollowButton(profile) {
 
 function renderMessageLink(profile) {
   const link = document.getElementById('messageUserLink');
-  if (!link) return;
+  if (!link) {
+    return;
+  }
   if (!profile || profile.self) {
     link.classList.add('d-none');
     return;
@@ -86,7 +94,9 @@ function renderMessageLink(profile) {
 function renderTrustButtons(profile) {
   for (const id of ['muteUserBtn', 'blockUserBtn']) {
     const button = document.getElementById(id);
-    if (!button) continue;
+    if (!button) {
+      continue;
+    }
     if (!profile || profile.self) {
       button.classList.add('d-none');
     } else {
@@ -97,14 +107,18 @@ function renderTrustButtons(profile) {
 
 function showTrustStatus(message) {
   const status = document.getElementById('userTrustStatus');
-  if (!status) return;
+  if (!status) {
+    return;
+  }
   status.textContent = message;
   status.classList.remove('d-none');
 }
 
 function renderEmptyFeed() {
   const list = document.getElementById('userFeed');
-  if (!list) return;
+  if (!list) {
+    return;
+  }
   list.innerHTML = `
     <div class="feed-empty-state user-empty-state">
       <h2>No posts yet</h2>
@@ -129,14 +143,18 @@ function clearFeedLoadError() {
 }
 
 async function toggleFollow() {
-  if (!PROFILE) return;
+  if (!PROFILE) {
+    return;
+  }
   if (!isLoggedIn()) {
     window.location.href = loginRedirectUrl();
     return;
   }
   const button = document.getElementById('followBtn');
   try {
-    if (button) button.disabled = true;
+    if (button) {
+      button.disabled = true;
+    }
     const method = PROFILE.followedByMe ? 'DELETE' : 'POST';
     const updated = await fetchJson(API.accounts.follow(PROFILE.username), {
       method,
@@ -146,12 +164,16 @@ async function toggleFollow() {
   } catch (err) {
     showAlert(err.message);
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+    }
   }
 }
 
 async function setTrust(type) {
-  if (!PROFILE) return;
+  if (!PROFILE) {
+    return;
+  }
   if (!isLoggedIn()) {
     window.location.href = loginRedirectUrl();
     return;
@@ -160,7 +182,9 @@ async function setTrust(type) {
     ? document.getElementById('blockUserBtn')
     : document.getElementById('muteUserBtn');
   try {
-    if (button) button.disabled = true;
+    if (button) {
+      button.disabled = true;
+    }
     await fetchJson(API.accounts.setTrust(PROFILE.username), {
       method: 'PUT',
       headers: authHeaders(),
@@ -172,7 +196,9 @@ async function setTrust(type) {
   } catch (err) {
     showAlert(err.message);
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+    }
   }
 }
 
@@ -208,14 +234,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       fetchPage: async ({ cursor, limit }) => {
         const params = new URLSearchParams();
         params.set('size', String(limit));
-        if (cursor) params.set('cursor', cursor);
+        if (cursor) {
+          params.set('cursor', cursor);
+        }
         return await fetchJson(`${API.posts.userFeedPage(username)}?${params.toString()}`, { headers: authHeaders() });
       },
       onError: showFeedLoadError,
       onSuccess: clearFeedLoadError,
       onPage: (items) => {
-        if (!items || items.length === 0) return;
-        for (const feedPost of items) list.appendChild(createFeedItem(feedPost, RENDER_CTX));
+        if (!items || items.length === 0) {
+          return;
+        }
+        for (const feedPost of items) {
+          list.appendChild(createFeedItem(feedPost, RENDER_CTX));
+        }
         initLazyMedia(list);
       },
       getCursor: (feedPost) => feedPost.createdOn || feedPost.lastUpdatedOn,

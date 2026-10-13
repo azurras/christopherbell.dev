@@ -8,10 +8,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 class LegacyMongoAccessBaselineTest {
@@ -74,7 +77,7 @@ class LegacyMongoAccessBaselineTest {
   @Test
   void everyDiscoveredDirectMongoConsumerHasOneExplicitTransitionClassification()
       throws IOException {
-    var classified = new java.util.EnumMap<DirectMongoConsumerKind, Set<String>>(
+    var classified = new EnumMap<DirectMongoConsumerKind, Set<String>>(
         DirectMongoConsumerKind.class);
     Arrays.stream(DirectMongoConsumerKind.values())
         .forEach(kind -> classified.put(kind, new TreeSet<>()));
@@ -94,7 +97,7 @@ class LegacyMongoAccessBaselineTest {
     assertThat(classified.get(DirectMongoConsumerKind.MIGRATION_READER)).isNotEmpty();
     assertThat(classified.get(DirectMongoConsumerKind.RETIREMENT_DELETION)).isEmpty();
     assertThat(classified.values().stream().flatMap(Set::stream).collect(
-        java.util.stream.Collectors.toSet()))
+        Collectors.toSet()))
         .containsExactlyInAnyOrderElementsOf(discovered);
   }
 
@@ -104,7 +107,7 @@ class LegacyMongoAccessBaselineTest {
         .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
         .importPackages("dev.christopherbell");
 
-    var approved = new java.util.HashSet<>(APPROVED_DIRECT_MONGO_INFRASTRUCTURE);
+    var approved = new HashSet<>(APPROVED_DIRECT_MONGO_INFRASTRUCTURE);
     new MongoPersistenceBoundaryRules(
         "dev.christopherbell", approved)
         .zeroBypassRule()
@@ -139,7 +142,9 @@ class LegacyMongoAccessBaselineTest {
     var relative = Path.of(owner.replace('.', '/') + ".java");
     for (var root : PRODUCTION_SOURCE_ROOTS) {
       var source = root.resolve(relative);
-      if (Files.isRegularFile(source)) return Files.readString(source);
+      if (Files.isRegularFile(source)) {
+        return Files.readString(source);
+      }
     }
     throw new IllegalStateException("Cannot locate production source for " + owner);
   }

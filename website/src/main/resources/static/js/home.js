@@ -24,7 +24,9 @@ export function selectMostActivePosts(posts = []) {
       .filter(post => post?.id)
       .toSorted((a, b) => {
         const scoreDelta = activeScore(b) - activeScore(a);
-        if (scoreDelta !== 0) return scoreDelta;
+        if (scoreDelta !== 0) {
+          return scoreDelta;
+        }
         return activityTime(b) - activityTime(a);
       })
       .slice(0, SIGNAL_RAIL_LIMIT);
@@ -77,16 +79,22 @@ export function signalRailMarkup(posts = []) {
 }
 
 async function loadActivePost() {
-  if (!activePostMount) return;
+  if (!activePostMount) {
+    return;
+  }
 
   const refreshSequence = ++activePostRefreshSequence;
   try {
     const params = new URLSearchParams({ limit: String(ACTIVE_POST_FEED_LIMIT) });
     const posts = await fetchJson(`${API.posts.feed}?${params.toString()}`);
-    if (refreshSequence !== activePostRefreshSequence) return;
+    if (refreshSequence !== activePostRefreshSequence) {
+      return;
+    }
     activePostMount.innerHTML = signalRailMarkup(selectMostActivePosts(posts || []));
   } catch (_) {
-    if (refreshSequence !== activePostRefreshSequence) return;
+    if (refreshSequence !== activePostRefreshSequence) {
+      return;
+    }
     activePostMount.innerHTML = `
       <div class="home-void-empty">
         <span class="home-void-eyebrow">Signal interrupted</span>

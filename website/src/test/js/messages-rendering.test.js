@@ -6,7 +6,9 @@ const pageInitializer = [];
 const conversationRows = ['alice', 'bob'].map(username => ({
   dataset: { username },
   addEventListener(eventName, callback) {
-    if (eventName === 'click') this.click = callback;
+    if (eventName === 'click') {
+      this.click = callback;
+    }
   },
 }));
 const conversationList = {
@@ -23,7 +25,9 @@ const messageList = {
     return renderedMessageList;
   },
   set innerHTML(markup) {
-    if (markup === '') renderedMessageList.length = 0;
+    if (markup === '') {
+      renderedMessageList.length = 0;
+    }
   },
   appendChild(row) {
     renderedMessageList.push(row);
@@ -96,7 +100,9 @@ globalThis.window = {
 globalThis.document = {
   cookie: 'CBELL_AUTH_STATE=present',
   addEventListener(eventName, callback) {
-    if (eventName === 'DOMContentLoaded') pageInitializer.push(callback);
+    if (eventName === 'DOMContentLoaded') {
+      pageInitializer.push(callback);
+    }
   },
   getElementById(elementId) {
     return pageNodes.get(elementId) || null;

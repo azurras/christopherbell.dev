@@ -2,9 +2,19 @@ package dev.christopherbell.sharedfolder.fs;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
+import java.net.URI;
+import java.nio.channels.ReadableByteChannel;
+import java.nio.channels.WritableByteChannel;
+import java.nio.file.FileSystemException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.ByteBuffer;
+import java.time.Instant;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
@@ -22,11 +32,11 @@ class PortableSharedFolderPrivateBoundaryTest {
     Path staging = systemRoot.resolve("shared-folder-upload-staging");
     Files.createDirectory(staging);
 
-    assertThat(Files.isDirectory(staging, java.nio.file.LinkOption.NOFOLLOW_LINKS)).isTrue();
+    assertThat(Files.isDirectory(staging, LinkOption.NOFOLLOW_LINKS)).isTrue();
     assertThat(Files.isSymbolicLink(staging)).isFalse();
     assertThat(Files.getFileStore(staging).name()).isEqualTo(Files.getFileStore(systemRoot).name());
     assertThat(Files.getFileStore(staging).type()).isEqualTo(Files.getFileStore(systemRoot).type());
-    assertThat(staging.toRealPath(java.nio.file.LinkOption.NOFOLLOW_LINKS)).startsWith(systemRoot);
+    assertThat(staging.toRealPath(LinkOption.NOFOLLOW_LINKS)).startsWith(systemRoot);
 
     Files.delete(staging);
     staging = boundary.directory("shared-folder-upload-staging");
@@ -87,7 +97,7 @@ class PortableSharedFolderPrivateBoundaryTest {
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
         "shared-folder-media-status", "not-created.json",
         PortableSharedFolderPrivateBoundary.FileAccess.READ, channel -> null))
-        .isInstanceOf(java.nio.file.NoSuchFileException.class);
+        .isInstanceOf(NoSuchFileException.class);
   }
 
   @Test
@@ -111,7 +121,7 @@ class PortableSharedFolderPrivateBoundaryTest {
               PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
       assertThat(invoked).isFalse();
       assertThat(Files.readString(outside)).isEqualTo("outside");
-    } catch (UnsupportedOperationException | java.nio.file.FileSystemException exception) {
+    } catch (UnsupportedOperationException | FileSystemException exception) {
       org.junit.jupiter.api.Assumptions.assumeTrue(false,
           "symbolic-link capability unavailable: " + exception.getMessage());
     }
@@ -129,7 +139,7 @@ class PortableSharedFolderPrivateBoundaryTest {
     Path hardlink = staging.resolve("hardlink-leaf");
     try {
       Files.createLink(hardlink, outside);
-    } catch (UnsupportedOperationException | java.nio.file.FileSystemException exception) {
+    } catch (UnsupportedOperationException | FileSystemException exception) {
       org.junit.jupiter.api.Assumptions.assumeTrue(false,
           "hard-link capability unavailable: " + exception.getMessage());
     }
@@ -168,7 +178,7 @@ class PortableSharedFolderPrivateBoundaryTest {
             PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
 
     assertThat(Files.readString(outside)).isEqualTo("outside");
-    if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("windows")) {
+    if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows")) {
       assertThat(Files.notExists(displaced)).isTrue();
       assertThat(Files.readString(leaf)).isEqualTo("private");
     } else {
@@ -186,7 +196,7 @@ class PortableSharedFolderPrivateBoundaryTest {
         new PortableSharedFolderPrivateBoundary(systemRoot) {
           @Override
           protected void afterPrivateFileOpenBeforeIdentity(
-              Path path, FileAccess access) throws java.io.IOException {
+              Path path, FileAccess access) throws IOException {
             if (access == FileAccess.CREATE_NEW) {
               Files.move(path, displaced);
               Files.copy(attacker, path);
@@ -205,7 +215,7 @@ class PortableSharedFolderPrivateBoundaryTest {
 
     assertThat(callbackInvoked).isFalse();
     Path named = systemRoot.resolve("shared-folder-upload-staging/new-chunk");
-    if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("windows")) {
+    if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows")) {
       assertThat(Files.size(named)).isZero();
       assertThat(Files.notExists(displaced)).isTrue();
     } else {
@@ -224,7 +234,7 @@ class PortableSharedFolderPrivateBoundaryTest {
         new PortableSharedFolderPrivateBoundary(systemRoot) {
           @Override
           protected void beforePrivateFileChannelOpen(Path path, FileAccess access)
-              throws java.io.IOException {
+              throws IOException {
             Files.move(path, displaced);
           }
         };
@@ -234,7 +244,7 @@ class PortableSharedFolderPrivateBoundaryTest {
         PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
           callbackInvoked.set(true);
           return null;
-        })).isInstanceOf(java.io.IOException.class);
+        })).isInstanceOf(IOException.class);
 
     assertThat(callbackInvoked).isFalse();
     assertThat(Files.exists(systemRoot.resolve(
@@ -260,7 +270,7 @@ class PortableSharedFolderPrivateBoundaryTest {
         "shared-folder-upload-staging", "session", target)).isInstanceOf(
             PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
 
-    assertThat(Files.notExists(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)).isTrue();
+    assertThat(Files.notExists(target, LinkOption.NOFOLLOW_LINKS)).isTrue();
     assertThat(Files.readString(systemRoot.resolve(
         "shared-folder-upload-staging/session"))).isEqualTo("private");
   }
@@ -299,14 +309,14 @@ class PortableSharedFolderPrivateBoundaryTest {
         "shared-folder-upload-staging", "session",
         PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
           channel.write(ByteBuffer.wrap("private".getBytes()));
-          java.nio.channels.WritableByteChannel blockedTarget =
-              new java.nio.channels.WritableByteChannel() {
+          WritableByteChannel blockedTarget =
+              new WritableByteChannel() {
                 @Override public int write(ByteBuffer source) { return 0; }
                 @Override public boolean isOpen() { return true; }
                 @Override public void close() { }
               };
-          java.nio.channels.ReadableByteChannel blockedSource =
-              new java.nio.channels.ReadableByteChannel() {
+          ReadableByteChannel blockedSource =
+              new ReadableByteChannel() {
                 @Override public int read(ByteBuffer target) { return 0; }
                 @Override public boolean isOpen() { return true; }
                 @Override public void close() { }
@@ -326,7 +336,7 @@ class PortableSharedFolderPrivateBoundaryTest {
     var identity = new WindowsSharedFolderNativeBridge.NativeFileIdentity(1, new byte[16]);
     org.mockito.Mockito.when(bridge.metadata(handle)).thenReturn(
         new WindowsSharedFolderNativeBridge.NativeFileMetadata(
-            identity, false, true, 8, java.time.Instant.EPOCH));
+            identity, false, true, 8, Instant.EPOCH));
     org.mockito.Mockito.when(bridge.write(
         org.mockito.ArgumentMatchers.eq(handle), org.mockito.ArgumentMatchers.any(byte[].class),
         org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
@@ -347,10 +357,12 @@ class PortableSharedFolderPrivateBoundaryTest {
       assertThat(gathering.position()).isEqualTo(2);
 
       AtomicBoolean firstTargetWrite = new AtomicBoolean(true);
-      java.nio.channels.WritableByteChannel partialTarget =
-          new java.nio.channels.WritableByteChannel() {
+      WritableByteChannel partialTarget =
+          new WritableByteChannel() {
             @Override public int write(ByteBuffer source) {
-              if (!firstTargetWrite.compareAndSet(true, false)) return 0;
+              if (!firstTargetWrite.compareAndSet(true, false)) {
+                return 0;
+              }
               source.position(source.position() + 2);
               return 2;
             }
@@ -359,11 +371,13 @@ class PortableSharedFolderPrivateBoundaryTest {
           };
       assertThat(channel.transferTo(0, 4, partialTarget)).isEqualTo(2);
 
-      java.nio.channels.ReadableByteChannel fourByteSource =
-          new java.nio.channels.ReadableByteChannel() {
+      ReadableByteChannel fourByteSource =
+          new ReadableByteChannel() {
             private boolean read;
             @Override public int read(ByteBuffer target) {
-              if (read) return -1;
+              if (read) {
+                return -1;
+              }
               read = true;
               target.put("more".getBytes());
               return 4;
@@ -521,8 +535,8 @@ class PortableSharedFolderPrivateBoundaryTest {
   @Test
   void rejectsUnsupportedPrivateFilesystemProviders() throws Exception {
     Path archive = temp.resolve("private-provider.zip");
-    try (var zip = java.nio.file.FileSystems.newFileSystem(
-        java.net.URI.create("jar:" + archive.toUri()), Map.of("create", "true"))) {
+    try (var zip = FileSystems.newFileSystem(
+        URI.create("jar:" + archive.toUri()), Map.of("create", "true"))) {
       Path systemRoot = Files.createDirectory(zip.getPath("/system"));
       var facts = new NioSharedFolderFileSystemBoundary(canonicalPath -> false) {
         @Override public boolean isMountPoint(Path path) { return false; }
@@ -547,10 +561,10 @@ class PortableSharedFolderPrivateBoundaryTest {
     try {
       Files.createSymbolicLink(alias, target);
       return;
-    } catch (UnsupportedOperationException | java.nio.file.FileSystemException exception) {
+    } catch (UnsupportedOperationException | FileSystemException exception) {
       // Windows directory junctions do not require symbolic-link privileges.
     }
-    if (!System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT)
+    if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT)
         .contains("windows")) {
       org.junit.jupiter.api.Assumptions.abort("directory aliases are unavailable");
     }

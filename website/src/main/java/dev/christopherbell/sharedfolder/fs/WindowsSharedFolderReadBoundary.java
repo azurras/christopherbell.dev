@@ -12,8 +12,10 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -266,7 +268,7 @@ public final class WindowsSharedFolderReadBoundary {
   }
 
   private static boolean isWindows() {
-    return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("windows");
+    return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows");
   }
 
   /** A metadata probe whose resource verifies that the streamed handle retains the same FileId. */
@@ -279,9 +281,13 @@ public final class WindowsSharedFolderReadBoundary {
       this.metadata = metadata;
     }
 
-    public NativeFileMetadata metadata() { return metadata; }
+    public NativeFileMetadata metadata() {
+      return metadata;
+    }
 
-    List<String> segments() { return segments; }
+    List<String> segments() {
+      return segments;
+    }
 
     /** Returns a pathless resource that opens and verifies its native handle only when streamed. */
     public AbstractResource resource(String filename) {
@@ -290,7 +296,7 @@ public final class WindowsSharedFolderReadBoundary {
   }
 
   /** Minimal immutable metadata used to bind a media job to one source revision. */
-  public record MediaFileMetadata(long size, java.time.Instant modifiedAt) {}
+  public record MediaFileMetadata(long size, Instant modifiedAt) {}
 
   private final class NativeReadResource extends AbstractResource {
     private final NativeReadTarget target;
@@ -309,13 +315,19 @@ public final class WindowsSharedFolderReadBoundary {
     }
 
     @Override
-    public long contentLength() { return size; }
+    public long contentLength() {
+      return size;
+    }
 
     @Override
-    public String getFilename() { return filename; }
+    public String getFilename() {
+      return filename;
+    }
 
     @Override
-    public String getDescription() { return "shared-folder native read resource"; }
+    public String getDescription() {
+      return "shared-folder native read resource";
+    }
   }
 
   private final class OpenedHandle {
@@ -327,7 +339,9 @@ public final class WindowsSharedFolderReadBoundary {
       this.owned = owned;
     }
 
-    NativeHandle handle() { return handle; }
+    NativeHandle handle() {
+      return handle;
+    }
 
     NativeHandle detach() {
       NativeHandle detached = handle;
@@ -430,14 +444,33 @@ public final class WindowsSharedFolderReadBoundary {
       return new NativeBoundaryException("native shared-folder boundary is inactive", 0);
     }
 
-    @Override public NativeHandle openRoot(Path path, int flags) { throw unavailable(); }
-    @Override public NativeHandle openRelative(NativeHandle parent, String name, OpenKind kind, int flags) {
+    @Override
+    public NativeHandle openRoot(Path path, int flags) {
       throw unavailable();
     }
-    @Override public NativeFileMetadata metadata(NativeHandle handle) { throw unavailable(); }
-    @Override public List<DirectoryEntry> listDirectory(NativeHandle directory) { throw unavailable(); }
-    @Override public int read(NativeHandle handle, byte[] buffer, int offset, int length) { throw unavailable(); }
-    @Override public long seek(NativeHandle handle, long offset) { throw unavailable(); }
-    @Override public void close(NativeHandle handle) { throw unavailable(); }
+    @Override
+    public NativeHandle openRelative(NativeHandle parent, String name, OpenKind kind, int flags) {
+      throw unavailable();
+    }
+    @Override
+    public NativeFileMetadata metadata(NativeHandle handle) {
+      throw unavailable();
+    }
+    @Override
+    public List<DirectoryEntry> listDirectory(NativeHandle directory) {
+      throw unavailable();
+    }
+    @Override
+    public int read(NativeHandle handle, byte[] buffer, int offset, int length) {
+      throw unavailable();
+    }
+    @Override
+    public long seek(NativeHandle handle, long offset) {
+      throw unavailable();
+    }
+    @Override
+    public void close(NativeHandle handle) {
+      throw unavailable();
+    }
   }
 }

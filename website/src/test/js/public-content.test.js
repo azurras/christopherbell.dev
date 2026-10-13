@@ -84,7 +84,9 @@ test('Bootstrap WebJar references match the packaged dependency', () => {
   ];
 
   for (const file of roots.flatMap(filesUnder)) {
-    if (!/\.(?:css|html|java|md)$/i.test(file)) continue;
+    if (!/\.(?:css|html|java|md)$/i.test(file)) {
+      continue;
+    }
     const source = fs.readFileSync(file, 'utf8');
     for (const match of source.matchAll(/\/webjars\/bootstrap\/([^/]+)\//g)) {
       assert.equal(match[1], expectedVersion, file + ': ' + match[0]);
@@ -99,7 +101,9 @@ test('Bootstrap is self-hosted and no CDN include remains', () => {
   ));
 
   for (const file of filesUnder('website/src/main/resources')) {
-    if (!/\.(?:css|html)$/i.test(file)) continue;
+    if (!/\.(?:css|html)$/i.test(file)) {
+      continue;
+    }
     assert.doesNotMatch(
       fs.readFileSync(file, 'utf8'),
       /cdn\.jsdelivr\.net\/npm\/bootstrap/i,

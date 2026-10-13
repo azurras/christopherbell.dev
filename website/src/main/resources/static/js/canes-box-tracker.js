@@ -42,17 +42,23 @@ let selectedMetroName = '';
 
 /** Format a USD price or return a readable empty state. */
 export function formatUsd(amountInDollars) {
-  if (amountInDollars == null || Number.isNaN(Number(amountInDollars))) return 'No data';
+  if (amountInDollars == null || Number.isNaN(Number(amountInDollars))) {
+    return 'No data';
+  }
   return `$${Number(amountInDollars).toFixed(2)}`;
 }
 
 /** Calculate percent movement between the latest two priced weekly averages. */
 export function canesBoxIndexTrend(weeks) {
   const pricedWeeks = (weeks || []).filter(week => week.averagePrice != null);
-  if (pricedWeeks.length < 2) return null;
+  if (pricedWeeks.length < 2) {
+    return null;
+  }
   const previous = Number(pricedWeeks[pricedWeeks.length - 2].averagePrice);
   const latest = Number(pricedWeeks[pricedWeeks.length - 1].averagePrice);
-  if (!previous || Number.isNaN(previous) || Number.isNaN(latest)) return null;
+  if (!previous || Number.isNaN(previous) || Number.isNaN(latest)) {
+    return null;
+  }
   const percent = ((latest - previous) / previous) * 100;
   return {
     percent: Math.round(percent * 10) / 10,
@@ -62,7 +68,9 @@ export function canesBoxIndexTrend(weeks) {
 
 function parsedWeekDate(weekStartDate) {
   const parts = String(weekStartDate || '').split('-').map(Number);
-  if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
+  if (parts.length !== 3 || parts.some(Number.isNaN)) {
+    return null;
+  }
   return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
 }
 
@@ -86,11 +94,15 @@ function maxComparisonDistanceDays(monthsBack) {
 /** Calculate percent movement from latest priced week to the closest historical period week. */
 export function canesBoxPeriodTrend(weeks, monthsBack) {
   const pricedWeeks = pricedWeeksByDate(weeks);
-  if (pricedWeeks.length < 2) return null;
+  if (pricedWeeks.length < 2) {
+    return null;
+  }
   const latest = pricedWeeks[pricedWeeks.length - 1];
   const targetDate = targetDateMonthsBefore(latest.priceDate, monthsBack);
   const candidates = pricedWeeks.filter(week => week.priceDate < latest.priceDate);
-  if (!candidates.length) return null;
+  if (!candidates.length) {
+    return null;
+  }
   const closest = candidates
     .map(week => ({ week, distance: Math.abs(week.priceDate - targetDate) }))
     .sort((left, right) => left.distance - right.distance || right.week.priceDate - left.week.priceDate)[0];
@@ -100,7 +112,9 @@ export function canesBoxPeriodTrend(weeks, monthsBack) {
   const comparison = closest.week;
   const previous = Number(comparison.averagePrice);
   const current = Number(latest.averagePrice);
-  if (!previous || Number.isNaN(previous) || Number.isNaN(current)) return null;
+  if (!previous || Number.isNaN(previous) || Number.isNaN(current)) {
+    return null;
+  }
   const percent = ((current - previous) / previous) * 100;
   return {
     percent: Math.round(percent * 10) / 10,
@@ -122,35 +136,51 @@ export function canesBoxPeriodTrends(weeks) {
 
 /** Format the visible index percentage. */
 export function formatIndexTrend(trend) {
-  if (!trend) return 'No trend yet';
-  if (trend.percent > 0) return `+${trend.percent.toFixed(1)}%`;
+  if (!trend) {
+    return 'No trend yet';
+  }
+  if (trend.percent > 0) {
+    return `+${trend.percent.toFixed(1)}%`;
+  }
   return `${trend.percent.toFixed(1)}%`;
 }
 
 /** Format source quality for public table rows. */
 export function formatQualityStatus(status) {
-  if (!status) return '-';
+  if (!status) {
+    return '-';
+  }
   const normalized = String(status).toLowerCase();
   return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
 }
 
 /** Format the latest collection timestamp as a stable date-only label. */
 export function formatCollectedDate(collectedOn) {
-  if (!collectedOn) return '-';
+  if (!collectedOn) {
+    return '-';
+  }
   const text = String(collectedOn);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text;
+  }
   const date = new Date(text);
-  if (Number.isNaN(date.getTime())) return '-';
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
   const parts = CENTRAL_DATE_FORMATTER.formatToParts(date)
     .reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
-  if (!parts.year || !parts.month || !parts.day) return '-';
+  if (!parts.year || !parts.month || !parts.day) {
+    return '-';
+  }
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 /** Build normalized SVG chart points for weekly price history. */
 export function canesBoxChartPoints(weeks, width = 720, height = 260, padding = 34) {
   const pricedWeeks = (weeks || []).filter(week => week.averagePrice != null);
-  if (pricedWeeks.length === 0) return [];
+  if (pricedWeeks.length === 0) {
+    return [];
+  }
   const prices = pricedWeeks.map(week => Number(week.averagePrice));
   const min = Math.min(...prices);
   const max = Math.max(...prices);
@@ -196,12 +226,18 @@ export function bindCanesBoxCurlCopyControl({
   showAlertFn = showAlert,
   setTimeoutFn = setTimeout,
 }) {
-  if (!panel || typeof showAlertFn !== 'function' || typeof setTimeoutFn !== 'function') return false;
+  if (!panel || typeof showAlertFn !== 'function' || typeof setTimeoutFn !== 'function') {
+    return false;
+  }
   panel.addEventListener('click', async event => {
     const button = event.target.closest?.('.canes-box-copy-curl');
-    if (!button) return;
+    if (!button) {
+      return;
+    }
     const code = panel.querySelector('.canes-box-official-curl code')?.textContent;
-    if (!code) return;
+    if (!code) {
+      return;
+    }
     if (typeof clipboard?.writeText !== 'function') {
       showAlertFn('Could not copy the official API curl request.');
       return;
@@ -221,14 +257,24 @@ export function bindCanesBoxCurlCopyControl({
 }
 
 function renderLatest(latest) {
-  if (latestPrice) latestPrice.textContent = formatUsd(latest?.averagePrice);
-  if (latestWeek) latestWeek.textContent = latest?.weekStartDate || '-';
+  if (latestPrice) {
+    latestPrice.textContent = formatUsd(latest?.averagePrice);
+  }
+  if (latestWeek) {
+    latestWeek.textContent = latest?.weekStartDate || '-';
+  }
   if (metroCount) {
     metroCount.textContent = latest ? `${latest.successfulMetroCount}/${latest.totalMetroCount}` : '-';
   }
-  if (verifiedCount) verifiedCount.textContent = latest?.verifiedMetroCount ?? '-';
-  if (provisionalCount) provisionalCount.textContent = latest?.provisionalMetroCount ?? '-';
-  if (excludedCount) excludedCount.textContent = latest?.excludedMetroCount ?? '-';
+  if (verifiedCount) {
+    verifiedCount.textContent = latest?.verifiedMetroCount ?? '-';
+  }
+  if (provisionalCount) {
+    provisionalCount.textContent = latest?.provisionalMetroCount ?? '-';
+  }
+  if (excludedCount) {
+    excludedCount.textContent = latest?.excludedMetroCount ?? '-';
+  }
 }
 
 function renderIndex(weeks) {
@@ -248,7 +294,9 @@ function renderIndex(weeks) {
 }
 
 function renderIndexMetric(numberElement, contextElement, trend, emptyLabel, emptyContext) {
-  if (!numberElement || !contextElement) return;
+  if (!numberElement || !contextElement) {
+    return;
+  }
   numberElement.textContent = trend ? formatIndexTrend(trend) : emptyLabel;
   numberElement.classList.remove('canes-box-index-higher', 'canes-box-index-lower', 'canes-box-index-neutral');
   numberElement.classList.add(trend?.direction === 'higher'
@@ -262,7 +310,9 @@ function renderIndexMetric(numberElement, contextElement, trend, emptyLabel, emp
 }
 
 export function formatPeriodTrendContext(trend) {
-  if (!trend) return '';
+  if (!trend) {
+    return '';
+  }
   return `Latest priced week: ${trend.latestWeekStartDate}. Compared with week of ${trend.comparisonWeekStartDate}.`;
 }
 
@@ -271,7 +321,9 @@ function normalizeMetroName(metroName) {
 }
 
 function isVerifiedMetroPrice(metroPrice) {
-  if (!metroPrice || metroPrice.price == null || metroPrice.status !== 'SUCCESS') return false;
+  if (!metroPrice || metroPrice.price == null || metroPrice.status !== 'SUCCESS') {
+    return false;
+  }
   return metroPrice.qualityStatus === 'VERIFIED' || !metroPrice.qualityStatus;
 }
 
@@ -286,7 +338,9 @@ function officialRestaurantQuery() {
 /** Build a reproducible official Cane's menu API request for the selected store. */
 export function canesBoxOfficialApiCurl(row) {
   const slug = row?.restaurantRef;
-  if (!slug) return '';
+  if (!slug) {
+    return '';
+  }
   const payload = JSON.stringify({
     query: officialRestaurantQuery(),
     variables: { slug },
@@ -301,7 +355,9 @@ export function canesBoxOfficialApiCurl(row) {
 
 function canesBoxOfficialCurlMarkup(row) {
   const curl = canesBoxOfficialApiCurl(row);
-  if (!curl) return '';
+  if (!curl) {
+    return '';
+  }
   return `
     <section class="canes-box-official-curl" aria-label="Official API verification request">
       <div class="canes-box-official-curl-header">
@@ -324,7 +380,9 @@ export function canesBoxMetroTrend(weeks, metroName) {
     .map(week => {
       const row = (week.metroPrices || []).find(candidate =>
         normalizeMetroName(candidate.metroName) === requested);
-      if (!isVerifiedMetroPrice(row)) return null;
+      if (!isVerifiedMetroPrice(row)) {
+        return null;
+      }
       return {
         ...row,
         weekStartDate: week.weekStartDate,
@@ -413,12 +471,16 @@ export function canesBoxMetroRowsMarkup(latest, selectedMetro = '') {
 }
 
 function renderMetroTrend() {
-  if (!metroTrendPanel) return;
+  if (!metroTrendPanel) {
+    return;
+  }
   metroTrendPanel.innerHTML = canesBoxMetroTrendMarkup(canesBoxMetroTrend(currentHistory.weeks || [], selectedMetroName));
 }
 
 function renderMetroRows(latest) {
-  if (!metroRows) return;
+  if (!metroRows) {
+    return;
+  }
   metroRows.innerHTML = canesBoxMetroRowsMarkup(latest, selectedMetroName);
 }
 
@@ -426,7 +488,9 @@ function renderHistory(history) {
   currentHistory = history || { latest: null, weeks: [] };
   renderIndex(history?.weeks || []);
   renderLatest(history?.latest);
-  if (chart) chart.innerHTML = canesBoxChartMarkup(history?.weeks || []);
+  if (chart) {
+    chart.innerHTML = canesBoxChartMarkup(history?.weeks || []);
+  }
   renderMetroTrend();
   renderMetroRows(history?.latest);
 }
@@ -445,7 +509,9 @@ if (hasDocument) {
   loadHistory();
   metroRows?.addEventListener('click', event => {
     const button = event.target.closest?.('.canes-box-metro-button');
-    if (!button) return;
+    if (!button) {
+      return;
+    }
     selectedMetroName = button.dataset.metro || '';
     renderMetroTrend();
     renderMetroRows(currentHistory.latest);

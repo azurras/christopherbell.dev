@@ -33,7 +33,9 @@ test('media loader retries initialization after a failed dynamic import', async 
     loadApi: async () => {
       attempts += 1;
       calls.push(`api:load:${attempts}`);
-      if (attempts === 1) throw new Error('temporary module failure');
+      if (attempts === 1) {
+        throw new Error('temporary module failure');
+      }
       return fakeApi(calls);
     },
   });
@@ -65,10 +67,16 @@ test('default media resume checks same-tab session storage', async context => {
   const hadDocument = Object.hasOwn(globalThis, 'document');
   const originalDocument = globalThis.document;
   context.after(() => {
-    if (hadWindow) globalThis.window = originalWindow;
-    else delete globalThis.window;
-    if (hadDocument) globalThis.document = originalDocument;
-    else delete globalThis.document;
+    if (hadWindow) {
+      globalThis.window = originalWindow;
+    } else {
+      delete globalThis.window;
+    }
+    if (hadDocument) {
+      globalThis.document = originalDocument;
+    } else {
+      delete globalThis.document;
+    }
   });
   const emptySessionStorage = { getItem: () => null };
   const staleLocalStorage = {

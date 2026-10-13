@@ -204,7 +204,9 @@ test('a failed vote keeps the local controls and restores the busy thumb', async
     mount: memberMount,
     claims: () => ({ sub: 'browser-session' }),
     request: async (_url, options = {}) => {
-      if (!options.method) return DETAIL;
+      if (!options.method) {
+        return DETAIL;
+      }
       throw new Error('Vote service unavailable');
     },
     headers: (extra = {}) => extra,
@@ -233,7 +235,9 @@ test('profile ignores stale opposite-thumb results and retains only the latest c
     publicMount,
     claims: () => ({ sub: 'browser-session' }),
     request: async (_url, options = {}) => {
-      if (!options.method) return DETAIL;
+      if (!options.method) {
+        return DETAIL;
+      }
       mutations += 1;
       return mutations === 1 ? first.promise : second.promise;
     },
@@ -270,7 +274,9 @@ test('profile ignores a stale opposite-thumb failure after the latest vote succe
     publicMount,
     claims: () => ({ sub: 'browser-session' }),
     request: async (_url, options = {}) => {
-      if (!options.method) return DETAIL;
+      if (!options.method) {
+        return DETAIL;
+      }
       mutations += 1;
       return mutations === 1 ? first.promise : second.promise;
     },

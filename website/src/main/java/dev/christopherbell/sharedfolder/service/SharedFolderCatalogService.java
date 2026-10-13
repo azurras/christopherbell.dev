@@ -12,14 +12,16 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
@@ -68,22 +70,33 @@ public final class SharedFolderCatalogService {
 
   /** Returns a generation-bound page in stable relative-path order. */
   public SharedFolderSearchResponse search(SharedFolderSearchRequest request) {
-    if (request == null) throw invalidQuery();
+    if (request == null) {
+      throw invalidQuery();
+    }
     String validatedQuery = requireQuery(request.query());
     int pageSize = requirePageSize(request.size());
     String normalizedQuery = validatedQuery.toLowerCase(Locale.ROOT);
     CatalogSnapshot current = currentSnapshot();
-    SearchCursor cursor = decodeCursor(request.cursor(), normalizedQuery);
-    if (cursor != null && cursor.generation() != current.generation()) {
+    Optional<SearchCursor> cursor = decodeCursor(request.cursor(), normalizedQuery);
+    if (cursor.filter(decoded -> decoded.generation() != current.generation()).isPresent()) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "SHARED_FOLDER_CATALOG_CHANGED");
     }
 
     List<SharedDirectoryEntry> matches = new ArrayList<>(pageSize + 1);
     for (SharedDirectoryEntry entry : current.entries()) {
-      if (cursor != null && comparePaths(entry.path(), cursor.path()) <= 0) continue;
-      if (!matches(entry, normalizedQuery)) continue;
+      boolean isAfterCursor = cursor
+          .map(decoded -> comparePaths(entry.path(), decoded.path()) > 0)
+          .orElse(true);
+      if (!isAfterCursor) {
+        continue;
+      }
+      if (!matches(entry, normalizedQuery)) {
+        continue;
+      }
       matches.add(entry);
-      if (matches.size() > pageSize) break;
+      if (matches.size() > pageSize) {
+        break;
+      }
     }
     String nextCursor = null;
     if (matches.size() > pageSize) {
@@ -133,7 +146,9 @@ public final class SharedFolderCatalogService {
   /** Schedules the requested generation when no worker currently owns it. */
   public void refreshAsync() {
     synchronized (schedulingLock) {
-      if (running != null && !running.isDone()) return;
+      if (running != null && !running.isDone()) {
+        return;
+      }
       long generation = requestedGeneration.get();
       running = executor.submit(() -> refresh(generation));
     }
@@ -141,10 +156,14 @@ public final class SharedFolderCatalogService {
 
   /** Advances generation, cancels obsolete work, and schedules the replacement. */
   public void invalidate(SharedFolderCatalogInvalidation reason) {
-    if (reason == null) throw new IllegalArgumentException("Catalog invalidation reason is required");
+    if (reason == null) {
+      throw new IllegalArgumentException("Catalog invalidation reason is required");
+    }
     synchronized (schedulingLock) {
       requestedGeneration.incrementAndGet();
-      if (running != null && !running.isDone()) running.cancel(true);
+      if (running != null && !running.isDone()) {
+        running.cancel(true);
+      }
       running = null;
     }
     refreshAsync();
@@ -167,7 +186,9 @@ public final class SharedFolderCatalogService {
         failedGeneration = 0;
       }
     } catch (RuntimeException failure) {
-      if (requestedGeneration.get() == generation) failedGeneration = generation;
+      if (requestedGeneration.get() == generation) {
+        failedGeneration = generation;
+      }
     }
   }
 
@@ -180,7 +201,9 @@ public final class SharedFolderCatalogService {
     boolean partial = false;
 
     while (!directories.isEmpty()) {
-      if (cancelled(generation)) return ScanResult.cancelledResult();
+      if (cancelled(generation)) {
+        return ScanResult.cancelledResult();
+      }
       if (listedDirectories >= properties.maxDirectories()) {
         partial = true;
         break;
@@ -190,19 +213,25 @@ public final class SharedFolderCatalogService {
       try {
         children = browser.list(work.path()).entries();
       } catch (RuntimeException failure) {
-        if (work.path().isEmpty()) throw failure;
+        if (work.path().isEmpty()) {
+          throw failure;
+        }
         partial = true;
         continue;
       }
       listedDirectories++;
       for (SharedDirectoryEntry entry : children) {
-        if (cancelled(generation)) return ScanResult.cancelledResult();
+        if (cancelled(generation)) {
+          return ScanResult.cancelledResult();
+        }
         if (entries.size() >= properties.maxEntries()) {
           partial = true;
           break;
         }
         entries.add(entry);
-        if (entry.type() != SharedDirectoryEntryType.DIRECTORY) continue;
+        if (entry.type() != SharedDirectoryEntryType.DIRECTORY) {
+          continue;
+        }
         int childDepth = work.depth() + 1;
         if (childDepth > properties.maxDepth()) {
           partial = true;
@@ -210,7 +239,9 @@ public final class SharedFolderCatalogService {
           directories.addLast(new DirectoryWork(entry.path(), childDepth));
         }
       }
-      if (entries.size() >= properties.maxEntries()) break;
+      if (entries.size() >= properties.maxEntries()) {
+        break;
+      }
       if (!clock.instant().isBefore(deadline)) {
         partial = partial || !directories.isEmpty();
         break;
@@ -231,16 +262,22 @@ public final class SharedFolderCatalogService {
 
   private boolean isAudioTrackBelowMusic(SharedDirectoryEntry entry) {
     if (entry.type() != SharedDirectoryEntryType.FILE
-        || entry.previewKind() != SharedFolderPreviewKind.AUDIO) return false;
+        || entry.previewKind() != SharedFolderPreviewKind.AUDIO) {
+      return false;
+    }
     int separator = entry.path().indexOf('/');
     return separator > 0 && entry.path().substring(0, separator).equalsIgnoreCase("Music");
   }
 
   private String requireQuery(String query) {
-    if (query == null) throw invalidQuery();
+    if (query == null) {
+      throw invalidQuery();
+    }
     String trimmed = query.strip();
     if (trimmed.isEmpty() || trimmed.length() > MAX_QUERY_LENGTH
-        || trimmed.chars().anyMatch(Character::isISOControl)) throw invalidQuery();
+        || trimmed.chars().anyMatch(Character::isISOControl)) {
+      throw invalidQuery();
+    }
     return trimmed;
   }
 
@@ -265,8 +302,11 @@ public final class SharedFolderCatalogService {
         .encodeToString(value.getBytes(StandardCharsets.UTF_8));
   }
 
-  private SearchCursor decodeCursor(String encoded, String normalizedQuery) {
-    if (encoded == null || encoded.isBlank()) return null;
+  /** The decoded cursor, or empty for a first page; a malformed cursor is rejected. */
+  private Optional<SearchCursor> decodeCursor(String encoded, String normalizedQuery) {
+    if (encoded == null || encoded.isBlank()) {
+      return Optional.empty();
+    }
     if (encoded.length() > MAX_CURSOR_LENGTH || !encoded.equals(encoded.strip())) {
       throw invalidCursor(null);
     }
@@ -274,14 +314,16 @@ public final class SharedFolderCatalogService {
       String value = new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8);
       String[] parts = value.split("\n", -1);
       if (parts.length != 4 || !CURSOR_VERSION.equals(parts[0]) || parts[3].isBlank()
-          || parts[3].chars().anyMatch(Character::isISOControl)) throw invalidCursor(null);
+          || parts[3].chars().anyMatch(Character::isISOControl)) {
+        throw invalidCursor(null);
+      }
       long generation = Long.parseLong(parts[1]);
       if (generation < 1 || !MessageDigest.isEqual(
           parts[2].getBytes(StandardCharsets.US_ASCII),
           queryHash(normalizedQuery).getBytes(StandardCharsets.US_ASCII))) {
         throw invalidCursor(null);
       }
-      return new SearchCursor(generation, parts[2], parts[3]);
+      return Optional.of(new SearchCursor(generation, parts[2], parts[3]));
     } catch (IllegalArgumentException failure) {
       throw invalidCursor(failure);
     }
@@ -325,7 +367,7 @@ public final class SharedFolderCatalogService {
       return new CatalogSnapshot(generation, now, List.of(), false);
     }
 
-    private boolean isCurrentAt(Instant now, java.time.Duration refreshAfter) {
+    private boolean isCurrentAt(Instant now, Duration refreshAfter) {
       return createdAt.plus(refreshAfter).isAfter(now);
     }
   }

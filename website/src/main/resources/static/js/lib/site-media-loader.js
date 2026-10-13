@@ -15,7 +15,9 @@ export function createSiteMediaLoader({
   let runtimePromise;
 
   function ensurePlayerStyles() {
-    if (documentRoot.querySelector('link[data-site-media-player-styles]')) return;
+    if (documentRoot.querySelector('link[data-site-media-player-styles]')) {
+      return;
+    }
     const link = documentRoot.createElement('link');
     link.rel = 'stylesheet';
     link.dataset.siteMediaPlayerStyles = 'true';
@@ -46,7 +48,9 @@ export function createSiteMediaLoader({
 
   return Object.freeze({
     async resumeSiteMediaIfPresent(storage) {
-      if (!storage.getItem(RESUME_KEY)) return false;
+      if (!storage.getItem(RESUME_KEY)) {
+        return false;
+      }
       await loadRuntime();
       return true;
     },

@@ -305,7 +305,9 @@ function fakeCurlCopyPanel(button) {
   let clickHandler = null;
   return {
     addEventListener(name, handler) {
-      if (name === 'click') clickHandler = handler;
+      if (name === 'click') {
+        clickHandler = handler;
+      }
     },
     querySelector(selector) {
       assert.equal(selector, '.canes-box-official-curl code');

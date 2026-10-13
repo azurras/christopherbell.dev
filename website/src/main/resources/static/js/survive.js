@@ -22,7 +22,9 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveStatus', STATUS_LABELS[state.status] || state.status);
   setText('surviveScene', SCENE_LABELS[state.status] || 'The wilderness');
   const message = documentRoot.getElementById('surviveMessage');
-  if (message.textContent !== state.message) message.textContent = state.message;
+  if (message.textContent !== state.message) {
+    message.textContent = state.message;
+  }
   setText('surviveHealthText', `${state.health} / 10`);
   documentRoot.getElementById('surviveHealth').value = state.health;
   setText('surviveStrength', state.strength);
@@ -81,7 +83,9 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
 /** Serialize browser requests; failed mutations are never automatically repeated. */
 export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const joinForm = documentRoot.getElementById('surviveJoin');
-  if (!joinForm) return null;
+  if (!joinForm) {
+    return null;
+  }
   let state = null;
   let pending = false;
   let mutationPending = false;
@@ -94,10 +98,14 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   function setPending(isPending, isMutation = false) {
     pending = isPending;
     mutationPending = isPending && isMutation;
-    for (const control of joinForm.querySelectorAll('input, button')) control.disabled = pending;
+    for (const control of joinForm.querySelectorAll('input, button')) {
+      control.disabled = pending;
+    }
     restart.disabled = pending;
     refresh.disabled = pending;
-    if (state) renderSurviveState(documentRoot, state, pending, mutationPending);
+    if (state) {
+      renderSurviveState(documentRoot, state, pending, mutationPending);
+    }
   }
 
   function acceptState(serverState) {
@@ -105,11 +113,15 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     documentRoot.getElementById('surviveGame').hidden = !state;
     joinForm.hidden = Boolean(state);
     cancel.hidden = !state;
-    if (state) renderSurviveState(documentRoot, state, pending, mutationPending);
+    if (state) {
+      renderSurviveState(documentRoot, state, pending, mutationPending);
+    }
   }
 
   async function sendRequest(url, options = {}) {
-    if (pending) return;
+    if (pending) {
+      return;
+    }
     setPending(true, options.method === 'POST');
     errorBox.hidden = true;
     try {
@@ -135,7 +147,9 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   };
   const act = event => {
     const button = event.target.closest('[data-action]');
-    if (!button || button.disabled || !state) return;
+    if (!button || button.disabled || !state) {
+      return;
+    }
     void sendRequest(API.survive.actions, {
       method: 'POST', body: JSON.stringify({ action: button.dataset.action, revision: state.revision }),
     });
@@ -149,11 +163,15 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const cancelJoin = () => { joinForm.hidden = true; };
   const readWorld = () => { void sendRequest(API.survive.game); };
   const chooseRecipient = () => {
-    if (state) renderSurviveState(documentRoot, state, pending, mutationPending);
+    if (state) {
+      renderSurviveState(documentRoot, state, pending, mutationPending);
+    }
   };
   const give = event => {
     event.preventDefault();
-    if (!state || pending || documentRoot.getElementById('surviveGive').disabled) return;
+    if (!state || pending || documentRoot.getElementById('surviveGive').disabled) {
+      return;
+    }
     void sendRequest(API.survive.gifts, {
       method: 'POST', body: JSON.stringify({
         recipientId: documentRoot.getElementById('surviveRecipient').value,
@@ -172,7 +190,9 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   refresh.addEventListener('click', readWorld);
   // Poll only when actively viewing a joined survivor; no background game mutation occurs.
   const timer = setInterval(() => {
-    if (state && !pending && joinForm.hidden && !documentRoot.hidden) readWorld();
+    if (state && !pending && joinForm.hidden && !documentRoot.hidden) {
+      readWorld();
+    }
   }, 5000);
   readWorld();
   return {
@@ -192,7 +212,9 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
 
 /** Keep controls attached while the browser parks this document in its back/forward cache. */
 export function disposeSurviveOnPageHide(mountedGame, event) {
-  if (!event.persisted) mountedGame?.dispose();
+  if (!event.persisted) {
+    mountedGame?.dispose();
+  }
 }
 
 if (typeof document !== 'undefined') {

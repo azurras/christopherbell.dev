@@ -51,7 +51,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 reportForm?.addEventListener('submit', async (submitEvent) => {
   submitEvent.preventDefault();
-  if (alertBox) alertBox.classList.add('d-none');
+  if (alertBox) {
+    alertBox.classList.add('d-none');
+  }
   const postId = reportedPostIdFromUrl();
   const reason = document.getElementById('reportReason')?.value;
   const details = document.getElementById('reportDetails')?.value?.trim() || null;
