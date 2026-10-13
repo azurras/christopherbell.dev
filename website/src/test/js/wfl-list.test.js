@@ -59,15 +59,23 @@ function createPage(mode, authenticated = true) {
     addEventListener(_type, listener) { this.listener = listener; },
     insertAdjacentHTML(_position, html) { this.html += html; },
     querySelectorAll(selector) {
-      if (selector === '.wfl-list-vote') return [up, down];
-      if (selector === '.wfl-list-card') return [card];
+      if (selector === '.wfl-list-vote') {
+        return [up, down];
+      }
+      if (selector === '.wfl-list-card') {
+        return [card];
+      }
       return [];
     },
   };
   const request = async (url, options = {}) => {
     calls.push({ options, url });
-    if (url.endsWith('/freshness')) return null;
-    if (url.includes('/favorites') || url.includes('/top-liked')) return [INITIAL];
+    if (url.endsWith('/freshness')) {
+      return null;
+    }
+    if (url.includes('/favorites') || url.includes('/top-liked')) {
+      return [INITIAL];
+    }
     if (url.endsWith('/vote')) {
       const next = deferred();
       pending.push(next);

@@ -2,7 +2,9 @@ import { sanitize } from './util.js';
 
 /** Format a Raising Canes Box Index price for Back Office summaries. */
 export function formatCanesBoxIndexPrice(value) {
-  if (value == null || Number.isNaN(Number(value))) return 'No data';
+  if (value == null || Number.isNaN(Number(value))) {
+    return 'No data';
+  }
   return `$${Number(value).toFixed(2)}`;
 }
 

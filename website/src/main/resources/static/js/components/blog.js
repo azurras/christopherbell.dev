@@ -14,7 +14,9 @@ export function blogPostsFromResponse(response) {
 
 function appendTextElement(parentElement, tagName, className, text) {
     const textElement = document.createElement(tagName);
-    if (className) textElement.className = className;
+    if (className) {
+      textElement.className = className;
+    }
     textElement.textContent = String(text || '');
     parentElement.appendChild(textElement);
     return textElement;

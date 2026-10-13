@@ -14,7 +14,9 @@ test('home feed alert is outside the authentication-hidden composer', async () =
     }
 
     const id = match[1].match(/\bid=["']([^"']+)["']/i)?.[1];
-    if (id === 'homeAlert') alertAncestors = [...divStack];
+    if (id === 'homeAlert') {
+      alertAncestors = [...divStack];
+    }
     divStack.push(id);
   }
 
@@ -144,6 +146,9 @@ function fakeAlert() {
 }
 
 function restoreDocument(previousDocument) {
-  if (previousDocument === undefined) delete globalThis.document;
-  else globalThis.document = previousDocument;
+  if (previousDocument === undefined) {
+    delete globalThis.document;
+  } else {
+    globalThis.document = previousDocument;
+  }
 }

@@ -91,8 +91,12 @@ function hasCoordinate(value) {
 
 function normalizeZipCode(value) {
   const zipCode = String(value || '').trim();
-  if (/^\d{5}$/.test(zipCode)) return zipCode;
-  if (/^\d{5}-\d{4}$/.test(zipCode)) return zipCode.slice(0, 5);
+  if (/^\d{5}$/.test(zipCode)) {
+    return zipCode;
+  }
+  if (/^\d{5}-\d{4}$/.test(zipCode)) {
+    return zipCode.slice(0, 5);
+  }
   return '';
 }
 
@@ -127,7 +131,9 @@ function locationPanelMarkup() {
 }
 
 function directionsUrl(restaurant) {
-  if (!restaurant) return '';
+  if (!restaurant) {
+    return '';
+  }
 
   const params = new URLSearchParams({ api: '1', travelmode: 'driving' });
   if (currentLocation) {
@@ -140,7 +146,9 @@ function directionsUrl(restaurant) {
     const destination = [restaurant.name, restaurantAddressLine(address)]
       .filter(Boolean)
       .join(', ');
-    if (!destination) return '';
+    if (!destination) {
+      return '';
+    }
     params.set('destination', destination);
   }
 
@@ -356,7 +364,9 @@ function renderControlsOnly() {
 }
 
 function selectedFilterLabel() {
-  if (selectedCuisines.size === 0) return '';
+  if (selectedCuisines.size === 0) {
+    return '';
+  }
   return ` Filtered by ${Array.from(selectedCuisines).join(', ')}.`;
 }
 
@@ -492,7 +502,9 @@ async function loadAdminState() {
 }
 
 async function loadPreferences() {
-  if (!isLoggedIn) return;
+  if (!isLoggedIn) {
+    return;
+  }
 
   try {
     const preferences = await fetchJson(API.whatsForLunch.preferences, {
@@ -507,12 +519,18 @@ async function loadPreferences() {
 }
 
 async function savePreferences() {
-  if (!isLoggedIn) return;
+  if (!isLoggedIn) {
+    return;
+  }
 
   const status = mount.querySelector('.lunch-filter-status');
   const button = mount.querySelector('.lunch-filter-save');
-  if (button) button.disabled = true;
-  if (status) status.textContent = 'Saving filters...';
+  if (button) {
+    button.disabled = true;
+  }
+  if (status) {
+    status.textContent = 'Saving filters...';
+  }
   try {
     const preferences = await fetchJson(API.whatsForLunch.preferences, {
       method: 'PUT',
@@ -524,11 +542,17 @@ async function savePreferences() {
     });
     selectedCuisines = new Set(Array.isArray(preferences?.cuisines) ? preferences.cuisines : []);
     selectedRadiusMiles = normalizeRadius(preferences?.radiusMiles);
-    if (status) status.textContent = 'Filters saved.';
+    if (status) {
+      status.textContent = 'Filters saved.';
+    }
   } catch (error) {
-    if (status) status.textContent = error.message || 'Could not save filters.';
+    if (status) {
+      status.textContent = error.message || 'Could not save filters.';
+    }
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+    }
   }
 }
 
@@ -548,11 +572,15 @@ export function createSessionRecoveryController({
   }
 
   async function restoreStoredSession(sessionId) {
-    if (!sessionId) return false;
+    if (!sessionId) {
+      return false;
+    }
     try {
       await loadSession(sessionId, { join: false, storeSession: true });
       const session = getActiveSession();
-      if (session && session.active !== false) return true;
+      if (session && session.active !== false) {
+        return true;
+      }
     } catch {
       // Stored sessions already fall back to normal initialization on lookup failure.
     }
@@ -564,7 +592,9 @@ export function createSessionRecoveryController({
     try {
       await loadSession(sessionId, { join: false, storeSession: true });
     } catch (error) {
-      if (error?.status !== 404) throw error;
+      if (error?.status !== 404) {
+        throw error;
+      }
       await loadSession(sessionId, { join: true, storeSession: true });
     }
   }
@@ -643,7 +673,9 @@ async function createSessionFromPicks(picks, invitedUsernames = []) {
 }
 
 async function updateSessionRestaurants(picks) {
-  if (!activeSession?.id) return null;
+  if (!activeSession?.id) {
+    return null;
+  }
   return fetchJson(API.whatsForLunch.sessionRestaurants(activeSession.id), {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -660,7 +692,9 @@ async function loadStoredMemberSession() {
 
 async function loadStoredAnonymousSession() {
   const stored = readAnonymousWflSession();
-  if (!stored) return false;
+  if (!stored) {
+    return false;
+  }
   currentZipCode = '';
   currentLocation = null;
   activeSession = null;
@@ -677,7 +711,9 @@ async function loadStoredAnonymousSession() {
 }
 
 async function loadSoloSession({ forceNew = false } = {}) {
-  if (!mount) return;
+  if (!mount) {
+    return;
+  }
   activeSession = null;
   stopSessionPolling();
   if (new URLSearchParams(window.location.search).has('session')) {
@@ -729,7 +765,9 @@ async function loadSoloSession({ forceNew = false } = {}) {
 }
 
 async function loadSession(sessionId, { join = true, storeSession = false } = {}) {
-  if (!mount) return;
+  if (!mount) {
+    return;
+  }
   if (!isLoggedIn) {
     renderSessionAuthPrompt(sessionId);
     return;
@@ -771,8 +809,12 @@ async function createSession() {
     .split(/[,\s]+/)
     .map((username) => username.trim())
     .filter(Boolean);
-  if (button) button.disabled = true;
-  if (status) status.textContent = 'Starting session...';
+  if (button) {
+    button.disabled = true;
+  }
+  if (status) {
+    status.textContent = 'Starting session...';
+  }
   try {
     activeSession = await createSessionFromPicks(currentPicks, invitedUsernames);
     storeMemberSessionId(activeSession.id);
@@ -780,16 +822,24 @@ async function createSession() {
     startSessionPolling();
     renderPicks(Array.isArray(activeSession?.restaurants) ? activeSession.restaurants : currentPicks);
   } catch (error) {
-    if (status) status.textContent = error.message || 'Could not start session.';
+    if (status) {
+      status.textContent = error.message || 'Could not start session.';
+    }
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+    }
   }
 }
 
 async function refreshSharedSessionPicks() {
-  if (!activeSession) return;
+  if (!activeSession) {
+    return;
+  }
   const button = mount.querySelector('.lunch-location-refresh');
-  if (button) button.disabled = true;
+  if (button) {
+    button.disabled = true;
+  }
   renderPicksLoading('Finding 3 more for everyone...');
   try {
     const picks = await fetchNearbyPicks();
@@ -803,17 +853,23 @@ async function refreshSharedSessionPicks() {
       <div class="alert alert-danger" role="alert">${sanitize(error.message || 'Could not update the shared session.')}</div>
     `);
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+    }
   }
 }
 
 function startSessionPolling() {
-  if (!activeSession?.id || activeSession.active === false || !isLoggedIn || sessionPollId) return;
+  if (!activeSession?.id || activeSession.active === false || !isLoggedIn || sessionPollId) {
+    return;
+  }
   sessionPollId = window.setInterval(refreshActiveSession, SESSION_POLL_INTERVAL_MS);
 }
 
 function stopSessionPolling() {
-  if (!sessionPollId) return;
+  if (!sessionPollId) {
+    return;
+  }
   window.clearInterval(sessionPollId);
   sessionPollId = null;
 }
@@ -830,7 +886,9 @@ function sessionChanged(latest, current) {
 }
 
 async function refreshActiveSession() {
-  if (!activeSession?.id || sessionPollInFlight) return;
+  if (!activeSession?.id || sessionPollInFlight) {
+    return;
+  }
   sessionPollInFlight = true;
   const sessionId = activeSession.id;
   try {
@@ -849,14 +907,18 @@ async function refreshActiveSession() {
 }
 
 async function loadLunchPicks() {
-  if (!mount) return;
+  if (!mount) {
+    return;
+  }
   try {
     dataFreshness = await fetchJson(API.whatsForLunch.freshness);
   } catch {
     dataFreshness = null;
   }
   isAdmin = await loadAdminState();
-  if (isLoggedIn) clearStoredAnonymousSession();
+  if (isLoggedIn) {
+    clearStoredAnonymousSession();
+  }
   await loadPreferences();
   const sessionId = new URLSearchParams(window.location.search).get('session');
   if (sessionId) {
@@ -902,15 +964,21 @@ async function copySessionLink(button) {
     }
     await clipboard.writeText(link);
     button.textContent = 'Copied';
-    if (status) status.textContent = 'Link copied.';
+    if (status) {
+      status.textContent = 'Link copied.';
+    }
   } catch {
-    if (status) status.textContent = 'Unable to copy link. Select and copy it manually.';
+    if (status) {
+      status.textContent = 'Unable to copy link. Select and copy it manually.';
+    }
   }
 }
 
 async function deleteRestaurant(button) {
   const restaurantId = button.dataset.restaurantId;
-  if (!restaurantId) return;
+  if (!restaurantId) {
+    return;
+  }
 
   button.disabled = true;
   button.textContent = 'Deleting...';
@@ -968,7 +1036,9 @@ mount?.addEventListener('submit', async (event) => {
   const form = event.target instanceof HTMLFormElement
     ? event.target.closest('.lunch-zip-form')
     : null;
-  if (!form) return;
+  if (!form) {
+    return;
+  }
 
   event.preventDefault();
   const input = form.querySelector('.lunch-zip-input');
@@ -989,10 +1059,14 @@ mount?.addEventListener('submit', async (event) => {
 });
 
 async function voteForRestaurant(restaurantId) {
-  if (!activeSession || !restaurantId) return;
+  if (!activeSession || !restaurantId) {
+    return;
+  }
   const button = Array.from(mount.querySelectorAll('.lunch-session-vote'))
     .find((candidate) => candidate.dataset.restaurantId === restaurantId);
-  if (button) button.disabled = true;
+  if (button) {
+    button.disabled = true;
+  }
   try {
     activeSession = await fetchJson(API.whatsForLunch.sessionVote(activeSession.id), {
       method: 'PUT',
@@ -1005,7 +1079,9 @@ async function voteForRestaurant(restaurantId) {
       <div class="alert alert-danger" role="alert">${sanitize(error.message || 'Could not save vote.')}</div>
     `);
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+    }
   }
 }
 
@@ -1022,7 +1098,9 @@ export function createPicksVoteController({
   const mutations = new Map();
 
   return async function setRestaurantVote(restaurantId, vote) {
-    if (!restaurantId || !['UP', 'DOWN'].includes(vote)) return;
+    if (!restaurantId || !['UP', 'DOWN'].includes(vote)) {
+      return;
+    }
     let mutation = mutations.get(restaurantId);
     if (!mutation) {
       mutation = createRestaurantVoteMutation({
@@ -1068,13 +1146,17 @@ const setRestaurantVote = createPicksVoteController({
 });
 
 async function toggleFavorite(restaurantId) {
-  if (!restaurantId) return;
+  if (!restaurantId) {
+    return;
+  }
   const restaurant = currentPicks.find((pick) => pick.id === restaurantId)
     || activeSession?.restaurants?.find((pick) => pick.id === restaurantId);
   const isFavorite = !!restaurant?.myFavorite;
   const button = Array.from(mount.querySelectorAll('.lunch-favorite-toggle'))
     .find((candidate) => candidate.dataset.restaurantId === restaurantId);
-  if (button) button.disabled = true;
+  if (button) {
+    button.disabled = true;
+  }
   try {
     const updatedRestaurant = await fetchJson(API.whatsForLunch.favoriteRestaurant, {
       method: isFavorite ? 'DELETE' : 'PUT',
@@ -1095,7 +1177,9 @@ async function toggleFavorite(restaurantId) {
       <div class="alert alert-danger" role="alert">${sanitize(error.message || 'Could not update favorite.')}</div>
     `);
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+    }
   }
 }
 
@@ -1111,7 +1195,9 @@ mount?.addEventListener('change', (event) => {
   const filterInput = event.target instanceof HTMLInputElement
     ? event.target.closest('.lunch-filter input[type="checkbox"]')
     : null;
-  if (!filterInput) return;
+  if (!filterInput) {
+    return;
+  }
 
   if (filterInput.checked) {
     selectedCuisines.add(filterInput.value);

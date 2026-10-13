@@ -10,9 +10,13 @@ export function createRestaurantVoteMutation({ buttons, apply, showError }) {
     controls.forEach(button => { button.disabled = true; });
     try {
       const value = await request();
-      if (requestGeneration === generation) apply(value);
+      if (requestGeneration === generation) {
+        apply(value);
+      }
     } catch (error) {
-      if (requestGeneration === generation) showError(error);
+      if (requestGeneration === generation) {
+        showError(error);
+      }
     } finally {
       if (requestGeneration === generation) {
         controls.forEach(button => { button.disabled = false; });

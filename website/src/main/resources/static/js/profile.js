@@ -31,27 +31,43 @@ function initialsFor(detail) {
  */
 function renderAccount(detail) {
   const root = document.getElementById('accountDetails');
-  if (!root) return;
+  if (!root) {
+    return;
+  }
   const set = (name, value) => {
     const el = root.querySelector(`[data-field="${name}"]`);
-    if (el) el.textContent = displayValue(value);
+    if (el) {
+      el.textContent = displayValue(value);
+    }
   };
   const fullName = [detail.firstName, detail.lastName].filter(Boolean).join(' ').trim();
   const handle = detail.username ? `@${detail.username}` : '@user';
 
   const title = document.getElementById('profileTitle');
-  if (title) title.textContent = handle;
+  if (title) {
+    title.textContent = handle;
+  }
   const heroMeta = document.getElementById('profileHeroMeta');
-  if (heroMeta) heroMeta.textContent = fullName ? `${fullName}'s posts and account details.` : 'Your posts and account details.';
+  if (heroMeta) {
+    heroMeta.textContent = fullName ? `${fullName}'s posts and account details.` : 'Your posts and account details.';
+  }
 
   const avatar = document.getElementById('profileAvatar');
-  if (avatar) avatar.textContent = initialsFor(detail);
+  if (avatar) {
+    avatar.textContent = initialsFor(detail);
+  }
   const profileHandle = document.getElementById('profileHandle');
-  if (profileHandle) profileHandle.textContent = handle;
+  if (profileHandle) {
+    profileHandle.textContent = handle;
+  }
   const profileName = document.getElementById('profileName');
-  if (profileName) profileName.textContent = fullName || 'Name unavailable';
+  if (profileName) {
+    profileName.textContent = fullName || 'Name unavailable';
+  }
   const role = document.getElementById('profileRole');
-  if (role) role.textContent = displayValue(detail.role);
+  if (role) {
+    role.textContent = displayValue(detail.role);
+  }
   const status = document.getElementById('profileStatus');
   if (status) {
     status.textContent = displayValue(detail.status);
@@ -76,7 +92,9 @@ function renderStats(profile, posts) {
   });
   const set = (id, value) => {
     const el = document.getElementById(id);
-    if (el) el.textContent = String(value);
+    if (el) {
+      el.textContent = String(value);
+    }
   };
   set('profilePostCount', stats.postCount);
   set('profileReplyCount', stats.replyCount);
@@ -93,7 +111,9 @@ function renderFederationConsent(status, busy = false, overrideMessage = '') {
     control.checked = model.checked;
     control.disabled = model.disabled;
   }
-  if (statusText) statusText.textContent = overrideMessage || model.message;
+  if (statusText) {
+    statusText.textContent = overrideMessage || model.message;
+  }
 }
 
 async function fetchFederationConsent() {
@@ -106,13 +126,17 @@ async function fetchFederationConsent() {
 
 async function initializeFederationConsent() {
   const control = document.getElementById('profileFederationEnabled');
-  if (!control) return;
+  if (!control) {
+    return;
+  }
   try {
     renderFederationConsent(await fetchFederationConsent());
   } catch (error) {
     control.disabled = true;
     const statusText = document.getElementById('profileFederationStatus');
-    if (statusText) statusText.textContent = error.message || 'Could not load federation status.';
+    if (statusText) {
+      statusText.textContent = error.message || 'Could not load federation status.';
+    }
     return;
   }
 
@@ -152,7 +176,9 @@ const ROOT_CACHE = {};
  */
 function renderPosts(posts, username) {
   const container = document.getElementById('postsList');
-  if (!container) return;
+  if (!container) {
+    return;
+  }
   container.innerHTML = '';
   if (!posts || posts.length === 0) {
     container.innerHTML = `
@@ -175,7 +201,9 @@ function renderPosts(posts, username) {
   });
   for (const post of posts) {
     const fetchRootCached = async (rootId) => {
-      if (!ROOT_CACHE[rootId]) ROOT_CACHE[rootId] = await fetchJson(API.posts.byId(rootId));
+      if (!ROOT_CACHE[rootId]) {
+        ROOT_CACHE[rootId] = await fetchJson(API.posts.byId(rootId));
+      }
       return ROOT_CACHE[rootId];
     };
     ctx.fetchRoot = fetchRootCached;

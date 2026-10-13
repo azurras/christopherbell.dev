@@ -4,12 +4,14 @@ import java.net.URI
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.time.Duration
 import java.util.HexFormat
 import java.util.zip.ZipFile
 import org.gradle.api.GradleException
+import org.gradle.api.file.FileCollection
 import org.gradle.api.provider.Provider
 import org.gradle.language.base.plugins.LifecycleBasePlugin
 import org.gradle.language.jvm.tasks.ProcessResources
@@ -121,7 +123,7 @@ val libreHardwareMonitorFiles = linkedMapOf(
     "System.Memory.dll" to "d5e8e4866f9cfa66f7765660f84b210198893e55335487afe5ebda342c0e913d",
     "System.Runtime.CompilerServices.Unsafe.dll" to "08cbd7278b66f1e68425a82d4b97181a4130d93e3dd91831407aba7212ccdacf")
 
-fun sha256(path: java.nio.file.Path): String = Files.newInputStream(path).use { input ->
+fun sha256(path: Path): String = Files.newInputStream(path).use { input ->
     val digest = MessageDigest.getInstance("SHA-256")
     val buffer = ByteArray(8192)
     while (true) {
@@ -143,7 +145,7 @@ val sensorArchiveCache = providers.gradleProperty("sensorArchiveCache")
             "caches/christopherbell.dev/sensors/LibreHardwareMonitor-0.9.6.zip")
     })
 
-fun moveAtomically(source: java.nio.file.Path, target: java.nio.file.Path) {
+fun moveAtomically(source: Path, target: Path) {
     try {
         Files.move(source, target, StandardCopyOption.ATOMIC_MOVE)
     } catch (_: AtomicMoveNotSupportedException) {
@@ -152,11 +154,11 @@ fun moveAtomically(source: java.nio.file.Path, target: java.nio.file.Path) {
 }
 
 fun resolvePinnedArchive(
-    cache: java.nio.file.Path,
+    cache: Path,
     expectedSha256: String,
     offline: Boolean,
-    downloadTo: (java.nio.file.Path) -> Unit
-): java.nio.file.Path {
+    downloadTo: (Path) -> Unit
+): Path {
     if (Files.exists(cache)) {
         if (sha256(cache) != expectedSha256) {
             throw GradleException(
@@ -204,7 +206,7 @@ fun resolvePinnedArchive(
     }
 }
 
-fun downloadPinnedArchive(uri: URI, target: java.nio.file.Path) {
+fun downloadPinnedArchive(uri: URI, target: Path) {
     val connection = uri.toURL().openConnection()
     connection.connectTimeout = sensorConnectTimeout.toMillis().toInt()
     connection.readTimeout = sensorReadTimeout.toMillis().toInt()
@@ -226,7 +228,7 @@ fun downloadPinnedArchive(uri: URI, target: java.nio.file.Path) {
     }
 }
 
-fun hasSensorPartial(directory: java.nio.file.Path, prefix: String): Boolean =
+fun hasSensorPartial(directory: Path, prefix: String): Boolean =
     Files.list(directory).use { paths ->
         paths.anyMatch { path ->
             val name = path.fileName.toString()
@@ -568,7 +570,7 @@ val productionDeploymentBuild = isProductionDeploymentBuild(
 
 fun quotedPowerShellPath(path: String): String = "'${path.replace("'", "''")}'"
 
-fun pesterPaths(files: org.gradle.api.file.FileCollection): String = files.files
+fun pesterPaths(files: FileCollection): String = files.files
     .sortedBy { it.absolutePath }
     .joinToString(",") { quotedPowerShellPath(it.absolutePath) }
 
@@ -584,168 +586,98 @@ fun requireWindowsExecutable(executable: String, label: String): String {
     return candidate.absolutePath
 }
 
-val sharedFolderWorkerPester = tasks.register<Exec>("sharedFolderWorkerPester") {
-    group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Runs shared-folder media-worker Pester coverage under PowerShell 7."
-    workingDir = rootProject.projectDir
-    inputs.files(sharedFolderWorkerPesterFiles, sharedFolderPesterInputs)
-    val report = pesterReportDirectory.map { it.file("worker-pwsh7.xml") }
-    outputs.file(report)
-    outputs.upToDateWhen { false }
-
-    doFirst {
-        val executable = requireWindowsExecutable(pwshExecutable.get(), "PowerShell 7")
-        val reportFile = report.get().asFile
-        reportFile.parentFile.mkdirs()
-        val command = """
-            ${'$'}ErrorActionPreference = 'Stop'
-            if (${'$'}PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or newer is required.' }
-            try {
-                Import-Module Pester -RequiredVersion $requiredPesterVersion -ErrorAction Stop
-            } catch {
-                throw 'Required Pester $requiredPesterVersion module is unavailable.'
-            }
-            if ((Get-Module Pester).Version -ne [version]'$requiredPesterVersion') {
-                throw 'Required Pester $requiredPesterVersion module failed to load.'
-            }
-            ${'$'}configuration = New-PesterConfiguration
-            ${'$'}configuration.Run.Path = @(${pesterPaths(sharedFolderWorkerPesterFiles)})
-            ${'$'}configuration.Run.Exit = ${'$'}true
-            ${'$'}configuration.Output.Verbosity = 'Detailed'
-            ${'$'}configuration.TestResult.Enabled = ${'$'}true
-            ${'$'}configuration.TestResult.OutputFormat = 'NUnitXml'
-            ${'$'}configuration.TestResult.OutputPath = ${quotedPowerShellPath(reportFile.absolutePath)}
-            Invoke-Pester -Configuration ${'$'}configuration
-        """.trimIndent()
-        commandLine(executable, "-NoLogo", "-NoProfile", "-Command", command)
-    }
-}
-
-val sharedFolderOperationsPwshPester = tasks.register<Exec>("sharedFolderOperationsPwshPester") {
-    group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Runs shared-folder installer and operations Pester coverage under PowerShell 7."
-    workingDir = rootProject.projectDir
-    inputs.files(sharedFolderOperationsPesterFiles, sharedFolderPesterInputs)
-    val report = pesterReportDirectory.map { it.file("operations-pwsh7.xml") }
-    outputs.file(report)
-    outputs.upToDateWhen { false }
-
-    doFirst {
-        val executable = requireWindowsExecutable(pwshExecutable.get(), "PowerShell 7")
-        val reportFile = report.get().asFile
-        reportFile.parentFile.mkdirs()
-        val command = """
-            ${'$'}ErrorActionPreference = 'Stop'
-            if (${'$'}PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or newer is required.' }
-            try {
-                Import-Module Pester -RequiredVersion $requiredPesterVersion -ErrorAction Stop
-            } catch {
-                throw 'Required Pester $requiredPesterVersion module is unavailable.'
-            }
-            if ((Get-Module Pester).Version -ne [version]'$requiredPesterVersion') {
-                throw 'Required Pester $requiredPesterVersion module failed to load.'
-            }
-            ${'$'}configuration = New-PesterConfiguration
-            ${'$'}configuration.Run.Path = @(${pesterPaths(sharedFolderOperationsPesterFiles)})
-            ${'$'}configuration.Run.Exit = ${'$'}true
-            ${'$'}configuration.Output.Verbosity = 'Detailed'
-            ${'$'}configuration.TestResult.Enabled = ${'$'}true
-            ${'$'}configuration.TestResult.OutputFormat = 'NUnitXml'
-            ${'$'}configuration.TestResult.OutputPath = ${quotedPowerShellPath(reportFile.absolutePath)}
-            Invoke-Pester -Configuration ${'$'}configuration
-        """.trimIndent()
-        commandLine(executable, "-NoLogo", "-NoProfile", "-Command", command)
-    }
-}
-
-val automationPester = tasks.register<Exec>("automationPester") {
-    group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Runs automatic-deployment, local candidate and CI script Pester coverage under PowerShell 7."
-    workingDir = rootProject.projectDir
-    inputs.files(automationPesterFiles, automationPesterInputs)
-    val report = pesterReportDirectory.map { it.file("automation-pwsh7.xml") }
-    outputs.file(report)
-    outputs.upToDateWhen { false }
-
-    doFirst {
-        val executable = requireWindowsExecutable(pwshExecutable.get(), "PowerShell 7")
-        val reportFile = report.get().asFile
-        reportFile.parentFile.mkdirs()
-        val command = """
-            ${'$'}ErrorActionPreference = 'Stop'
-            if (${'$'}PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or newer is required.' }
-            try {
-                Import-Module Pester -RequiredVersion $requiredPesterVersion -ErrorAction Stop
-            } catch {
-                throw 'Required Pester $requiredPesterVersion module is unavailable.'
-            }
-            if ((Get-Module Pester).Version -ne [version]'$requiredPesterVersion') {
-                throw 'Required Pester $requiredPesterVersion module failed to load.'
-            }
-            ${'$'}configuration = New-PesterConfiguration
-            ${'$'}configuration.Run.Path = @(${pesterPaths(automationPesterFiles)})
-            ${'$'}configuration.Run.Exit = ${'$'}true
-            ${'$'}configuration.Output.Verbosity = 'Detailed'
-            ${'$'}configuration.TestResult.Enabled = ${'$'}true
-            ${'$'}configuration.TestResult.OutputFormat = 'NUnitXml'
-            ${'$'}configuration.TestResult.OutputPath = ${quotedPowerShellPath(reportFile.absolutePath)}
-            Invoke-Pester -Configuration ${'$'}configuration
-        """.trimIndent()
-        commandLine(executable, "-NoLogo", "-NoProfile", "-Command", command)
-    }
-}
-
-val sharedFolderOperationsWindowsPowerShellPester =
-    tasks.register<Exec>("sharedFolderOperationsWindowsPowerShellPester") {
-        group = LifecycleBasePlugin.VERIFICATION_GROUP
-        description = "Runs installer and operations compatibility coverage under Windows PowerShell 5.1."
-        workingDir = rootProject.projectDir
-        inputs.files(sharedFolderOperationsPesterFiles, sharedFolderPesterInputs)
-        val report = pesterReportDirectory.map { it.file("operations-powershell51.xml") }
-        outputs.file(report)
-        outputs.upToDateWhen { false }
-
-        doFirst {
-            val executable = requireWindowsExecutable(
-                windowsPowerShellExecutable.get(), "Windows PowerShell 5.1")
-            val reportFile = report.get().asFile
-            reportFile.parentFile.mkdirs()
-            val command = """
-                ${'$'}ErrorActionPreference = 'Stop'
-                if (${'$'}PSVersionTable.PSVersion.Major -ne 5 -or
-                    ${'$'}PSVersionTable.PSVersion.Minor -lt 1) {
-                    throw 'Windows PowerShell 5.1 is required.'
-                }
-                ${'$'}documents = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
-                ${'$'}coreModules = Join-Path ${'$'}documents 'PowerShell\Modules'
-                ${'$'}windowsUserModules = Join-Path ${'$'}documents 'WindowsPowerShell\Modules'
-                ${'$'}programModules = Join-Path ${'$'}env:ProgramFiles 'WindowsPowerShell\Modules'
-                ${'$'}builtInModules = Join-Path ${'$'}env:WINDIR 'System32\WindowsPowerShell\v1.0\Modules'
-                ${'$'}env:PSModulePath = @(
-                    ${'$'}coreModules,
-                    ${'$'}windowsUserModules,
-                    ${'$'}programModules,
-                    ${'$'}builtInModules) -join ';'
-                try {
-                    Import-Module Pester -RequiredVersion $requiredPesterVersion -ErrorAction Stop
-                } catch {
-                    throw 'Required Pester $requiredPesterVersion module is unavailable.'
-                }
-                if ((Get-Module Pester).Version -ne [version]'$requiredPesterVersion') {
-                    throw 'Required Pester $requiredPesterVersion module failed to load.'
-                }
-                ${'$'}configuration = New-PesterConfiguration
-                ${'$'}configuration.Run.Path = @(${pesterPaths(sharedFolderOperationsPesterFiles)})
-                ${'$'}configuration.Run.Exit = ${'$'}true
-                ${'$'}configuration.Output.Verbosity = 'Detailed'
-                ${'$'}configuration.TestResult.Enabled = ${'$'}true
-                ${'$'}configuration.TestResult.OutputFormat = 'NUnitXml'
-                ${'$'}configuration.TestResult.OutputPath = ${quotedPowerShellPath(reportFile.absolutePath)}
-                Invoke-Pester -Configuration ${'$'}configuration
-            """.trimIndent()
-            commandLine(executable, "-NoLogo", "-NoProfile", "-Command", command)
+/** The PowerShell a Pester task runs under, and the preamble that proves and prepares it. */
+enum class PesterHost(val label: String, val preamble: String) {
+    POWERSHELL_7("PowerShell 7", """
+        ${'$'}ErrorActionPreference = 'Stop'
+        if (${'$'}PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or newer is required.' }
+    """.trimIndent()),
+    // Windows PowerShell 5.1 gets a module path that also finds the PowerShell 7 user modules.
+    WINDOWS_POWERSHELL_51("Windows PowerShell 5.1", """
+        ${'$'}ErrorActionPreference = 'Stop'
+        if (${'$'}PSVersionTable.PSVersion.Major -ne 5 -or
+            ${'$'}PSVersionTable.PSVersion.Minor -lt 1) {
+            throw 'Windows PowerShell 5.1 is required.'
         }
+        ${'$'}documents = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
+        ${'$'}coreModules = Join-Path ${'$'}documents 'PowerShell\Modules'
+        ${'$'}windowsUserModules = Join-Path ${'$'}documents 'WindowsPowerShell\Modules'
+        ${'$'}programModules = Join-Path ${'$'}env:ProgramFiles 'WindowsPowerShell\Modules'
+        ${'$'}builtInModules = Join-Path ${'$'}env:WINDIR 'System32\WindowsPowerShell\v1.0\Modules'
+        ${'$'}env:PSModulePath = @(
+            ${'$'}coreModules,
+            ${'$'}windowsUserModules,
+            ${'$'}programModules,
+            ${'$'}builtInModules) -join ';'
+    """.trimIndent())
+}
+
+/** The PowerShell command that loads the pinned Pester and runs testFiles into an NUnit report. */
+fun pesterScript(host: PesterHost, testFiles: FileCollection, reportFile: File): String =
+    host.preamble + "\n" + """
+        try {
+            Import-Module Pester -RequiredVersion $requiredPesterVersion -ErrorAction Stop
+        } catch {
+            throw 'Required Pester $requiredPesterVersion module is unavailable.'
+        }
+        if ((Get-Module Pester).Version -ne [version]'$requiredPesterVersion') {
+            throw 'Required Pester $requiredPesterVersion module failed to load.'
+        }
+        ${'$'}configuration = New-PesterConfiguration
+        ${'$'}configuration.Run.Path = @(${pesterPaths(testFiles)})
+        ${'$'}configuration.Run.Exit = ${'$'}true
+        ${'$'}configuration.Output.Verbosity = 'Detailed'
+        ${'$'}configuration.TestResult.Enabled = ${'$'}true
+        ${'$'}configuration.TestResult.OutputFormat = 'NUnitXml'
+        ${'$'}configuration.TestResult.OutputPath = ${quotedPowerShellPath(reportFile.absolutePath)}
+        Invoke-Pester -Configuration ${'$'}configuration
+    """.trimIndent()
+
+fun registerPesterTask(
+    name: String,
+    summary: String,
+    host: PesterHost,
+    testFiles: FileCollection,
+    inputFiles: FileCollection,
+    reportName: String
+) = tasks.register<Exec>(name) {
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description = summary
+    workingDir = rootProject.projectDir
+    inputs.files(testFiles, inputFiles)
+    val report = pesterReportDirectory.map { it.file(reportName) }
+    outputs.file(report)
+    outputs.upToDateWhen { false }
+
+    doFirst {
+        val executableSetting = when (host) {
+            PesterHost.POWERSHELL_7 -> pwshExecutable
+            PesterHost.WINDOWS_POWERSHELL_51 -> windowsPowerShellExecutable
+        }
+        val executable = requireWindowsExecutable(executableSetting.get(), host.label)
+        val reportFile = report.get().asFile
+        reportFile.parentFile.mkdirs()
+        commandLine(executable, "-NoLogo", "-NoProfile", "-Command", pesterScript(host, testFiles, reportFile))
     }
+}
+
+val sharedFolderWorkerPester = registerPesterTask(
+    "sharedFolderWorkerPester",
+    "Runs shared-folder media-worker Pester coverage under PowerShell 7.",
+    PesterHost.POWERSHELL_7, sharedFolderWorkerPesterFiles, sharedFolderPesterInputs, "worker-pwsh7.xml")
+val sharedFolderOperationsPwshPester = registerPesterTask(
+    "sharedFolderOperationsPwshPester",
+    "Runs shared-folder installer and operations Pester coverage under PowerShell 7.",
+    PesterHost.POWERSHELL_7, sharedFolderOperationsPesterFiles, sharedFolderPesterInputs, "operations-pwsh7.xml")
+val automationPester = registerPesterTask(
+    "automationPester",
+    "Runs automatic-deployment, local candidate and CI script Pester coverage under PowerShell 7.",
+    PesterHost.POWERSHELL_7, automationPesterFiles, automationPesterInputs, "automation-pwsh7.xml")
+val sharedFolderOperationsWindowsPowerShellPester = registerPesterTask(
+    "sharedFolderOperationsWindowsPowerShellPester",
+    "Runs installer and operations compatibility coverage under Windows PowerShell 5.1.",
+    PesterHost.WINDOWS_POWERSHELL_51, sharedFolderOperationsPesterFiles, sharedFolderPesterInputs,
+    "operations-powershell51.xml")
 
 val windowsPesterVerification = listOf(
     sharedFolderWorkerPester,

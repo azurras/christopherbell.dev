@@ -44,7 +44,9 @@ export function moderationActivitySummary(activity) {
 }
 
 function toInstant(value) {
-  if (!value) return '';
+  if (!value) {
+    return '';
+  }
   const parsed = new Date(String(value));
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : '';
 }

@@ -11,7 +11,9 @@ import { API } from './api.js';
 export function createRootFetcher(fetchJson) {
   const cache = {};
   return async function fetchRoot(postId) {
-    if (!cache[postId]) cache[postId] = await fetchJson(API.posts.byId(postId));
+    if (!cache[postId]) {
+      cache[postId] = await fetchJson(API.posts.byId(postId));
+    }
     return cache[postId];
   };
 }
@@ -23,8 +25,12 @@ export function createRootFetcher(fetchJson) {
  */
 export function canDeleteFor(currentUser) {
   return function (post) {
-    if (!currentUser) return false;
-    if (currentUser.role === 'ADMIN') return true;
+    if (!currentUser) {
+      return false;
+    }
+    if (currentUser.role === 'ADMIN') {
+      return true;
+    }
     return !!currentUser.id && currentUser.id === post.accountId;
   };
 }
@@ -32,8 +38,12 @@ export function canDeleteFor(currentUser) {
 /** Build the same 15-minute author/admin edit predicate exposed by the server. */
 export function canEditFor(currentUser, now = Date.now()) {
   return function (post) {
-    if (!currentUser || !post?.createdOn) return false;
-    if (currentUser.role !== 'ADMIN' && currentUser.id !== post.accountId) return false;
+    if (!currentUser || !post?.createdOn) {
+      return false;
+    }
+    if (currentUser.role !== 'ADMIN' && currentUser.id !== post.accountId) {
+      return false;
+    }
     const created = new Date(post.createdOn).getTime();
     const expires = post.expiresOn ? new Date(post.expiresOn).getTime() : Number.POSITIVE_INFINITY;
     return Number.isFinite(created)

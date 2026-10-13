@@ -14,11 +14,17 @@ class FakeElement {
 const copyButton = Object.assign(new FakeElement(), { textContent: 'Copy link' });
 const mount = {
   addEventListener(name, listener) {
-    if (name === 'click') clickHandler = listener;
+    if (name === 'click') {
+      clickHandler = listener;
+    }
   },
   querySelector(selector) {
-    if (selector === '.lunch-session-link') return sessionLink;
-    if (selector === '.lunch-session-status') return status;
+    if (selector === '.lunch-session-link') {
+      return sessionLink;
+    }
+    if (selector === '.lunch-session-status') {
+      return status;
+    }
     return null;
   },
 };

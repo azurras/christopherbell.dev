@@ -176,46 +176,74 @@ function setLoading() {
 }
 
 function renderState(container, message) {
-  if (!container) return;
+  if (!container) {
+    return;
+  }
   container.innerHTML = `<div class="empty-state">${sanitize(message)}</div>`;
 }
 
 function renderOperationResult(container, markup, tone = 'neutral') {
-  if (!container) return;
+  if (!container) {
+    return;
+  }
   container.className = `operation-result operation-${tone}`;
   container.innerHTML = markup;
 }
 
 function statusClass(status) {
   const value = (status || '').toLowerCase();
-  if (value === 'open') return 'status-open';
-  if (value === 'resolved' || value === 'active') return 'status-resolved';
-  if (value === 'suspended') return 'status-suspended';
-  if (value === 'inactive') return 'status-pending';
+  if (value === 'open') {
+    return 'status-open';
+  }
+  if (value === 'resolved' || value === 'active') {
+    return 'status-resolved';
+  }
+  if (value === 'suspended') {
+    return 'status-suspended';
+  }
+  if (value === 'inactive') {
+    return 'status-pending';
+  }
   return 'status-neutral';
 }
 
 function reportSeverityClass(report) {
-  if ((report.status || 'OPEN') === 'RESOLVED') return 'queue-resolved';
+  if ((report.status || 'OPEN') === 'RESOLVED') {
+    return 'queue-resolved';
+  }
   const reason = (report.reason || '').toLowerCase();
-  if (['harassment', 'violence', 'sexual'].includes(reason)) return 'queue-severe';
+  if (['harassment', 'violence', 'sexual'].includes(reason)) {
+    return 'queue-severe';
+  }
   return 'queue-open';
 }
 
 function userSeverityClass(account) {
-  if ((account.status || '').toUpperCase() === 'SUSPENDED') return 'queue-suspended';
-  if ((account.status || '').toUpperCase() === 'INACTIVE') return 'queue-pending';
+  if ((account.status || '').toUpperCase() === 'SUSPENDED') {
+    return 'queue-suspended';
+  }
+  if ((account.status || '').toUpperCase() === 'INACTIVE') {
+    return 'queue-pending';
+  }
   return 'queue-resolved';
 }
 
 function relativeAge(value) {
-  if (!value) return '—';
+  if (!value) {
+    return '—';
+  }
   const seconds = Math.max(1, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 60) {
+    return `${seconds}s ago`;
+  }
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
 }
@@ -242,12 +270,16 @@ function renderMetrics() {
 
   Object.entries(metrics).forEach(([id, value]) => {
     const element = document.getElementById(id);
-    if (element) element.textContent = String(value);
+    if (element) {
+      element.textContent = String(value);
+    }
   });
 }
 
 function renderReports() {
-  if (!reportQueue) return;
+  if (!reportQueue) {
+    return;
+  }
   if (!reports.length) {
     renderState(reportQueue, 'No reports yet. The queue is clear.');
     return;
@@ -305,7 +337,9 @@ function repeatReportSummary(report) {
 }
 
 function renderUsers() {
-  if (!userQueue) return;
+  if (!userQueue) {
+    return;
+  }
   if (!accounts.length) {
     renderState(userQueue, 'No accounts found.');
     return;
@@ -348,16 +382,28 @@ function applyReportPage(payload) {
 
 function renderReportNavigation() {
   const state = reportPageNavigation(reportPageState);
-  if (reportPrevious) reportPrevious.disabled = state.previousDisabled;
-  if (reportNext) reportNext.disabled = state.nextDisabled;
-  if (reportPage) reportPage.textContent = state.label;
+  if (reportPrevious) {
+    reportPrevious.disabled = state.previousDisabled;
+  }
+  if (reportNext) {
+    reportNext.disabled = state.nextDisabled;
+  }
+  if (reportPage) {
+    reportPage.textContent = state.label;
+  }
 }
 
 function renderUserNavigation() {
   const state = accountPageNavigation(accountPageState);
-  if (userPrevious) userPrevious.disabled = state.previousDisabled;
-  if (userNext) userNext.disabled = state.nextDisabled;
-  if (userPage) userPage.textContent = state.label;
+  if (userPrevious) {
+    userPrevious.disabled = state.previousDisabled;
+  }
+  if (userNext) {
+    userNext.disabled = state.nextDisabled;
+  }
+  if (userPage) {
+    userPage.textContent = state.label;
+  }
 }
 
 function applyActivityPage(payload) {
@@ -373,9 +419,15 @@ function applyActivityPage(payload) {
 
 function renderActivityNavigation() {
   const state = activityPageNavigation(activityPageState);
-  if (activityPrevious) activityPrevious.disabled = state.previousDisabled;
-  if (activityNext) activityNext.disabled = state.nextDisabled;
-  if (activityPage) activityPage.textContent = state.label;
+  if (activityPrevious) {
+    activityPrevious.disabled = state.previousDisabled;
+  }
+  if (activityNext) {
+    activityNext.disabled = state.nextDisabled;
+  }
+  if (activityPage) {
+    activityPage.textContent = state.label;
+  }
 }
 
 function applyAccountPage(payload) {
@@ -415,7 +467,9 @@ function userActionSelect(account) {
 }
 
 function renderActivity() {
-  if (!activityList) return;
+  if (!activityList) {
+    return;
+  }
   if (!activities.length) {
     renderState(activityList, 'No admin activity recorded yet.');
     return;
@@ -438,9 +492,15 @@ function renderActivity() {
 }
 
 function activityClass(action) {
-  if (action === 'USER_SUSPENDED') return 'activity-danger';
-  if (action === 'POST_DELETED') return 'activity-warning';
-  if (action === 'REPORT_RESOLVED') return 'activity-success';
+  if (action === 'USER_SUSPENDED') {
+    return 'activity-danger';
+  }
+  if (action === 'POST_DELETED') {
+    return 'activity-warning';
+  }
+  if (action === 'REPORT_RESOLVED') {
+    return 'activity-success';
+  }
   return 'activity-neutral';
 }
 
@@ -448,7 +508,9 @@ function openDrawer(type, id) {
   const item = type === 'report'
       ? reports.find(report => report.id === id)
       : accounts.find(account => account.id === id);
-  if (!item || !drawer || !drawerBody || !drawerTitle || !drawerKicker) return;
+  if (!item || !drawer || !drawerBody || !drawerTitle || !drawerKicker) {
+    return;
+  }
 
   drawerKicker.textContent = type === 'report' ? 'Report Details' : 'User Details';
   drawerTitle.textContent = type === 'report'
@@ -528,7 +590,9 @@ function userDetails(account) {
 
 function renderCapabilityPermissions(account, family) {
   const host = document.getElementById(family.hostId);
-  if (!host || !family.template) return;
+  if (!host || !family.template) {
+    return;
+  }
 
   const state = family.stateOf(account);
   const fragment = family.template.content.cloneNode(true);
@@ -587,7 +651,9 @@ async function refreshDashboard() {
   try {
     await refreshSharedAdministration();
   } catch (error) {
-    if (error?.status === 401 || error?.status === 403) throw error;
+    if (error?.status === 401 || error?.status === 403) {
+      throw error;
+    }
     renderState(sharedAuditList, 'Shared-folder audit is temporarily unavailable.');
     renderState(sharedRecycleList, 'Recycle administration is temporarily unavailable.');
     showAlert(error?.message || 'Shared-folder administration is temporarily unavailable.');
@@ -637,15 +703,23 @@ async function refreshSharedAdministration(filters = sharedAuditFilters(sharedAu
   sharedAuditList.innerHTML = sharedAuditMarkup(sharedAuditEvents || []);
   sharedRecycleList.innerHTML = sharedRecycleMarkup(sharedRecycleItems || []);
   if (musicAttempts?.error) {
-    if ([401, 403].includes(musicAttempts.error.status)) throw musicAttempts.error;
+    if ([401, 403].includes(musicAttempts.error.status)) {
+      throw musicAttempts.error;
+    }
     renderState(musicAccessAuditList, 'Denied Music access is temporarily unavailable.');
   } else {
     musicAccessAuditList.innerHTML = musicAccessAttemptMarkup(musicAttempts || []);
   }
   const pagination = sharedRecyclePagination(sharedRecyclePageNumber, sharedRecycleHasNext);
-  if (sharedRecyclePage) sharedRecyclePage.textContent = pagination.label;
-  if (sharedRecyclePrevious) sharedRecyclePrevious.disabled = pagination.previousDisabled;
-  if (sharedRecycleNext) sharedRecycleNext.disabled = pagination.nextDisabled;
+  if (sharedRecyclePage) {
+    sharedRecyclePage.textContent = pagination.label;
+  }
+  if (sharedRecyclePrevious) {
+    sharedRecyclePrevious.disabled = pagination.previousDisabled;
+  }
+  if (sharedRecycleNext) {
+    sharedRecycleNext.disabled = pagination.nextDisabled;
+  }
 }
 
 const handleSharedRecycleAction = createSharedRecycleActionHandler({
@@ -695,8 +769,11 @@ async function loadRestaurantInventory({ append = false } = {}) {
   const items = Array.isArray(page.items) ? page.items : [];
   if (wflInventory) {
     const markup = wflInventoryMarkup(items, page.total ?? 0, append);
-    if (append) wflInventory.insertAdjacentHTML('beforeend', markup);
-    else wflInventory.innerHTML = markup;
+    if (append) {
+      wflInventory.insertAdjacentHTML('beforeend', markup);
+    } else {
+      wflInventory.innerHTML = markup;
+    }
   }
   restaurantInventoryNextCursor = String(page.nextCursor || '');
   restaurantInventoryTotal = Number(page.total || 0);
@@ -744,7 +821,9 @@ async function importRestaurants(button) {
       ])}
       <p>${(preview?.representativeChanges || []).map(sanitize).join('<br>') || 'No changed records.'}</p>
     `);
-    if (!window.confirm('Apply this exact OpenStreetMap import preview?')) return;
+    if (!window.confirm('Apply this exact OpenStreetMap import preview?')) {
+      return;
+    }
     renderOperationResult(wflOperationStatus, 'Applying the reviewed import…');
     const outcome = await fetchJson(API.whatsForLunch.importOpenStreetMapApply, {
       method: 'POST',
@@ -837,7 +916,9 @@ async function reviewCanesBoxMetro(button) {
   const action = button.getAttribute('data-canes-box-review');
   const weekStartDate = button.getAttribute('data-week-start-date');
   const metroName = button.getAttribute('data-metro-name');
-  if (!action || !weekStartDate || !metroName) return;
+  if (!action || !weekStartDate || !metroName) {
+    return;
+  }
   button.disabled = true;
   const note = window.prompt(`${action === 'approve' ? 'Approve' : 'Reject'} ${metroName}: review note`) || '';
   try {
@@ -965,7 +1046,9 @@ async function loadBlogPosts() {
 
 async function loadUserPosts(accountId) {
   const target = document.getElementById('drawerUserPosts');
-  if (!target) return;
+  if (!target) {
+    return;
+  }
   renderOperationResult(target, 'Loading posts…');
   const page = await fetchJson(API.posts.byAccount(accountId), { headers: authHeaders() }) || {};
   const posts = page.items || [];
@@ -986,7 +1069,9 @@ async function loadUserPosts(accountId) {
 async function handleReportAction(target) {
   const reportId = target.getAttribute('data-report');
   const resolution = target.value;
-  if (!reportId || !resolution) return;
+  if (!reportId || !resolution) {
+    return;
+  }
 
   const reason = moderationReasonValue(window.prompt('Reason for this report decision:'));
   if (!reason) {
@@ -1009,7 +1094,9 @@ async function handleReportAction(target) {
 async function handleUserAction(target) {
   const accountId = target.getAttribute('data-account');
   const action = target.value;
-  if (!accountId || !action) return;
+  if (!accountId || !action) {
+    return;
+  }
 
   const reason = moderationReasonValue(window.prompt('Reason for this account change:'));
   if (!reason) {
@@ -1042,7 +1129,9 @@ async function handleCapabilityPermissionChange(target, family) {
   const accountId = target.dataset.account;
   const permission = target.dataset[family.datasetKey];
   const account = accounts.find(candidate => candidate.id === accountId);
-  if (!account || !permission) return;
+  if (!account || !permission) {
+    return;
+  }
 
   const state = family.stateOf(account, { [permission]: target.checked });
   const controls = drawerBody?.querySelectorAll(`[data-${family.dataAttribute}]`) || [];
@@ -1103,11 +1192,15 @@ function wirePager({ previous, next, getQuery, setQuery, totalPages, refresh, no
     }
   };
   previous?.addEventListener('click', async () => {
-    if (getQuery().page <= 0) return;
+    if (getQuery().page <= 0) {
+      return;
+    }
     await move(-1, 'previous');
   });
   next?.addEventListener('click', async () => {
-    if (getQuery().page + 1 >= totalPages()) return;
+    if (getQuery().page + 1 >= totalPages()) {
+      return;
+    }
     await move(1, 'next');
   });
 }
@@ -1131,7 +1224,9 @@ function wireEvents() {
   });
 
   wflInventoryMore?.addEventListener('click', async () => {
-    if (!restaurantInventoryNextCursor) return;
+    if (!restaurantInventoryNextCursor) {
+      return;
+    }
     restaurantInventoryQuery = { ...restaurantInventoryQuery, cursor: restaurantInventoryNextCursor };
     wflInventoryMore.disabled = true;
     try {
@@ -1254,15 +1349,23 @@ function wireEvents() {
     }
 
     const card = event.target.closest?.('.queue-card');
-    if (!card) return;
+    if (!card) {
+      return;
+    }
     openDrawer(card.getAttribute('data-detail-type'), card.getAttribute('data-id'));
   });
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeDrawer();
-    if (event.key !== 'Enter') return;
+    if (event.key === 'Escape') {
+      closeDrawer();
+    }
+    if (event.key !== 'Enter') {
+      return;
+    }
     const card = event.target.closest?.('.queue-card');
-    if (!card) return;
+    if (!card) {
+      return;
+    }
     openDrawer(card.getAttribute('data-detail-type'), card.getAttribute('data-id'));
   });
 
@@ -1284,7 +1387,9 @@ function wireEvents() {
     clearAlert();
     const input = vehicleVinForm.querySelector('[name="vin"]');
     const vin = input?.value?.trim();
-    if (!vin) return;
+    if (!vin) {
+      return;
+    }
     try {
       await createVehicleFromVin(vin);
       vehicleVinForm.reset();
@@ -1311,7 +1416,9 @@ function wireEvents() {
         .split(/\s+/)
         .map(value => value.trim())
         .filter(Boolean);
-    if (!vins.length) return;
+    if (!vins.length) {
+      return;
+    }
     try {
       await createVehiclesFromVins(vins);
       vehicleVinBatchForm.reset();
@@ -1331,7 +1438,9 @@ function wireEvents() {
   });
 
   sharedRecyclePrevious?.addEventListener('click', async () => {
-    if (sharedRecyclePageNumber === 0) return;
+    if (sharedRecyclePageNumber === 0) {
+      return;
+    }
     sharedRecyclePageNumber--;
     try {
       await refreshSharedAdministration();
@@ -1341,7 +1450,9 @@ function wireEvents() {
     }
   });
   sharedRecycleNext?.addEventListener('click', async () => {
-    if (!sharedRecycleHasNext) return;
+    if (!sharedRecycleHasNext) {
+      return;
+    }
     sharedRecyclePageNumber++;
     try {
       await refreshSharedAdministration();

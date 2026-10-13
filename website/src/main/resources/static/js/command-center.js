@@ -154,7 +154,9 @@ async function pollNow() {
   const decision = pollRequestDecision({
     hidden: document.hidden, revoked: accessRevoked, inFlight: pollInFlight,
   });
-  if (decision === 'ignore') return;
+  if (decision === 'ignore') {
+    return;
+  }
   if (decision === 'queue') {
     pollRequested = true;
     return;
@@ -168,12 +170,16 @@ async function pollNow() {
     const snapshot = await fetchJson(API.admin.commandCenter.snapshot, {
       headers: authHeaders(), signal: controller.signal,
     });
-    if (!isCurrentPoll(generation, controller)) return;
+    if (!isCurrentPoll(generation, controller)) {
+      return;
+    }
     latestSnapshot = snapshot;
     failures = 0;
     renderSnapshot(snapshot);
     connectionStatus.textContent = 'Mission Control connected';
-    if (shouldPoll(document.hidden, logsPaused)) await pollLogs(generation, controller);
+    if (shouldPoll(document.hidden, logsPaused)) {
+      await pollLogs(generation, controller);
+    }
   } catch (error) {
     const failureDecision = pollFailureDecision(error, isCurrentPoll(generation, controller));
     if (failureDecision === 'revoke') {
@@ -183,9 +189,13 @@ async function pollNow() {
       renderOffline(error);
     }
   } finally {
-    if (pollController === controller) pollController = null;
+    if (pollController === controller) {
+      pollController = null;
+    }
     pollInFlight = false;
-    if (accessRevoked || document.hidden) return;
+    if (accessRevoked || document.hidden) {
+      return;
+    }
     if (pollRequested) {
       pollRequested = false;
       queueMicrotask(pollNow);
@@ -205,7 +215,9 @@ function invalidatePoll(restart = true) {
   window.clearTimeout(pollTimer);
   pollRequested = restart && !document.hidden && !accessRevoked;
   pollController?.abort();
-  if (!pollInFlight && pollRequested) requestPoll();
+  if (!pollInFlight && pollRequested) {
+    requestPoll();
+  }
 }
 
 function restartPollGeneration() {
@@ -215,7 +227,9 @@ function restartPollGeneration() {
 }
 
 function requestPoll() {
-  if (accessRevoked || document.hidden) return;
+  if (accessRevoked || document.hidden) {
+    return;
+  }
   if (pollInFlight) {
     pollRequested = true;
     return;
@@ -225,20 +239,26 @@ function requestPoll() {
 }
 
 function handleRequestFailure(error) {
-  if (!isAccessDenied(error)) return false;
+  if (!isAccessDenied(error)) {
+    return false;
+  }
   revokeCommandCenterAccess(error);
   return true;
 }
 
 function revokeCommandCenterAccess() {
-  if (accessRevoked) return;
+  if (accessRevoked) {
+    return;
+  }
   accessRevoked = true;
   root.classList.add('d-none');
   invalidatePoll(false);
   window.clearInterval(sampleTimer);
   window.clearTimeout(searchTimer);
   clearDialogState();
-  if (actionDialog.open) actionDialog.close();
+  if (actionDialog.open) {
+    actionDialog.close();
+  }
   redirectLostSignal();
 }
 
@@ -293,7 +313,9 @@ function metricCard(reading, points) {
   valueNode.className = 'command-metric-value';
   valueNode.textContent = displayMetric(reading);
   const title = metricTitle(reading);
-  if (title) valueNode.title = title;
+  if (title) {
+    valueNode.title = title;
+  }
   const status = document.createElement('span');
   status.className = 'command-metric-status';
   status.textContent = state === 'available' ? 'Live' : state;
@@ -314,7 +336,9 @@ function sparkline(points, label) {
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label', label);
   const values = points.map(point => Number(point.value)).filter(Number.isFinite);
-  if (values.length < 2) return svg;
+  if (values.length < 2) {
+    return svg;
+  }
   const min = Math.min(...values);
   const range = Math.max(Math.max(...values) - min, 1);
   const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
@@ -330,15 +354,23 @@ function sparkline(points, label) {
 async function pollLogs(generation, controller) {
   const request = { generation, cursor: logState.cursor };
   const params = new URLSearchParams({ level: logLevel.value, query: logQuery.value });
-  if (request.cursor) params.set('cursor', request.cursor);
+  if (request.cursor) {
+    params.set('cursor', request.cursor);
+  }
   try {
     const page = await fetchJson(`${API.admin.commandCenter.logs}?${params}`, {
       headers: authHeaders(), signal: controller.signal,
     });
-    if (!isCurrentPoll(generation, controller)) return;
+    if (!isCurrentPoll(generation, controller)) {
+      return;
+    }
     const decision = nextLogPageState(logState, request, page);
-    if (!decision.apply) return;
-    if (page.reset) logOutput.replaceChildren();
+    if (!decision.apply) {
+      return;
+    }
+    if (page.reset) {
+      logOutput.replaceChildren();
+    }
     (page.records || []).forEach(appendLogRecord);
     logState = {
       generation: decision.generation,
@@ -346,10 +378,16 @@ async function pollLogs(generation, controller) {
       lastAppliedNextCursor: decision.lastAppliedNextCursor,
     };
     logStatus.textContent = page.status || `${(page.records || []).length} new records`;
-    if (logAutoscroll.checked) logOutput.scrollTop = logOutput.scrollHeight;
+    if (logAutoscroll.checked) {
+      logOutput.scrollTop = logOutput.scrollHeight;
+    }
   } catch (error) {
-    if (error?.name === 'AbortError') return;
-    if (handleRequestFailure(error)) return;
+    if (error?.name === 'AbortError') {
+      return;
+    }
+    if (handleRequestFailure(error)) {
+      return;
+    }
     logStatus.textContent = error?.message || 'Log stream unavailable';
   }
 }
@@ -363,7 +401,9 @@ function appendLogRecord(record) {
 }
 
 async function openActionDialog(action) {
-  if (actionInFlight || !Object.hasOwn(ACTION_PHRASES, action)) return;
+  if (actionInFlight || !Object.hasOwn(ACTION_PHRASES, action)) {
+    return;
+  }
   clearDialogState();
   actionStatus.textContent = 'Requesting a fresh action challenge…';
   try {
@@ -377,14 +417,18 @@ async function openActionDialog(action) {
     actionDialog.showModal();
     passwordInput.focus();
   } catch (error) {
-    if (handleRequestFailure(error)) return;
+    if (handleRequestFailure(error)) {
+      return;
+    }
     actionStatus.textContent = error?.message || 'Unable to create action challenge';
   }
 }
 
 function closeActionDialog() {
   clearDialogState();
-  if (actionDialog.open) actionDialog.close();
+  if (actionDialog.open) {
+    actionDialog.close();
+  }
 }
 
 function clearDialogState() {
@@ -395,7 +439,9 @@ function clearDialogState() {
 
 async function confirmAction(event) {
   event.preventDefault();
-  if (actionInFlight || !currentChallenge) return;
+  if (actionInFlight || !currentChallenge) {
+    return;
+  }
   const password = passwordInput.value;
   passwordInput.value = '';
   const confirmationPhrase = phraseInput.value;
@@ -420,7 +466,9 @@ async function confirmAction(event) {
     closeActionDialog();
     restartPollGeneration();
   } catch (error) {
-    if (handleRequestFailure(error)) return;
+    if (handleRequestFailure(error)) {
+      return;
+    }
     dialogStatus.textContent = error?.message || 'Action was not accepted';
   } finally {
     actionInFlight = false;
@@ -431,18 +479,24 @@ async function confirmAction(event) {
 function renderPendingAction(pendingAction) {
   pendingPanel.classList.toggle('d-none', !pendingAction);
   cancelAction.disabled = !pendingAction?.cancellable;
-  if (pendingAction) updatePendingCountdown(pendingAction);
+  if (pendingAction) {
+    updatePendingCountdown(pendingAction);
+  }
 }
 
 function updatePendingCountdown(pendingAction = latestSnapshot?.pendingAction) {
-  if (!pendingAction) return;
+  if (!pendingAction) {
+    return;
+  }
   const countdown = actionCountdown(pendingAction.executeAt, Date.now(), pendingAction.cancellable);
   pendingText.textContent = `${String(pendingAction.action).replaceAll('_', ' ')} in ${countdown.seconds}s`;
   cancelAction.classList.toggle('d-none', !countdown.cancellable || countdown.expired);
 }
 
 async function cancelPendingAction() {
-  if (actionInFlight) return;
+  if (actionInFlight) {
+    return;
+  }
   actionInFlight = true;
   cancelAction.disabled = true;
   try {
@@ -450,7 +504,9 @@ async function cancelPendingAction() {
     actionStatus.textContent = 'Pending machine action cancelled.';
     restartPollGeneration();
   } catch (error) {
-    if (handleRequestFailure(error)) return;
+    if (handleRequestFailure(error)) {
+      return;
+    }
     actionStatus.textContent = error?.message || 'Unable to cancel pending action';
   } finally {
     actionInFlight = false;
@@ -466,4 +522,6 @@ function updateTimeDisplays() {
   updatePendingCountdown();
 }
 
-if (root) gateCommandCenter();
+if (root) {
+  gateCommandCenter();
+}
