@@ -7,8 +7,12 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.configuration.SharedFolderMediaProperties;
 import dev.christopherbell.configuration.SharedFolderProperties;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -61,7 +65,7 @@ class ProgressiveMediaStreamerTest {
     when(jobs.findById("job-1")).thenAnswer(ignored -> {
       if (checks.incrementAndGet() == 2) {
         Files.write(storage.partialPath(job), "ment".getBytes(),
-            java.nio.file.StandardOpenOption.APPEND);
+            StandardOpenOption.APPEND);
         storage.writeReadyForTest(job, "fragment".getBytes());
         job.setStatus(MediaJobStatus.READY);
       }
@@ -109,15 +113,15 @@ class ProgressiveMediaStreamerTest {
     CountDownLatch continueLength = new CountDownLatch(1);
     MediaStorage coordinated = new MediaStorage(folders) {
       @Override
-      public OptionalLong readyLength(MediaJob current, long maximum) throws java.io.IOException {
+      public OptionalLong readyLength(MediaJob current, long maximum) throws IOException {
         lengthStarted.countDown();
         try {
           if (!continueLength.await(2, TimeUnit.SECONDS)) {
-            throw new java.io.IOException("Timed out coordinating ready selection");
+            throw new IOException("Timed out coordinating ready selection");
           }
         } catch (InterruptedException exception) {
           Thread.currentThread().interrupt();
-          throw new java.io.IOException("Ready selection was interrupted", exception);
+          throw new IOException("Ready selection was interrupted", exception);
         }
         return super.readyLength(current, maximum);
       }
@@ -164,13 +168,13 @@ class ProgressiveMediaStreamerTest {
       @Override
       public long copy(
           MediaJob current, boolean ready, long position, long length,
-          java.io.OutputStream output, long maximum) throws java.io.IOException {
+          OutputStream output, long maximum) throws IOException {
         if (!ready && !published) {
           published = true;
           writeReadyForTest(current, "fragment".getBytes());
           writeStatusForTest(current, MediaJobStatus.READY, 8, null);
           Files.deleteIfExists(partialPath(current));
-          throw new java.nio.file.NoSuchFileException(partialPath(current).toString());
+          throw new NoSuchFileException(partialPath(current).toString());
         }
         return super.copy(current, ready, position, length, output, maximum);
       }
