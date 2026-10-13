@@ -12,9 +12,6 @@
   <suppress files="[\/]sharedfolder[\/]media[\/]" checks=".*"/>
   <!-- Slice 19f: shared-folder upload. -->
   <suppress files="[\/]sharedfolder[\/]upload[\/]" checks=".*"/>
-  <!-- Slice 19g: shared-folder service and the package-level shared-folder tests. -->
-  <suppress files="[\/]sharedfolder[\/]service[\/]" checks=".*"/>
-  <suppress files="[\/]test[\/]java[\/]dev[\/]christopherbell[\/]sharedfolder[\/][A-Za-z]+\.java$" checks=".*"/>
   <!-- Slice 19h: shared-folder file system. -->
   <suppress files="[\/]sharedfolder[\/]fs[\/]" checks=".*"/>
   <!-- Slice 20: application and cross-feature tests. -->

@@ -2,10 +2,10 @@ package dev.christopherbell.sharedfolder.service;
 
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.configuration.SharedFolderProperties;
-import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
-import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary;
 import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary.BoundaryUnavailableException;
 import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary.FileAccess;
+import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary;
+import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderMutationBoundary;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeBoundaryException;
@@ -19,28 +19,34 @@ import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
 import dev.christopherbell.sharedfolder.model.SharedFolderRenameRequest;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import java.io.IOException;
+import java.nio.channels.Channels;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.nio.channels.Channels;
 import java.security.MessageDigest;
-import java.util.UUID;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
-import org.springframework.http.HttpStatus;
+import java.util.Base64;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Performs conflict-safe shared-folder mutations after a fresh write authorization decision. */
 @Service
 public class SharedFolderMutationService {
-  private static final java.time.Duration OPERATION_LEASE_TTL = java.time.Duration.ofMinutes(2);
+  private static final Duration OPERATION_LEASE_TTL = Duration.ofMinutes(2);
   private static final long LEASE_RENEWAL_BYTES = 1024L * 1024L;
   private final SharedFolderAccessService access;
   private final SharedFolderProperties properties;
@@ -248,7 +254,9 @@ public class SharedFolderMutationService {
                 true, request.replacedObservedToken());
             replaced = nativeBoundary.metadata(targetRelative);
           } catch (NativeBoundaryException exception) {
-            if (isNativeMissing(exception)) throw conflict();
+            if (isNativeMissing(exception)) {
+              throw conflict();
+            }
             throw exception;
           }
           requireNativeToken(targetRelative, replaced, request.replacedObservedToken());
@@ -422,7 +430,7 @@ public class SharedFolderMutationService {
 
   private String nativeToken(String relative, NativeFileMetadata metadata) {
     String identity = metadata.identity().volumeSerial() + ":"
-        + java.util.Base64.getUrlEncoder().withoutPadding()
+        + Base64.getUrlEncoder().withoutPadding()
             .encodeToString(metadata.identity().fileId());
     return SharedFolderObservedItemTokens.token(
         relative, identity, metadata.directory(), metadata.size(), metadata.modifiedAt());
@@ -439,7 +447,7 @@ public class SharedFolderMutationService {
   /** Performs one provider-guaranteed atomic case-only rename or leaves the source unchanged. */
   protected void moveCaseOnlyAtomically(Path source, Path target) throws IOException {
     try {
-      Files.move(source, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+      Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
     } catch (AtomicMoveNotSupportedException exception) {
       throw conflict();
     }
@@ -448,8 +456,8 @@ public class SharedFolderMutationService {
   protected void moveAtomically(Path source, Path target, boolean replace) throws IOException {
     try {
       if (replace) {
-        Files.move(source, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Files.move(source, target, StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING);
       } else {
         // ATOMIC_MOVE may replace an existing target even without REPLACE_EXISTING on Windows.
         // The ordinary same-volume move preserves the explicit no-replacement contract.
@@ -556,7 +564,7 @@ public class SharedFolderMutationService {
       }
       throw exception;
     }
-    if (!java.util.Objects.equals(
+    if (!Objects.equals(
         recovery.getTargetIdentity(), nativeStableIdentity(quarantined))) {
       throw conflict();
     }
@@ -690,7 +698,9 @@ public class SharedFolderMutationService {
 
   /** Reconciles account-owned replacement journals before account metadata is removed. */
   public void deleteOwnedPrivateState(String ownerId) {
-    if (ownerId == null || ownerId.isBlank() || recoveries == null) throw unavailable();
+    if (ownerId == null || ownerId.isBlank() || recoveries == null) {
+      throw unavailable();
+    }
     var owned = recoveries.findTop100ByOwnerIdOrderByUpdatedAtAsc(ownerId);
     for (var recovery : owned) {
       reconcileRecovery(recovery);
@@ -704,11 +714,7 @@ public class SharedFolderMutationService {
     if (!recovery.isNativeMode() && !nativeBoundary.testOnlyPortableMode()) {
       return;
     }
-    SharedFolderMutationRecovery claimed = claimExpiredRecovery(recovery);
-    if (claimed == null) {
-      return;
-    }
-    reconcileClaimedRecovery(claimed);
+    claimExpiredRecovery(recovery).ifPresent(this::reconcileClaimedRecovery);
   }
 
   private void reconcileClaimedRecovery(SharedFolderMutationRecovery recovery) {
@@ -755,19 +761,18 @@ public class SharedFolderMutationService {
     }
   }
 
-  private SharedFolderMutationRecovery claimExpiredRecovery(
+  /** The recovery reloaded under a fresh lease, or empty when another instance claimed it. */
+  private Optional<SharedFolderMutationRecovery> claimExpiredRecovery(
       SharedFolderMutationRecovery candidate) {
     String recoveryToken = serviceInstanceId + ":recovery:" + UUID.randomUUID();
     var claimedExpiry = recoveries.claimExpiredOperationLease(
         candidate.getId(), candidate.getOperationLeaseToken(), candidate.getState(),
         recoveryToken, operationLeaseDuration());
     if (claimedExpiry.isEmpty()) {
-      return null;
+      return Optional.empty();
     }
     return recoveries.findById(candidate.getId())
-        .filter(current -> java.util.Objects.equals(
-            recoveryToken, current.getOperationLeaseToken()))
-        .orElse(null);
+        .filter(current -> Objects.equals(recoveryToken, current.getOperationLeaseToken()));
   }
 
   private String newOperationLeaseToken() {
@@ -800,14 +805,18 @@ public class SharedFolderMutationService {
   }
 
   /** Test seam for deterministic short leases. */
-  protected Instant leaseNow() { return Instant.now(); }
+  protected Instant leaseNow() {
+    return Instant.now();
+  }
 
   /** Test seam for deterministic short leases. */
-  protected java.time.Duration operationLeaseDuration() { return OPERATION_LEASE_TTL; }
+  protected Duration operationLeaseDuration() {
+    return OPERATION_LEASE_TTL;
+  }
 
-  private java.time.Duration operationLeaseRenewalInterval() {
-    java.time.Duration interval = operationLeaseDuration().dividedBy(3);
-    return interval.isZero() ? java.time.Duration.ofMillis(1) : interval;
+  private Duration operationLeaseRenewalInterval() {
+    Duration interval = operationLeaseDuration().dividedBy(3);
+    return interval.isZero() ? Duration.ofMillis(1) : interval;
   }
 
   private void reconcileNativeRecovery(SharedFolderMutationRecovery recovery) {
@@ -859,11 +868,18 @@ public class SharedFolderMutationService {
     }
   }
 
+  /*
+   * The native lookups below return null only for a path the native boundary reports missing.
+   * Mutation recovery treats each lookup as a presence fact across its state machine, so the
+   * OrNull names keep the branches readable; every other failure is thrown.
+   */
   private NativeFileMetadata nativeMetadataOrNull(String path) {
     try {
       return nativeBoundary.metadata(path);
     } catch (NativeBoundaryException exception) {
-      if (isNativeMissing(exception)) return null;
+      if (isNativeMissing(exception)) {
+        return null;
+      }
       throw nativeFailure(exception);
     } catch (SecurityException exception) {
       throw unavailable();
@@ -874,7 +890,9 @@ public class SharedFolderMutationService {
     try {
       return nativeBoundary.quarantineMetadata(key);
     } catch (NativeBoundaryException exception) {
-      if (isNativeMissing(exception)) return null;
+      if (isNativeMissing(exception)) {
+        return null;
+      }
       throw nativeFailure(exception);
     } catch (SecurityException exception) {
       throw unavailable();
@@ -882,12 +900,12 @@ public class SharedFolderMutationService {
   }
 
   private boolean nativeIdentityMatches(NativeFileMetadata metadata, String expected) {
-    return metadata != null && java.util.Objects.equals(expected, nativeStableIdentity(metadata));
+    return metadata != null && Objects.equals(expected, nativeStableIdentity(metadata));
   }
 
   private String nativeStableIdentity(NativeFileMetadata metadata) {
     return metadata.identity().volumeSerial() + ":"
-        + java.util.Base64.getUrlEncoder().withoutPadding()
+        + Base64.getUrlEncoder().withoutPadding()
             .encodeToString(metadata.identity().fileId())
         + ":" + metadata.directory();
   }
@@ -921,7 +939,7 @@ public class SharedFolderMutationService {
 
   private boolean quarantineIdentityMatches(SharedFolderMutationRecovery recovery)
       throws IOException {
-    return java.util.Objects.equals(recovery.getTargetIdentity(),
+    return Objects.equals(recovery.getTargetIdentity(),
         privateReplacementIdentity(recovery.getQuarantineKey(), recovery));
   }
 
@@ -947,18 +965,18 @@ public class SharedFolderMutationService {
 
   private boolean identityMatches(Path path, String expected) throws IOException {
     return Files.exists(path, LinkOption.NOFOLLOW_LINKS)
-        && java.util.Objects.equals(expected, portableStableIdentity(path));
+        && Objects.equals(expected, portableStableIdentity(path));
   }
 
   private boolean portableReplacementIdentityMatches(Path path, String expected) throws IOException {
     return Files.exists(path, LinkOption.NOFOLLOW_LINKS)
-        && java.util.Objects.equals(expected, portableReplacementIdentity(path));
+        && Objects.equals(expected, portableReplacementIdentity(path));
   }
 
   private boolean portableReplacementIdentityMatches(
       Path path, String expected, SharedFolderMutationRecovery recovery) throws IOException {
     return Files.exists(path, LinkOption.NOFOLLOW_LINKS)
-        && java.util.Objects.equals(expected, portableReplacementIdentity(path, recovery));
+        && Objects.equals(expected, portableReplacementIdentity(path, recovery));
   }
 
   private String portableReplacementIdentity(Path path) throws IOException {
@@ -975,12 +993,16 @@ public class SharedFolderMutationService {
         + before.lastModifiedTime().toMillis();
     if (before.isDirectory()) {
       try (var children = Files.list(path)) {
-        if (children.findAny().isPresent()) throw conflict();
+        if (children.findAny().isPresent()) {
+          throw conflict();
+        }
       }
       heartbeat.run();
       return metadata + ":empty-directory";
     }
-    if (!before.isRegularFile()) throw conflict();
+    if (!before.isRegularFile()) {
+      throw conflict();
+    }
     MessageDigest digest = sha256Digest();
     try (var input = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
       byte[] buffer = new byte[16 * 1024];
@@ -1003,11 +1025,11 @@ public class SharedFolderMutationService {
         path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
     if (before.size() != after.size()
         || !before.lastModifiedTime().equals(after.lastModifiedTime())
-        || !java.util.Objects.equals(before.fileKey(), after.fileKey())) {
+        || !Objects.equals(before.fileKey(), after.fileKey())) {
       throw conflict();
     }
     return metadata + ":sha256:"
-        + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(digest.digest());
+        + Base64.getUrlEncoder().withoutPadding().encodeToString(digest.digest());
   }
 
   private String privateReplacementIdentity(
@@ -1019,15 +1041,19 @@ public class SharedFolderMutationService {
     String metadata = privateStableIdentity(before) + ":" + attributes.size() + ":"
         + attributes.lastModifiedTime().toMillis();
     if (attributes.isDirectory()) {
-      if (!privateDirectoryIsEmpty(key)) throw conflict();
+      if (!privateDirectoryIsEmpty(key)) {
+        throw conflict();
+      }
       heartbeat.run();
       var after = privateMetadata(key);
-      if (!java.util.Objects.equals(before.stableIdentity(), after.stableIdentity())) {
+      if (!Objects.equals(before.stableIdentity(), after.stableIdentity())) {
         throw conflict();
       }
       return metadata + ":empty-directory";
     }
-    if (!attributes.isRegularFile()) throw conflict();
+    if (!attributes.isRegularFile()) {
+      throw conflict();
+    }
     MessageDigest digest = sha256Digest();
     try {
       privateBoundary.operateOnRegularFile(
@@ -1054,13 +1080,13 @@ public class SharedFolderMutationService {
     }
     heartbeat.run();
     var after = privateMetadata(key);
-    if (!java.util.Objects.equals(before.stableIdentity(), after.stableIdentity())
+    if (!Objects.equals(before.stableIdentity(), after.stableIdentity())
         || attributes.size() != after.attributes().size()
         || !attributes.lastModifiedTime().equals(after.attributes().lastModifiedTime())) {
       throw conflict();
     }
     return metadata + ":sha256:"
-        + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(digest.digest());
+        + Base64.getUrlEncoder().withoutPadding().encodeToString(digest.digest());
   }
 
   private PortableSharedFolderPrivateBoundary.PrivateLeafMetadata privateMetadata(String key)
@@ -1083,7 +1109,7 @@ public class SharedFolderMutationService {
   private MessageDigest sha256Digest() {
     try {
       return MessageDigest.getInstance("SHA-256");
-    } catch (java.security.NoSuchAlgorithmException exception) {
+    } catch (NoSuchAlgorithmException exception) {
       throw new IllegalStateException("SHA-256 is required", exception);
     }
   }
@@ -1118,7 +1144,9 @@ public class SharedFolderMutationService {
   }
 
   private void requireMutationCapacity(Account account) {
-    if (mutationLimiter != null) mutationLimiter.requireMutation(account);
+    if (mutationLimiter != null) {
+      mutationLimiter.requireMutation(account);
+    }
   }
 
   private void requirePortableBoundary() {
