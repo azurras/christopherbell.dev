@@ -13,6 +13,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -101,26 +102,29 @@ public class MediaPlaybackService {
     String safePath = path == null ? "invalid-path" : path;
     try {
       Account account = access.requireRead();
-      if (profile == null) throw badRequest("A fixed media output profile is required");
+      if (profile == null) {
+        throw badRequest("A fixed media output profile is required");
+      }
       MediaSourceSnapshot source = sources.resolve(path);
       String cacheKey = MediaCacheKeys.forSource(source, profile, PROFILE_VERSION);
       synchronized (admissionLock) {
-        MediaJob ready = readyCache(cacheKey);
-        if (ready != null) {
+        var cacheHit = readyCache(cacheKey);
+        if (cacheHit.isPresent()) {
+          MediaJob ready = cacheHit.orElseThrow();
           ready.setLastAccessedAt(clock.instant());
           ready.setUpdatedAt(clock.instant());
           jobs.save(ready);
           audit.recordFor(account, "MEDIA_CACHE_HIT", path, source.size(), "accepted", null);
           return MediaPlaybackDescriptor.from(ready);
         }
-        var existing = jobs.findFirstByCacheKeyAndStatusInOrderByCreatedAtAsc(
+        var activeJob = jobs.findFirstByCacheKeyAndStatusInOrderByCreatedAtAsc(
             cacheKey, MediaJobStatus.active());
-        if (existing.isPresent()) {
-          if (Objects.equals(existing.get().getOwnerId(), account.getId())) {
-            return MediaPlaybackDescriptor.from(existing.get());
-          }
-          throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
-              "This media is already being prepared. Try again shortly.");
+        if (activeJob.isPresent()) {
+          return activeJob
+              .filter(job -> Objects.equals(job.getOwnerId(), account.getId()))
+              .map(MediaPlaybackDescriptor::from)
+              .orElseThrow(() -> new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                  "This media is already being prepared. Try again shortly."));
         }
 
         requireCapacity(account.getId());
@@ -202,7 +206,9 @@ public class MediaPlaybackService {
 
   /** Cancels and removes private worker metadata owned by a deleted account. */
   public void deleteOwnedPrivateState(String ownerId) {
-    if (ownerId == null || ownerId.isBlank()) throw unavailable();
+    if (ownerId == null || ownerId.isBlank()) {
+      throw unavailable();
+    }
     while (true) {
       var page = jobs.findByOwnerIdOrderByIdAsc(
           ownerId, PageRequest.of(0, PRIVATE_DELETION_PAGE_SIZE));
@@ -223,7 +229,9 @@ public class MediaPlaybackService {
           throw unavailable(failure);
         }
       }
-      if (!page.hasNext()) return;
+      if (!page.hasNext()) {
+        return;
+      }
     }
   }
 
@@ -232,7 +240,9 @@ public class MediaPlaybackService {
     long started = System.nanoTime();
     while (System.nanoTime() - started < timeoutNanos) {
       var status = storage.readStatus(job, properties.maxOutput().toBytes());
-      if (status.isPresent() && status.get().status().terminal()) return;
+      if (status.filter(worker -> worker.status().terminal()).isPresent()) {
+        return;
+      }
       try {
         Thread.sleep(Math.max(1L, properties.progressivePollInterval().toMillis()));
       } catch (InterruptedException interrupted) {
@@ -320,18 +330,22 @@ public class MediaPlaybackService {
   @Scheduled(fixedDelayString = "${app.shared-folder.media.admission-poll:PT5S}")
   public void promoteQueuedJob() {
     synchronized (admissionLock) {
-      MediaJob published = publishedActiveJob().orElse(null);
-      if (published == null) {
+      var published = publishedActiveJob();
+      if (published.isEmpty()) {
         publishNextIfIdleLocked();
         return;
       }
-      MediaJob refreshed = refreshWorkerStateLocked(published);
-      if (refreshed.getStatus().terminal()) return;
+      MediaJob refreshed = refreshWorkerStateLocked(published.orElseThrow());
+      if (refreshed.getStatus().terminal()) {
+        return;
+      }
       try {
         MediaSourceSnapshot source = requireCurrentSourceRevision(refreshed);
         storage.writeDescriptor(descriptor(refreshed, source));
       } catch (ResponseStatusException failure) {
-        if (failure.getStatusCode() != HttpStatus.NOT_FOUND) throw failure;
+        if (failure.getStatusCode() != HttpStatus.NOT_FOUND) {
+          throw failure;
+        }
         rejectChangedSource(refreshed);
         publishNextIfIdleLocked();
       } catch (MediaStorage.MediaDescriptorProtocolException failure) {
@@ -359,17 +373,24 @@ public class MediaPlaybackService {
   }
 
   private void publishNextIfIdleLocked() {
-    if (publishedActiveJob().isPresent()) return;
+    if (publishedActiveJob().isPresent()) {
+      return;
+    }
     while (true) {
-      MediaJob next = jobs.findFirstByStatusAndDescriptorPublishedFalseOrderByCreatedAtAsc(
-          MediaJobStatus.QUEUED).orElse(null);
-      if (next == null) return;
+      var queued = jobs.findFirstByStatusAndDescriptorPublishedFalseOrderByCreatedAtAsc(
+          MediaJobStatus.QUEUED);
+      if (queued.isEmpty()) {
+        return;
+      }
+      MediaJob next = queued.orElseThrow();
       try {
         MediaSourceSnapshot source = requireCurrentSourceRevision(next);
         publish(next, source);
         return;
       } catch (ResponseStatusException failure) {
-        if (failure.getStatusCode() != HttpStatus.NOT_FOUND) throw failure;
+        if (failure.getStatusCode() != HttpStatus.NOT_FOUND) {
+          throw failure;
+        }
         rejectChangedSource(next);
       } catch (MediaStorage.MediaDescriptorProtocolException failure) {
         rejectProtocolFailure(next, "descriptor_invalid");
@@ -402,7 +423,7 @@ public class MediaPlaybackService {
     storage.writeDescriptor(descriptor(job, source));
   }
 
-  private java.util.Optional<MediaJob> publishedActiveJob() {
+  private Optional<MediaJob> publishedActiveJob() {
     return jobs.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(
         MediaJobStatus.active());
   }
@@ -411,7 +432,9 @@ public class MediaPlaybackService {
     MediaSourceSnapshot source = sources.resolve(job.getSourcePath());
     String currentKey = MediaCacheKeys.forSource(
         source, job.getProfile(), job.getProfileVersion());
-    if (!currentKey.equals(job.getCacheKey())) throw notFound();
+    if (!currentKey.equals(job.getCacheKey())) {
+      throw notFound();
+    }
     return source;
   }
 
@@ -423,24 +446,26 @@ public class MediaPlaybackService {
     }
   }
 
-  private MediaJob readyCache(String cacheKey) {
-    MediaJob ready = jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(
-        cacheKey, MediaJobStatus.READY).orElse(null);
-    return ready != null
-        && readyMatchesOrRejectOversized(ready, ready.getOutputBytes()) ? ready : null;
+  /**
+   * The newest READY derivative for cacheKey whose stored output still matches, or empty. Checking
+   * the match also rejects an oversized derivative, so it is never served again.
+   */
+  private Optional<MediaJob> readyCache(String cacheKey) {
+    return jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(cacheKey, MediaJobStatus.READY)
+        .filter(ready -> readyMatchesOrRejectOversized(ready, ready.getOutputBytes()));
   }
 
-  private java.util.Optional<MediaStorage.MediaWorkerStatus> readWorkerStatus(MediaJob job) {
+  private Optional<MediaStorage.MediaWorkerStatus> readWorkerStatus(MediaJob job) {
     try {
       return storage.readStatus(job, properties.maxOutput().toBytes());
     } catch (MediaStorage.MediaOutputLimitException failure) {
       rejectProtocolFailure(job, "output_limit");
       publishNextIfIdleLocked();
-      return java.util.Optional.empty();
+      return Optional.empty();
     } catch (MediaStorage.MediaWorkerProtocolException failure) {
       rejectProtocolFailure(job, "invalid_worker_status");
       publishNextIfIdleLocked();
-      return java.util.Optional.empty();
+      return Optional.empty();
     } catch (IOException failure) {
       throw unavailable(failure);
     }
@@ -454,7 +479,9 @@ public class MediaPlaybackService {
       terminal(job, MediaJobStatus.FAILED, "output_limit", clock.instant());
       audit.recordSystem("MEDIA_FAILED", job.getSourcePath(), job.getOutputBytes(),
           "rejected", "output_limit");
-      if (wasActive) publishNextIfIdleLocked();
+      if (wasActive) {
+        publishNextIfIdleLocked();
+      }
       return false;
     } catch (IOException failure) {
       throw unavailable(failure);
@@ -527,16 +554,22 @@ public class MediaPlaybackService {
         for (MediaJob candidate : slice.getContent()) {
           var length = storage.readyLength(candidate, Long.MAX_VALUE);
           if (length.isEmpty() || protectedKeys.contains(candidate.getCacheKey())
-              || storage.isBeingRead(candidate.getCacheKey())) continue;
+              || storage.isBeingRead(candidate.getCacheKey())) {
+            continue;
+          }
           if (total <= folderProperties.transcodeCacheLimit().toBytes()
-              && storage.usableSpace() >= requiredFree) return;
+              && storage.usableSpace() >= requiredFree) {
+            return;
+          }
           if (storage.deleteReady(candidate)) {
             total = Math.max(0, total - length.getAsLong());
             deleted = true;
           }
         }
         more = slice.hasNext();
-        if (!deleted) page++;
+        if (!deleted) {
+          page++;
+        }
       } while (more);
     } catch (ArithmeticException failure) {
       throw insufficientStorage(failure);
@@ -553,9 +586,9 @@ public class MediaPlaybackService {
       var slice = jobs.findByStatusOrderByLastAccessedAtAscIdAsc(
           MediaJobStatus.READY, PageRequest.of(page++, CACHE_PAGE_SIZE));
       for (MediaJob ready : slice.getContent()) {
-        var length = storage.readyLength(ready, Long.MAX_VALUE);
-        if (length.isPresent() && length.getAsLong() > 0) {
-          total = Math.addExact(total, length.getAsLong());
+        long readyBytes = storage.readyLength(ready, Long.MAX_VALUE).orElse(0);
+        if (readyBytes > 0) {
+          total = Math.addExact(total, readyBytes);
         }
       }
       more = slice.hasNext();
@@ -572,7 +605,9 @@ public class MediaPlaybackService {
     int cleaned = 0;
     for (MediaJob job : due.getContent()) {
       if (!CLEANUP_STATUSES.contains(job.getStatus()) || job.isArtifactsCleaned()
-          || job.getCleanupAfter() == null || job.getCleanupAfter().isAfter(now)) continue;
+          || job.getCleanupAfter() == null || job.getCleanupAfter().isAfter(now)) {
+        continue;
+      }
       try {
         storage.deleteJobArtifacts(job);
         redactCleanedJob(job, now);
@@ -619,7 +654,9 @@ public class MediaPlaybackService {
   }
 
   private void applyTerminalRetention(MediaJob job, MediaJobStatus status, Instant now) {
-    if (!CLEANUP_STATUSES.contains(status)) return;
+    if (!CLEANUP_STATUSES.contains(status)) {
+      return;
+    }
     if (job.getCleanupAfter() == null) {
       job.setCleanupAfter(now.plus(properties.cleanupDelay(status)));
     }
@@ -628,7 +665,9 @@ public class MediaPlaybackService {
   }
 
   private boolean validTransition(MediaJobStatus from, MediaJobStatus to) {
-    if (from.terminal()) return false;
+    if (from.terminal()) {
+      return false;
+    }
     return switch (from) {
       case QUEUED -> to != MediaJobStatus.QUEUED;
       case INSPECTING -> to != MediaJobStatus.QUEUED && to != MediaJobStatus.INSPECTING;
@@ -639,14 +678,18 @@ public class MediaPlaybackService {
   }
 
   private MediaJob visible(String id, String accountId) {
-    if (id == null || id.isBlank()) throw notFound();
+    if (id == null || id.isBlank()) {
+      throw notFound();
+    }
     return jobs.findById(id)
         .filter(job -> accountId.equals(job.getOwnerId()) || job.getStatus() == MediaJobStatus.READY)
         .orElseThrow(this::notFound);
   }
 
   private MediaJob owned(String id, String ownerId) {
-    if (id == null || id.isBlank()) throw notFound();
+    if (id == null || id.isBlank()) {
+      throw notFound();
+    }
     return jobs.findById(id).filter(job -> ownerId.equals(job.getOwnerId()))
         .orElseThrow(this::notFound);
   }

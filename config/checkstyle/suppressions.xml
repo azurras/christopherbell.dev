@@ -8,8 +8,6 @@
   else belongs here.
 -->
 <suppressions>
-  <!-- Slice 19e: shared-folder media. -->
-  <suppress files="[\/]sharedfolder[\/]media[\/]" checks=".*"/>
   <!-- Slice 19g: shared-folder service and the package-level shared-folder tests. -->
   <suppress files="[\/]sharedfolder[\/]service[\/]" checks=".*"/>
   <suppress files="[\/]test[\/]java[\/]dev[\/]christopherbell[\/]sharedfolder[\/][A-Za-z]+\.java$" checks=".*"/>
