@@ -28,21 +28,31 @@ function getPostId() {
 
 function setText(id, value) {
   const element = document.getElementById(id);
-  if (element) element.textContent = value ?? '-';
+  if (element) {
+    element.textContent = value ?? '-';
+  }
 }
 
 function setStatusPill(label, tone) {
   const statusPill = document.getElementById('threadStatus');
-  if (!statusPill) return;
+  if (!statusPill) {
+    return;
+  }
   statusPill.textContent = label;
   statusPill.className = `thread-status-pill is-${tone}`;
 }
 
 function statusFor(post) {
-  if (!post.expiresOn) return { label: 'Live', tone: 'live' };
+  if (!post.expiresOn) {
+    return { label: 'Live', tone: 'live' };
+  }
   const remainingMs = new Date(post.expiresOn).getTime() - Date.now();
-  if (remainingMs <= 0) return { label: 'Expired', tone: 'expired' };
-  if (remainingMs < EXPIRES_SOON_MS) return { label: 'Expires soon', tone: 'soon' };
+  if (remainingMs <= 0) {
+    return { label: 'Expired', tone: 'expired' };
+  }
+  if (remainingMs < EXPIRES_SOON_MS) {
+    return { label: 'Expires soon', tone: 'soon' };
+  }
   return { label: 'Live', tone: 'live' };
 }
 
@@ -58,10 +68,14 @@ function renderThreadSummary(post, directReplies) {
   setStatusPill(status.label, status.tone);
 
   const heroTitle = document.getElementById('postHeroTitle');
-  if (heroTitle) heroTitle.textContent = 'Post';
+  if (heroTitle) {
+    heroTitle.textContent = 'Post';
+  }
 
   const heroMeta = document.getElementById('postHeroMeta');
-  if (heroMeta) heroMeta.textContent = `${author} · ${replyCountLabel(directReplies.length)}`;
+  if (heroMeta) {
+    heroMeta.textContent = `${author} · ${replyCountLabel(directReplies.length)}`;
+  }
 }
 
 function renderExpiredRootState(root) {
@@ -74,7 +88,9 @@ function renderExpiredRootState(root) {
     </div>`;
 
   const heroMeta = document.getElementById('postHeroMeta');
-  if (heroMeta) heroMeta.textContent = 'The selected post reached the end of its lifespan.';
+  if (heroMeta) {
+    heroMeta.textContent = 'The selected post reached the end of its lifespan.';
+  }
 
   setStatusPill('Expired', 'expired');
 }
@@ -101,10 +117,14 @@ async function fillContext(root, kind, postId) {
       const username = context.username || '';
       handle.textContent = username ? `@${username}` : '@user';
     }
-    if (text) text.textContent = context.text || '';
+    if (text) {
+      text.textContent = context.text || '';
+    }
   } catch {
     const text = root.querySelector(`[data-context-kind="${kind}"] [data-context-text]`);
-    if (text) text.textContent = 'Context unavailable';
+    if (text) {
+      text.textContent = 'Context unavailable';
+    }
   }
 }
 
@@ -140,7 +160,9 @@ function rendererContextFor(viewer, onExpire) {
  */
 function renderRoot(post, viewer) {
   const root = document.querySelector('#rootPost .thread-root-body');
-  if (!root) return;
+  if (!root) {
+    return;
+  }
   root.innerHTML = '';
   const contextStack = document.createElement('div');
   contextStack.className = 'thread-context-stack';
@@ -150,7 +172,9 @@ function renderRoot(post, viewer) {
   if (post.parentId) {
     contextStack.insertAdjacentHTML('beforeend', contextCard('parent', post.parentId));
   }
-  if (contextStack.children.length > 0) root.appendChild(contextStack);
+  if (contextStack.children.length > 0) {
+    root.appendChild(contextStack);
+  }
 
   const focusedPost = createFeedItem(post, rendererContextFor(viewer, () => renderExpiredRootState(root)));
   focusedPost.dataset.postId = post.id;
@@ -170,7 +194,9 @@ function renderRoot(post, viewer) {
 function showReplyComposer(viewer) {
   const composer = document.getElementById('replyComposer');
   const meta = document.getElementById('replyComposerMeta');
-  if (!composer) return;
+  if (!composer) {
+    return;
+  }
 
   composer.classList.remove('d-none');
   if (meta) {
@@ -195,10 +221,14 @@ async function submitReply(parentId) {
   const replyButton = document.getElementById('replyBtn');
   const alert = document.getElementById('postAlert');
   const text = replyText?.value?.trim() || '';
-  if (!text) return;
+  if (!text) {
+    return;
+  }
 
   replyButton?.setAttribute('disabled', 'disabled');
-  if (alert) alert.classList.add('d-none');
+  if (alert) {
+    alert.classList.add('d-none');
+  }
   try {
     await fetchJson(API.posts.create, {
       method: 'POST',
@@ -222,7 +252,9 @@ function cssString(value) {
 
 function scrollToPost(postId) {
   const target = document.querySelector(`[data-post-id="${cssString(postId)}"]`);
-  if (!target) return false;
+  if (!target) {
+    return false;
+  }
   target.scrollIntoView({ behavior: 'smooth', block: 'center' });
   return true;
 }
@@ -235,10 +267,14 @@ function numericLevel(post) {
 function descendantPostsForCurrent(visibleThread, currentId) {
   const postsById = new Map(currentThread.filter(post => post?.id).map(post => [post.id, post]));
   return visibleThread.filter(post => {
-    if (!post?.id || post.id === currentId) return false;
+    if (!post?.id || post.id === currentId) {
+      return false;
+    }
     let parentId = post.parentId || null;
     while (parentId) {
-      if (parentId === currentId) return true;
+      if (parentId === currentId) {
+        return true;
+      }
       parentId = postsById.get(parentId)?.parentId || null;
     }
     return false;
@@ -274,26 +310,36 @@ function decorateReplyItem(item, post, childIds, selectedLevel) {
   item.style.setProperty('--thread-depth', String(Math.min(relativeDepth - 1, MAX_REPLY_INDENT)));
 
   const content = item.querySelector('.post-content');
-  if (!content) return;
+  if (!content) {
+    return;
+  }
   content.insertBefore(branchTools(post, childIds, relativeDepth), content.firstChild);
 }
 
 function rerenderThreadReplies() {
-  if (!currentPost || !currentPostId) return;
+  if (!currentPost || !currentPostId) {
+    return;
+  }
   const directReplies = renderThread(currentThread, currentUser, currentPostId);
   renderThreadSummary(currentPost, directReplies);
 }
 
 function newestReplyForCurrentPost() {
-  if (!currentPostId) return null;
+  if (!currentPostId) {
+    return null;
+  }
   return newestReplyInThread(descendantPostsForCurrent(currentThread, currentPostId));
 }
 
 function wireThreadControls() {
   document.getElementById('jumpNewestReply')?.addEventListener('click', () => {
     const newest = newestReplyForCurrentPost();
-    if (!newest?.id) return;
-    if (scrollToPost(newest.id)) return;
+    if (!newest?.id) {
+      return;
+    }
+    if (scrollToPost(newest.id)) {
+      return;
+    }
     collapsedBranches.clear();
     rerenderThreadReplies();
     requestAnimationFrame(() => scrollToPost(newest.id));
@@ -324,7 +370,9 @@ function toggleBranch(postId) {
  */
 function renderThread(items, viewer, currentId) {
   const list = document.getElementById('threadList');
-  if (!list) return [];
+  if (!list) {
+    return [];
+  }
   list.innerHTML = '';
   const thread = Array.isArray(items) ? items : [];
   const directReplies = thread.filter(threadPost => threadPost.parentId === currentId);
@@ -351,7 +399,9 @@ function renderThread(items, viewer, currentId) {
     button.addEventListener('click', event => {
       event.stopPropagation();
       const postId = button.dataset.collapseThread;
-      if (postId) toggleBranch(postId);
+      if (postId) {
+        toggleBranch(postId);
+      }
     });
   });
   return directReplies;
@@ -359,14 +409,18 @@ function renderThread(items, viewer, currentId) {
 
 function renderNavigation(items, currentId) {
   const nav = document.getElementById('threadNavigation');
-  if (!nav) return;
+  if (!nav) {
+    return;
+  }
   nav.innerHTML = renderThreadNavigation(items, currentId);
   nav.classList.toggle('d-none', !nav.innerHTML.trim());
 }
 
 /** The signed-in account, or null when nobody is signed in or the session has lapsed. */
 async function loadViewer() {
-  if (!isLoggedIn()) return null;
+  if (!isLoggedIn()) {
+    return null;
+  }
   try {
     return await fetchJson(API.accounts.me, { headers: authHeaders() });
   } catch {
@@ -399,7 +453,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   closeOnOutside('.post-menu');
   const id = getPostId();
-  if (!id) return;
+  if (!id) {
+    return;
+  }
   currentPostId = id;
   wireThreadControls();
   try {

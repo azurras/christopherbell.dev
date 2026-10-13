@@ -1,6 +1,8 @@
 function discoveryPageUrl(path, cursor, size) {
   const params = new URLSearchParams({ size: String(size) });
-  if (cursor) params.set('cursor', String(cursor));
+  if (cursor) {
+    params.set('cursor', String(cursor));
+  }
   return `/api/posts/2026-07-28/discovery/${path}?${params}`;
 }
 
@@ -27,11 +29,21 @@ export const API = {
     activityPage: ({ page = 0, size = 25, action = '', targetType = '', actor = '',
       from = '', to = '' } = {}) => {
       const params = new URLSearchParams({ page: String(page), size: String(size) });
-      if (action) params.set('action', String(action));
-      if (targetType) params.set('targetType', String(targetType));
-      if (actor) params.set('actor', String(actor));
-      if (from) params.set('from', String(from));
-      if (to) params.set('to', String(to));
+      if (action) {
+        params.set('action', String(action));
+      }
+      if (targetType) {
+        params.set('targetType', String(targetType));
+      }
+      if (actor) {
+        params.set('actor', String(actor));
+      }
+      if (from) {
+        params.set('from', String(from));
+      }
+      if (to) {
+        params.set('to', String(to));
+      }
       return `/api/admin/activity/2026-07-26?${params}`;
     },
     commandCenter: {
@@ -61,9 +73,15 @@ export const API = {
         sort: String(sort),
         direction: String(direction),
       });
-      if (status) params.set('status', String(status));
-      if (role) params.set('role', String(role));
-      if (text) params.set('text', String(text));
+      if (status) {
+        params.set('status', String(status));
+      }
+      if (role) {
+        params.set('role', String(role));
+      }
+      if (text) {
+        params.set('text', String(text));
+      }
       return `/api/accounts/2026-07-26/admin?${params}`;
     },
     login: '/api/accounts/2024-12-15/login',
@@ -99,7 +117,9 @@ export const API = {
       params.set('page', String(query.page ?? 0));
       params.set('size', String(query.size ?? 25));
       for (const key of ['status', 'reportType', 'targetType', 'reporter', 'from', 'to']) {
-        if (query[key]) params.set(key, query[key]);
+        if (query[key]) {
+          params.set(key, query[key]);
+        }
       }
       return `/api/reports/2026-07-26?${params.toString()}`;
     },
@@ -159,7 +179,9 @@ export const API = {
     },
     search: (query, cursor = null, size = 25) => {
       const params = new URLSearchParams({ query: String(query ?? '') });
-      if (cursor) params.set('cursor', String(cursor));
+      if (cursor) {
+        params.set('cursor', String(cursor));
+      }
       params.set('size', String(size));
       return `/api/shared-folder/2026-07-17/search?${params}`;
     },
@@ -205,12 +227,24 @@ export const API = {
       favorite = false, playlistId = '',
     } = {}) => {
       const params = new URLSearchParams({ page: String(page), size: String(size) });
-      if (q) params.set('q', String(q));
-      if (artist) params.set('artist', String(artist));
-      if (album) params.set('album', String(album));
-      if (genre) params.set('genre', String(genre));
-      if (favorite) params.set('favorite', 'true');
-      if (playlistId) params.set('playlistId', String(playlistId));
+      if (q) {
+        params.set('q', String(q));
+      }
+      if (artist) {
+        params.set('artist', String(artist));
+      }
+      if (album) {
+        params.set('album', String(album));
+      }
+      if (genre) {
+        params.set('genre', String(genre));
+      }
+      if (favorite) {
+        params.set('favorite', 'true');
+      }
+      if (playlistId) {
+        params.set('playlistId', String(playlistId));
+      }
       return `/api/music/2026-07-28/catalog?${params}`;
     },
     stream: id => `/api/music/2026-07-28/tracks/${encodeURIComponent(id)}/stream`,
@@ -243,7 +277,9 @@ export const API = {
     conversation: (username) => `/api/messages/2025-09-14/conversation/${encodeURIComponent(username)}`,
     conversationPage: (username, cursor = null, size = 50) => {
       const params = new URLSearchParams({ size: String(size) });
-      if (cursor) params.set('cursor', String(cursor));
+      if (cursor) {
+        params.set('cursor', String(cursor));
+      }
       return `/api/messages/2026-07-26/conversation/${encodeURIComponent(username)}?${params}`;
     },
     archiveConversation: (username) =>
@@ -253,10 +289,18 @@ export const API = {
     restaurants: '/api/whatsforlunch/restaurant/2025-09-12',
     inventory: ({ name = '', city = '', state = '', cursor = '', size = 25 } = {}) => {
       const params = new URLSearchParams({ size: String(size) });
-      if (name.trim()) params.set('name', name.trim());
-      if (city.trim()) params.set('city', city.trim());
-      if (state.trim()) params.set('state', state.trim());
-      if (cursor) params.set('cursor', cursor);
+      if (name.trim()) {
+        params.set('name', name.trim());
+      }
+      if (city.trim()) {
+        params.set('city', city.trim());
+      }
+      if (state.trim()) {
+        params.set('state', state.trim());
+      }
+      if (cursor) {
+        params.set('cursor', cursor);
+      }
       return `/api/whatsforlunch/restaurant/2026-07-29/inventory?${params}`;
     },
     today: '/api/whatsforlunch/restaurant/2026-05-17/today',
@@ -268,7 +312,9 @@ export const API = {
         useSavedPreferences: String(useSavedPreferences),
       });
       cuisines.forEach((cuisine) => {
-        if (cuisine) params.append('cuisine', cuisine);
+        if (cuisine) {
+          params.append('cuisine', cuisine);
+        }
       });
       return `/api/whatsforlunch/restaurant/2026-05-17/nearby?${params}`;
     },
@@ -278,7 +324,9 @@ export const API = {
         useSavedPreferences: String(useSavedPreferences),
       });
       cuisines.forEach((cuisine) => {
-        if (cuisine) params.append('cuisine', cuisine);
+        if (cuisine) {
+          params.append('cuisine', cuisine);
+        }
       });
       return `/api/whatsforlunch/restaurant/2026-05-17/nearby/zip/${encodeURIComponent(zipCode)}?${params}`;
     },
@@ -301,7 +349,9 @@ export const API = {
     dedupeNamesPreview: '/api/whatsforlunch/restaurant/2026-07-26/dedupe-names/preview',
     dedupeNamesPreviewPage: (cursor = '', size = 25) => {
       const params = new URLSearchParams({ size: String(size) });
-      if (cursor) params.set('cursor', cursor);
+      if (cursor) {
+        params.set('cursor', cursor);
+      }
       return `/api/whatsforlunch/restaurant/2026-07-26/dedupe-names/preview?${params}`;
     },
     dedupeNamesApply: '/api/whatsforlunch/restaurant/2026-07-26/dedupe-names/apply',

@@ -11,19 +11,25 @@ function escapeHtml(text) {
 
 function snippet(text) {
   const value = String(text ?? '').replace(/\s+/g, ' ').trim();
-  if (value.length <= THREAD_SNIPPET_LENGTH) return value || 'Untitled signal';
+  if (value.length <= THREAD_SNIPPET_LENGTH) {
+    return value || 'Untitled signal';
+  }
   return `${value.slice(0, THREAD_SNIPPET_LENGTH - 1).trim()}...`;
 }
 
 function depthFor(post) {
   const value = Number(post?.level || 0);
-  if (!Number.isFinite(value) || value < 0) return 0;
+  if (!Number.isFinite(value) || value < 0) {
+    return 0;
+  }
   return Math.min(value, 6);
 }
 
 function replyTimestamp(post) {
   const value = post?.createdOn || post?.lastUpdatedOn;
-  if (!value) return 0;
+  if (!value) {
+    return 0;
+  }
   const timestamp = new Date(value).getTime();
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
@@ -42,7 +48,9 @@ export function newestReplyInThread(thread = []) {
   let newestTimestamp = -1;
 
   for (const post of posts) {
-    if (!isReply(post)) continue;
+    if (!isReply(post)) {
+      continue;
+    }
     const timestamp = replyTimestamp(post);
     if (timestamp > newestTimestamp) {
       newest = post;
@@ -81,7 +89,9 @@ export function visibleThreadAfterCollapsedBranches(thread = [], collapsedIds = 
   const visible = [];
 
   for (const post of posts) {
-    if (!post?.id) continue;
+    if (!post?.id) {
+      continue;
+    }
     const parentId = post.parentId || null;
     if (parentId && (collapsedIds.has(parentId) || hiddenIds.has(parentId))) {
       hiddenIds.add(post.id);
@@ -117,7 +127,9 @@ export function threadNavigationModel(items, currentId) {
 }
 
 function jumpLink(post, label, direction) {
-  if (!post?.id) return '';
+  if (!post?.id) {
+    return '';
+  }
   return `<a class="void-thread-jump void-thread-jump-${direction}" href="/p/${encodeURIComponent(post.id)}">
     <span>${escapeHtml(label)}</span>
     <strong>@${escapeHtml(post.username || 'user')}</strong>
@@ -139,7 +151,9 @@ function mapItem(node) {
 /** Render the nested Signal Rail for a post detail page. */
 export function renderThreadNavigation(items, currentId) {
   const model = threadNavigationModel(items, currentId);
-  if (model.nodes.length === 0) return '';
+  if (model.nodes.length === 0) {
+    return '';
+  }
 
   const jumps = [
     jumpLink(model.previous, 'Previous', 'previous'),

@@ -4,7 +4,9 @@ import { fetchJson, isLoggedIn, sanitize } from './lib/util.js';
 /** Split configured paths without silently truncating a customer's selected coverage. */
 export function monitorPagePaths(pathsText) {
   const pagePaths = String(pathsText || '').split(/\r?\n/).map(path => path.trim()).filter(Boolean);
-  if (!pagePaths.length || pagePaths.length > 5) throw new Error('Choose one to five page paths.');
+  if (!pagePaths.length || pagePaths.length > 5) {
+    throw new Error('Choose one to five page paths.');
+  }
   return pagePaths;
 }
 
@@ -37,7 +39,9 @@ if (typeof document !== 'undefined') {
   const renderSites = workspace => { sitesList.innerHTML = workspace.sites.map(monitorSiteHtml).join(''); };
   /** Runs one workspace request at a time, disabling buttons and restoring their prior state. */
   async function runWorkspaceRequest(sendRequest, pendingMessage) {
-    if (requestInFlight) return;
+    if (requestInFlight) {
+      return;
+    }
     requestInFlight = true;
     const buttonStates = Array.from(workspacePanel.querySelectorAll('button'), button => [button, button.disabled]);
     buttonStates.forEach(([button]) => { button.disabled = true; });
@@ -75,10 +79,16 @@ if (typeof document !== 'undefined') {
   });
   sitesList?.addEventListener('click', event => {
     const button = event.target.closest('button[data-monitor-action]');
-    if (!button || requestInFlight) return;
+    if (!button || requestInFlight) {
+      return;
+    }
     const { monitorAction: action, site: siteId } = button.dataset;
-    if (action === 'delete' && !window.confirm('Remove this website and all its reports?')) return;
-    if (action === 'baseline' && !window.confirm('Accept a new baseline only if these pages represent the intended website. Continue?')) return;
+    if (action === 'delete' && !window.confirm('Remove this website and all its reports?')) {
+      return;
+    }
+    if (action === 'baseline' && !window.confirm('Accept a new baseline only if these pages represent the intended website. Continue?')) {
+      return;
+    }
     void runWorkspaceRequest(() => fetchJson(action === 'delete' ? API.siteMonitor.site(siteId)
       : API.siteMonitor.action(siteId, action), { method: action === 'delete' ? 'DELETE' : 'POST' }),
     action === 'delete' ? 'Removing website…' : 'Checking configured pages. This can take up to 45 seconds…');

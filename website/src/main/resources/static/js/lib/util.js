@@ -12,7 +12,9 @@ const URL_TRAILING_PUNCTUATION = /[.,!?;:]$/;
 
 /** Return non-authoritative browser session metadata for UI-only decisions. */
 export function getAuthClaims() {
-  if (!isLoggedIn()) return null;
+  if (!isLoggedIn()) {
+    return null;
+  }
   return {
     sub: 'browser-session',
     role: String(localStorage.getItem('cbellRole') || ''),
@@ -34,7 +36,9 @@ export function isLoggedIn() {
 
 /** Verify a readable session marker against an authenticated server endpoint. */
 export async function hasAuthenticatedSession(accountUrl) {
-  if (!isLoggedIn()) return false;
+  if (!isLoggedIn()) {
+    return false;
+  }
   try {
     await fetchJson(accountUrl);
     return true;
@@ -143,11 +147,15 @@ export async function fetchJson(url, options = {}) {
 }
 
 function readCookie(name) {
-  if (typeof document === 'undefined') return '';
+  if (typeof document === 'undefined') {
+    return '';
+  }
   const prefix = `${encodeURIComponent(name)}=`;
   for (const item of String(document.cookie || '').split(';')) {
     const cookie = item.trim();
-    if (!cookie.startsWith(prefix)) continue;
+    if (!cookie.startsWith(prefix)) {
+      continue;
+    }
     try {
       return decodeURIComponent(cookie.substring(prefix.length));
     } catch (_) {
@@ -195,7 +203,9 @@ export function linkMentions(text) {
 
 /** Fill an element with text while linking @username mentions to profiles. */
 export function appendTextWithMentionLinks(container, text) {
-  if (!container) return;
+  if (!container) {
+    return;
+  }
   container.textContent = '';
   const value = String(text ?? '');
   let lastIndex = 0;
@@ -239,7 +249,9 @@ function textLinks(value) {
   WEB_URL_RE.lastIndex = 0;
   while ((match = WEB_URL_RE.exec(value)) !== null) {
     const url = trimUrlPunctuation(match[0]);
-    if (!url) continue;
+    if (!url) {
+      continue;
+    }
     links.push({ type: 'url', start: match.index, end: match.index + url.length, url });
   }
 
@@ -247,7 +259,9 @@ function textLinks(value) {
   return links
     .sort((left, right) => left.start - right.start || left.end - right.end)
     .filter(link => {
-      if (link.start < lastEnd) return false;
+      if (link.start < lastEnd) {
+        return false;
+      }
       lastEnd = link.end;
       return true;
     });
