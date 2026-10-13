@@ -467,8 +467,9 @@ export async function configureUploadPanel(account, currentPath, resumeStore = u
     } catch (error) {
       if (error?.status === 409 || error?.status === 404) {
         clearStoredUpload(resumeStore);
+      } else {
+        throw error;
       }
-      else throw error;
     }
   }
   const startUpload = file => {
@@ -485,8 +486,9 @@ export async function configureUploadPanel(account, currentPath, resumeStore = u
         }
         else if (isSharedFolderAccessDenied(error)) {
           handleSharedFolderAccessLoss(error.status);
+        } else {
+          status(error?.message || 'Upload failed. You can resume or cancel it.');
         }
-        else status(error?.message || 'Upload failed. You can resume or cancel it.');
       });
   };
   form?.addEventListener('submit', event => {
@@ -531,8 +533,9 @@ export async function configureUploadPanel(account, currentPath, resumeStore = u
     }).catch(error => {
       if (isSharedFolderAccessDenied(error)) {
         handleSharedFolderAccessLoss(error.status);
+      } else {
+        status(error?.message || 'The upload could not be cancelled.');
       }
-      else status(error?.message || 'The upload could not be cancelled.');
     });
   });
 }
@@ -759,8 +762,9 @@ export function bindSharedFolderRadioControl({
     } catch (error) {
       if (isSharedFolderAccessDenied(error)) {
         handleAccessLossFn(error.status);
+      } else {
+        statusFn(error?.message || 'The shared-folder radio is unavailable.');
       }
-      else statusFn(error?.message || 'The shared-folder radio is unavailable.');
     } finally {
       button.disabled = false;
     }
@@ -1009,8 +1013,9 @@ export async function initializeSharedFolderPage({
       pageRoot.classList.remove('d-none');
       if (isSharedFolderAccessDenied(error)) {
         handleAccessLossFn(error.status);
+      } else {
+        statusFn(error?.message || 'The shared folder is unavailable.');
       }
-      else statusFn(error?.message || 'The shared folder is unavailable.');
     };
     navigator = createSharedFolderNavigator({
       load: path => fetchJsonFn(API.sharedFolder.entries(path), {
