@@ -16,6 +16,8 @@ import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.media.MediaSourceBoundary.MediaSourceSnapshot;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
+import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -162,7 +164,7 @@ class MediaPlaybackServiceTest {
     failed.setReservedBytes(100);
     failed.setCleanupAfter(NOW.minusSeconds(1));
     MediaStorage cleanupStorage = mock(MediaStorage.class);
-    doThrow(new java.io.IOException("locked")).when(cleanupStorage).deleteJobArtifacts(failed);
+    doThrow(new IOException("locked")).when(cleanupStorage).deleteJobArtifacts(failed);
     when(jobs.findByStatusInAndCleanupAfterLessThanEqualAndArtifactsCleanedFalseOrderByCleanupAfterAscIdAsc(
         any(), any(), any())).thenReturn(new SliceImpl<>(List.of(failed)));
     MediaPlaybackService cleanup = new MediaPlaybackService(
@@ -334,7 +336,9 @@ class MediaPlaybackServiceTest {
         MediaJobStatus.active())).thenAnswer(ignored -> Optional.ofNullable(published.get()));
     when(jobs.save(any())).thenAnswer(invocation -> {
       MediaJob saved = invocation.getArgument(0);
-      if (saved.isDescriptorPublished()) published.set(saved);
+      if (saved.isDescriptorPublished()) {
+        published.set(saved);
+      }
       return saved;
     });
 
@@ -480,7 +484,7 @@ class MediaPlaybackServiceTest {
     sequential.requestFallback(second.relativePath(), MediaOutputProfile.VIDEO_MP4);
 
     assertThat(storage.readDescriptor("job-1")).contains("\"jobId\":\"job-1\"");
-    assertThatThrownBy(() -> storage.readDescriptor("job-2")).isInstanceOf(java.io.IOException.class);
+    assertThatThrownBy(() -> storage.readDescriptor("job-2")).isInstanceOf(IOException.class);
   }
 
   @Test
@@ -489,7 +493,9 @@ class MediaPlaybackServiceTest {
     AtomicReference<MediaJob> published = new AtomicReference<>();
     when(jobs.save(any())).thenAnswer(invocation -> {
       MediaJob saved = invocation.getArgument(0);
-      if (saved.isDescriptorPublished() && !saved.getStatus().terminal()) published.set(saved);
+      if (saved.isDescriptorPublished() && !saved.getStatus().terminal()) {
+        published.set(saved);
+      }
       return saved;
     });
     when(jobs.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(
@@ -536,13 +542,13 @@ class MediaPlaybackServiceTest {
     AtomicBoolean overlapped = new AtomicBoolean();
     MediaStorage coordinatedStorage = new MediaStorage(folderProperties) {
       @Override
-      public void requestCancellation(MediaJob current) throws java.io.IOException {
+      public void requestCancellation(MediaJob current) throws IOException {
         cancellationEntered.countDown();
         try {
           overlapped.set(admissionInsideLifecycle.await(500, TimeUnit.MILLISECONDS));
         } catch (InterruptedException exception) {
           Thread.currentThread().interrupt();
-          throw new java.io.IOException("Cancellation coordination was interrupted", exception);
+          throw new IOException("Cancellation coordination was interrupted", exception);
         }
         super.requestCancellation(current);
       }
@@ -816,7 +822,7 @@ class MediaPlaybackServiceTest {
     MediaStorage failingStorage = mock(MediaStorage.class);
     MediaJob queued = job("job-1", "a".repeat(64), MediaJobStatus.QUEUED);
     when(jobs.findById("job-1")).thenReturn(Optional.of(queued));
-    doThrow(new java.io.IOException("cancel marker unavailable"))
+    doThrow(new IOException("cancel marker unavailable"))
         .when(failingStorage).requestCancellation(queued);
     MediaPlaybackService failing = new MediaPlaybackService(
         access, jobs, audit, sources, failingStorage, folderProperties, mediaProperties,
@@ -832,7 +838,7 @@ class MediaPlaybackServiceTest {
     MediaSourceSnapshot upper = source("Folder/Track.MKV", 10, NOW.minusSeconds(5));
     MediaSourceSnapshot lower = source("folder/track.mkv", 10, NOW.minusSeconds(5));
 
-    if (java.io.File.separatorChar == '\\') {
+    if (File.separatorChar == '\\') {
       assertThat(MediaCacheKeys.forSource(upper, MediaOutputProfile.VIDEO_MP4, 1))
           .isEqualTo(MediaCacheKeys.forSource(lower, MediaOutputProfile.VIDEO_MP4, 1));
     } else {
