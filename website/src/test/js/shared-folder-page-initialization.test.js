@@ -91,8 +91,11 @@ function replaceGlobal(name, value) {
   const previous = Object.getOwnPropertyDescriptor(globalThis, name);
   Object.defineProperty(globalThis, name, { configurable: true, value });
   return () => {
-    if (previous) Object.defineProperty(globalThis, name, previous);
-    else delete globalThis[name];
+    if (previous) {
+      Object.defineProperty(globalThis, name, previous);
+    } else {
+      delete globalThis[name];
+    }
   };
 }
 

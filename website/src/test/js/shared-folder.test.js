@@ -264,14 +264,16 @@ test('shared-folder search controller loads the next stable page without duplica
   const controller = sharedFolderPage.createSharedFolderSearchController({
     load: async (query, _signal, cursor) => {
       requests.push([query, cursor]);
-      if (!cursor) return searchPage({
-        query,
-        entries: [{
-          name: 'a.txt', path: 'a.txt', type: 'FILE', size: 1,
-          modifiedAt: '2026-07-25T00:00:00Z', previewKind: 'TEXT', observedToken: 'a',
-        }],
-        nextCursor: 'page-2',
-      });
+      if (!cursor) {
+        return searchPage({
+          query,
+          entries: [{
+            name: 'a.txt', path: 'a.txt', type: 'FILE', size: 1,
+            modifiedAt: '2026-07-25T00:00:00Z', previewKind: 'TEXT', observedToken: 'a',
+          }],
+          nextCursor: 'page-2',
+        });
+      }
       return searchPage({
         query,
         entries: [{
@@ -504,7 +506,9 @@ test('bounded retry handles only network and 5xx failures', async () => {
   let attempts = 0;
   const result = await retryUploadOperation(async () => {
     attempts += 1;
-    if (attempts < 3) throw Object.assign(new Error('temporary'), { status: 503 });
+    if (attempts < 3) {
+      throw Object.assign(new Error('temporary'), { status: 503 });
+    }
     return 'ok';
   }, { delays: [0, 0] });
   assert.equal(result, 'ok');
@@ -702,7 +706,9 @@ test('cancel waits for aborted append settlement and retries the normal APPENDIN
   const cancelled = await cancelUploadWorkflow(gate, async () => {
     assert.equal(appendSettled, true);
     cancels += 1;
-    if (cancels === 1) throw Object.assign(new Error('append rollback pending'), { status: 409 });
+    if (cancels === 1) {
+      throw Object.assign(new Error('append rollback pending'), { status: 409 });
+    }
     return { state: 'CANCELLED' };
   }, { delays: [0] });
   assert.equal(cancelled.state, 'CANCELLED');
@@ -860,7 +866,9 @@ function fakeButton() {
   return {
     disabled: false,
     addEventListener(name, handler) {
-      if (name === 'click') clickHandler = handler;
+      if (name === 'click') {
+        clickHandler = handler;
+      }
     },
     click() {
       return clickHandler?.({ preventDefault() {} });
@@ -874,9 +882,15 @@ function cssMediaBlock(css, heading) {
   const bodyStart = css.indexOf('{', headingStart);
   let depth = 0;
   for (let index = bodyStart; index < css.length; index += 1) {
-    if (css[index] === '{') depth += 1;
-    if (css[index] === '}') depth -= 1;
-    if (depth === 0) return css.slice(headingStart, index + 1);
+    if (css[index] === '{') {
+      depth += 1;
+    }
+    if (css[index] === '}') {
+      depth -= 1;
+    }
+    if (depth === 0) {
+      return css.slice(headingStart, index + 1);
+    }
   }
   assert.fail(`Unclosed CSS media query: ${heading}`);
 }

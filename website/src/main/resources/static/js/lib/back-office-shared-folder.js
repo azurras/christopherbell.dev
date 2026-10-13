@@ -1,7 +1,9 @@
 import { sanitize } from './util.js';
 
 function when(value) {
-  if (!value) return '—';
+  if (!value) {
+    return '—';
+  }
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
 }
@@ -66,13 +68,19 @@ export function sharedAuditFilters(form) {
   const result = {};
   for (const name of ['accountId', 'action', 'outcome', 'path']) {
     const value = String(form?.elements?.[name]?.value || '').trim();
-    if (value) result[name] = value;
+    if (value) {
+      result[name] = value;
+    }
   }
   for (const name of ['from', 'to']) {
     const value = String(form?.elements?.[name]?.value || '').trim();
-    if (!value) continue;
+    if (!value) {
+      continue;
+    }
     const date = new Date(value);
-    if (!Number.isNaN(date.getTime())) result[name] = date.toISOString();
+    if (!Number.isNaN(date.getTime())) {
+      result[name] = date.toISOString();
+    }
   }
   return result;
 }
@@ -89,13 +97,17 @@ export async function runSharedRecycleAction({
   restore,
   purge,
 }) {
-  if (!id || !['restore', 'replace', 'purge'].includes(action)) return false;
+  if (!id || !['restore', 'replace', 'purge'].includes(action)) {
+    return false;
+  }
   if (action === 'restore') {
     await restore(id, false);
     return true;
   }
   if (action === 'replace') {
-    if (!confirmReplace()) return false;
+    if (!confirmReplace()) {
+      return false;
+    }
     await restore(id, true);
     return true;
   }
@@ -125,7 +137,9 @@ export function createSharedRecycleActionHandler({
   return async button => {
     const id = button?.getAttribute?.('data-id');
     const action = button?.getAttribute?.('data-shared-recycle-action');
-    if (!id || !action) return;
+    if (!id || !action) {
+      return;
+    }
     button.disabled = true;
     clearAlert();
     try {
@@ -141,7 +155,9 @@ export function createSharedRecycleActionHandler({
           method: 'DELETE', headers: authHeaders(), body: JSON.stringify({ confirmation }),
         }),
       });
-      if (completed) await refresh();
+      if (completed) {
+        await refresh();
+      }
     } catch (error) {
       showAlert(error?.message || 'Shared-folder administration failed.');
     } finally {
