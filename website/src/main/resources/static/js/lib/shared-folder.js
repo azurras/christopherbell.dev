@@ -8,7 +8,9 @@ export {
 export function uploadProgressPercent(status) {
   const expected = Number(status?.expectedBytes);
   const offset = Number(status?.nextOffset);
-  if (!Number.isFinite(expected) || expected <= 0 || !Number.isFinite(offset)) return 0;
+  if (!Number.isFinite(expected) || expected <= 0 || !Number.isFinite(offset)) {
+    return 0;
+  }
   return Math.max(0, Math.min(100, Math.round((offset / expected) * 100)));
 }
 
@@ -109,13 +111,17 @@ export async function runUploadWorkflow(options) {
     }
     await verifyCommittedUploadPrefix(upload, file, digest);
   } else {
-    if (resume) throw new Error('Cancel the saved upload or choose the same file before starting another.');
+    if (resume) {
+      throw new Error('Cancel the saved upload or choose the same file before starting another.');
+    }
     const listing = await retryUploadOperation(() => listEntries(parentPath, signal), { signal });
     const target = listing.entries?.find(entry =>
       String(entry.name).toLocaleLowerCase() === String(file.name).toLocaleLowerCase());
     if (target) {
       replace = Boolean(confirmReplace(target));
-      if (!replace) throw new Error('Upload cancelled because the target already exists.');
+      if (!replace) {
+        throw new Error('Upload cancelled because the target already exists.');
+      }
     }
     upload = await createUpload({
       parentPath,
@@ -145,7 +151,9 @@ export function createUploadOperationGate() {
   let current = null;
   return {
     start(operation) {
-      if (current) return null;
+      if (current) {
+        return null;
+      }
       const controller = new AbortController();
       let promise;
       try {
@@ -155,17 +163,23 @@ export function createUploadOperationGate() {
       }
       current = { controller, promise };
       promise.finally(() => {
-        if (current?.promise === promise) current = null;
+        if (current?.promise === promise) {
+          current = null;
+        }
       }).catch(() => {});
       return promise;
     },
     pause() {
-      if (!current) return false;
+      if (!current) {
+        return false;
+      }
       current.controller.abort();
       return true;
     },
     async pauseAndSettle() {
-      if (!current) return false;
+      if (!current) {
+        return false;
+      }
       const active = current;
       active.controller.abort();
       try {
@@ -191,7 +205,9 @@ export async function cancelUploadWorkflow(gate, cancel, options = {}) {
     } catch (error) {
       const status = Number(error?.status);
       const retryable = !Number.isFinite(status) || status === 409 || status >= 500 && status <= 599;
-      if (!retryable || attempt >= delays.length) throw error;
+      if (!retryable || attempt >= delays.length) {
+        throw error;
+      }
       await new Promise(resolve => setTimeout(resolve, Math.max(0, Number(delays[attempt]) || 0)));
     }
   }
@@ -312,7 +328,9 @@ export function internalSharedFolderUrl(path = '') {
 
 /** Return the closed visual category used by the file-browser row and preview. */
 export function sharedFolderEntryKind(entry) {
-  if (entry?.type === 'DIRECTORY') return 'folder';
+  if (entry?.type === 'DIRECTORY') {
+    return 'folder';
+  }
   return ({
     AUDIO: 'audio',
     VIDEO: 'video',
@@ -324,7 +342,9 @@ export function sharedFolderEntryKind(entry) {
 
 /** Bring a newly selected file into view when the browser uses the stacked mobile layout. */
 export function revealSharedFolderPreview(preview, mobileView) {
-  if (!mobileView || typeof preview?.scrollIntoView !== 'function') return false;
+  if (!mobileView || typeof preview?.scrollIntoView !== 'function') {
+    return false;
+  }
   preview.scrollIntoView({ behavior: 'smooth', block: 'start' });
   return true;
 }
@@ -332,8 +352,12 @@ export function revealSharedFolderPreview(preview, mobileView) {
 /** Format a non-negative byte count without hiding the original order of magnitude. */
 export function formatSharedFolderSize(value) {
   const bytes = Number(value);
-  if (!Number.isFinite(bytes) || bytes < 0) return '—';
-  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return '—';
+  }
+  if (bytes < 1024) {
+    return `${Math.round(bytes)} B`;
+  }
   const units = ['KB', 'MB', 'GB', 'TB'];
   let amount = bytes / 1024;
   let unit = units[0];
@@ -348,7 +372,9 @@ export function formatSharedFolderSize(value) {
 /** Format an API timestamp for a file row, or an em dash when the boundary value is invalid. */
 export function formatSharedFolderModifiedAt(value, locale, timeZone) {
   const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return '—';
+  if (!Number.isFinite(date.getTime())) {
+    return '—';
+  }
   return new Intl.DateTimeFormat(locale, {
     dateStyle: 'medium',
     timeStyle: 'short',
@@ -361,7 +387,9 @@ export function sortSharedFolderEntries(entries) {
   return [...(Array.isArray(entries) ? entries : [])].sort((left, right) => {
     const leftDirectory = left?.type === 'DIRECTORY';
     const rightDirectory = right?.type === 'DIRECTORY';
-    if (leftDirectory !== rightDirectory) return leftDirectory ? -1 : 1;
+    if (leftDirectory !== rightDirectory) {
+      return leftDirectory ? -1 : 1;
+    }
     return String(left?.name || '').localeCompare(String(right?.name || ''), undefined, {
       sensitivity: 'base',
     });
@@ -385,8 +413,12 @@ export function isSharedFolderAccessDenied(error) {
 
 /** Select one closed server-side output profile from trusted listing metadata. */
 export function mediaOutputProfile(entry) {
-  if (entry?.previewKind === 'VIDEO') return 'VIDEO_MP4';
-  if (entry?.previewKind === 'AUDIO') return 'AUDIO_M4A';
+  if (entry?.previewKind === 'VIDEO') {
+    return 'VIDEO_MP4';
+  }
+  if (entry?.previewKind === 'AUDIO') {
+    return 'AUDIO_M4A';
+  }
   throw new Error('A media entry is required.');
 }
 
@@ -415,13 +447,17 @@ export async function waitForPlayableMediaJob(initial, options) {
   for (let poll = 0; ; poll += 1) {
     signal?.throwIfAborted();
     onStatus(job);
-    if (job?.status === 'BUFFERING' || job?.status === 'READY') return job;
+    if (job?.status === 'BUFFERING' || job?.status === 'READY') {
+      return job;
+    }
     if (['FAILED', 'CANCELED', 'INSUFFICIENT_SPACE', 'TIMED_OUT'].includes(job?.status)) {
       const error = new Error(mediaStatusMessage(job.status));
       error.mediaStatus = job.status;
       throw error;
     }
-    if (poll >= delays.length) throw new Error('Media preparation is taking longer than expected.');
+    if (poll >= delays.length) {
+      throw new Error('Media preparation is taking longer than expected.');
+    }
     const delay = Math.max(0, Number(delays[poll]) || 0);
     await new Promise((resolve, reject) => {
       const abort = () => {
@@ -449,13 +485,17 @@ export async function waitForTerminalMediaJob(initial, options) {
   for (let poll = 0; ; poll += 1) {
     signal?.throwIfAborted();
     onStatus(job);
-    if (job?.status === 'READY') return job;
+    if (job?.status === 'READY') {
+      return job;
+    }
     if (['FAILED', 'CANCELED', 'INSUFFICIENT_SPACE', 'TIMED_OUT'].includes(job?.status)) {
       const error = new Error(mediaStatusMessage(job.status));
       error.mediaStatus = job.status;
       throw error;
     }
-    if (poll >= delays.length) throw new Error('Media preparation is taking longer than expected.');
+    if (poll >= delays.length) {
+      throw new Error('Media preparation is taking longer than expected.');
+    }
     await mediaPollDelay(delays[poll], signal);
     job = await load(initial.jobId || initial.id, signal);
   }
