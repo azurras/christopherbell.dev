@@ -14,6 +14,7 @@ param(
     [string]$GitHubTokenPath
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $moduleRoot = Join-Path $PSScriptRoot 'modules'
 Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
