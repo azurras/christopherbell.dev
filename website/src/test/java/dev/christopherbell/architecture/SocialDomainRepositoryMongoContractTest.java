@@ -7,7 +7,6 @@ import com.mongodb.ConnectionString;
 import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
-import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.deletion.AccountDeletionJob;
 import dev.christopherbell.account.deletion.AccountDeletionJobRepository;
 import dev.christopherbell.account.model.Account;
@@ -402,7 +401,9 @@ class SocialDomainRepositoryMongoContractTest {
           .createdOn(second(index))
           .build();
       var inserted = repository.insert(activity);
-      if (index == 0) generated = inserted;
+      if (index == 0) {
+        generated = inserted;
+      }
     }
 
     assertThat(generated).isNotNull();

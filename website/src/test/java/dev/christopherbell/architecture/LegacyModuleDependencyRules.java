@@ -142,7 +142,7 @@ final class LegacyModuleDependencyRules {
       return true;
     }
     var physicalArea = physicalAreaOf(packageName);
-    if (physicalArea.isEmpty() || physicalArea.get().equals("permission")) {
+    if (physicalArea.map("permission"::equals).orElse(true)) {
       return false;
     }
 
