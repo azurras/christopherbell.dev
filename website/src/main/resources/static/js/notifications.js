@@ -26,19 +26,25 @@ const markAllReadButton = document.getElementById('markAllNotificationsRead');
 const notificationState = { items: [], nextCursor: null, loading: false };
 
 function showError(message) {
-  if (!alertBox) return;
+  if (!alertBox) {
+    return;
+  }
   alertBox.textContent = message;
   alertBox.classList.remove('d-none');
 }
 
 function clearError() {
-  if (!alertBox) return;
+  if (!alertBox) {
+    return;
+  }
   alertBox.textContent = '';
   alertBox.classList.add('d-none');
 }
 
 function setSettingsStatus(message) {
-  if (!settingsStatus) return;
+  if (!settingsStatus) {
+    return;
+  }
   settingsStatus.textContent = message || '';
 }
 
@@ -56,7 +62,9 @@ function notificationItemHtml(notification) {
 }
 
 function renderNotificationSettings(preferences) {
-  if (!settingsForm) return;
+  if (!settingsForm) {
+    return;
+  }
   settingsForm.innerHTML = notificationSettingsMarkup(preferences);
   settingsForm.querySelectorAll('[data-notification-setting]').forEach(input => {
     input.addEventListener('change', saveNotificationSettings);
@@ -64,7 +72,9 @@ function renderNotificationSettings(preferences) {
 }
 
 async function loadNotificationSettings() {
-  if (!settingsForm) return;
+  if (!settingsForm) {
+    return;
+  }
   setSettingsStatus('Loading settings...');
   try {
     const preferences = await fetchJson(API.notifications.preferences, {
@@ -79,7 +89,9 @@ async function loadNotificationSettings() {
 }
 
 async function saveNotificationSettings() {
-  if (!settingsForm) return;
+  if (!settingsForm) {
+    return;
+  }
   setSettingsStatus('Saving settings...');
   try {
     const preferences = await fetchJson(API.notifications.preferences, {
@@ -107,7 +119,9 @@ function updateNotificationControls() {
 }
 
 function renderNotifications(notifications) {
-  if (!list) return;
+  if (!list) {
+    return;
+  }
   if (!Array.isArray(notifications) || notifications.length === 0) {
     list.innerHTML = `
       <div class="feed-empty-state notifications-empty-state">
@@ -143,12 +157,16 @@ function renderNotifications(notifications) {
 }
 
 async function loadNotifications(cursor = null) {
-  if (!page) return;
+  if (!page) {
+    return;
+  }
   if (!getAuthToken()) {
     window.location.href = loginRedirectUrl('/notifications');
     return;
   }
-  if (notificationState.loading) return;
+  if (notificationState.loading) {
+    return;
+  }
   clearError();
   notificationState.loading = true;
   updateNotificationControls();
@@ -173,7 +191,9 @@ async function loadNotifications(cursor = null) {
 }
 
 async function markAllRead() {
-  if (notificationState.loading) return;
+  if (notificationState.loading) {
+    return;
+  }
   notificationState.loading = true;
   updateNotificationControls();
   clearError();

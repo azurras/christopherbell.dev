@@ -42,7 +42,9 @@ function documentFixture() {
   return {
     hidden: false, buttons,
     getElementById(id) {
-      if (!elements.has(id)) elements.set(id, element());
+      if (!elements.has(id)) {
+        elements.set(id, element());
+      }
       return elements.get(id);
     },
     querySelectorAll() { return buttons; },
@@ -84,7 +86,9 @@ test('background reads preserve gift input editing and unchanged recipient optio
   let completeRead;
   let reads = 0;
   const mounted = mountSurvive(documentRoot, async () => {
-    if (++reads === 1) return snapshot;
+    if (++reads === 1) {
+      return snapshot;
+    }
     return new Promise(resolve => { completeRead = resolve; });
   });
   try {

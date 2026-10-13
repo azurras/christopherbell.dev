@@ -22,15 +22,21 @@ const YOUTUBE_HOSTS = new Set([
 let postMenuEscapeHandlerInitialized = false;
 
 export function remainingLifespanMs(expiresOn, now = Date.now()) {
-  if (!expiresOn) return null;
+  if (!expiresOn) {
+    return null;
+  }
   const delta = new Date(expiresOn).getTime() - now;
-  if (!Number.isFinite(delta)) return null;
+  if (!Number.isFinite(delta)) {
+    return null;
+  }
   return Math.max(0, delta);
 }
 
 export function formatLifespanCountdown(expiresOn, now = Date.now()) {
   const remaining = remainingLifespanMs(expiresOn, now);
-  if (remaining === null) return '';
+  if (remaining === null) {
+    return '';
+  }
 
   const totalSeconds = Math.max(0, Math.ceil(remaining / 1000));
   const days = Math.floor(totalSeconds / 86400);
@@ -42,11 +48,15 @@ export function formatLifespanCountdown(expiresOn, now = Date.now()) {
 }
 
 export function linkPreviewCardMarkup(preview, sanitize) {
-  if (!preview?.url || typeof sanitize !== 'function') return '';
+  if (!preview?.url || typeof sanitize !== 'function') {
+    return '';
+  }
 
   const domain = preview.domain || previewDomain(preview.url) || preview.url;
   const title = preview.title || domain;
-  if (!title) return '';
+  if (!title) {
+    return '';
+  }
 
   const imageUrl = activeImageUrl(preview.imageUrl);
   const image = imageUrl
@@ -96,11 +106,15 @@ export function youtubeEmbedUrlsForPost(post) {
   const urls = new Set();
   for (const url of urlsFromText(post?.text)) {
     const embedUrl = youtubeEmbedUrl(url);
-    if (embedUrl) urls.add(embedUrl);
+    if (embedUrl) {
+      urls.add(embedUrl);
+    }
   }
   for (const preview of post?.linkPreviews || []) {
     const embedUrl = youtubeEmbedUrl(preview?.url);
-    if (embedUrl) urls.add(embedUrl);
+    if (embedUrl) {
+      urls.add(embedUrl);
+    }
   }
   return [...urls];
 }
@@ -110,8 +124,12 @@ export function directImageUrl(url) {
   try {
     const trimmed = trimUrlPunctuation(url);
     const parsed = new URL(trimmed);
-    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
-    if (DIRECT_IMAGE_EXT_RE.test(parsed.pathname)) return parsed.href;
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return '';
+    }
+    if (DIRECT_IMAGE_EXT_RE.test(parsed.pathname)) {
+      return parsed.href;
+    }
     return hasImageQueryFormat(parsed) ? parsed.href : '';
   } catch (_) {
     return '';
@@ -123,8 +141,12 @@ export function directGifUrl(url) {
   try {
     const trimmed = trimUrlPunctuation(url);
     const parsed = new URL(trimmed);
-    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
-    if (DIRECT_GIF_EXT_RE.test(parsed.pathname)) return parsed.href;
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return '';
+    }
+    if (DIRECT_GIF_EXT_RE.test(parsed.pathname)) {
+      return parsed.href;
+    }
     return hasGifQueryFormat(parsed) ? parsed.href : '';
   } catch (_) {
     return '';
@@ -149,9 +171,13 @@ function hasGifQueryFormat(parsed) {
 export function spotifyEmbedUrl(url) {
   try {
     const parsed = new URL(trimUrlPunctuation(url));
-    if (parsed.hostname.toLowerCase() !== 'open.spotify.com') return '';
+    if (parsed.hostname.toLowerCase() !== 'open.spotify.com') {
+      return '';
+    }
     const [type, id] = parsed.pathname.split('/').filter(Boolean);
-    if (!SPOTIFY_TYPES.has(type) || !id) return '';
+    if (!SPOTIFY_TYPES.has(type) || !id) {
+      return '';
+    }
     return `https://open.spotify.com/embed/${type}/${id}`;
   } catch (_) {
     return '';
@@ -164,7 +190,9 @@ export function soundCloudEmbedUrl(url) {
     const trimmed = trimUrlPunctuation(url);
     const parsed = new URL(trimmed);
     const host = parsed.hostname.toLowerCase();
-    if (!['soundcloud.com', 'www.soundcloud.com'].includes(host)) return '';
+    if (!['soundcloud.com', 'www.soundcloud.com'].includes(host)) {
+      return '';
+    }
     return `https://w.soundcloud.com/player/?url=${encodeURIComponent(trimmed)}`;
   } catch (_) {
     return '';
@@ -175,9 +203,13 @@ export function soundCloudEmbedUrl(url) {
 export function githubCardDetail(url) {
   try {
     const parsed = new URL(trimUrlPunctuation(url));
-    if (parsed.hostname.toLowerCase() !== 'github.com') return null;
+    if (parsed.hostname.toLowerCase() !== 'github.com') {
+      return null;
+    }
     const [owner, repo, kind, number] = parsed.pathname.split('/').filter(Boolean);
-    if (!owner || !repo) return null;
+    if (!owner || !repo) {
+      return null;
+    }
 
     let label = 'Repository';
     let suffix = '';
@@ -205,22 +237,34 @@ export function githubCardDetail(url) {
 
 function richEmbedForUrl(url) {
   const youtube = youtubeEmbedUrl(url);
-  if (youtube) return { type: 'youtube', key: `youtube:${youtube}`, sourceUrl: trimUrlPunctuation(url), src: youtube };
+  if (youtube) {
+    return { type: 'youtube', key: `youtube:${youtube}`, sourceUrl: trimUrlPunctuation(url), src: youtube };
+  }
 
   const gif = directGifUrl(url);
-  if (gif) return { type: 'gif', key: `gif:${gif}`, sourceUrl: trimUrlPunctuation(url), src: gif };
+  if (gif) {
+    return { type: 'gif', key: `gif:${gif}`, sourceUrl: trimUrlPunctuation(url), src: gif };
+  }
 
   const image = directImageUrl(url);
-  if (image) return { type: 'image', key: `image:${image}`, sourceUrl: trimUrlPunctuation(url), src: image };
+  if (image) {
+    return { type: 'image', key: `image:${image}`, sourceUrl: trimUrlPunctuation(url), src: image };
+  }
 
   const spotify = spotifyEmbedUrl(url);
-  if (spotify) return { type: 'spotify', key: `spotify:${spotify}`, sourceUrl: trimUrlPunctuation(url), src: spotify };
+  if (spotify) {
+    return { type: 'spotify', key: `spotify:${spotify}`, sourceUrl: trimUrlPunctuation(url), src: spotify };
+  }
 
   const soundcloud = soundCloudEmbedUrl(url);
-  if (soundcloud) return { type: 'soundcloud', key: `soundcloud:${soundcloud}`, sourceUrl: trimUrlPunctuation(url), src: soundcloud };
+  if (soundcloud) {
+    return { type: 'soundcloud', key: `soundcloud:${soundcloud}`, sourceUrl: trimUrlPunctuation(url), src: soundcloud };
+  }
 
   const github = githubCardDetail(url);
-  if (github) return { type: 'github', key: `github:${github.href}`, sourceUrl: trimUrlPunctuation(url), ...github };
+  if (github) {
+    return { type: 'github', key: `github:${github.href}`, sourceUrl: trimUrlPunctuation(url), ...github };
+  }
 
   return null;
 }
@@ -236,7 +280,9 @@ export function richEmbedsForPost(post) {
 
   for (const url of urls) {
     const embed = richEmbedForUrl(url);
-    if (!embed || seen.has(embed.key)) continue;
+    if (!embed || seen.has(embed.key)) {
+      continue;
+    }
     seen.add(embed.key);
     embeds.push(embed);
   }
@@ -245,7 +291,9 @@ export function richEmbedsForPost(post) {
 }
 
 export function richEmbedMarkupForPost(post, sanitize) {
-  if (typeof sanitize !== 'function') return '';
+  if (typeof sanitize !== 'function') {
+    return '';
+  }
 
   const embeds = richEmbedsForPost(post);
   const imageEmbeds = embeds.filter(embed => embed.type === 'image' || embed.type === 'gif');
@@ -305,7 +353,9 @@ function urlsFromText(text) {
   let match;
   while ((match = WEB_URL_RE.exec(String(text ?? ''))) !== null) {
     const url = trimUrlPunctuation(match[0]);
-    if (url) urls.push(url);
+    if (url) {
+      urls.push(url);
+    }
   }
   return urls;
 }
@@ -322,12 +372,16 @@ const COLLAPSE_AT = 180;
 
 function isRecent(post) {
   const value = post.createdOn || post.lastUpdatedOn;
-  if (!value) return false;
+  if (!value) {
+    return false;
+  }
   return Date.now() - new Date(value).getTime() < 10 * 60 * 1000;
 }
 
 export function expiresSoon(post, now = Date.now()) {
-  if (!post.expiresOn) return false;
+  if (!post.expiresOn) {
+    return false;
+  }
   const delta = new Date(post.expiresOn).getTime() - now;
   return delta > 0 && delta <= 12 * 60 * 60 * 1000;
 }
@@ -347,11 +401,21 @@ export function keepAlivePresentation(keptAlive, count) {
 
 export function postStatusChips(post, liked) {
   const chips = [];
-  if (post.level && post.level > 0) chips.push(['reply', 'Reply']);
-  if (liked) chips.push(['kept-alive', 'Kept alive']);
-  if (post.editedOn) chips.push(['edited', 'Edited']);
-  if (isRecent(post)) chips.push(['new', 'New']);
-  if (expiresSoon(post)) chips.push(['expires', 'Expires soon']);
+  if (post.level && post.level > 0) {
+    chips.push(['reply', 'Reply']);
+  }
+  if (liked) {
+    chips.push(['kept-alive', 'Kept alive']);
+  }
+  if (post.editedOn) {
+    chips.push(['edited', 'Edited']);
+  }
+  if (isRecent(post)) {
+    chips.push(['new', 'New']);
+  }
+  if (expiresSoon(post)) {
+    chips.push(['expires', 'Expires soon']);
+  }
   return chips.map(([type, label]) => `<span class="post-chip post-chip-${type}">${label}</span>`).join('');
 }
 
@@ -368,7 +432,9 @@ export async function sharePost(postId, browser = window) {
       await navigatorApi.share({ title: 'Void post', url });
       return 'shared';
     } catch (error) {
-      if (error?.name === 'AbortError') return 'cancelled';
+      if (error?.name === 'AbortError') {
+        return 'cancelled';
+      }
       throw error;
     }
   }
@@ -386,7 +452,9 @@ function renderKeepAlivePresentation(button, presentation) {
   button.setAttribute('aria-label', presentation.ariaLabel);
   const label = button.querySelector('.keep-alive-label');
   const count = button.querySelector('.keep-alive-count');
-  if (label) label.textContent = presentation.label;
+  if (label) {
+    label.textContent = presentation.label;
+  }
   if (count) {
     count.textContent = presentation.count;
     count.setAttribute('aria-label', `${presentation.count} keep-alives`);
@@ -394,7 +462,9 @@ function renderKeepAlivePresentation(button, presentation) {
 }
 
 function expireFeedItem(item, post, ctx) {
-  if (item.dataset.expiring === 'true') return null;
+  if (item.dataset.expiring === 'true') {
+    return null;
+  }
   item.dataset.expiring = 'true';
   item.classList.add('post-item-expiring');
 
@@ -415,9 +485,13 @@ function startLifespanTimer(item, post, ctx) {
   let wasConnected = item.isConnected;
 
   const ensureLabel = () => {
-    if (label) return label;
+    if (label) {
+      return label;
+    }
     const author = item.querySelector('.post-author');
-    if (!author) return null;
+    if (!author) {
+      return null;
+    }
 
     label = document.createElement('span');
     label.className = 'post-lifespan';
@@ -435,7 +509,9 @@ function startLifespanTimer(item, post, ctx) {
   };
 
   const cancelExpiry = () => {
-    if (expiryTimeoutId === null) return;
+    if (expiryTimeoutId === null) {
+      return;
+    }
     window.clearTimeout(expiryTimeoutId);
     expiryTimeoutId = null;
     delete item.dataset.expiring;
@@ -487,7 +563,9 @@ function startLifespanTimer(item, post, ctx) {
 
   return {
     update(nextExpiresOn) {
-      if (!nextExpiresOn) return;
+      if (!nextExpiresOn) {
+        return;
+      }
 
       const remaining = remainingLifespanMs(nextExpiresOn);
       expiresOn = nextExpiresOn;
@@ -609,7 +687,9 @@ export function createFeedItem(post, ctx) {
   `;
 
   const body = item.querySelector('.post-text');
-  if (body) appendTextWithMentionLinks(body, post.text);
+  if (body) {
+    appendTextWithMentionLinks(body, post.text);
+  }
   for (const image of item.querySelectorAll('.post-rich-image')) {
     image.addEventListener('error', () => {
       const src = image.getAttribute('src') || '';
@@ -690,7 +770,9 @@ export function createFeedItem(post, ctx) {
     replySubmit.addEventListener('click', async () => {
       if (!ctx.isLoggedIn()) { window.location.href = loginRedirectUrl(); return; }
       const text = (replyText.value || '').trim();
-      if (!text) return;
+      if (!text) {
+        return;
+      }
       try {
         replySubmit.disabled = true;
         if (typeof ctx.onReply === 'function') {
@@ -721,7 +803,9 @@ export function createFeedItem(post, ctx) {
                 <div class="post-body"></div>
             </div>`;
           const replyBody = row.querySelector('.post-body');
-          if (replyBody) appendTextWithMentionLinks(replyBody, text);
+          if (replyBody) {
+            appendTextWithMentionLinks(replyBody, text);
+          }
           replies.appendChild(row);
         }
         // Quick inline toast
@@ -768,7 +852,9 @@ export function createFeedItem(post, ctx) {
                       <div class="post-body"></div>
                   </div>`;
                 const replyBody = row.querySelector('.post-body');
-                if (replyBody) appendTextWithMentionLinks(replyBody, reply.text || '');
+                if (replyBody) {
+                  appendTextWithMentionLinks(replyBody, reply.text || '');
+                }
                 replies.appendChild(row);
               }
               // View full thread link
@@ -785,11 +871,15 @@ export function createFeedItem(post, ctx) {
         }
         replies.classList.remove('d-none');
         replToggle.setAttribute('aria-expanded', 'true');
-        if (label) label.textContent = 'Hide';
+        if (label) {
+          label.textContent = 'Hide';
+        }
       } else {
         replies.classList.add('d-none');
         replToggle.setAttribute('aria-expanded', 'false');
-        if (label) label.textContent = 'Replies';
+        if (label) {
+          label.textContent = 'Replies';
+        }
       }
     });
   }
@@ -839,7 +929,9 @@ export function createFeedItem(post, ctx) {
     del?.addEventListener('click', async (e) => {
       e.stopPropagation();
       menu.classList.add('d-none');
-      if (!confirm('Delete this post?')) return;
+      if (!confirm('Delete this post?')) {
+        return;
+      }
       try {
         await ctx.onDelete(post.id);
         item.remove();
@@ -852,7 +944,9 @@ export function createFeedItem(post, ctx) {
       e.stopPropagation();
       menu.classList.add('d-none');
       const nextText = window.prompt('Edit post', post.text || '');
-      if (nextText === null || nextText.trim() === post.text) return;
+      if (nextText === null || nextText.trim() === post.text) {
+        return;
+      }
       try {
         edit.disabled = true;
         await ctx.onEdit(post.id, nextText.trim());
@@ -865,7 +959,9 @@ export function createFeedItem(post, ctx) {
     const hideThreadBtn = item.querySelector('.post-hide-thread-btn');
     hideThreadBtn?.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (typeof ctx.onHideThread !== 'function') return;
+      if (typeof ctx.onHideThread !== 'function') {
+        return;
+      }
       menu.classList.add('d-none');
       try {
         hideThreadBtn.disabled = true;
@@ -904,10 +1000,14 @@ export function createFeedItem(post, ctx) {
 }
 
 function ensurePostMenuEscapeHandler() {
-  if (postMenuEscapeHandlerInitialized || typeof document === 'undefined') return;
+  if (postMenuEscapeHandlerInitialized || typeof document === 'undefined') {
+    return;
+  }
   postMenuEscapeHandlerInitialized = true;
   document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return;
+    if (event.key !== 'Escape') {
+      return;
+    }
     document.querySelectorAll('.post-menu').forEach(menu => menu.classList.add('d-none'));
   });
 }

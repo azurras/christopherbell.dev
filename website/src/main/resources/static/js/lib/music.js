@@ -58,29 +58,45 @@ export function musicCatalog(value) {
 
 /** Return a compact set of zero-based page numbers for accessible pagination controls. */
 export function musicPageNumbers(page, totalPages) {
-  if (!Number.isSafeInteger(page) || !Number.isSafeInteger(totalPages) || totalPages < 1) return [];
+  if (!Number.isSafeInteger(page) || !Number.isSafeInteger(totalPages) || totalPages < 1) {
+    return [];
+  }
   const last = totalPages - 1;
   const current = Math.max(0, Math.min(last, page));
-  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index);
-  if (current <= 1) return [0, 1, 2, last];
-  if (current >= last - 1) return [0, last - 2, last - 1, last];
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index);
+  }
+  if (current <= 1) {
+    return [0, 1, 2, last];
+  }
+  if (current >= last - 1) {
+    return [0, last - 2, last - 1, last];
+  }
   return [0, current - 1, current, current + 1, last];
 }
 
 /** Translate a validated Music sidebar view into server-side catalog constraints. */
 export function musicViewFilter(view) {
-  if (view === 'all') return {};
-  if (view === 'favorites') return { favorite: true };
+  if (view === 'all') {
+    return {};
+  }
+  if (view === 'favorites') {
+    return { favorite: true };
+  }
   if (typeof view === 'string' && view.startsWith('playlist:')) {
     const playlistId = view.substring('playlist:'.length);
-    if (/^[A-Za-z0-9_-]{1,100}$/u.test(playlistId)) return { playlistId };
+    if (/^[A-Za-z0-9_-]{1,100}$/u.test(playlistId)) {
+      return { playlistId };
+    }
   }
   throw new Error('Music view is invalid.');
 }
 
 /** Build one bounded catalog request from browser-owned view and filter state. */
 export function musicCatalogParameters({ view, page, q, artist, album, genre }) {
-  if (!Number.isSafeInteger(page) || page < 0) throw new Error('Music page is invalid.');
+  if (!Number.isSafeInteger(page) || page < 0) {
+    throw new Error('Music page is invalid.');
+  }
   return {
     q, artist, album, genre, page, size: 50, ...musicViewFilter(view),
   };
@@ -89,7 +105,9 @@ export function musicCatalogParameters({ view, page, q, artist, album, genre }) 
 /** Render accessible page controls from trusted, validated catalog metadata. */
 export function musicPaginationMarkup({ page, totalPages }) {
   const pages = musicPageNumbers(page, totalPages);
-  if (pages.length <= 1) return '';
+  if (pages.length <= 1) {
+    return '';
+  }
   const previous = Math.max(0, page - 1);
   const next = Math.min(totalPages - 1, page + 1);
   const parts = [`<button type="button" data-page="${previous}"${page === 0 ? ' disabled' : ''}>Previous</button>`];
@@ -119,7 +137,9 @@ export function musicQueue(value) {
 }
 
 export function musicPlaylists(value) {
-  if (!Array.isArray(value)) throw new Error('Music returned invalid playlists.');
+  if (!Array.isArray(value)) {
+    throw new Error('Music returned invalid playlists.');
+  }
   return Object.freeze(value.slice(0, 100).map(playlist => {
     if (typeof playlist?.id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/u.test(playlist.id)
         || typeof playlist.name !== 'string' || playlist.name.length < 1 || playlist.name.length > 100
@@ -164,7 +184,9 @@ export function musicTrackMarkup(track, { canManage = false, playlists = [] } = 
 
 export function musicQueueMarkup(queue, { canManage = false } = {}) {
   const value = musicQueue(queue);
-  if (!value.items.length) return '<p class="music-empty">The shared queue is empty.</p>';
+  if (!value.items.length) {
+    return '<p class="music-empty">The shared queue is empty.</p>';
+  }
   return value.items.map((item, index) => `<article class="music-queue-item" data-queue-id="${sanitize(item.id)}">
     <span>${index + 1}</span><div><strong>${sanitize(item.track.title)}</strong>
     <small>${sanitize(item.track.artist || 'Unknown artist')}</small></div>

@@ -20,7 +20,9 @@ async function resetPassword(token, password) {
 
 document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('resetPasswordForm');
-  if (!form) return;
+  if (!form) {
+    return;
+  }
 
   const token = new URLSearchParams(window.location.search).get('token') || '';
   if (!token) {

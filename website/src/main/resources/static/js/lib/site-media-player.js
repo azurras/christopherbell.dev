@@ -187,11 +187,17 @@ export function createSiteRadioDurationReporter({ report }) {
   const reported = new Set();
   return Object.freeze({
     async loaded(playback, source, durationSeconds) {
-      if (!validString(source)) return false;
+      if (!validString(source)) {
+        return false;
+      }
       const request = siteRadioDurationReport(playback, durationSeconds);
-      if (!request) return false;
+      if (!request) {
+        return false;
+      }
       const key = `${request.stationSequence}\0${source}`;
-      if (reported.has(key)) return false;
+      if (reported.has(key)) {
+        return false;
+      }
       reported.add(key);
       await report(request);
       return true;
@@ -222,12 +228,16 @@ export function createSiteRadioScheduler({ poll, schedule, cancel, onError = () 
   let timer = null;
 
   const queue = () => {
-    if (!active || running || timer !== null) return;
+    if (!active || running || timer !== null) {
+      return;
+    }
     timer = schedule(run, SITE_RADIO_POLL_MILLISECONDS);
   };
   const run = () => {
     timer = null;
-    if (!active || running) return;
+    if (!active || running) {
+      return;
+    }
     running = true;
     let result;
     try {
@@ -245,13 +255,17 @@ export function createSiteRadioScheduler({ poll, schedule, cancel, onError = () 
 
   return Object.freeze({
     start() {
-      if (active) return;
+      if (active) {
+        return;
+      }
       active = true;
       queue();
     },
     stop() {
       active = false;
-      if (timer !== null) cancel(timer);
+      if (timer !== null) {
+        cancel(timer);
+      }
       timer = null;
     },
     active: () => active,
@@ -304,9 +318,13 @@ function validatedSiteMediaResume(value) {
 export function readSiteMediaResume(storage) {
   try {
     const serialized = storage?.getItem?.(SITE_MEDIA_RESUME_KEY);
-    if (!serialized) return null;
+    if (!serialized) {
+      return null;
+    }
     const resume = validatedSiteMediaResume(JSON.parse(serialized));
-    if (resume) return resume;
+    if (resume) {
+      return resume;
+    }
   } catch (_) {
     // Corrupt or unavailable session storage must not prevent page startup.
   }
@@ -354,13 +372,17 @@ export function armSiteMediaGestureResume(
   let active = true;
   let attemptInFlight = false;
   const cancel = () => {
-    if (!active) return;
+    if (!active) {
+      return;
+    }
     active = false;
     eventTarget.removeEventListener('pointerdown', retry, true);
     eventTarget.removeEventListener('keydown', retry, true);
   };
   const retry = event => {
-    if (!active || attemptInFlight || !shouldResume(event)) return;
+    if (!active || attemptInFlight || !shouldResume(event)) {
+      return;
+    }
     attemptInFlight = true;
     let attempt;
     try {
@@ -382,7 +404,9 @@ export function armSiteMediaGestureResume(
 }
 
 function normalizedAudioMetadataText(value) {
-  if (typeof value !== 'string') return null;
+  if (typeof value !== 'string') {
+    return null;
+  }
   const normalized = value.trim();
   return normalized.length > 0 && normalized.length <= AUDIO_METADATA_TEXT_LIMIT
     ? normalized : null;
@@ -398,7 +422,9 @@ function normalizedAudioArtwork(picture) {
     return null;
   }
   for (const byte of data) {
-    if (!Number.isInteger(byte) || byte < 0 || byte > 255) return null;
+    if (!Number.isInteger(byte) || byte < 0 || byte > 255) {
+      return null;
+    }
   }
   return Object.freeze({ type, bytes: Uint8Array.from(data) });
 }
@@ -499,7 +525,9 @@ function createBoundedAudioMetadataReader(Reader, url, signal) {
   return Object.freeze({
     reader: reader.setFileReader(BoundedFileReader),
     abort() {
-      for (const xhr of activeRequests) xhr.abort?.();
+      for (const xhr of activeRequests) {
+        xhr.abort?.();
+      }
       activeRequests.clear();
     },
   });
@@ -516,13 +544,19 @@ export async function readSiteAudioMetadata(url, loadReader, signal = undefined)
     throw new TypeError('Audio metadata reading requires a URL and reader loader.');
   }
   const Reader = await loadReader();
-  if (typeof Reader !== 'function') throw new TypeError('Audio metadata reader is unavailable.');
-  if (signal?.aborted) throw siteMediaAbortError();
+  if (typeof Reader !== 'function') {
+    throw new TypeError('Audio metadata reader is unavailable.');
+  }
+  if (signal?.aborted) {
+    throw siteMediaAbortError();
+  }
   const bounded = createBoundedAudioMetadataReader(Reader, url, signal);
   return new Promise((resolve, reject) => {
     let settled = false;
     const settle = (complete, value) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       signal?.removeEventListener?.('abort', onAbort);
       complete(value);
@@ -559,7 +593,9 @@ export function clearSiteMediaResume(storage) {
 /** Restore media preferences and position before optionally continuing playback. */
 export function applySiteMediaResume(media, resume) {
   const validated = validatedSiteMediaResume({ version: 1, ...resume });
-  if (!media || !validated) throw new TypeError('Site media resume state is invalid.');
+  if (!media || !validated) {
+    throw new TypeError('Site media resume state is invalid.');
+  }
   const duration = Number(media.duration);
   media.currentTime = Number.isFinite(duration)
     ? Math.min(validated.positionSeconds, Math.max(0, duration))
@@ -599,15 +635,21 @@ export function nextSiteMediaPlaybackRate(currentRate) {
 
 /** Toggle playback through the media element's native lifecycle. */
 export function toggleSiteMediaPlayback(media) {
-  if (!media?.play || !media?.pause) throw new TypeError('Site media is not controllable.');
-  if (media.paused || media.ended) return media.play();
+  if (!media?.play || !media?.pause) {
+    throw new TypeError('Site media is not controllable.');
+  }
+  if (media.paused || media.ended) {
+    return media.play();
+  }
   media.pause();
   return Promise.resolve();
 }
 
 /** Toggle mute without relying on unsupported mobile volume assignment. */
 export function toggleSiteMediaMute(media) {
-  if (!media) throw new TypeError('Site media is unavailable.');
+  if (!media) {
+    throw new TypeError('Site media is unavailable.');
+  }
   media.muted = !media.muted;
   return media.muted;
 }
@@ -652,12 +694,18 @@ export function createPersistentSiteNavigator({
   const loaded = ({ href, title }) => {
     const historyMode = pendingHistory;
     pendingHistory = null;
-    if (title) setTitle(title);
-    if (historyMode !== 'restore' && href !== currentHref()) pushHref(href);
+    if (title) {
+      setTitle(title);
+    }
+    if (historyMode !== 'restore' && href !== currentHref()) {
+      pushHref(href);
+    }
   };
 
   const ensureFrame = () => {
-    if (frame) return frame;
+    if (frame) {
+      return frame;
+    }
     frame = createFrame(loaded);
     showFrame(frame);
     return frame;
@@ -680,16 +728,22 @@ export function createSiteMediaSession({ mount, unmount }) {
   let active = null;
 
   const release = (playback, removeUi) => {
-    if (!playback) return;
+    if (!playback) {
+      return;
+    }
     playback.controller.abort();
     playback.media.pause();
     playback.media.removeAttribute('src');
     playback.media.load?.();
-    if (removeUi) unmount();
+    if (removeUi) {
+      unmount();
+    }
   };
 
   const stop = playback => {
-    if (!active || active !== playback) return;
+    if (!active || active !== playback) {
+      return;
+    }
     active = null;
     release(playback, true);
   };
@@ -784,7 +838,9 @@ export function playMusicTrack(track, browserWindow = window) {
 /** Let every same-origin document delegate ordinary link clicks to the top player. */
 export function handleSiteNavigationClick(event, browserWindow = window) {
   const anchor = event?.target?.closest?.('a[href]');
-  if (!anchor) return false;
+  if (!anchor) {
+    return false;
+  }
   return siteMediaPlayerHost(browserWindow)?.navigateFromClick?.(anchor, event) === true;
 }
 

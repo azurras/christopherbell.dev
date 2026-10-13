@@ -52,7 +52,9 @@ function loadAudioMetadataReader() {
   if (typeof globalThis.jsmediatags?.Reader === 'function') {
     return Promise.resolve(globalThis.jsmediatags.Reader);
   }
-  if (audioMetadataReaderPromise) return audioMetadataReaderPromise;
+  if (audioMetadataReaderPromise) {
+    return audioMetadataReaderPromise;
+  }
   audioMetadataReaderPromise = new Promise((resolve, reject) => {
     const script = document.createElement('script');
     script.src = AUDIO_METADATA_LIBRARY_URL;
@@ -78,7 +80,9 @@ function loadAudioMetadataReader() {
 /** One top-document media owner that survives navigation through a same-origin content shell. */
 export class SiteMediaPlayer extends HTMLElement {
   connectedCallback() {
-    if (this.initialized) return;
+    if (this.initialized) {
+      return;
+    }
     this.initialized = true;
     this.className = 'site-media-player-host';
     this.hidden = true;
@@ -123,7 +127,9 @@ export class SiteMediaPlayer extends HTMLElement {
   }
 
   disconnectedCallback() {
-    if (this.pageHideHandler) window.removeEventListener('pagehide', this.pageHideHandler);
+    if (this.pageHideHandler) {
+      window.removeEventListener('pagehide', this.pageHideHandler);
+    }
     this.resizeObserver?.disconnect();
     this.cancelGestureResume();
     this.releaseArtwork();
@@ -234,7 +240,9 @@ export class SiteMediaPlayer extends HTMLElement {
     this.querySelector('[data-site-player-close]').addEventListener('click', () => this.close());
     this.querySelector('[data-site-player-control="play"]').addEventListener('click', () => {
       const media = this.currentMedia();
-      if (!media) return;
+      if (!media) {
+        return;
+      }
       const intendsToPlay = media.paused || media.ended;
       this.playbackIntentByMedia.set(media, intendsToPlay);
       if (intendsToPlay && this.session.snapshot()?.descriptor.mode === 'RADIO') {
@@ -250,44 +258,58 @@ export class SiteMediaPlayer extends HTMLElement {
     });
     this.querySelector('[data-site-player-control="rewind"]').addEventListener('click', () => {
       const media = this.currentMedia();
-      if (!media || this.session.snapshot()?.descriptor.mode === 'RADIO') return;
+      if (!media || this.session.snapshot()?.descriptor.mode === 'RADIO') {
+        return;
+      }
       seekSiteMediaBy(media, -10);
       this.syncControls();
       this.persistPlayback();
     });
     this.querySelector('[data-site-player-control="forward"]').addEventListener('click', () => {
       const media = this.currentMedia();
-      if (!media || this.session.snapshot()?.descriptor.mode === 'RADIO') return;
+      if (!media || this.session.snapshot()?.descriptor.mode === 'RADIO') {
+        return;
+      }
       seekSiteMediaBy(media, 10);
       this.syncControls();
       this.persistPlayback();
     });
     this.querySelector('[data-site-player-control="mute"]').addEventListener('click', () => {
       const media = this.currentMedia();
-      if (!media) return;
+      if (!media) {
+        return;
+      }
       toggleSiteMediaMute(media);
       this.syncControls();
       this.persistPlayback();
     });
     this.querySelector('[data-site-player-control="rate"]').addEventListener('click', () => {
       const media = this.currentMedia();
-      if (!media || this.session.snapshot()?.descriptor.mode === 'RADIO') return;
+      if (!media || this.session.snapshot()?.descriptor.mode === 'RADIO') {
+        return;
+      }
       media.playbackRate = nextSiteMediaPlaybackRate(media.playbackRate);
       this.syncControls();
       this.persistPlayback();
     });
     this.querySelector('[data-site-player-seek]').addEventListener('input', event => {
       const media = this.currentMedia();
-      if (!media || this.session.snapshot()?.descriptor.mode === 'RADIO') return;
+      if (!media || this.session.snapshot()?.descriptor.mode === 'RADIO') {
+        return;
+      }
       media.currentTime = Number(event.currentTarget.value);
       this.syncControls();
       this.persistPlayback();
     });
     this.querySelector('[data-site-player-volume]').addEventListener('input', event => {
       const media = this.currentMedia();
-      if (!media) return;
+      if (!media) {
+        return;
+      }
       media.volume = Number(event.currentTarget.value);
-      if (media.volume > 0) media.muted = false;
+      if (media.volume > 0) {
+        media.muted = false;
+      }
       this.syncControls();
       this.persistPlayback();
     });
@@ -303,7 +325,9 @@ export class SiteMediaPlayer extends HTMLElement {
 
   async restorePlayback() {
     const resume = readSiteMediaResume(sessionStorage);
-    if (!resume) return;
+    if (!resume) {
+      return;
+    }
     if (!getAuthToken()) {
       clearSiteMediaResume(sessionStorage);
       return;
@@ -333,7 +357,9 @@ export class SiteMediaPlayer extends HTMLElement {
         }, resume);
       }
     } catch (error) {
-      if (isSharedFolderAccessDenied(error)) this.handleAccessLoss(error.status);
+      if (isSharedFolderAccessDenied(error)) {
+        this.handleAccessLoss(error.status);
+      }
       else clearSiteMediaResume(sessionStorage);
     }
   }
@@ -341,7 +367,9 @@ export class SiteMediaPlayer extends HTMLElement {
   bindPlaybackEvents(playback) {
     const sync = () => this.syncControls(playback);
     const persist = () => {
-      if (!playback.signal.aborted) this.persistPlayback();
+      if (!playback.signal.aborted) {
+        this.persistPlayback();
+      }
     };
     const eventOptions = { signal: playback.signal };
     playback.media.addEventListener('loadedmetadata', () => {
@@ -393,7 +421,9 @@ export class SiteMediaPlayer extends HTMLElement {
       if (playback.signal.aborted
           || this.sourceVersionByMedia.get(playback.media) !== sourceVersion) return;
       const resume = this.resumeByMedia.get(playback.media);
-      if (resume?.wasPlaying) this.pendingPlaybackStart.add(playback.media);
+      if (resume?.wasPlaying) {
+        this.pendingPlaybackStart.add(playback.media);
+      }
       void applySiteMediaResume(playback.media, resume)
         .then(() => {
           this.pendingPlaybackStart.delete(playback.media);
@@ -417,7 +447,9 @@ export class SiteMediaPlayer extends HTMLElement {
 
   persistPlayback() {
     const playback = this.session?.snapshot();
-    if (!playback || playback.signal.aborted) return false;
+    if (!playback || playback.signal.aborted) {
+      return false;
+    }
     return saveSiteMediaResume(sessionStorage, playback.descriptor, playback.media, {
       wasPlaying: this.playbackIntentByMedia.get(playback.media)
         ?? playback.media.paused === false,
@@ -431,7 +463,9 @@ export class SiteMediaPlayer extends HTMLElement {
       playback.media,
       document,
       () => {
-        if (this.session?.snapshot() !== playback || playback.signal.aborted) return;
+        if (this.session?.snapshot() !== playback || playback.signal.aborted) {
+          return;
+        }
         this.pendingPlaybackStart.delete(playback.media);
         this.playbackIntentByMedia.set(playback.media, true);
         this.gestureResumeCancel = null;
@@ -444,7 +478,9 @@ export class SiteMediaPlayer extends HTMLElement {
   }
 
   cancelGestureResume(expectedPlayback = null) {
-    if (expectedPlayback && this.gestureResumePlayback !== expectedPlayback) return;
+    if (expectedPlayback && this.gestureResumePlayback !== expectedPlayback) {
+      return;
+    }
     this.gestureResumeCancel?.();
     this.gestureResumeCancel = null;
     this.gestureResumePlayback = null;
@@ -452,7 +488,9 @@ export class SiteMediaPlayer extends HTMLElement {
 
   syncControls(expectedPlayback = null) {
     const playback = this.session?.snapshot();
-    if (!playback || (expectedPlayback && playback !== expectedPlayback)) return;
+    if (!playback || (expectedPlayback && playback !== expectedPlayback)) {
+      return;
+    }
     const { media } = playback;
     const duration = Number.isFinite(media.duration) && media.duration >= 0 ? media.duration : 0;
     const position = Math.min(duration || Number.MAX_SAFE_INTEGER, Math.max(0, media.currentTime || 0));
@@ -495,7 +533,9 @@ export class SiteMediaPlayer extends HTMLElement {
 
   async openPictureInPicture() {
     const media = this.currentMedia();
-    if (typeof media?.requestPictureInPicture !== 'function') return;
+    if (typeof media?.requestPictureInPicture !== 'function') {
+      return;
+    }
     try {
       await media.requestPictureInPicture();
     } catch (_) {
@@ -505,7 +545,9 @@ export class SiteMediaPlayer extends HTMLElement {
 
   async openFullscreen() {
     const media = this.currentMedia();
-    if (!media) return;
+    if (!media) {
+      return;
+    }
     let restoreCustomControls = null;
     try {
       if (typeof media.requestFullscreen === 'function') {
@@ -570,14 +612,24 @@ export class SiteMediaPlayer extends HTMLElement {
     try {
       response = await this.fetchRadioSnapshot(this.radioController.signal);
     } catch (error) {
-      if (generation === this.radioGeneration) this.stopRadioSync();
-      if (replacingRadio) this.stopPlayback();
+      if (generation === this.radioGeneration) {
+        this.stopRadioSync();
+      }
+      if (replacingRadio) {
+        this.stopPlayback();
+      }
       throw error;
     }
-    if (generation !== this.radioGeneration) return response;
+    if (generation !== this.radioGeneration) {
+      return response;
+    }
     if (response.status === 'EMPTY') {
-      if (resume?.descriptor.mode === 'RADIO') clearSiteMediaResume(sessionStorage);
-      if (replacingRadio) this.stopPlayback();
+      if (resume?.descriptor.mode === 'RADIO') {
+        clearSiteMediaResume(sessionStorage);
+      }
+      if (replacingRadio) {
+        this.stopPlayback();
+      }
       else this.stopRadioSync();
       return response;
     }
@@ -596,14 +648,22 @@ export class SiteMediaPlayer extends HTMLElement {
     const radioResume = siteRadioResumeState(saved, station);
     this.radioPlayback = station;
     await this.playMusicRadioEntry(station.entry, radioResume);
-    if (generation === this.radioGeneration) this.radioScheduler.start();
+    if (generation === this.radioGeneration) {
+      this.radioScheduler.start();
+    }
     return response;
   }
 
   async syncRadio({ requestPlay = false } = {}) {
-    if (requestPlay) this.radioPlayRequested = true;
-    if (!this.radioController || this.radioController.signal.aborted) return false;
-    if (this.radioSyncPromise) return this.radioSyncPromise;
+    if (requestPlay) {
+      this.radioPlayRequested = true;
+    }
+    if (!this.radioController || this.radioController.signal.aborted) {
+      return false;
+    }
+    if (this.radioSyncPromise) {
+      return this.radioSyncPromise;
+    }
     const generation = this.radioGeneration;
     const operation = this.performRadioSync(generation).catch(error => {
       this.radioPlayRequested = false;
@@ -612,7 +672,9 @@ export class SiteMediaPlayer extends HTMLElement {
     });
     this.radioSyncPromise = operation;
     void operation.finally(() => {
-      if (this.radioSyncPromise !== operation) return;
+      if (this.radioSyncPromise !== operation) {
+        return;
+      }
       this.radioSyncPromise = null;
       if (this.radioPlayRequested && generation === this.radioGeneration) {
         void this.syncRadio({ requestPlay: true });
@@ -623,9 +685,13 @@ export class SiteMediaPlayer extends HTMLElement {
 
   async performRadioSync(generation) {
     const response = await this.fetchRadioSnapshot(this.radioController.signal);
-    if (generation !== this.radioGeneration) return false;
+    if (generation !== this.radioGeneration) {
+      return false;
+    }
     const current = this.session?.snapshot();
-    if (!current || current.descriptor.mode !== 'RADIO') return false;
+    if (!current || current.descriptor.mode !== 'RADIO') {
+      return false;
+    }
     const decision = siteRadioSyncDecision({
       stationSequence: current.descriptor.stationSequence,
       path: current.descriptor.path,
@@ -656,15 +722,21 @@ export class SiteMediaPlayer extends HTMLElement {
     }
 
     this.radioPlayback = response.playback;
-    if (decision.action === 'SEEK') current.media.currentTime = decision.targetPositionSeconds;
-    if (requestedPlay) await this.continueRadioPlayback(current);
+    if (decision.action === 'SEEK') {
+      current.media.currentTime = decision.targetPositionSeconds;
+    }
+    if (requestedPlay) {
+      await this.continueRadioPlayback(current);
+    }
     this.syncControls(current);
     this.persistPlayback();
     return true;
   }
 
   async continueRadioPlayback(playback) {
-    if (this.session?.snapshot() !== playback || playback.signal.aborted) return;
+    if (this.session?.snapshot() !== playback || playback.signal.aborted) {
+      return;
+    }
     this.pendingPlaybackStart.add(playback.media);
     this.playbackIntentByMedia.set(playback.media, true);
     try {
@@ -679,7 +751,9 @@ export class SiteMediaPlayer extends HTMLElement {
   }
 
   handleRadioSyncError(error) {
-    if (error?.name === 'AbortError') return;
+    if (error?.name === 'AbortError') {
+      return;
+    }
     if (isSharedFolderAccessDenied(error)) {
       this.handleAccessLoss(error.status);
       return;
@@ -706,7 +780,9 @@ export class SiteMediaPlayer extends HTMLElement {
     media.preload = 'metadata';
     media.playsInline = true;
     media.title = track.title;
-    if (!resume) clearSiteMediaResume(sessionStorage);
+    if (!resume) {
+      clearSiteMediaResume(sessionStorage);
+    }
     this.cancelGestureResume();
     this.releaseArtwork();
     const playback = this.session.start({
@@ -728,12 +804,16 @@ export class SiteMediaPlayer extends HTMLElement {
     };
     this.resumeByMedia.set(media, initialResume);
     this.playbackIntentByMedia.set(media, initialResume.wasPlaying);
-    if (initialResume.wasPlaying) this.pendingPlaybackStart.add(media);
+    if (initialResume.wasPlaying) {
+      this.pendingPlaybackStart.add(media);
+    }
     this.bindPlaybackEvents(playback);
     this.renderMusicRadioPresentation(playback, track);
     this.resumePlaybackWhenReady(playback);
     media.addEventListener('error', () => {
-      if (!playback.signal.aborted) this.setStatus('This track could not be streamed');
+      if (!playback.signal.aborted) {
+        this.setStatus('This track could not be streamed');
+      }
     }, { once: true, signal: playback.signal });
     media.src = API.music.stream(track.id);
     media.load();
@@ -758,7 +838,9 @@ export class SiteMediaPlayer extends HTMLElement {
     }, media);
     this.resumeByMedia.set(media, resume);
     this.playbackIntentByMedia.set(media, resume.wasPlaying);
-    if (resume.wasPlaying) this.pendingPlaybackStart.add(media);
+    if (resume.wasPlaying) {
+      this.pendingPlaybackStart.add(media);
+    }
     saveSiteMediaResume(sessionStorage, playback.descriptor, {
       currentTime: resume.positionSeconds,
       paused: !resume.wasPlaying,
@@ -777,7 +859,9 @@ export class SiteMediaPlayer extends HTMLElement {
   }
 
   renderMusicRadioPresentation(playback, track) {
-    if (this.session?.snapshot() !== playback) return;
+    if (this.session?.snapshot() !== playback) {
+      return;
+    }
     this.querySelector('[data-site-player-title]').textContent = track.title;
     const subtitle = [track.artist, track.album].filter(Boolean).join(' · ');
     const trackMetadata = this.querySelector('[data-site-player-track-metadata]');
@@ -818,7 +902,9 @@ export class SiteMediaPlayer extends HTMLElement {
     media.preload = 'metadata';
     media.playsInline = true;
     media.title = entry.name;
-    if (!resume) clearSiteMediaResume(sessionStorage);
+    if (!resume) {
+      clearSiteMediaResume(sessionStorage);
+    }
     this.cancelGestureResume();
     this.releaseArtwork();
     const playback = this.session.start({
@@ -839,7 +925,9 @@ export class SiteMediaPlayer extends HTMLElement {
     };
     this.resumeByMedia.set(media, initialResume);
     this.playbackIntentByMedia.set(media, initialResume.wasPlaying);
-    if (initialResume.wasPlaying) this.pendingPlaybackStart.add(media);
+    if (initialResume.wasPlaying) {
+      this.pendingPlaybackStart.add(media);
+    }
     saveSiteMediaResume(sessionStorage, playback.descriptor, {
       currentTime: initialResume.positionSeconds,
       paused: !initialResume.wasPlaying,
@@ -874,7 +962,9 @@ export class SiteMediaPlayer extends HTMLElement {
       void this.loadAudioMetadata(playback, new URL(url, window.location.href).href);
     }
     playback.media.addEventListener('error', () => {
-      if (!playback.signal.aborted) void this.loadFallbackSource(entry, playback);
+      if (!playback.signal.aborted) {
+        void this.loadFallbackSource(entry, playback);
+      }
     }, { once: true });
     this.resumePlaybackWhenReady(playback);
     playback.media.src = url;
@@ -886,7 +976,9 @@ export class SiteMediaPlayer extends HTMLElement {
     try {
       const metadata = await readSiteAudioMetadata(
         url, loadAudioMetadataReader, playback.signal);
-      if (playback.signal.aborted || this.session?.snapshot() !== playback) return;
+      if (playback.signal.aborted || this.session?.snapshot() !== playback) {
+        return;
+      }
       this.renderAudioPresentation(playback, metadata);
     } catch (_) {
       // Tag parsing is optional; filename playback remains the complete fallback.
@@ -894,7 +986,9 @@ export class SiteMediaPlayer extends HTMLElement {
   }
 
   async loadFallbackSource(entry, playback) {
-    if (playback.signal.aborted) return;
+    if (playback.signal.aborted) {
+      return;
+    }
     this.setStatus('Preparing a browser-compatible version…');
     try {
       const initial = await fetchJson(API.sharedFolder.media.fallback, {
@@ -922,7 +1016,9 @@ export class SiteMediaPlayer extends HTMLElement {
       await prepareSharedFolderMediaAuth(url);
       playback.signal.throwIfAborted();
       playback.media.addEventListener('error', () => {
-        if (!playback.signal.aborted) this.showRetry(entry, playback);
+        if (!playback.signal.aborted) {
+          this.showRetry(entry, playback);
+        }
       }, { once: true });
       const priorResume = this.resumeByMedia.get(playback.media);
       if (priorResume && Number.isFinite(playback.media.currentTime)
@@ -936,14 +1032,18 @@ export class SiteMediaPlayer extends HTMLElement {
       playback.media.src = url;
       playback.media.load();
       this.setStatus(mediaStatusMessage(playable.status));
-      if (playable.status !== 'READY') await waitForTerminalMediaJob(playable, observe);
+      if (playable.status !== 'READY') {
+        await waitForTerminalMediaJob(playable, observe);
+      }
     } catch (error) {
       this.handlePlaybackError(error, entry, playback);
     }
   }
 
   handlePlaybackError(error, entry, playback) {
-    if (error?.name === 'AbortError' || playback.signal.aborted) return;
+    if (error?.name === 'AbortError' || playback.signal.aborted) {
+      return;
+    }
     if (isSharedFolderAccessDenied(error)) {
       this.handleAccessLoss(error.status);
       return;
@@ -1022,7 +1122,9 @@ export class SiteMediaPlayer extends HTMLElement {
   }
 
   renderAudioPresentation(playback, metadata) {
-    if (playback.descriptor.kind !== 'AUDIO' || this.session?.snapshot() !== playback) return;
+    if (playback.descriptor.kind !== 'AUDIO' || this.session?.snapshot() !== playback) {
+      return;
+    }
     const presentation = siteAudioPresentation(metadata, playback.descriptor.title);
     this.querySelector('[data-site-player-title]').textContent = presentation.title;
     const trackMetadata = this.querySelector('[data-site-player-track-metadata]');
@@ -1050,7 +1152,9 @@ export class SiteMediaPlayer extends HTMLElement {
   }
 
   setMediaSessionMetadata(presentation) {
-    if (!navigator.mediaSession || typeof globalThis.MediaMetadata !== 'function') return;
+    if (!navigator.mediaSession || typeof globalThis.MediaMetadata !== 'function') {
+      return;
+    }
     const artwork = this.artworkUrl && presentation.picture
       ? [{ src: this.artworkUrl, type: presentation.picture.type }] : [];
     try {
@@ -1066,7 +1170,9 @@ export class SiteMediaPlayer extends HTMLElement {
   }
 
   clearMediaSessionMetadata() {
-    if (!navigator.mediaSession) return;
+    if (!navigator.mediaSession) {
+      return;
+    }
     try {
       navigator.mediaSession.metadata = null;
     } catch (_) {
@@ -1075,7 +1181,9 @@ export class SiteMediaPlayer extends HTMLElement {
   }
 
   releaseArtwork() {
-    if (!this.artworkUrl) return;
+    if (!this.artworkUrl) {
+      return;
+    }
     URL.revokeObjectURL(this.artworkUrl);
     this.artworkUrl = null;
   }
@@ -1088,12 +1196,16 @@ export class SiteMediaPlayer extends HTMLElement {
   close() {
     const frameHref = this.navigator.currentFrame()?.href();
     this.stopPlayback();
-    if (frameHref) window.location.assign(frameHref);
+    if (frameHref) {
+      window.location.assign(frameHref);
+    }
   }
 
   setStatus(message) {
     const status = this.querySelector('[data-site-player-status]');
-    if (status) status.textContent = message;
+    if (status) {
+      status.textContent = message;
+    }
   }
 
   updatePlayerHeight() {
@@ -1113,9 +1225,13 @@ export class SiteMediaPlayer extends HTMLElement {
   }
 
   navigateFromClick(anchor, event) {
-    if (!this.session?.snapshot()) return false;
+    if (!this.session?.snapshot()) {
+      return false;
+    }
     const href = persistentNavigationTarget(anchor, event, window.location.href);
-    if (!href) return false;
+    if (!href) {
+      return false;
+    }
     event.preventDefault();
     this.navigator.open(href);
     return true;

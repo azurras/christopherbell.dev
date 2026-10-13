@@ -22,7 +22,9 @@ export async function initializeWflList({
   headers = authHeaders,
   loginUrl = loginRedirectUrl,
 } = {}) {
-  if (!mount) return;
+  if (!mount) {
+    return;
+  }
 
   const mode = mount.dataset.listMode || 'top-liked';
   const title = mount.dataset.listTitle
@@ -38,7 +40,9 @@ export async function initializeWflList({
 
   function voteControlsMarkup(restaurant) {
     const id = restaurant.id || '';
-    if (!isLoggedIn || !id) return '';
+    if (!isLoggedIn || !id) {
+      return '';
+    }
     const summary = voteSummary(restaurant);
     const restaurantName = sanitize(restaurant.name || 'restaurant');
     return `<div class="lunch-vote-control" role="group" aria-label="Vote on ${restaurantName}">
@@ -135,7 +139,9 @@ export async function initializeWflList({
 
   function renderVoteError(restaurantId, error) {
     const card = cardFor(restaurantId);
-    if (!card) return;
+    if (!card) {
+      return;
+    }
     card.querySelector?.('.wfl-list-vote-error')?.remove();
     card.insertAdjacentHTML('afterbegin', `
       <div class="alert alert-danger wfl-list-vote-error" role="alert">${
@@ -163,7 +169,9 @@ export async function initializeWflList({
   }
 
   async function setRestaurantVote(restaurantId, vote) {
-    if (!isLoggedIn || !restaurantId || !VOTES.some(option => option.value === vote)) return;
+    if (!isLoggedIn || !restaurantId || !VOTES.some(option => option.value === vote)) {
+      return;
+    }
     await mutationFor(restaurantId)(() => request(API.whatsForLunch.voteRestaurant, {
       method: 'PUT',
       headers: headers({ 'Content-Type': 'application/json' }),
@@ -172,7 +180,9 @@ export async function initializeWflList({
   }
 
   async function toggleFavorite(restaurantId) {
-    if (!restaurantId) return;
+    if (!restaurantId) {
+      return;
+    }
     const restaurant = restaurants.find(candidate => candidate.id === restaurantId);
     const isFavorite = !!restaurant?.myFavorite;
     try {
@@ -250,7 +260,9 @@ export async function initializeWflList({
     const retryButton = event.target instanceof Element
       ? event.target.closest('.wfl-list-retry')
       : null;
-    if (retryButton) await loadRestaurants();
+    if (retryButton) {
+      await loadRestaurants();
+    }
   });
 
   await loadRestaurants();
