@@ -61,12 +61,7 @@ ul {
 	padding-bottom: 50px;
 }
 
-.article-title{
-	font: bold;
-}
-
 .article-text {
-	background-image:url();
 	background-color: white;
 	border: 0px solid #000000;
 	border-radius: 10px;
