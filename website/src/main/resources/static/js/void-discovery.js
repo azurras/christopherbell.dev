@@ -30,7 +30,9 @@ function definitions() {
 /** Append a link for each topic that has a canonical name; topic text stays a DOM text node. */
 function appendTopicLinks(container, topics, className) {
   topics.forEach(topic => {
-    if (!topic?.canonical) return;
+    if (!topic?.canonical) {
+      return;
+    }
     const link = document.createElement('a');
     link.className = className;
     link.href = topicHref(topic.canonical);
@@ -41,12 +43,16 @@ function appendTopicLinks(container, topics, className) {
 
 function appendTopicChips(card, post) {
   const topics = Array.isArray(post.topics) ? post.topics : [];
-  if (!topics.length) return;
+  if (!topics.length) {
+    return;
+  }
   const chips = document.createElement('nav');
   chips.className = 'void-post-topics';
   chips.setAttribute('aria-label', 'Post topics');
   appendTopicLinks(chips, topics, 'void-topic-chip');
-  if (chips.childElementCount) card.append(chips);
+  if (chips.childElementCount) {
+    card.append(chips);
+  }
 }
 
 function renderPosts(container, items, rendererContext) {
@@ -64,7 +70,9 @@ function renderTopics(container, items) {
 
 function personDetail(person) {
   const shared = Array.isArray(person.sharedTopics) ? person.sharedTopics.slice(0, MAX_SHARED_TOPICS) : [];
-  if (!shared.length) return 'Recently active in the Void';
+  if (!shared.length) {
+    return 'Recently active in the Void';
+  }
   return `Shared: ${shared.map(topic => `#${topic}`).join(' · ')}`;
 }
 
@@ -88,20 +96,28 @@ function personCard(person) {
 
 function renderPeople(container, items) {
   items.forEach(person => {
-    if (!person?.accountId || !person?.username) return;
+    if (!person?.accountId || !person?.username) {
+      return;
+    }
     container.append(personCard(person));
   });
 }
 
 function emptyCopy(kind) {
-  if (kind === 'topics') return 'No active topics are transmitting right now.';
-  if (kind === 'people') return 'No recent people to suggest right now.';
+  if (kind === 'topics') {
+    return 'No active topics are transmitting right now.';
+  }
+  if (kind === 'people') {
+    return 'No recent people to suggest right now.';
+  }
   return 'No active conversations in this section right now.';
 }
 
 function renderSection(definition, state, rendererContext) {
   const panel = document.querySelector(`[data-discovery-section="${definition.key}"]`);
-  if (!panel) return;
+  if (!panel) {
+    return;
+  }
   const status = panel.querySelector('[data-discovery-status]');
   const items = panel.querySelector('[data-discovery-items]');
   const retry = panel.querySelector('[data-discovery-action="retry"]');
@@ -111,16 +127,26 @@ function renderSection(definition, state, rendererContext) {
   more.hidden = state.loading || Boolean(state.error) || !state.nextCursor;
   more.disabled = state.loading;
   items.replaceChildren();
-  if (definition.kind === 'posts') renderPosts(items, state.items, rendererContext);
-  if (definition.kind === 'topics') renderTopics(items, state.items);
-  if (definition.kind === 'people') renderPeople(items, state.items);
-  if (!state.loading && !state.error && state.items.length === 0) status.textContent = emptyCopy(definition.kind);
+  if (definition.kind === 'posts') {
+    renderPosts(items, state.items, rendererContext);
+  }
+  if (definition.kind === 'topics') {
+    renderTopics(items, state.items);
+  }
+  if (definition.kind === 'people') {
+    renderPeople(items, state.items);
+  }
+  if (!state.loading && !state.error && state.items.length === 0) {
+    status.textContent = emptyCopy(definition.kind);
+  }
 }
 
 async function startSection(definition, rendererContext) {
   const state = createDiscoverySectionState(definition.key);
   const panel = document.querySelector(`[data-discovery-section="${definition.key}"]`);
-  if (!panel) return;
+  if (!panel) {
+    return;
+  }
   const load = async append => {
     panel.querySelector('[data-discovery-status]').textContent = 'Loading…';
     await loadDiscoverySection(state, async cursor => {

@@ -369,7 +369,9 @@ class SharedFolderSecurityIntegrationTest {
     if (Files.exists(root)) {
       try (var entries = Files.walk(root)) {
         for (Path path : entries.sorted(Comparator.reverseOrder()).toList()) {
-          if (!path.equals(root)) Files.deleteIfExists(path);
+          if (!path.equals(root)) {
+            Files.deleteIfExists(path);
+          }
         }
       }
     }
@@ -377,7 +379,9 @@ class SharedFolderSecurityIntegrationTest {
   }
 
   private static void deleteRecursively(Path root) throws IOException {
-    if (!Files.exists(root)) return;
+    if (!Files.exists(root)) {
+      return;
+    }
     try (var entries = Files.walk(root)) {
       for (Path path : entries.sorted(Comparator.reverseOrder()).toList()) {
         Files.deleteIfExists(path);

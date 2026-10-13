@@ -11,7 +11,9 @@ test('infinite scroller reports an initial load failure and permits another atte
   const scroller = createInfiniteScroller({
     async fetchPage() {
       attempts += 1;
-      if (attempts === 1) throw new Error('Feed unavailable');
+      if (attempts === 1) {
+        throw new Error('Feed unavailable');
+      }
       return [];
     },
     onPage: () => assert.fail('An empty page must not render feed items.'),
@@ -37,7 +39,9 @@ test('infinite scroller reports malformed page data and permits a retry', async 
   const scroller = createInfiniteScroller({
     async fetchPage() {
       attempts += 1;
-      if (attempts === 1) return { items: 'not-an-array', nextCursor: 'ignored' };
+      if (attempts === 1) {
+        return { items: 'not-an-array', nextCursor: 'ignored' };
+      }
       return { items: [{ createdOn: 'recovered' }], nextCursor: null };
     },
     onPage: items => rendered.push(...items),
@@ -59,7 +63,9 @@ test('infinite scroller reports an empty cursor instead of treating the feed as 
   const scroller = createInfiniteScroller({
     async fetchPage() {
       attempts += 1;
-      if (attempts === 1) return { items: [], nextCursor: '' };
+      if (attempts === 1) {
+        return { items: [], nextCursor: '' };
+      }
       return { items: [{ createdOn: 'recovered' }], nextCursor: null };
     },
     onPage: items => rendered.push(...items),
@@ -82,7 +88,9 @@ test('infinite scroller reports a non-string cursor before requesting another pa
   const scroller = createInfiniteScroller({
     async fetchPage() {
       attempts += 1;
-      if (attempts === 1) return { items: [], nextCursor: { value: 'malformed' } };
+      if (attempts === 1) {
+        return { items: [], nextCursor: { value: 'malformed' } };
+      }
       return { items: [{ createdOn: 'recovered' }], nextCursor: null };
     },
     onPage: items => rendered.push(...items),
@@ -106,8 +114,12 @@ test('infinite scroller follows advancing cursors across empty pages', async () 
   const scroller = createInfiniteScroller({
     async fetchPage({ cursor }) {
       cursors.push(cursor);
-      if (cursors.length === 1) return { items: [], nextCursor: 'first-empty' };
-      if (cursors.length === 2) return { items: [], nextCursor: 'second-empty' };
+      if (cursors.length === 1) {
+        return { items: [], nextCursor: 'first-empty' };
+      }
+      if (cursors.length === 2) {
+        return { items: [], nextCursor: 'second-empty' };
+      }
       return { items: [{ createdOn: 'after-empty-pages' }], nextCursor: null };
     },
     onPage: items => rendered.push(...items),
@@ -130,7 +142,9 @@ test('infinite scroller stops repeated empty-page cursors and can be retried', a
   const scroller = createInfiniteScroller({
     async fetchPage() {
       attempts += 1;
-      if (attempts <= 2) return { items: [], nextCursor: 'repeated' };
+      if (attempts <= 2) {
+        return { items: [], nextCursor: 'repeated' };
+      }
       return { items: [{ createdOn: 'recovered' }], nextCursor: null };
     },
     onPage: items => rendered.push(...items),
@@ -154,7 +168,9 @@ test('infinite scroller rejects a repeated cursor after a rendered page', async 
     innerHeight: 100,
     scrollY: 0,
     addEventListener(name, handler) {
-      if (name === 'scroll') scrollHandler = handler;
+      if (name === 'scroll') {
+        scrollHandler = handler;
+      }
     },
     removeEventListener() {},
   };
@@ -167,8 +183,12 @@ test('infinite scroller rejects a repeated cursor after a rendered page', async 
     const scroller = createInfiniteScroller({
       async fetchPage() {
         attempts += 1;
-        if (attempts === 1) return { items: [{ createdOn: 'first' }], nextCursor: 'repeated' };
-        if (attempts === 2) return { items: [{ createdOn: 'duplicate' }], nextCursor: 'repeated' };
+        if (attempts === 1) {
+          return { items: [{ createdOn: 'first' }], nextCursor: 'repeated' };
+        }
+        if (attempts === 2) {
+          return { items: [{ createdOn: 'duplicate' }], nextCursor: 'repeated' };
+        }
         return { items: [{ createdOn: 'recovered' }], nextCursor: null };
       },
       onPage: items => rendered.push(...items),
@@ -187,10 +207,16 @@ test('infinite scroller rejects a repeated cursor after a rendered page', async 
     assert.deepEqual(rendered.map(item => item.createdOn), ['first', 'recovered']);
     assert.equal(attempts, 3);
   } finally {
-    if (previousWindow === undefined) delete globalThis.window;
-    else globalThis.window = previousWindow;
-    if (previousDocument === undefined) delete globalThis.document;
-    else globalThis.document = previousDocument;
+    if (previousWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
+    }
+    if (previousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
+    }
   }
 });
 
@@ -202,7 +228,9 @@ test('infinite scroller reports a scroll failure and retries the same cursor', a
     innerHeight: 100,
     scrollY: 0,
     addEventListener(name, handler) {
-      if (name === 'scroll') scrollHandler = handler;
+      if (name === 'scroll') {
+        scrollHandler = handler;
+      }
     },
     removeEventListener() {},
   };
@@ -217,8 +245,12 @@ test('infinite scroller reports a scroll failure and retries the same cursor', a
       limit: 1,
       async fetchPage({ cursor }) {
         attempts += 1;
-        if (!cursor) return { items: [{ createdOn: 'first' }], nextCursor: 'next' };
-        if (attempts === 2) throw new Error('Next page unavailable');
+        if (!cursor) {
+          return { items: [{ createdOn: 'first' }], nextCursor: 'next' };
+        }
+        if (attempts === 2) {
+          throw new Error('Next page unavailable');
+        }
         return { items: [{ createdOn: 'second' }], nextCursor: null };
       },
       onPage: items => pages.push(...items),
@@ -237,10 +269,16 @@ test('infinite scroller reports a scroll failure and retries the same cursor', a
     assert.equal(attempts, 3);
     assert.equal(successfulPages, 2);
   } finally {
-    if (previousWindow === undefined) delete globalThis.window;
-    else globalThis.window = previousWindow;
-    if (previousDocument === undefined) delete globalThis.document;
-    else globalThis.document = previousDocument;
+    if (previousWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
+    }
+    if (previousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
+    }
   }
 });
 
@@ -252,7 +290,9 @@ test('infinite scroller retries a malformed scroll cursor from the previous vali
     innerHeight: 100,
     scrollY: 0,
     addEventListener(name, handler) {
-      if (name === 'scroll') scrollHandler = handler;
+      if (name === 'scroll') {
+        scrollHandler = handler;
+      }
     },
     removeEventListener() {},
   };
@@ -292,10 +332,16 @@ test('infinite scroller retries a malformed scroll cursor from the previous vali
     assert.deepEqual(requests.map(request => request.before), [null, 'first', 'first']);
     assert.deepEqual(pages.map(page => page.createdOn), ['first', 'second']);
   } finally {
-    if (previousWindow === undefined) delete globalThis.window;
-    else globalThis.window = previousWindow;
-    if (previousDocument === undefined) delete globalThis.document;
-    else globalThis.document = previousDocument;
+    if (previousWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
+    }
+    if (previousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
+    }
   }
 });
 
@@ -307,7 +353,9 @@ test('a new initial load ignores stale results and keeps its loading lock', asyn
     innerHeight: 100,
     scrollY: 0,
     addEventListener(name, handler) {
-      if (name === 'scroll') scrollHandler = handler;
+      if (name === 'scroll') {
+        scrollHandler = handler;
+      }
     },
     removeEventListener() {},
   };
@@ -357,9 +405,15 @@ test('a new initial load ignores stale results and keeps its loading lock', asyn
     assert.deepEqual(successfulPages, ['loaded']);
     assert.equal(requestsWhileCurrentLoadIsPending, 3);
   } finally {
-    if (previousWindow === undefined) delete globalThis.window;
-    else globalThis.window = previousWindow;
-    if (previousDocument === undefined) delete globalThis.document;
-    else globalThis.document = previousDocument;
+    if (previousWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
+    }
+    if (previousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
+    }
   }
 });

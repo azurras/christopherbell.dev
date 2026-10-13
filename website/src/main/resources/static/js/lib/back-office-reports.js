@@ -25,7 +25,9 @@ export function reportFilterValue(filterForm) {
 
 /** Returns the ISO instant for a local date-time control value, or '' when empty or invalid. */
 function isoInstantFromLocalDateTime(localDateTimeText) {
-  if (!localDateTimeText) return '';
+  if (!localDateTimeText) {
+    return '';
+  }
   const localDateTime = new Date(String(localDateTimeText));
   return Number.isFinite(localDateTime.getTime()) ? localDateTime.toISOString() : '';
 }

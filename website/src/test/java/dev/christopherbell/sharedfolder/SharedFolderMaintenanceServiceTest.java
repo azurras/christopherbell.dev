@@ -26,6 +26,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -260,7 +261,7 @@ class SharedFolderMaintenanceServiceTest {
     SharedFolderMaintenanceHostLock hostLock = mock(SharedFolderMaintenanceHostLock.class);
     SharedFolderMaintenanceHostLock.Handle hostHandle =
         mock(SharedFolderMaintenanceHostLock.Handle.class);
-    when(hostLock.tryAcquire()).thenReturn(java.util.Optional.of(hostHandle));
+    when(hostLock.tryAcquire()).thenReturn(Optional.of(hostHandle));
     return fixture(enabled, hostLock, hostHandle);
   }
 
@@ -307,32 +308,36 @@ class SharedFolderMaintenanceServiceTest {
     private SharedLeaseStore(Clock clock) { this.clock = clock; }
 
     @Override
-    public synchronized java.util.Optional<dev.christopherbell.libs.lease.LeaseGrant> tryAcquire(
+    public synchronized Optional<dev.christopherbell.libs.lease.LeaseGrant> tryAcquire(
         String ownerToken, Duration duration) {
       Instant now = clock.instant();
       if (owner != null && !owner.equals(ownerToken) && expiresAt.isAfter(now)) {
-        return java.util.Optional.empty();
+        return Optional.empty();
       }
       owner = ownerToken;
       expiresAt = now.plus(duration);
-      return java.util.Optional.of(new dev.christopherbell.libs.lease.LeaseGrant(
+      return Optional.of(new dev.christopherbell.libs.lease.LeaseGrant(
           "shared-folder-maintenance", owner, ++fence, expiresAt));
     }
 
     @Override
-    public synchronized java.util.Optional<dev.christopherbell.libs.lease.LeaseGrant> renew(
+    public synchronized Optional<dev.christopherbell.libs.lease.LeaseGrant> renew(
         dev.christopherbell.libs.lease.LeaseGrant grant, Duration duration) {
       if (!grant.ownerId().equals(owner) || grant.fenceToken() != fence
-          || !expiresAt.isAfter(clock.instant())) return java.util.Optional.empty();
+          || !expiresAt.isAfter(clock.instant())) {
+        return Optional.empty();
+      }
       expiresAt = clock.instant().plus(duration);
-      return java.util.Optional.of(new dev.christopherbell.libs.lease.LeaseGrant(
+      return Optional.of(new dev.christopherbell.libs.lease.LeaseGrant(
           grant.leaseName(), owner, fence, expiresAt));
     }
 
     @Override
     public synchronized boolean release(dev.christopherbell.libs.lease.LeaseGrant grant) {
       if (!grant.ownerId().equals(owner) || grant.fenceToken() != fence
-          || !expiresAt.isAfter(clock.instant())) return false;
+          || !expiresAt.isAfter(clock.instant())) {
+        return false;
+      }
       owner = null;
       expiresAt = Instant.EPOCH;
       return true;

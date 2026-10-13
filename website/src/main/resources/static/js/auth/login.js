@@ -36,7 +36,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
   const form = document.getElementById('loginForm');
-  if (!form) return;
+  if (!form) {
+    return;
+  }
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

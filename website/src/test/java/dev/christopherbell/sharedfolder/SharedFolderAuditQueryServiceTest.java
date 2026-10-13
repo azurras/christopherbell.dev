@@ -12,6 +12,7 @@ import dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRepository;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
@@ -57,7 +58,7 @@ class SharedFolderAuditQueryServiceTest {
     SharedFolderAccessService access = mock(SharedFolderAccessService.class);
     SharedFolderAuditRepository repository = mock(SharedFolderAuditRepository.class);
     var service = new SharedFolderAuditQueryService(access, repository);
-    String longPath = String.join("/", java.util.Collections.nCopies(
+    String longPath = String.join("/", Collections.nCopies(
         150, "valid-segment"));
     when(repository.search(
         null, null, null, SharedFolderAuditEvent.class.getName(), null, null, 25))

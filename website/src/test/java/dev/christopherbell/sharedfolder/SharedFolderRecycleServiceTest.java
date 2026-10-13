@@ -24,10 +24,13 @@ import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.service.SharedFolderMutationService;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Base64;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
@@ -75,7 +78,7 @@ class SharedFolderRecycleServiceTest {
         NOW.minusSeconds(1), "missing-payload", 1, false, "fingerprint",
         SharedFolderRecycleState.RECYCLED);
     List<SharedFolderRecycleItem> fullCleanupBatch =
-        java.util.Collections.nCopies(100, blocked);
+        Collections.nCopies(100, blocked);
     SharedFolderRecycleItem later = new SharedFolderRecycleItem(
         "later-id", "later.txt", "writer-1", NOW.minus(Duration.ofDays(30)),
         NOW.minusSeconds(1), "later-payload", 1, false, "fingerprint",
@@ -109,7 +112,7 @@ class SharedFolderRecycleServiceTest {
         "later-ambiguous-id", "../later-unsafe.txt", "writer-1", NOW.plusSeconds(1),
         NOW.plus(Duration.ofDays(30)), "missing-payload", 1, false, "fingerprint",
         SharedFolderRecycleState.PREPARING);
-    org.mockito.Mockito.doReturn(java.util.Collections.nCopies(100, ambiguous))
+    org.mockito.Mockito.doReturn(Collections.nCopies(100, ambiguous))
         .doReturn(List.of(laterAmbiguous)).when(fixture.repository)
         .findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(any(), any(), any());
 
@@ -268,7 +271,7 @@ class SharedFolderRecycleServiceTest {
     Path completedPath = fixture.root.resolve("completed.txt");
     String restoredToken = fixture.mutations.observedToken("completed.txt");
     var completedAttributes = Files.readAttributes(
-        completedPath, java.nio.file.attribute.BasicFileAttributes.class);
+        completedPath, BasicFileAttributes.class);
     String completedIdentity =
         dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary
             .stableIdentity(completedPath)
@@ -280,7 +283,7 @@ class SharedFolderRecycleServiceTest {
         dev.christopherbell.sharedfolder.service.SharedFolderObservedItemTokens.token(
             "completed.txt", Files.readAttributes(
                 replacedRoot.resolve(completedReplacement),
-                java.nio.file.attribute.BasicFileAttributes.class));
+                BasicFileAttributes.class));
     SharedFolderRecycleItem completed = new SharedFolderRecycleItem(
         "completed-id", "completed.txt", "writer-1", NOW, NOW.plus(Duration.ofDays(30)),
         completedPayload, 8, false, restoredToken, SharedFolderRecycleState.RESTORING,
@@ -435,7 +438,7 @@ class SharedFolderRecycleServiceTest {
     String replacementFingerprint =
         dev.christopherbell.sharedfolder.service.SharedFolderObservedItemTokens.token(
             "replace.txt", Files.readAttributes(fixture.root.resolve("replace.txt"),
-                java.nio.file.attribute.BasicFileAttributes.class));
+                BasicFileAttributes.class));
     String replacementKey = "ffffffff-ffff-ffff-ffff-ffffffffffff";
     Files.move(fixture.root.resolve("replace.txt"), replacedRoot.resolve(replacementKey));
     Files.move(recycleRoot.resolve(replacing.payloadKey()), fixture.root.resolve("replace.txt"));
@@ -454,7 +457,7 @@ class SharedFolderRecycleServiceTest {
     byte[] fileId = new byte[16];
     fileId[0] = 7;
     NativeFileIdentity identity = new NativeFileIdentity(11, fileId);
-    String encoded = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(fileId);
+    String encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(fileId);
     String nativeIdentity = "11:" + encoded;
     String directoryStable = nativeIdentity + ":true:false";
     String directoryFull = directoryStable + ":2:" + NOW;
@@ -491,7 +494,7 @@ class SharedFolderRecycleServiceTest {
     byte[] fileId = new byte[16];
     fileId[0] = 8;
     NativeFileIdentity identity = new NativeFileIdentity(11, fileId);
-    String encoded = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(fileId);
+    String encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(fileId);
     String stable = "11:" + encoded + ":true:false";
     NativeFileMetadata original = new NativeFileMetadata(identity, true, false, 2, NOW);
     NativeFileMetadata partial = new NativeFileMetadata(
@@ -532,7 +535,7 @@ class SharedFolderRecycleServiceTest {
     otherId[0] = 9;
     NativeFileIdentity expectedIdentity = new NativeFileIdentity(11, expectedId);
     NativeFileIdentity otherIdentity = new NativeFileIdentity(11, otherId);
-    String encoded = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(expectedId);
+    String encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(expectedId);
     String stable = "11:" + encoded + ":false:true";
     String full = stable + ":8:" + NOW;
     SharedFolderRecycleItem preparing = new SharedFolderRecycleItem(
@@ -633,7 +636,9 @@ class SharedFolderRecycleServiceTest {
     SharedFolderAccessService access = mock(SharedFolderAccessService.class);
     SharedFolderAuditRecorder audit = mock(SharedFolderAuditRecorder.class);
     var records = new LinkedHashMap<String, SharedFolderRecycleItem>();
-    for (SharedFolderRecycleItem item : items) records.put(item.id(), item);
+    for (SharedFolderRecycleItem item : items) {
+      records.put(item.id(), item);
+    }
     SharedFolderRecycleRepository repository = mock(SharedFolderRecycleRepository.class);
     when(repository.findById(any())).thenAnswer(invocation ->
         Optional.ofNullable(records.get(invocation.<String>getArgument(0))));
