@@ -15,7 +15,11 @@ public enum MediaOutputProfile {
     this.mediaType = mediaType;
   }
 
-  public String extension() { return extension; }
+  public String extension() {
+    return extension;
+  }
 
-  public MediaType mediaType() { return mediaType; }
+  public MediaType mediaType() {
+    return mediaType;
+  }
 }

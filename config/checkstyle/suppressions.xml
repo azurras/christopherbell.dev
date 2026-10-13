@@ -8,8 +8,6 @@
   else belongs here.
 -->
 <suppressions>
-  <!-- Slice 19e: shared-folder media. -->
-  <suppress files="[\/]sharedfolder[\/]media[\/]" checks=".*"/>
   <!-- Slice 19f: shared-folder upload. -->
   <suppress files="[\/]sharedfolder[\/]upload[\/]" checks=".*"/>
   <!-- Slice 19g: shared-folder service and the package-level shared-folder tests. -->
