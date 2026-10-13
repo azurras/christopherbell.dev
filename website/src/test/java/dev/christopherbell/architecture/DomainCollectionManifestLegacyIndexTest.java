@@ -6,11 +6,13 @@ import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
 
@@ -158,7 +160,7 @@ class DomainCollectionManifestLegacyIndexTest {
 
   @Test
   void finalManifestRetainsAllKindIndexesAfterRuntimeDocumentMappingsAreRemoved() {
-    var expectedIndexes = java.util.stream.Stream.concat(
+    var expectedIndexes = Stream.concat(
         FROZEN_ANNOTATION_INDEXES.stream(), MANUAL_ONLY_INDEXES.stream()).toList();
     assertThat(FROZEN_ANNOTATION_INDEXES).hasSize(92);
     assertThat(MANUAL_ONLY_INDEXES).hasSize(20);
@@ -174,7 +176,7 @@ class DomainCollectionManifestLegacyIndexTest {
     return snapshot.lines().filter(line -> !line.isBlank()).map(line -> {
       var fields = line.strip().split("\\|", -1);
       assertThat(fields).as("frozen index fields").hasSize(9);
-      var keys = java.util.Arrays.stream(fields[8].split(","))
+      var keys = Arrays.stream(fields[8].split(","))
           .map(key -> {
             var separator = key.lastIndexOf(':');
             return new DomainCollectionManifest.IndexKey(

@@ -58,7 +58,9 @@ import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -286,7 +288,7 @@ class RemainingDomainRepositoryPortContractTest {
   @Test
   void everyEnumCollectionQueryPreservesTwoValuesAndAcceptsEmptyInput() throws Exception {
     var applicable = ADAPTERS.stream()
-        .flatMap(definition -> java.util.Arrays.stream(definition.port().getDeclaredMethods())
+        .flatMap(definition -> Arrays.stream(definition.port().getDeclaredMethods())
             .filter(RemainingDomainRepositoryPortContractTest::hasEnumCollectionParameter)
             .map(method -> new BulkMethod(definition, method)))
         .toList();
@@ -320,7 +322,7 @@ class RemainingDomainRepositoryPortContractTest {
   @Test
   void everyLookupResultPreservesExactStorageAbsence() throws Exception {
     var lookups = ADAPTERS.stream()
-        .flatMap(definition -> java.util.Arrays.stream(definition.port().getDeclaredMethods())
+        .flatMap(definition -> Arrays.stream(definition.port().getDeclaredMethods())
             .filter(RemainingDomainRepositoryPortContractTest::returnsLookupResult)
             .filter(method -> {
               var key = definition.port().getSimpleName() + "." + signature(method);
@@ -357,7 +359,7 @@ class RemainingDomainRepositoryPortContractTest {
   @Test
   void everyBulkPortPreservesTwoValuesAndPerformsNoWorkForEmptyInput() throws Exception {
     var bulkMethods = ADAPTERS.stream()
-        .flatMap(definition -> java.util.Arrays.stream(definition.port().getDeclaredMethods())
+        .flatMap(definition -> Arrays.stream(definition.port().getDeclaredMethods())
             .filter(method -> method.getName().equals("saveAll")
                 || method.getName().equals("deleteAll"))
             .map(method -> new BulkMethod(definition, method)))
@@ -427,7 +429,7 @@ class RemainingDomainRepositoryPortContractTest {
         factory(SharedFolderMutationRecovery.class, mutationOperations))
         .renewOperationLease("recovery-a", "owner-a",
             SharedFolderMutationRecoveryState.PREPARED,
-            java.time.Duration.ofMinutes(1)))
+            Duration.ofMinutes(1)))
         .isSameAs(stale);
   }
 
@@ -481,7 +483,7 @@ class RemainingDomainRepositoryPortContractTest {
   }
 
   private static String snapshot(Invocation invocation) {
-    return invocation.getMethod().getName() + java.util.Arrays.stream(invocation.getArguments())
+    return invocation.getMethod().getName() + Arrays.stream(invocation.getArguments())
         .map(RemainingDomainRepositoryPortContractTest::snapshotArgument)
         .collect(Collectors.joining(", ", "(", ")"));
   }
@@ -511,7 +513,7 @@ class RemainingDomainRepositoryPortContractTest {
           .collect(Collectors.joining(",", "[", "]"));
     }
     if (argument == null || argument instanceof String || argument instanceof Number
-        || argument instanceof Instant || argument instanceof java.time.Duration
+        || argument instanceof Instant || argument instanceof Duration
         || argument.getClass().isEnum()) {
       return String.valueOf(argument);
     }
@@ -522,13 +524,13 @@ class RemainingDomainRepositoryPortContractTest {
   }
 
   private static Set<String> signatures(Class<?> type) {
-    return java.util.Arrays.stream(type.getDeclaredMethods())
+    return Arrays.stream(type.getDeclaredMethods())
         .map(RemainingDomainRepositoryPortContractTest::signature)
         .collect(Collectors.toSet());
   }
 
   private static String signature(Method method) {
-    return method.getName() + java.util.Arrays.stream(method.getParameterTypes())
+    return method.getName() + Arrays.stream(method.getParameterTypes())
         .map(Class::getSimpleName)
         .collect(Collectors.joining(",", "(", ")"));
   }
@@ -571,13 +573,27 @@ class RemainingDomainRepositoryPortContractTest {
   }
 
   private static Object argument(Type genericType, Class<?> rawType) {
-    if (rawType == String.class) return "value";
-    if (rawType == Instant.class) return Instant.parse("2026-08-11T00:00:00Z");
-    if (rawType == java.time.Duration.class) return java.time.Duration.ofMinutes(1);
-    if (rawType == Pageable.class) return PageRequest.of(0, 10);
-    if (rawType == int.class) return 1;
-    if (rawType == long.class) return 1L;
-    if (rawType.isEnum()) return rawType.getEnumConstants()[0];
+    if (rawType == String.class) {
+      return "value";
+    }
+    if (rawType == Instant.class) {
+      return Instant.parse("2026-08-11T00:00:00Z");
+    }
+    if (rawType == Duration.class) {
+      return Duration.ofMinutes(1);
+    }
+    if (rawType == Pageable.class) {
+      return PageRequest.of(0, 10);
+    }
+    if (rawType == int.class) {
+      return 1;
+    }
+    if (rawType == long.class) {
+      return 1L;
+    }
+    if (rawType.isEnum()) {
+      return rawType.getEnumConstants()[0];
+    }
     if (Collection.class.isAssignableFrom(rawType) || Iterable.class == rawType) {
       var elementType = (Class<?>) ((ParameterizedType) genericType).getActualTypeArguments()[0];
       if (elementType.isEnum()) {
@@ -592,7 +608,9 @@ class RemainingDomainRepositoryPortContractTest {
   }
 
   private static Object entityArgument(Class<?> type, String label) {
-    if (type.isEnum()) return type.getEnumConstants()[0];
+    if (type.isEnum()) {
+      return type.getEnumConstants()[0];
+    }
     var value = mock(type, withSettings().name(label));
     if (value instanceof ZipCoordinate coordinate) {
       when(coordinate.getZipCode()).thenReturn(label.equals("second") ? "75002" : "75001");
@@ -624,19 +642,33 @@ class RemainingDomainRepositoryPortContractTest {
     var update = UpdateResult.acknowledged(matchedCount, matchedCount, null);
     return mock(KindScopedMongoOperations.class, invocation -> {
       var name = invocation.getMethod().getName();
-      if (name.equals("save") || name.equals("insert")) return invocation.getArgument(0);
+      if (name.equals("save") || name.equals("insert")) {
+        return invocation.getArgument(0);
+      }
       var returnType = invocation.getMethod().getReturnType();
       if (returnType == Optional.class) {
         return returnedEntities.isEmpty()
             ? Optional.empty()
             : Optional.of(returnedEntities.getFirst());
       }
-      if (returnType == List.class) return returnedEntities;
-      if (returnType == long.class) return 1L;
-      if (returnType == boolean.class) return true;
-      if (returnType == UpdateResult.class) return update;
-      if (returnType == DeleteResult.class) return DeleteResult.acknowledged(1);
-      if (returnType == String.class) return "test";
+      if (returnType == List.class) {
+        return returnedEntities;
+      }
+      if (returnType == long.class) {
+        return 1L;
+      }
+      if (returnType == boolean.class) {
+        return true;
+      }
+      if (returnType == UpdateResult.class) {
+        return update;
+      }
+      if (returnType == DeleteResult.class) {
+        return DeleteResult.acknowledged(1);
+      }
+      if (returnType == String.class) {
+        return "test";
+      }
       return null;
     });
   }

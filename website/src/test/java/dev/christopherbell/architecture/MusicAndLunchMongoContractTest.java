@@ -57,10 +57,12 @@ import dev.christopherbell.whatsforlunch.restaurant.vote.MongoRestaurantVoteRepo
 import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteQueryRepository;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterAll;
@@ -497,7 +499,7 @@ class MusicAndLunchMongoContractTest {
         .restaurantId("restaurant-1").accountId("account-1").createdOn(now).build()))
         .isInstanceOf(DuplicateKeyException.class);
 
-    var actualTtl = mongo.getCollection("whatsforlunch").listIndexes().into(new java.util.ArrayList<>())
+    var actualTtl = mongo.getCollection("whatsforlunch").listIndexes().into(new ArrayList<>())
         .stream().filter(document -> previewTtl.name().equals(document.getString("name")))
         .findFirst().orElseThrow();
     assertThat(actualTtl.get("expireAfterSeconds", Number.class).longValue()).isZero();
@@ -513,7 +515,7 @@ class MusicAndLunchMongoContractTest {
       options.partialFilterExpression(new Document(definition.partialFilterExpression()));
     }
     definition.expireAfterSeconds().ifPresent(seconds ->
-        options.expireAfter(seconds, java.util.concurrent.TimeUnit.SECONDS));
+        options.expireAfter(seconds, TimeUnit.SECONDS));
     mongo.getCollection(definition.collection()).createIndex(keys, options);
   }
 

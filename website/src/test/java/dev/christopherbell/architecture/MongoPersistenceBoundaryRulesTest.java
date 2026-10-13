@@ -313,7 +313,7 @@ class MongoPersistenceBoundaryRulesTest {
     var details = rules.zeroBypassRule().evaluate(fixtures).getFailureReport().getDetails();
 
     assertThat(AUDITED_MONGO_ACCESS_TYPES).hasSize(91);
-    var expected = new java.util.TreeSet<String>();
+    var expected = new TreeSet<String>();
     AUDITED_MONGO_ACCESS_TYPES.forEach(target -> expected.add(
         ACCESS_FIXTURE + " directly depends on " + target));
     expected.add(FIXTURE_ROOT + ".ForbiddenSpringRepository directly depends on "
