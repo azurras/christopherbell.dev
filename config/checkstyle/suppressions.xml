@@ -8,8 +8,6 @@
   else belongs here.
 -->
 <suppressions>
-  <!-- Slice 19h: shared-folder file system. -->
-  <suppress files="[\/]sharedfolder[\/]fs[\/]" checks=".*"/>
   <!-- Slice 20: application and cross-feature tests. -->
   <suppress files="[\/]test[\/]java[\/]dev[\/]christopherbell[\/]architecture[\/]" checks=".*"/>
   <!-- Slice 21: cbell-lib. -->

@@ -8,12 +8,14 @@ import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.Nativ
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeBoundaryException;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeFileMetadata;
 import dev.christopherbell.configuration.SharedFolderProperties;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -134,8 +136,8 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
       var observed = boundary.metadata("documents/archive/source.txt");
       boundary.delete("documents/archive/source.txt", observed);
 
-      assertThat(sourceMove.get()).isInstanceOf(java.io.IOException.class);
-      assertThat(ancestorMove.get()).isInstanceOf(java.io.IOException.class);
+      assertThat(sourceMove.get()).isInstanceOf(IOException.class);
+      assertThat(ancestorMove.get()).isInstanceOf(IOException.class);
       assertThat(Files.exists(source)).isFalse();
       assertThat(outside).isEmptyDirectory();
     } finally {
@@ -165,8 +167,8 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
       boundary.rename("documents/archive/source.txt", "documents/archive", "renamed.txt", false,
           observed);
 
-      assertThat(sourceMove.get()).isInstanceOf(java.io.IOException.class);
-      assertThat(ancestorMove.get()).isInstanceOf(java.io.IOException.class);
+      assertThat(sourceMove.get()).isInstanceOf(IOException.class);
+      assertThat(ancestorMove.get()).isInstanceOf(IOException.class);
       assertThat(Files.readString(ancestor.resolve("renamed.txt"))).isEqualTo("inside");
       assertThat(outside).isEmptyDirectory();
     } finally {
@@ -191,7 +193,7 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
           () -> Files.writeString(source, "racer!")));
       boundary.rename("documents/source.txt", "documents", "renamed.txt", false,
           boundary.metadata("documents/source.txt"));
-      assertThat(sourceWrite.get()).isInstanceOf(java.io.IOException.class);
+      assertThat(sourceWrite.get()).isInstanceOf(IOException.class);
       assertThat(Files.readString(documents.resolve("renamed.txt"))).isEqualTo("source");
 
       AtomicReference<Throwable> targetWrite = new AtomicReference<>();
@@ -200,16 +202,16 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
       String targetKey = "66666666-6666-6666-6666-666666666666";
       NativeFileMetadata targetMetadata = boundary.metadata("documents/target.txt");
       boundary.quarantineVisible("documents/target.txt", targetKey, targetMetadata);
-      assertThat(targetWrite.get()).isInstanceOf(java.io.IOException.class);
+      assertThat(targetWrite.get()).isInstanceOf(IOException.class);
       bridge.beforeRename = () -> {};
       boundary.restoreQuarantine(targetKey, "documents", "target.txt", targetMetadata);
       assertThat(Files.readString(target)).isEqualTo("target");
 
       Path targetDirectory = Files.createDirectory(documents.resolve("empty-target"));
       AtomicReference<Throwable> childCreate = new AtomicReference<>();
-      java.util.concurrent.atomic.AtomicBoolean attemptChildCreate =
-          new java.util.concurrent.atomic.AtomicBoolean(true);
-      AtomicReference<java.util.List<String>> quarantinedPaths = new AtomicReference<>();
+      AtomicBoolean attemptChildCreate =
+          new AtomicBoolean(true);
+      AtomicReference<List<String>> quarantinedPaths = new AtomicReference<>();
       bridge.beforeRename = () -> {
         if (attemptChildCreate.compareAndSet(true, false)) {
           childCreate.set(catchThrowable(
@@ -228,7 +230,7 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
       assertThat(quarantinedPaths.get()).as("paths immediately after quarantine")
           .anyMatch(path -> path.endsWith("racer.txt"));
       assertThat(targetDirectory).exists();
-      java.util.List<String> remaining = Files.walk(root)
+      List<String> remaining = Files.walk(root)
           .map(path -> root.relativize(path).toString()).toList();
       assertThat(remaining).as("remaining visible paths: %s", remaining)
           .contains("documents\\empty-target\\racer.txt");
@@ -259,7 +261,7 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
 
       boundary.finalizeStaging(key, "", "uploaded.bin", false);
 
-      assertThat(stagingWrite.get()).isInstanceOf(java.io.IOException.class);
+      assertThat(stagingWrite.get()).isInstanceOf(IOException.class);
       assertThat(Files.readString(root.resolve("uploaded.bin"))).isEqualTo("staged");
     } finally {
       boundary.destroy();
@@ -282,7 +284,7 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
       NativeFileMetadata target = boundary.metadata("target.bin");
       try (var ignored = boundary.staging(stagingKey)) {
         assertThat(catchThrowable(() -> Files.writeString(stagingPath, "racer")))
-            .isInstanceOf(java.io.IOException.class);
+            .isInstanceOf(IOException.class);
         NativeFileMetadata quarantined =
             boundary.quarantineVisible("target.bin", quarantineKey, target);
         assertThat(quarantined.identity().sameFile(target.identity())).isTrue();
@@ -487,10 +489,10 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
     @Override public void close(NativeHandle handle) { delegate.close(handle); }
   }
 
-  private static java.util.List<String> catchPaths(Path root) {
+  private static List<String> catchPaths(Path root) {
     try (var paths = Files.walk(root)) {
       return paths.map(Path::toString).toList();
-    } catch (java.io.IOException exception) {
+    } catch (IOException exception) {
       throw new AssertionError(exception);
     }
   }

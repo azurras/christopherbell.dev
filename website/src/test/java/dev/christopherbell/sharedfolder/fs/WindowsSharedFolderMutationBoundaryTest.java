@@ -9,7 +9,12 @@ import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.Nativ
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class WindowsSharedFolderMutationBoundaryTest {
@@ -69,7 +74,7 @@ class WindowsSharedFolderMutationBoundaryTest {
 
     assertThat(bridge.exclusiveMutationOpenNames)
         .contains("source.txt", "target.txt", "55555555-5555-5555-5555-555555555555");
-    assertThat(java.util.Collections.frequency(
+    assertThat(Collections.frequency(
         bridge.exclusiveMutationOpenNames, "55555555-5555-5555-5555-555555555555"))
         .isEqualTo(2);
     assertThat(bridge.mutationOpenNames).contains("documents");
@@ -238,8 +243,8 @@ class WindowsSharedFolderMutationBoundaryTest {
     String key = "abababab-abab-abab-abab-abababababab";
     NativeFileMetadata recycled = boundary.metadata(key);
     NativeFileMetadata target = boundary.metadata("documents/report.pdf");
-    int sourceClosesBefore = java.util.Collections.frequency(bridge.closed, key);
-    int destinationClosesBefore = java.util.Collections.frequency(bridge.closed, "documents");
+    int sourceClosesBefore = Collections.frequency(bridge.closed, key);
+    int destinationClosesBefore = Collections.frequency(bridge.closed, "documents");
     bridge.failExclusiveMutationOpenName = "report.pdf";
 
     assertThatThrownBy(() -> boundary.restoreRecycle(
@@ -247,9 +252,9 @@ class WindowsSharedFolderMutationBoundaryTest {
         .isInstanceOf(NativeBoundaryException.class)
         .hasMessageContaining("raced");
 
-    assertThat(java.util.Collections.frequency(bridge.closed, key))
+    assertThat(Collections.frequency(bridge.closed, key))
         .isEqualTo(sourceClosesBefore + 1);
-    assertThat(java.util.Collections.frequency(bridge.closed, "documents"))
+    assertThat(Collections.frequency(bridge.closed, "documents"))
         .isEqualTo(destinationClosesBefore + 2);
     boundary.destroy();
   }
@@ -325,9 +330,9 @@ class WindowsSharedFolderMutationBoundaryTest {
     private boolean mutateDirectoryMetadataAfterChildDelete;
     private String failExclusiveMutationOpenName;
     private NativeBoundaryException privateDirectoryOpenFailure;
-    private final java.util.Set<String> directoryHandles = new java.util.HashSet<>();
-    private final java.util.Map<String, List<DirectoryEntry>> directoryChildren =
-        new java.util.HashMap<>();
+    private final Set<String> directoryHandles = new HashSet<>();
+    private final Map<String, List<DirectoryEntry>> directoryChildren =
+        new HashMap<>();
 
     @Override
     public NativeHandle openRoot(Path rootPath, int attributes) {
