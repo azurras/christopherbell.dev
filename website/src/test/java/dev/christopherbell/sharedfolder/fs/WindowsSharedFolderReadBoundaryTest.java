@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -167,7 +168,7 @@ class WindowsSharedFolderReadBoundaryTest {
     WindowsSharedFolderNativeBridge.NativeHandle handle = bridge.lastOpenedHandle();
 
     assertThatThrownBy(stream::close)
-        .isInstanceOf(java.io.IOException.class)
+        .isInstanceOf(IOException.class)
         .hasMessage("Shared-folder item is no longer available");
     stream.close();
 

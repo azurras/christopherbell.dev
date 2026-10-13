@@ -127,9 +127,13 @@ public interface WindowsSharedFolderNativeBridge {
       this.fileId = fileId.clone();
     }
 
-    public long volumeSerial() { return volumeSerial; }
+    public long volumeSerial() {
+      return volumeSerial;
+    }
 
-    public byte[] fileId() { return fileId.clone(); }
+    public byte[] fileId() {
+      return fileId.clone();
+    }
 
     /** Returns whether this is the same Windows volume-plus-file identity. */
     public boolean sameFile(NativeFileIdentity other) {
@@ -182,8 +186,12 @@ public interface WindowsSharedFolderNativeBridge {
       this.kind = kind;
     }
 
-    public int ntStatus() { return ntStatus; }
-    public Kind kind() { return kind; }
+    public int ntStatus() {
+      return ntStatus;
+    }
+    public Kind kind() {
+      return kind;
+    }
 
     public static NativeBoundaryException conflict(String message) {
       return new NativeBoundaryException(message, 0, Kind.CONFLICT, null);

@@ -7,7 +7,6 @@ import com.sun.jna.Structure;
 import com.sun.jna.platform.win32.Kernel32;
 import com.sun.jna.platform.win32.WinBase;
 import com.sun.jna.platform.win32.WinDef.DWORD;
-import com.sun.jna.platform.win32.WinNT;
 import com.sun.jna.platform.win32.WinNT.HANDLE;
 import com.sun.jna.platform.win32.WinNT.HANDLEByReference;
 import com.sun.jna.ptr.IntByReference;
@@ -19,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /** JNA implementation of the held-root Windows native bridge. */
@@ -240,7 +240,7 @@ final class JnaWindowsSharedFolderNativeBridge implements WindowsSharedFolderNat
       return 0;
     }
     byte[] source = offset == 0 && length == buffer.length ? buffer
-        : java.util.Arrays.copyOfRange(buffer, offset, offset + length);
+        : Arrays.copyOfRange(buffer, offset, offset + length);
     IntByReference written = new IntByReference();
     if (!Kernel32.INSTANCE.WriteFile(nativeHandle(nativeHandle), source, source.length, written, null)) {
       throw win32Failure("native file write failed");

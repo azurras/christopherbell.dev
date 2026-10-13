@@ -10,7 +10,9 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  if (!isSharedFolderApiRequest(event.request, self.location.origin)) return;
+  if (!isSharedFolderApiRequest(event.request, self.location.origin)) {
+    return;
+  }
   event.respondWith(respondToSharedFolderFetch({
     request: event.request,
     clientId: event.clientId,

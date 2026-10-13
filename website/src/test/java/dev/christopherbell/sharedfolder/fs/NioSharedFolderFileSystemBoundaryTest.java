@@ -6,7 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.io.IOException;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -111,7 +113,7 @@ class NioSharedFolderFileSystemBoundaryTest {
 
   private static final class UnsupportedNoFollowBoundary extends NioSharedFolderFileSystemBoundary {
     @Override
-    protected SeekableByteChannel openNoFollowChannel(Path path, java.util.Set<java.nio.file.OpenOption> options) {
+    protected SeekableByteChannel openNoFollowChannel(Path path, Set<OpenOption> options) {
       throw new UnsupportedOperationException("NOFOLLOW is unavailable");
     }
   }

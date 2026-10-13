@@ -29,8 +29,12 @@ async function signup(payload) {
 export function signupPayload(fields) {
   const firstName = String(fields.firstName || '').trim();
   const lastName = String(fields.lastName || '').trim();
-  if (!firstName) throw new Error('First name is required.');
-  if (!lastName) throw new Error('Last name is required.');
+  if (!firstName) {
+    throw new Error('First name is required.');
+  }
+  if (!lastName) {
+    throw new Error('Last name is required.');
+  }
   return {
     email: String(fields.email || '').trim(),
     username: String(fields.username || '').trim(),
@@ -50,7 +54,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
   const form = document.getElementById('signupForm');
-  if (!form) return;
+  if (!form) {
+    return;
+  }
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

@@ -72,8 +72,12 @@ public final class SharedFolderDownloadAuditResource extends AbstractResource {
     public int read() throws IOException {
       try {
         int value = super.read();
-        if (value >= 0) delivered++;
-        else finish();
+        if (value >= 0) {
+          delivered++;
+        }
+        else {
+          finish();
+        }
         return value;
       } catch (IOException failure) {
         fail();
@@ -85,8 +89,12 @@ public final class SharedFolderDownloadAuditResource extends AbstractResource {
     public int read(byte[] bytes, int offset, int length) throws IOException {
       try {
         int count = super.read(bytes, offset, length);
-        if (count > 0) delivered += count;
-        else if (count < 0) finish();
+        if (count > 0) {
+          delivered += count;
+        }
+        else if (count < 0) {
+          finish();
+        }
         return count;
       } catch (IOException failure) {
         fail();
@@ -103,26 +111,36 @@ public final class SharedFolderDownloadAuditResource extends AbstractResource {
         throw failure;
       } finally {
         if (!terminalEmitted) {
-          if (delivered == expectedBytes) finish();
-          else abort();
+          if (delivered == expectedBytes) {
+            finish();
+          }
+          else {
+            abort();
+          }
         }
       }
     }
 
     private void finish() {
-      if (terminalEmitted) return;
+      if (terminalEmitted) {
+        return;
+      }
       terminalEmitted = true;
       emit(delivered == expectedBytes ? Outcome.COMPLETED : Outcome.FAILED, delivered);
     }
 
     private void abort() {
-      if (terminalEmitted) return;
+      if (terminalEmitted) {
+        return;
+      }
       terminalEmitted = true;
       emit(Outcome.ABORTED, delivered);
     }
 
     private void fail() {
-      if (terminalEmitted) return;
+      if (terminalEmitted) {
+        return;
+      }
       terminalEmitted = true;
       emit(Outcome.FAILED, delivered);
     }

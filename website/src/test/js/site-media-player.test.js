@@ -757,7 +757,9 @@ function fakeMedia() {
     removedSource: false,
     pause() { this.pauseCalls += 1; },
     removeAttribute(name) {
-      if (name === 'src') this.removedSource = true;
+      if (name === 'src') {
+        this.removedSource = true;
+      }
     },
     load() { this.loadCalls += 1; },
   };
@@ -778,7 +780,9 @@ function fakeEventTarget() {
   return {
     addEventListener(name, listener) { listeners.set(name, listener); },
     removeEventListener(name, listener) {
-      if (listeners.get(name) === listener) listeners.delete(name);
+      if (listeners.get(name) === listener) {
+        listeners.delete(name);
+      }
     },
     dispatch(name, event = undefined) { listeners.get(name)?.(event); },
     eventNames() { return [...listeners.keys()].sort(); },
