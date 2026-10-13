@@ -4,36 +4,40 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.configuration.filter.RequestPayloadTooLargeException;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
-import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
-import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary;
 import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary.BoundaryUnavailableException;
 import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary.FileAccess;
+import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary;
+import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderMutationBoundary;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeBoundaryException;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeFileMetadata;
-import dev.christopherbell.sharedfolder.service.SharedFolderObservedItemTokens;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
+import dev.christopherbell.sharedfolder.service.SharedFolderObservedItemTokens;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.nio.channels.Channels;
-import java.nio.channels.FileChannel;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
@@ -172,7 +176,9 @@ public class SharedFolderUploadService {
 
   /** Expires a bounded batch of inactive staging sessions and deletes only private payloads. */
   public int expireAbandoned() {
-    if (!properties.enabled()) return 0;
+    if (!properties.enabled()) {
+      return 0;
+    }
     Instant now = clock.instant();
     var batch = sessions.findDueForMaintenance(now, PageRequest.of(
         0, EXPIRY_BATCH_LIMIT, Sort.by(
@@ -186,8 +192,14 @@ public class SharedFolderUploadService {
             && sessions.expireActive(candidate.getId(), now, now) != 1) {
           continue;
         }
-        current = sessions.findById(candidate.getId()).orElse(null);
-        if (current == null || current.getState() != SharedFolderUploadState.EXPIRED) continue;
+        var stored = sessions.findById(candidate.getId());
+        if (stored.isEmpty()) {
+          continue;
+        }
+        current = stored.orElseThrow();
+        if (current.getState() != SharedFolderUploadState.EXPIRED) {
+          continue;
+        }
         deleteExpiredPrivatePayloads(current);
         sessions.deleteById(current.getId());
         expired++;
@@ -195,7 +207,9 @@ public class SharedFolderUploadService {
         recordMaintenanceFailure(candidate, failure);
         SharedFolderUploadSession deferred = current != null ? current : candidate;
         try {
-          if (deferred.getState() != SharedFolderUploadState.EXPIRED) throw unavailable();
+          if (deferred.getState() != SharedFolderUploadState.EXPIRED) {
+            throw unavailable();
+          }
           deferExpiredMaintenance(deferred, now);
         } catch (RuntimeException persistenceFailure) {
           deferralPersistenceFailed = true;
@@ -203,13 +217,17 @@ public class SharedFolderUploadService {
         log.warn("Shared-folder abandoned upload cleanup deferred");
       }
     }
-    if (deferralPersistenceFailed) throw unavailable();
+    if (deferralPersistenceFailed) {
+      throw unavailable();
+    }
     return expired;
   }
 
   /** Reconciles and removes every private upload artifact owned by a deleted account. */
   public void deleteOwnedPrivateState(String ownerId) {
-    if (ownerId == null || ownerId.isBlank()) throw unavailable();
+    if (ownerId == null || ownerId.isBlank()) {
+      throw unavailable();
+    }
     while (true) {
       var page = sessions.findByOwnerIdOrderByIdAsc(
           ownerId, PageRequest.of(0, PRIVATE_DELETION_PAGE_SIZE));
@@ -230,7 +248,9 @@ public class SharedFolderUploadService {
           throw unavailable();
         }
       }
-      if (!page.hasNext()) return;
+      if (!page.hasNext()) {
+        return;
+      }
     }
   }
 
@@ -239,7 +259,9 @@ public class SharedFolderUploadService {
     int newAttempts = Math.min(MAX_MAINTENANCE_ATTEMPTS, expectedAttempts + 1);
     int exponent = Math.max(0, newAttempts - 1);
     Duration delay = MAINTENANCE_RETRY_BASE.multipliedBy(1L << exponent);
-    if (delay.compareTo(MAINTENANCE_RETRY_MAX) > 0) delay = MAINTENANCE_RETRY_MAX;
+    if (delay.compareTo(MAINTENANCE_RETRY_MAX) > 0) {
+      delay = MAINTENANCE_RETRY_MAX;
+    }
     Instant retryAt = now.plus(delay);
     if (sessions.deferExpiredMaintenance(
         session.getId(), expectedAttempts, retryAt, newAttempts, now) != 1) {
@@ -249,7 +271,9 @@ public class SharedFolderUploadService {
 
   private void recordMaintenanceFailure(
       SharedFolderUploadSession session, Exception failure) {
-    if (audit == null) return;
+    if (audit == null) {
+      return;
+    }
     try {
       RuntimeException safeFailure = failure instanceof RuntimeException runtime
           ? runtime : unavailable();
@@ -785,7 +809,9 @@ public class SharedFolderUploadService {
   }
 
   /** Test seam for deterministic short append leases. */
-  protected Duration appendLeaseDuration() { return APPEND_LEASE_TTL; }
+  protected Duration appendLeaseDuration() {
+    return APPEND_LEASE_TTL;
+  }
 
   private Duration appendLeaseRenewalInterval() {
     Duration interval = appendLeaseDuration().dividedBy(3);
@@ -795,7 +821,9 @@ public class SharedFolderUploadService {
   private void reconcilePortableAppendLength(
       SharedFolderUploadSession session, long committedOffset) throws IOException {
     if (!privateExists(STAGING_DIRECTORY, session.getStagingKey())) {
-      if (committedOffset == 0) return;
+      if (committedOffset == 0) {
+        return;
+      }
       throw conflict();
     }
     operateOnPrivateRegularFile(
@@ -917,7 +945,9 @@ public class SharedFolderUploadService {
         try {
           target = nativeBoundary.metadata(relativePath(session));
         } catch (NativeBoundaryException exception) {
-          if (isNativeMissing(exception)) throw conflict();
+          if (isNativeMissing(exception)) {
+            throw conflict();
+          }
           throw exception;
         }
         requireNativeTargetToken(session, target);
@@ -1148,10 +1178,11 @@ public class SharedFolderUploadService {
       throw unavailable();
     }
     String finalizationId = session.getId();
-    session = claimExpiredFinalization(session);
-    if (session == null) {
+    var claimed = claimExpiredFinalization(session);
+    if (claimed.isEmpty()) {
       return sessions.findById(finalizationId).orElseThrow(this::notFound);
     }
+    session = claimed.orElseThrow();
     if (Boolean.TRUE.equals(session.getFinalizingReplace())) {
       return reconcileReplacementFinalization(session);
     }
@@ -1164,17 +1195,18 @@ public class SharedFolderUploadService {
     return session;
   }
 
-  private SharedFolderUploadSession claimExpiredFinalization(SharedFolderUploadSession session) {
+  /** The session reloaded under a fresh recovery lease, or empty when another instance claimed it. */
+  private Optional<SharedFolderUploadSession> claimExpiredFinalization(
+      SharedFolderUploadSession session) {
     String recoveryToken = serviceInstanceId + ":recovery:" + UUID.randomUUID();
     var claimedExpiry = sessions.claimExpiredFinalizationLease(
         session.getId(), session.getFinalizationLeaseToken(), session.getFinalizationState(),
         recoveryToken, finalizationLeaseDuration());
     if (claimedExpiry.isEmpty()) {
-      return null;
+      return Optional.empty();
     }
     return sessions.findById(session.getId())
-        .filter(current -> Objects.equals(recoveryToken, current.getFinalizationLeaseToken()))
-        .orElse(null);
+        .filter(current -> Objects.equals(recoveryToken, current.getFinalizationLeaseToken()));
   }
 
 
@@ -1272,7 +1304,8 @@ public class SharedFolderUploadService {
     session.setUpdatedAt(now);
     try {
       return sessions.save(session);
-    } catch (RuntimeException ignored) {
+    } catch (RuntimeException saveFailure) {
+      // The unsaved RESTORE_PENDING state still drives this call; the lease expiry retries the save.
       return session;
     }
   }
@@ -1308,21 +1341,32 @@ public class SharedFolderUploadService {
   }
 
   /** Test seam for deterministic short finalization leases. */
-  protected Instant leaseNow() { return Instant.now(); }
+  protected Instant leaseNow() {
+    return Instant.now();
+  }
 
   /** Test seam for deterministic short finalization leases. */
-  protected Duration finalizationLeaseDuration() { return FINALIZATION_LEASE_TTL; }
+  protected Duration finalizationLeaseDuration() {
+    return FINALIZATION_LEASE_TTL;
+  }
 
   private Duration finalizationLeaseRenewalInterval() {
     Duration interval = finalizationLeaseDuration().dividedBy(3);
     return interval.isZero() ? Duration.ofMillis(1) : interval;
   }
 
+  /*
+   * The native lookups below return null only for a path the native boundary reports missing.
+   * Finalization treats each lookup as a presence fact across its state machine, so the OrNull
+   * names keep the branches readable; every other failure is thrown.
+   */
   private NativeFileMetadata nativeMetadataOrNull(String path) {
     try {
       return nativeBoundary.metadata(path);
     } catch (NativeBoundaryException exception) {
-      if (isNativeMissing(exception)) return null;
+      if (isNativeMissing(exception)) {
+        return null;
+      }
       throw nativeFailure(exception);
     } catch (SecurityException exception) {
       throw unavailable();
@@ -1333,7 +1377,9 @@ public class SharedFolderUploadService {
     try (var staging = nativeBoundary.staging(key)) {
       return staging.metadata();
     } catch (NativeBoundaryException exception) {
-      if (isNativeMissing(exception)) return null;
+      if (isNativeMissing(exception)) {
+        return null;
+      }
       throw nativeFailure(exception);
     } catch (SecurityException exception) {
       throw unavailable();
@@ -1344,7 +1390,9 @@ public class SharedFolderUploadService {
     try {
       return nativeBoundary.quarantineMetadata(key);
     } catch (NativeBoundaryException exception) {
-      if (isNativeMissing(exception)) return null;
+      if (isNativeMissing(exception)) {
+        return null;
+      }
       throw nativeFailure(exception);
     } catch (SecurityException exception) {
       throw unavailable();
@@ -1448,12 +1496,16 @@ public class SharedFolderUploadService {
         + before.lastModifiedTime().toMillis();
     if (before.isDirectory()) {
       try (var children = Files.list(path)) {
-        if (children.findAny().isPresent()) throw conflict();
+        if (children.findAny().isPresent()) {
+          throw conflict();
+        }
       }
       heartbeat.run();
       return metadata + ":empty-directory";
     }
-    if (!before.isRegularFile()) throw conflict();
+    if (!before.isRegularFile()) {
+      throw conflict();
+    }
     MessageDigest digest = sha256();
     try (InputStream input = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
       byte[] buffer = new byte[COPY_BUFFER_SIZE];
@@ -1491,13 +1543,19 @@ public class SharedFolderUploadService {
     String metadata = privateIdentity(before) + ":" + attributes.size() + ":"
         + attributes.lastModifiedTime().toMillis();
     if (attributes.isDirectory()) {
-      if (!privateDirectoryIsEmpty(directory, key)) throw conflict();
+      if (!privateDirectoryIsEmpty(directory, key)) {
+        throw conflict();
+      }
       heartbeat.run();
       var after = privateMetadata(directory, key);
-      if (!Objects.equals(before.stableIdentity(), after.stableIdentity())) throw conflict();
+      if (!Objects.equals(before.stableIdentity(), after.stableIdentity())) {
+        throw conflict();
+      }
       return metadata + ":empty-directory";
     }
-    if (!attributes.isRegularFile()) throw conflict();
+    if (!attributes.isRegularFile()) {
+      throw conflict();
+    }
     MessageDigest digest = sha256();
     operateOnPrivateRegularFile(directory, key, FileAccess.READ, channel -> {
       InputStream input = Channels.newInputStream(channel);
@@ -1546,8 +1604,12 @@ public class SharedFolderUploadService {
       renewFinalizationLease(session);
     }
     session.setState(state);
-    if (state == SharedFolderUploadState.COMPLETED) armCompletedRetention(session);
-    else session.setDeleteAt(null);
+    if (state == SharedFolderUploadState.COMPLETED) {
+      armCompletedRetention(session);
+    }
+    else {
+      session.setDeleteAt(null);
+    }
     if (previous == SharedFolderUploadState.FINALIZING) {
       clearFinalization(session);
     }
@@ -1606,7 +1668,9 @@ public class SharedFolderUploadService {
 
   private long appendPeakBytes(SharedFolderUploadSession session) {
     long remaining = session.getExpectedBytes() - session.getNextOffset();
-    if (remaining < 0) throw conflict();
+    if (remaining < 0) {
+      throw conflict();
+    }
     long temporaryChunk = Math.min(remaining, properties.uploadChunk().toBytes());
     try {
       return Math.addExact(remaining, temporaryChunk);
@@ -1753,7 +1817,7 @@ public class SharedFolderUploadService {
     if (session.getState() == SharedFolderUploadState.APPENDING
         && Objects.equals(session.getAppendOffset(), offset)
         && constantTimeEquals(session.getAppendDigest(), digest)) {
-      long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
       while (session.getState() == SharedFolderUploadState.APPENDING
           && System.nanoTime() < deadline) {
         try {
@@ -1773,7 +1837,7 @@ public class SharedFolderUploadService {
 
   private SharedFolderUploadSession awaitMatchingCommittedChunk(
       String id, Account account, long offset, String digest, long length) {
-    long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
     SharedFolderUploadSession session;
     do {
       session = ownedActiveOrTerminal(id, account);
@@ -2121,13 +2185,14 @@ public class SharedFolderUploadService {
         })
         .filter(proof -> proof.offset() >= 0 && proof.length() > 0 && proof.sha256() != null
             && proof.offset() + proof.length() <= session.getNextOffset())
-        .sorted(java.util.Comparator.comparingLong(SharedFolderUploadChunkProof::offset))
+        .sorted(Comparator.comparingLong(SharedFolderUploadChunkProof::offset))
         .toList();
     return new SharedFolderUploadStatus(session.getId(), session.getParentPath(), session.getName(),
         session.getExpectedBytes(), session.getNextOffset(), session.getState(), session.getExpiresAt(),
         properties.uploadChunk().toBytes(), committedChunks);
   }
 
+  /** The canonical digest, or null when none was supplied, matching the nullable stored field. */
   private String normalizeDigest(String digest) {
     if (digest == null || digest.isBlank()) {
       return null;
@@ -2157,8 +2222,8 @@ public class SharedFolderUploadService {
 
   private boolean constantTimeEquals(String expected, String actual) {
     return expected != null && actual != null && MessageDigest.isEqual(
-        expected.getBytes(java.nio.charset.StandardCharsets.US_ASCII),
-        actual.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        expected.getBytes(StandardCharsets.US_ASCII),
+        actual.getBytes(StandardCharsets.US_ASCII));
   }
 
   private ResponseStatusException conflict() {
