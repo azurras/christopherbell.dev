@@ -39,7 +39,9 @@ export function readAnonymousWflSession(storage = localStorage, now = Date.now()
   }
 
   const legacyIds = restaurantIds(value?.restaurants);
-  if (legacyIds.length === 0) return remove(storage);
+  if (legacyIds.length === 0) {
+    return remove(storage);
+  }
   const migrated = {
     version: 3,
     restaurantIds: legacyIds,
@@ -56,7 +58,9 @@ export function writeAnonymousWflSession(
   now = Date.now(),
 ) {
   const ids = restaurantIds(restaurants);
-  if (ids.length === 0) return remove(storage);
+  if (ids.length === 0) {
+    return remove(storage);
+  }
   const value = {
     version: 3,
     restaurantIds: ids,

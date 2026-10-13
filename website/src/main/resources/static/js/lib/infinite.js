@@ -33,7 +33,9 @@ export function createInfiniteScroller({
   const cursorFn = getCursor || ((it) => it.createdOn || it.lastUpdatedOn);
 
   async function load(renew = false) {
-    if (loading || done) return;
+    if (loading || done) {
+      return;
+    }
     loading = true;
     const generation = loadGeneration;
     try {
@@ -45,7 +47,9 @@ export function createInfiniteScroller({
           cursor: requestCursor,
           limit
         });
-        if (generation !== loadGeneration) return;
+        if (generation !== loadGeneration) {
+          return;
+        }
         const items = Array.isArray(page) ? page : page?.items;
         if (!Array.isArray(items)) {
           throw new TypeError('Feed page response must contain an items array.');
@@ -71,22 +75,30 @@ export function createInfiniteScroller({
           return;
         }
         if (Array.isArray(page) || !cursor) {
-          if (renew && typeof onEmpty === 'function') onEmpty();
+          if (renew && typeof onEmpty === 'function') {
+            onEmpty();
+          }
           done = true;
           return;
         }
         firstRequest = false;
       }
     } catch (error) {
-      if (generation === loadGeneration) onError(error);
+      if (generation === loadGeneration) {
+        onError(error);
+      }
     } finally {
-      if (generation === loadGeneration) loading = false;
+      if (generation === loadGeneration) {
+        loading = false;
+      }
     }
   }
 
   function onScroll() {
     const nearBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - thresholdPx;
-    if (nearBottom) return load(false);
+    if (nearBottom) {
+      return load(false);
+    }
   }
 
   function loadInitial() {

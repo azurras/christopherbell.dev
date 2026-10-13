@@ -33,7 +33,9 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.io.InputStream;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -71,13 +73,13 @@ class SharedFolderWriteControllerTest {
   @Test
   @WithMockUser(authorities = "ADMIN")
   void adminCanFilterAuditAndListRestoreOrPurgeRecycleItems() throws Exception {
-    when(auditQueries.search(any())).thenReturn(java.util.List.of(new SharedFolderAuditEvent(
+    when(auditQueries.search(any())).thenReturn(List.of(new SharedFolderAuditEvent(
         "audit-1", "account-1", "RECYCLE", "docs/report.pdf", 42L, "accepted", null,
         "203.0.113.8", Instant.parse("2026-07-18T12:00:00Z"),
         Instant.parse("2027-01-14T12:00:00Z"))));
     when(recycle.listPage(3)).thenReturn(
         new dev.christopherbell.sharedfolder.recycle.SharedFolderRecyclePage(
-            java.util.List.of(), 3, false));
+            List.of(), 3, false));
 
     mockMvc.perform(get(BASE + "/admin/audit")
             .queryParam("accountId", "account-1")
@@ -240,7 +242,7 @@ class SharedFolderWriteControllerTest {
   @Test
   @WithMockUser(authorities = "USER")
   void putChunkRouteBindsTheRawServletStreamAndReturnsProgress() throws Exception {
-    when(uploads.append(eq("session-1"), eq(0L), any(java.io.InputStream.class), eq("digest")))
+    when(uploads.append(eq("session-1"), eq(0L), any(InputStream.class), eq("digest")))
         .thenReturn(new SharedFolderUploadStatus(
             "session-1", "docs", "video.mkv", 3, 3, SharedFolderUploadState.ACTIVE,
             Instant.parse("2026-07-18T00:00:00Z")));

@@ -90,13 +90,19 @@ async function loadCatalog(page = 0) {
       cache: 'no-store',
       signal: requestController.signal,
     });
-    if (catalogRequestController !== requestController || state.view !== requestedView) return;
+    if (catalogRequestController !== requestController || state.view !== requestedView) {
+      return;
+    }
     state.catalog = musicCatalog(response);
     renderWorkspace();
   } catch (error) {
-    if (error?.name !== 'AbortError') throw error;
+    if (error?.name !== 'AbortError') {
+      throw error;
+    }
   } finally {
-    if (catalogRequestController === requestController) catalogRequestController = null;
+    if (catalogRequestController === requestController) {
+      catalogRequestController = null;
+    }
   }
 }
 
@@ -115,10 +121,14 @@ function renderFilters() {
 }
 
 function fillSelect(select, label, values) {
-  if (!select) return;
+  if (!select) {
+    return;
+  }
   const selected = select.value;
   select.replaceChildren(new Option(label, ''), ...values.map(value => new Option(value, value)));
-  if (values.includes(selected)) select.value = selected;
+  if (values.includes(selected)) {
+    select.value = selected;
+  }
 }
 
 function renderResults() {
@@ -167,7 +177,9 @@ function renderPlaylists() {
 }
 
 function historyMarkup() {
-  if (!state.history.length) return '<p class="music-empty">The radio has no history yet.</p>';
+  if (!state.history.length) {
+    return '<p class="music-empty">The radio has no history yet.</p>';
+  }
   const byId = new Map(state.catalog.tracks.map(track => [track.id, track]));
   return state.history.map(event => {
     const track = byId.get(event?.trackId);
@@ -184,7 +196,9 @@ async function trackAction(action, track) {
     await playMusicTrack(track);
     return;
   }
-  if (!state.canManage) return;
+  if (!state.canManage) {
+    return;
+  }
   if (action === 'favorite' || action === 'exclude') {
     const updated = await fetchJson(API.music.library.preferences(track.id), {
       method: 'PATCH',
@@ -220,7 +234,9 @@ function replaceTrack(updated) {
 
 async function addToPlaylist(playlistId, track) {
   const playlist = state.playlists.find(item => item.id === playlistId);
-  if (!playlist || playlist.trackIds.includes(track.id)) return;
+  if (!playlist || playlist.trackIds.includes(track.id)) {
+    return;
+  }
   const updated = await fetchJson(API.music.library.playlist(playlist.id), {
     method: 'PUT',
     body: JSON.stringify({
@@ -254,9 +270,13 @@ function openMetadata(track) {
 async function saveMetadata() {
   const id = document.getElementById('music-edit-track-id').value;
   const track = state.catalog.tracks.find(item => item.id === id);
-  if (!track) return;
+  if (!track) {
+    return;
+  }
   const artworkFile = document.getElementById('music-edit-artwork').files?.[0];
-  if (artworkFile?.size > 5 * 1024 * 1024) throw new Error('Artwork must be 5 MB or smaller.');
+  if (artworkFile?.size > 5 * 1024 * 1024) {
+    throw new Error('Artwork must be 5 MB or smaller.');
+  }
   const artworkDataUrl = artworkFile ? await fileDataUrl(artworkFile) : null;
   const result = await fetchJson(API.music.metadata(id), {
     method: 'PATCH',
@@ -347,14 +367,19 @@ elements.library?.addEventListener('click', event => {
   const view = event.target.closest('[data-view]')?.dataset.view;
   if (view) {
     state.view = view;
-    if (view === 'history') renderWorkspace();
-    else void loadCatalog(0).catch(showError);
+    if (view === 'history') {
+      renderWorkspace();
+    } else {
+      void loadCatalog(0).catch(showError);
+    }
     return;
   }
   const action = event.target.closest('[data-action]')?.dataset.action;
   const row = event.target.closest('[data-track-id]');
   const track = state.catalog.tracks.find(item => item.id === row?.dataset.trackId);
-  if (action && track) void trackAction(action, track).catch(showError);
+  if (action && track) {
+    void trackAction(action, track).catch(showError);
+  }
   if (action === 'remove-queue') {
     const queueId = event.target.closest('[data-queue-id]')?.dataset.queueId;
     void fetchJson(`${API.music.queueItem(queueId)}?expectedVersion=${state.queue.version}`, {
@@ -363,15 +388,21 @@ elements.library?.addEventListener('click', event => {
   }
 });
 elements.library?.addEventListener('change', event => {
-  if (event.target.dataset.action !== 'playlist' || !event.target.value) return;
+  if (event.target.dataset.action !== 'playlist' || !event.target.value) {
+    return;
+  }
   const id = event.target.closest('[data-track-id]')?.dataset.trackId;
   const track = state.catalog.tracks.find(item => item.id === id);
-  if (track) void addToPlaylist(event.target.value, track).catch(showError);
+  if (track) {
+    void addToPlaylist(event.target.value, track).catch(showError);
+  }
   event.target.value = '';
 });
 elements.newPlaylist?.addEventListener('click', () => elements.playlistDialog.showModal());
 elements.playlistForm?.addEventListener('submit', event => {
-  if (event.submitter?.value === 'cancel') return;
+  if (event.submitter?.value === 'cancel') {
+    return;
+  }
   event.preventDefault();
   const name = input('music-playlist-name');
   void fetchJson(API.music.library.playlists, {
@@ -384,7 +415,9 @@ elements.playlistForm?.addEventListener('submit', event => {
   }).catch(showError);
 });
 elements.metadataForm?.addEventListener('submit', event => {
-  if (event.submitter?.value === 'cancel') return;
+  if (event.submitter?.value === 'cancel') {
+    return;
+  }
   event.preventDefault();
   document.getElementById('music-edit-status').textContent = 'Saving…';
   void saveMetadata().catch(error => {

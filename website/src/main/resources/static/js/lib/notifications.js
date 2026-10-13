@@ -38,7 +38,9 @@ export function notificationTitle(notification) {
 
 /** Short notification body text pulled from the type-specific payload. */
 export function notificationText(notification) {
-  if (!notification) return '';
+  if (!notification) {
+    return '';
+  }
   if (notification.notificationType === 'MESSAGE') {
     return notification.messageText || '';
   }
@@ -50,7 +52,9 @@ export function notificationText(notification) {
 
 /** Local URL users should land on when they open a notification. */
 export function notificationTargetUrl(notification) {
-  if (!notification) return '/notifications';
+  if (!notification) {
+    return '/notifications';
+  }
   if (notification.notificationType === 'MESSAGE' && notification.actorUsername) {
     return `/messages?with=${encodeURIComponent(notification.actorUsername)}`;
   }
@@ -74,7 +78,9 @@ export function mergeNotificationPages(current, incoming) {
   const seen = new Set();
   for (const notification of [...(current || []), ...(incoming || [])]) {
     const id = notification?.id;
-    if (!id || seen.has(id)) continue;
+    if (!id || seen.has(id)) {
+      continue;
+    }
     seen.add(id);
     merged.push(notification);
   }
@@ -118,7 +124,9 @@ export function notificationPreferencePayload(root) {
 }
 
 function notificationTypeEnabled(notificationType, preferences) {
-  if (!preferences) return true;
+  if (!preferences) {
+    return true;
+  }
   const key = {
     MENTION: 'mentions',
     LIKE: 'likes',

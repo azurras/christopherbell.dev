@@ -2,7 +2,9 @@ import { formatWhen, sanitize } from './util.js';
 
 /** Renders the public WFL source freshness summary. */
 export function wflFreshnessMarkup(freshness) {
-  if (!freshness) return '';
+  if (!freshness) {
+    return '';
+  }
   const refreshed = freshness.lastRefreshedOn
     ? formatWhen(freshness.lastRefreshedOn)
     : 'Not yet imported';

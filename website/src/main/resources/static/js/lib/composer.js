@@ -22,32 +22,48 @@ export function initComposer({ selectors, maxLength = 280, isLoggedIn, onSubmit 
 
   function toggle() {
     const auth = isLoggedIn();
-    if (composer) composer.classList.toggle('d-none', !auth);
-    if (prompt) prompt.classList.toggle('d-none', auth);
+    if (composer) {
+      composer.classList.toggle('d-none', !auth);
+    }
+    if (prompt) {
+      prompt.classList.toggle('d-none', auth);
+    }
   }
 
   function updateCounter() {
-    if (!textarea) return;
+    if (!textarea) {
+      return;
+    }
     const model = composerPreviewModel(textarea.value || '', maxLength);
-    if (counter) counter.textContent = `${model.length} / ${maxLength}`;
+    if (counter) {
+      counter.textContent = `${model.length} / ${maxLength}`;
+    }
     updatePreview(model);
   }
 
   function updatePreview(model = composerPreviewModel(textarea?.value || '', maxLength)) {
-    if (!preview || !textarea) return;
+    if (!preview || !textarea) {
+      return;
+    }
     preview.innerHTML = composerPreviewMarkup(model, sanitize);
   }
 
   async function handleSubmit() {
-    if (alertEl) alertEl.classList.add('d-none');
+    if (alertEl) {
+      alertEl.classList.add('d-none');
+    }
     const text = (textarea?.value || '').trim();
-    if (!text) return;
+    if (!text) {
+      return;
+    }
     if (text.length > maxLength) {
       if (alertEl) { alertEl.textContent = `Post text exceeds ${maxLength} characters.`; alertEl.classList.remove('d-none'); }
       return;
     }
     try {
-      if (button) button.disabled = true;
+      if (button) {
+        button.disabled = true;
+      }
       await onSubmit(text);
       reset();
     } catch (err) {
@@ -56,7 +72,9 @@ export function initComposer({ selectors, maxLength = 280, isLoggedIn, onSubmit 
         alertEl.classList.remove('d-none');
       }
     } finally {
-      if (button) button.disabled = false;
+      if (button) {
+        button.disabled = false;
+      }
     }
   }
 
@@ -68,7 +86,9 @@ export function initComposer({ selectors, maxLength = 280, isLoggedIn, onSubmit 
   }
 
   function reset() {
-    if (textarea) textarea.value = '';
+    if (textarea) {
+      textarea.value = '';
+    }
     updateCounter();
   }
 

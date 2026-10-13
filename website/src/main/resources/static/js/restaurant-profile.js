@@ -47,7 +47,9 @@ function memberMarkup(restaurant) {
 }
 
 async function saveVote(restaurantId, vote, request, headers) {
-  if (!VOTE_OPTIONS.some(option => option.value === vote)) return null;
+  if (!VOTE_OPTIONS.some(option => option.value === vote)) {
+    return null;
+  }
   return request(API.whatsForLunch.voteRestaurant, {
     method: 'PUT',
     headers: headers({ 'Content-Type': 'application/json' }),
@@ -67,10 +69,14 @@ export async function initializeRestaurantProfile({
   request = fetchJson,
   headers = authHeaders,
 } = {}) {
-  if (!mount || !claims()?.sub) return;
+  if (!mount || !claims()?.sub) {
+    return;
+  }
 
   const restaurantId = String(mount.dataset.restaurantId || '').trim();
-  if (!restaurantId) return;
+  if (!restaurantId) {
+    return;
+  }
 
   const anonymousFallback = mount.innerHTML;
   const state = { restaurant: null };
@@ -96,7 +102,9 @@ export async function initializeRestaurantProfile({
     buttons: () => Array.from(mount.querySelectorAll?.('.lunch-vote-button') || []),
     apply: value => {
       const updated = render(value);
-      if (publicMount) publicMount.textContent = voteSummary(updated).overall;
+      if (publicMount) {
+        publicMount.textContent = voteSummary(updated).overall;
+      }
     },
     showError: error => {
       if (error?.status === 401) {
@@ -114,14 +122,18 @@ export async function initializeRestaurantProfile({
     }));
   } catch (error) {
     mount.innerHTML = anonymousFallback;
-    if (error?.status !== 401) showError(error);
+    if (error?.status !== 401) {
+      showError(error);
+    }
     return;
   }
 
   mount.addEventListener('click', async event => {
     const voteButton = event.target?.closest?.('.lunch-vote-button');
     const favoriteButton = event.target?.closest?.('.restaurant-favorite-toggle');
-    if (!voteButton && !favoriteButton) return;
+    if (!voteButton && !favoriteButton) {
+      return;
+    }
 
     try {
       if (voteButton) {

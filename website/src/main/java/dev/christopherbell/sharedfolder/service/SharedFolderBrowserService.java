@@ -1,8 +1,8 @@
 package dev.christopherbell.sharedfolder.service;
 
 import dev.christopherbell.configuration.SharedFolderProperties;
-import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver.ReadHandle;
+import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.DirectoryEntry;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundary;
@@ -14,10 +14,11 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
-import org.springframework.http.HttpStatus;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -119,7 +120,7 @@ public class SharedFolderBrowserService {
   }
 
   private String nativeIdentity(DirectoryEntry entry) {
-    return entry.identity().volumeSerial() + ":" + java.util.Base64.getUrlEncoder().withoutPadding()
+    return entry.identity().volumeSerial() + ":" + Base64.getUrlEncoder().withoutPadding()
         .encodeToString(entry.identity().fileId());
   }
 
