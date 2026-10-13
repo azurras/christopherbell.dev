@@ -19,6 +19,7 @@ import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.List;
@@ -241,7 +242,7 @@ class SharedFolderCatalogServiceTest {
     }
 
     @Override
-    public Clock withZone(java.time.ZoneId zone) {
+    public Clock withZone(ZoneId zone) {
       return this;
     }
 

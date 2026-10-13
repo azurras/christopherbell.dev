@@ -7,7 +7,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import dev.christopherbell.account.model.Account;
 import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
@@ -15,6 +14,7 @@ import dev.christopherbell.sharedfolder.audit.SharedFolderAuditSink;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Collections;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -116,7 +116,7 @@ class SharedFolderAuditRecorderTest {
     var recorder = new SharedFolderAuditRecorder(
         sink, permissions, mock(ClientIpResolver.class),
         Clock.fixed(Instant.parse("2026-07-18T12:00:00Z"), ZoneOffset.UTC));
-    String longPath = String.join("/", java.util.Collections.nCopies(
+    String longPath = String.join("/", Collections.nCopies(
         150, "valid-segment"));
 
     recorder.recordLogicalAccess("DOWNLOAD_STARTED", longPath, 42L);

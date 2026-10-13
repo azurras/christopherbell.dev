@@ -8,6 +8,7 @@ import dev.christopherbell.sharedfolder.service.SharedFolderMutationRecoveryRepo
 import dev.christopherbell.sharedfolder.upload.MongoSharedFolderUploadSessionRepository;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadSession;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadSessionRepository;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.annotation.Version;
 
@@ -21,16 +22,16 @@ class SharedFolderLeaseClaimRepositoryTest {
     assertThat(SharedFolderMutationRecoveryRepository.class.getDeclaredMethod(
         "claimExpiredOperationLease", String.class, String.class,
         dev.christopherbell.sharedfolder.service.SharedFolderMutationRecoveryState.class,
-        String.class, java.time.Duration.class))
+        String.class, Duration.class))
         .isNotNull();
     assertThat(SharedFolderUploadSessionRepository.class.getDeclaredMethod(
         "claimExpiredAppendLease", String.class, String.class, long.class,
-        String.class, java.time.Duration.class))
+        String.class, Duration.class))
         .isNotNull();
     assertThat(SharedFolderUploadSessionRepository.class.getDeclaredMethod(
         "claimExpiredFinalizationLease", String.class, String.class,
         dev.christopherbell.sharedfolder.upload.SharedFolderUploadFinalizationState.class,
-        String.class, java.time.Duration.class))
+        String.class, Duration.class))
         .isNotNull();
     assertThat(MongoSharedFolderMutationRecoveryRepository.class.getInterfaces())
         .contains(SharedFolderMutationRecoveryRepository.class);

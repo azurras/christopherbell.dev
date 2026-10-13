@@ -64,10 +64,16 @@ test('worker registration requires no readable credential or message staging', a
   try {
     assert.equal(await prepareSharedFolderStreamingAuth(), controller);
   } finally {
-    if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator);
-    else delete globalThis.navigator;
-    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
-    else delete globalThis.window;
+    if (originalNavigator) {
+      Object.defineProperty(globalThis, 'navigator', originalNavigator);
+    } else {
+      delete globalThis.navigator;
+    }
+    if (originalWindow) {
+      Object.defineProperty(globalThis, 'window', originalWindow);
+    } else {
+      delete globalThis.window;
+    }
   }
 
   assert.deepEqual(registrations, [{

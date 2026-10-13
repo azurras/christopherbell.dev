@@ -7,6 +7,7 @@ import java.io.OutputStream;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpRange;
 import org.springframework.stereotype.Component;
@@ -46,7 +47,9 @@ public final class ProgressiveMediaStreamer {
     long maximum = properties.maxOutput().toBytes();
     while (!Thread.currentThread().isInterrupted()) {
       MediaJob current = jobs.findById(original.getId()).orElse(original);
-      if (media != null) current = media.refreshWorkerState(current);
+      if (media != null) {
+        current = media.refreshWorkerState(current);
+      }
       MediaJob observed = current;
       var workerStatus = storage.readStatus(observed, maximum);
       MediaJobStatus effectiveStatus = effectiveStatus(observed, workerStatus, maximum);
@@ -55,23 +58,35 @@ public final class ProgressiveMediaStreamer {
           ? storage.readyLength(observed, maximum)
               .orElseThrow(() -> new IOException("Media output is unavailable"))
           : storage.partialLength(observed, maximum);
-      if (!started && size >= properties.initialBuffer().toBytes()) started = true;
-      if (!started && effectiveStatus.terminal()) started = size > 0;
+      if (!started && size >= properties.initialBuffer().toBytes()) {
+        started = true;
+      }
+      if (!started && effectiveStatus.terminal()) {
+        started = size > 0;
+      }
       if (started && size > position) {
         long copied;
         try {
           copied = storage.copy(observed, ready, position, size - position, output, maximum);
         } catch (IOException partialFailure) {
-          if (ready) throw partialFailure;
+          if (ready) {
+            throw partialFailure;
+          }
           copied = copyAfterAtomicPublish(observed, position, output, maximum, partialFailure);
         }
         position += copied;
         output.flush();
-        if (copied > 0) idleSince = System.nanoTime();
+        if (copied > 0) {
+          idleSince = System.nanoTime();
+        }
       }
-      if (effectiveStatus.terminal() && position >= size) return;
+      if (effectiveStatus.terminal() && position >= size) {
+        return;
+      }
       if (Duration.ofNanos(System.nanoTime() - idleSince)
-          .compareTo(properties.progressiveIdleTimeout()) >= 0) return;
+          .compareTo(properties.progressiveIdleTimeout()) >= 0) {
+        return;
+      }
       sleep(properties.progressivePollInterval());
     }
   }
@@ -82,12 +97,18 @@ public final class ProgressiveMediaStreamer {
     try {
       total = storage.readyLength(job, properties.maxOutput().toBytes())
           .orElseThrow(() -> new IOException("Media output is unavailable"));
-      if (rangeHeader == null) return new ReadySelection(job, 0, total, total, false, lease);
+      if (rangeHeader == null) {
+        return new ReadySelection(job, 0, total, total, false, lease);
+      }
       List<HttpRange> ranges = HttpRange.parseRanges(rangeHeader);
-      if (ranges.size() != 1 || total == 0) throw invalidRange(total);
+      if (ranges.size() != 1 || total == 0) {
+        throw invalidRange(total);
+      }
       long start = ranges.getFirst().getRangeStart(total);
       long end = ranges.getFirst().getRangeEnd(total);
-      if (start < 0 || end < start || end >= total) throw invalidRange(total);
+      if (start < 0 || end < start || end >= total) {
+        throw invalidRange(total);
+      }
       return new ReadySelection(job, start, end - start + 1, total, true, lease);
     } catch (IllegalArgumentException failure) {
       lease.close();
@@ -102,7 +123,9 @@ public final class ProgressiveMediaStreamer {
     long copied = storage.copy(
         selection.job(), true, selection.start(), selection.length(), output,
         properties.maxOutput().toBytes());
-    if (copied != selection.length()) throw new IOException("Media output changed during streaming");
+    if (copied != selection.length()) {
+      throw new IOException("Media output changed during streaming");
+    }
     output.flush();
   }
 
@@ -119,11 +142,13 @@ public final class ProgressiveMediaStreamer {
 
   private MediaJobStatus effectiveStatus(
       MediaJob job,
-      java.util.Optional<MediaStorage.MediaWorkerStatus> workerStatus,
+      Optional<MediaStorage.MediaWorkerStatus> workerStatus,
       long maximum) throws IOException {
     MediaJobStatus reported = workerStatus
         .map(MediaStorage.MediaWorkerStatus::status).orElse(job.getStatus());
-    if (reported != MediaJobStatus.READY || workerStatus.isEmpty()) return reported;
+    if (reported != MediaJobStatus.READY || workerStatus.isEmpty()) {
+      return reported;
+    }
     return storage.readyMatches(job, workerStatus.get().outputBytes(), maximum)
         ? reported : job.getStatus();
   }
@@ -159,6 +184,8 @@ public final class ProgressiveMediaStreamer {
     }
 
     @Override
-    public void close() { lease.close(); }
+    public void close() {
+      lease.close();
+    }
   }
 }

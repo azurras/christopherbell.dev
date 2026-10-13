@@ -29,7 +29,9 @@ public final class SharedFolderAccountMutationLimiter {
   }
 
   public SharedFolderAccountMutationLimiter(Clock clock, int maxAccounts, int capacity) {
-    if (maxAccounts < 1 || capacity < 1) throw new IllegalArgumentException("Invalid limit");
+    if (maxAccounts < 1 || capacity < 1) {
+      throw new IllegalArgumentException("Invalid limit");
+    }
     this.clock = clock;
     this.maxAccounts = maxAccounts;
     this.capacity = capacity;
@@ -44,14 +46,18 @@ public final class SharedFolderAccountMutationLimiter {
       admitNewWindow(accountId, now);
       return;
     }
-    if (current.used() >= capacity) throw rateLimited();
+    if (current.used() >= capacity) {
+      throw rateLimited();
+    }
     windows.put(accountId, new Window(current.startedAt(), current.used() + 1));
   }
 
   private void admitNewWindow(String accountId, Instant now) {
     while (!windows.containsKey(accountId) && windows.size() >= maxAccounts) {
       var eldest = windows.entrySet().iterator();
-      if (!eldest.hasNext()) break;
+      if (!eldest.hasNext()) {
+        break;
+      }
       eldest.next();
       eldest.remove();
     }

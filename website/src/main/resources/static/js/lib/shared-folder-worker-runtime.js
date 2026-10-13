@@ -16,7 +16,9 @@ export async function respondToSharedFolderFetch({
 }
 
 async function notifySharedFolderDenial(clients, clientId, status) {
-  if (!clientId || !clients?.get) return;
+  if (!clientId || !clients?.get) {
+    return;
+  }
   try {
     const client = await clients.get(clientId);
     client?.postMessage({ type: 'shared-folder-auth-denied', status });
