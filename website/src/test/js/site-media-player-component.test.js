@@ -240,8 +240,9 @@ test('component publishes exact title artist album and artwork to Media Session'
   } finally {
     if (previousNavigator) {
       Object.defineProperty(globalThis, 'navigator', previousNavigator);
+    } else {
+      delete globalThis.navigator;
     }
-    else delete globalThis.navigator;
     globalThis.MediaMetadata = previousMediaMetadata;
   }
 });
@@ -302,8 +303,9 @@ function fakeEventTarget() {
       const remaining = (listeners.get(name) || []).filter(candidate => candidate !== listener);
       if (remaining.length > 0) {
         listeners.set(name, remaining);
+      } else {
+        listeners.delete(name);
       }
-      else listeners.delete(name);
     },
     dispatch(name, event = undefined) {
       for (const listener of [...(listeners.get(name) || [])]) {

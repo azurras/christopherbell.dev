@@ -209,12 +209,14 @@ test('infinite scroller rejects a repeated cursor after a rendered page', async 
   } finally {
     if (previousWindow === undefined) {
       delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
     }
-    else globalThis.window = previousWindow;
     if (previousDocument === undefined) {
       delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
     }
-    else globalThis.document = previousDocument;
   }
 });
 
@@ -269,12 +271,14 @@ test('infinite scroller reports a scroll failure and retries the same cursor', a
   } finally {
     if (previousWindow === undefined) {
       delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
     }
-    else globalThis.window = previousWindow;
     if (previousDocument === undefined) {
       delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
     }
-    else globalThis.document = previousDocument;
   }
 });
 
@@ -330,12 +334,14 @@ test('infinite scroller retries a malformed scroll cursor from the previous vali
   } finally {
     if (previousWindow === undefined) {
       delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
     }
-    else globalThis.window = previousWindow;
     if (previousDocument === undefined) {
       delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
     }
-    else globalThis.document = previousDocument;
   }
 });
 
@@ -401,11 +407,13 @@ test('a new initial load ignores stale results and keeps its loading lock', asyn
   } finally {
     if (previousWindow === undefined) {
       delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
     }
-    else globalThis.window = previousWindow;
     if (previousDocument === undefined) {
       delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
     }
-    else globalThis.document = previousDocument;
   }
 });

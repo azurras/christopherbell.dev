@@ -369,8 +369,9 @@ elements.library?.addEventListener('click', event => {
     state.view = view;
     if (view === 'history') {
       renderWorkspace();
+    } else {
+      void loadCatalog(0).catch(showError);
     }
-    else void loadCatalog(0).catch(showError);
     return;
   }
   const action = event.target.closest('[data-action]')?.dataset.action;

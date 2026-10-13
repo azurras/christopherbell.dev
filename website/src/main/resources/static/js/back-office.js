@@ -771,8 +771,9 @@ async function loadRestaurantInventory({ append = false } = {}) {
     const markup = wflInventoryMarkup(items, page.total ?? 0, append);
     if (append) {
       wflInventory.insertAdjacentHTML('beforeend', markup);
+    } else {
+      wflInventory.innerHTML = markup;
     }
-    else wflInventory.innerHTML = markup;
   }
   restaurantInventoryNextCursor = String(page.nextCursor || '');
   restaurantInventoryTotal = Number(page.total || 0);

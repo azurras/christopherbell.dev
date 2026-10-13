@@ -69,12 +69,14 @@ test('default media resume checks same-tab session storage', async context => {
   context.after(() => {
     if (hadWindow) {
       globalThis.window = originalWindow;
+    } else {
+      delete globalThis.window;
     }
-    else delete globalThis.window;
     if (hadDocument) {
       globalThis.document = originalDocument;
+    } else {
+      delete globalThis.document;
     }
-    else delete globalThis.document;
   });
   const emptySessionStorage = { getItem: () => null };
   const staleLocalStorage = {

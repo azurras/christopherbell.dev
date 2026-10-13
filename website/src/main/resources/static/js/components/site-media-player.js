@@ -359,8 +359,9 @@ export class SiteMediaPlayer extends HTMLElement {
     } catch (error) {
       if (isSharedFolderAccessDenied(error)) {
         this.handleAccessLoss(error.status);
+      } else {
+        clearSiteMediaResume(sessionStorage);
       }
-      else clearSiteMediaResume(sessionStorage);
     }
   }
 
@@ -629,8 +630,9 @@ export class SiteMediaPlayer extends HTMLElement {
       }
       if (replacingRadio) {
         this.stopPlayback();
+      } else {
+        this.stopRadioSync();
       }
-      else this.stopRadioSync();
       return response;
     }
 

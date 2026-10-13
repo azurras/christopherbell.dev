@@ -148,6 +148,7 @@ function fakeAlert() {
 function restoreDocument(previousDocument) {
   if (previousDocument === undefined) {
     delete globalThis.document;
+  } else {
+    globalThis.document = previousDocument;
   }
-  else globalThis.document = previousDocument;
 }
