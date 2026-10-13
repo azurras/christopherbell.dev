@@ -16,8 +16,12 @@ export function conversationRowMarkup(conversation, activeUsername) {
   const active = username === activeUsername;
   const unread = Number(conversation.unreadCount || 0);
   const rowClasses = ['conversation-row'];
-  if (active) rowClasses.push('active');
-  if (unread > 0) rowClasses.push('is-unread');
+  if (active) {
+    rowClasses.push('active');
+  }
+  if (unread > 0) {
+    rowClasses.push('is-unread');
+  }
   return `
       <button class="${rowClasses.join(' ')}" type="button" data-username="${sanitize(username)}">
         <span class="conversation-avatar">${sanitize((username || '?')[0].toUpperCase())}</span>
@@ -78,21 +82,27 @@ function suggestionBox() {
 
 function clearRecipientSuggestions() {
   const box = suggestionBox();
-  if (!box) return;
+  if (!box) {
+    return;
+  }
   box.innerHTML = '';
   box.classList.add('d-none');
 }
 
 function renderRecipientSuggestions(suggestions) {
   const box = suggestionBox();
-  if (!box) return;
+  if (!box) {
+    return;
+  }
   box.innerHTML = messageSuggestionListMarkup(suggestions);
   box.classList.remove('d-none');
   box.querySelectorAll('[data-username]').forEach(option => {
     option.addEventListener('click', async () => {
       const username = option.dataset.username || '';
       const input = document.getElementById('recipientHandle');
-      if (input) input.value = username;
+      if (input) {
+        input.value = username;
+      }
       clearRecipientSuggestions();
       await openConversation(username);
     });
@@ -107,7 +117,9 @@ function getInitialTarget() {
 function updateCounter() {
   const draftText = document.getElementById('messageText')?.value || '';
   const characterCount = document.getElementById('messageCount');
-  if (characterCount) characterCount.textContent = `${draftText.length} / 1000`;
+  if (characterCount) {
+    characterCount.textContent = `${draftText.length} / 1000`;
+  }
 }
 
 async function loadRecipientSuggestions(enteredHandle) {
@@ -127,7 +139,9 @@ async function loadRecipientSuggestions(enteredHandle) {
     });
     renderRecipientSuggestions(suggestions || []);
   } catch (suggestionFailure) {
-    if (suggestionFailure.name !== 'AbortError') clearRecipientSuggestions();
+    if (suggestionFailure.name !== 'AbortError') {
+      clearRecipientSuggestions();
+    }
   }
 }
 
@@ -140,7 +154,9 @@ function scheduleRecipientSuggestionLoad(enteredHandle) {
 
 function renderConversations() {
   const list = document.getElementById('conversationList');
-  if (!list) return;
+  if (!list) {
+    return;
+  }
   if (!CONVERSATIONS.length) {
     list.innerHTML = `
       <div class="conversation-empty">
@@ -156,7 +172,9 @@ function renderConversations() {
 
 function renderMessages(messages, scrollToEnd = true) {
   const list = document.getElementById('messageList');
-  if (!list) return;
+  if (!list) {
+    return;
+  }
   if (!messages.length) {
     list.innerHTML = `
       <div class="feed-empty-state message-empty-state">
@@ -180,7 +198,9 @@ function renderMessages(messages, scrollToEnd = true) {
     appendTextWithMentionLinks(row.querySelector('p'), message.text || '');
     list.appendChild(row);
   }
-  if (scrollToEnd) list.scrollTop = list.scrollHeight;
+  if (scrollToEnd) {
+    list.scrollTop = list.scrollHeight;
+  }
 }
 
 function renderConversationActions() {
@@ -207,14 +227,18 @@ function isCurrentConversationSelectionFor(username, selectionGeneration) {
 }
 
 async function openConversation(username) {
-  if (!username) return;
+  if (!username) {
+    return;
+  }
   clearAlert();
   clearRecipientSuggestions();
   const selectedUsername = username.trim().replace(/^@/, '');
   const selectionGeneration = ++conversationSelectionGeneration;
   ACTIVE_USERNAME = selectedUsername;
   const title = document.getElementById('conversationTitle');
-  if (title) title.textContent = `@${selectedUsername}`;
+  if (title) {
+    title.textContent = `@${selectedUsername}`;
+  }
   const profileLink = document.getElementById('conversationProfileLink');
   if (profileLink) {
     profileLink.href = `/u/${encodeURIComponent(selectedUsername)}`;
@@ -222,19 +246,25 @@ async function openConversation(username) {
   }
   document.getElementById('messageForm')?.classList.remove('d-none');
   const olderMessagesButton = document.getElementById('loadOlderMessages');
-  if (olderMessagesButton) olderMessagesButton.disabled = false;
+  if (olderMessagesButton) {
+    olderMessagesButton.disabled = false;
+  }
   renderConversations();
   const page = parseConversationPage(await fetchJson(
       API.messages.conversationPage(selectedUsername, null, 50), {
     headers: authHeaders(),
     redirectOnUnauthorized: true,
   }));
-  if (!isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) return;
+  if (!isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) {
+    return;
+  }
   THREAD_STATE = page;
   renderMessages(THREAD_STATE.items);
   renderConversationActions();
   await loadConversations(selectionGeneration);
-  if (!isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) return;
+  if (!isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) {
+    return;
+  }
   renderConversations();
   const url = new URL(window.location.href);
   url.searchParams.set('with', selectedUsername);
@@ -242,7 +272,9 @@ async function openConversation(username) {
 }
 
 async function loadOlderMessages() {
-  if (!ACTIVE_USERNAME || !THREAD_STATE.nextCursor) return;
+  if (!ACTIVE_USERNAME || !THREAD_STATE.nextCursor) {
+    return;
+  }
   const selectedUsername = ACTIVE_USERNAME;
   const selectionGeneration = conversationSelectionGeneration;
   const nextCursor = THREAD_STATE.nextCursor;
@@ -250,19 +282,25 @@ async function loadOlderMessages() {
   const list = document.getElementById('messageList');
   const priorHeight = list?.scrollHeight || 0;
   try {
-    if (button) button.disabled = true;
+    if (button) {
+      button.disabled = true;
+    }
     const olderPage = parseConversationPage(await fetchJson(
         API.messages.conversationPage(selectedUsername, nextCursor, 50), {
           headers: authHeaders(),
           redirectOnUnauthorized: true,
         }));
-    if (!isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) return;
+    if (!isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) {
+      return;
+    }
     THREAD_STATE = {
       items: mergeOlderConversationPage(THREAD_STATE.items, olderPage),
       nextCursor: olderPage.nextCursor,
     };
     renderMessages(THREAD_STATE.items, false);
-    if (list) list.scrollTop = Math.max(0, list.scrollHeight - priorHeight);
+    if (list) {
+      list.scrollTop = Math.max(0, list.scrollHeight - priorHeight);
+    }
     renderConversationActions();
   } catch (olderMessagesFailure) {
     if (isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) {
@@ -275,10 +313,14 @@ async function loadOlderMessages() {
 }
 
 async function archiveActiveConversation() {
-  if (!ACTIVE_USERNAME) return;
+  if (!ACTIVE_USERNAME) {
+    return;
+  }
   const button = document.getElementById('archiveConversation');
   try {
-    if (button) button.disabled = true;
+    if (button) {
+      button.disabled = true;
+    }
     await fetchJson(API.messages.archiveConversation(ACTIVE_USERNAME), {
       method: 'POST',
       headers: authHeaders(),
@@ -290,7 +332,9 @@ async function archiveActiveConversation() {
     document.getElementById('messageForm')?.classList.add('d-none');
     document.getElementById('conversationProfileLink')?.classList.add('d-none');
     const title = document.getElementById('conversationTitle');
-    if (title) title.textContent = 'Pick a conversation';
+    if (title) {
+      title.textContent = 'Pick a conversation';
+    }
     renderMessages([]);
     renderConversationActions();
     await loadConversations();
@@ -300,7 +344,9 @@ async function archiveActiveConversation() {
   } catch (archiveFailure) {
     showAlert(archiveFailure?.message || 'Failed to archive conversation.');
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+    }
   }
 }
 
@@ -308,23 +354,31 @@ async function sendActiveMessage() {
   const textarea = document.getElementById('messageText');
   const button = document.getElementById('sendMessageBtn');
   const text = (textarea?.value || '').trim();
-  if (!ACTIVE_USERNAME || !text) return;
+  if (!ACTIVE_USERNAME || !text) {
+    return;
+  }
   clearAlert();
   try {
-    if (button) button.disabled = true;
+    if (button) {
+      button.disabled = true;
+    }
     await fetchJson(API.messages.base, {
       method: 'POST',
       headers: authHeaders(),
       redirectOnUnauthorized: true,
       body: JSON.stringify({ recipientUsername: ACTIVE_USERNAME, text })
     });
-    if (textarea) textarea.value = '';
+    if (textarea) {
+      textarea.value = '';
+    }
     updateCounter();
     await openConversation(ACTIVE_USERNAME);
   } catch (sendFailure) {
     showAlert(sendFailure.message);
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+    }
   }
 }
 
@@ -356,7 +410,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const target = getInitialTarget();
     if (target) {
       const input = document.getElementById('recipientHandle');
-      if (input) input.value = target.replace(/^@/, '');
+      if (input) {
+        input.value = target.replace(/^@/, '');
+      }
       await openConversation(target);
     }
   } catch (startupFailure) {

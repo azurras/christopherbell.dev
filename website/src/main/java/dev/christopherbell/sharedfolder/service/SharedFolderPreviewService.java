@@ -1,20 +1,20 @@
 package dev.christopherbell.sharedfolder.service;
 
 import dev.christopherbell.configuration.SharedFolderProperties;
-import dev.christopherbell.sharedfolder.fs.SharedFolderReadResource;
-import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver.ReadHandle;
+import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
+import dev.christopherbell.sharedfolder.fs.SharedFolderReadResource;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
-import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundary;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundary.NativeReadTarget;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundary;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.attribute.BasicFileAttributes;
-import org.springframework.core.io.Resource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;

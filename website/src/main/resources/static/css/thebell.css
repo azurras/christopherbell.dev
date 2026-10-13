@@ -1,12 +1,11 @@
 body{
-	background-image:url('');
 	text-align: center;
 }
 
 h1 {
 	color: #000000;
 	text-align: center;
-	font-size:
+	font-size: 70px;
 }
 
 img{
@@ -62,12 +61,7 @@ ul {
 	padding-bottom: 50px;
 }
 
-.article-title{
-	font: bold;
-}
-
 .article-text {
-	background-image:url();
 	background-color: white;
 	border: 0px solid #000000;
 	border-radius: 10px;

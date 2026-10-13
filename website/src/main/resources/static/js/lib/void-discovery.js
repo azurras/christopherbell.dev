@@ -21,7 +21,9 @@ export function applyDiscoveryPage(state, page, append = false) {
 
 /** Load one panel; failure is contained to only the supplied state object. */
 export async function loadDiscoverySection(state, fetchPage, append = false) {
-  if (state.loading) return state;
+  if (state.loading) {
+    return state;
+  }
   state.loading = true;
   state.error = null;
   try {

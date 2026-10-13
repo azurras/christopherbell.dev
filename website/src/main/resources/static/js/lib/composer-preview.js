@@ -24,7 +24,9 @@ export function composerPreviewModel(text, maxLength = 280) {
  * Render sanitized preview markup using the same rich embed detector as feed cards.
  */
 export function composerPreviewMarkup(model, sanitize) {
-  if (typeof sanitize !== 'function') return '';
+  if (typeof sanitize !== 'function') {
+    return '';
+  }
 
   if (!model?.hasContent) {
     return '<div class="composer-preview composer-preview-empty">Preview appears as you type.</div>';

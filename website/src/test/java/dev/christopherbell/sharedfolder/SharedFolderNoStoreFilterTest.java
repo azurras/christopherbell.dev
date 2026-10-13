@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -44,12 +45,12 @@ class SharedFolderNoStoreFilterTest {
         "POST", "/api/shared-folder/2026-07-17/folders");
     var invalidResponse = new org.springframework.mock.web.MockHttpServletResponse();
     filter.doFilter(invalid, invalidResponse, (request, response) ->
-        ((jakarta.servlet.http.HttpServletResponse) response).setStatus(400));
+        ((HttpServletResponse) response).setStatus(400));
     var denied = new org.springframework.mock.web.MockHttpServletRequest(
         "GET", "/api/shared-folder/2026-07-17/admin/audit");
     var deniedResponse = new org.springframework.mock.web.MockHttpServletResponse();
     filter.doFilter(denied, deniedResponse, (request, response) ->
-        ((jakarta.servlet.http.HttpServletResponse) response).setStatus(403));
+        ((HttpServletResponse) response).setStatus(403));
 
     org.mockito.Mockito.verify(audit).recordRejectedOnce(
         "CREATE_FOLDER", "request", "invalid_request");
@@ -93,7 +94,7 @@ class SharedFolderNoStoreFilterTest {
     var request = new MockHttpServletRequest(method, uri);
     var response = new MockHttpServletResponse();
     filter.doFilter(request, response, (ignoredRequest, ignoredResponse) ->
-        ((jakarta.servlet.http.HttpServletResponse) ignoredResponse).setStatus(status));
+        ((HttpServletResponse) ignoredResponse).setStatus(status));
     assertThat(response.getHeader("Cache-Control")).isEqualTo("private, no-store");
   }
 
@@ -131,7 +132,7 @@ class SharedFolderNoStoreFilterTest {
     filter.doFilter(request, response, (ignoredRequest, ignoredResponse) -> {
       recorder.recordCurrent(
           "PERMISSION_CHANGE", "account-1", null, "rejected", "access_denied");
-      ((jakarta.servlet.http.HttpServletResponse) ignoredResponse).setStatus(403);
+      ((HttpServletResponse) ignoredResponse).setStatus(403);
     });
 
     var captor = org.mockito.ArgumentCaptor.forClass(

@@ -4,9 +4,13 @@ const initializedRoots = new WeakSet();
 
 /** Return a normalized absolute HTTP(S) image URL or an empty rejection. */
 export function activeImageUrl(src) {
-  if (typeof src !== 'string' || !src.trim()) return '';
+  if (typeof src !== 'string' || !src.trim()) {
+    return '';
+  }
   const raw = src.trim();
-  if (!/^https?:\/\/[^\\/\s?#]+(?:[/?#]|$)/i.test(raw)) return '';
+  if (!/^https?:\/\/[^\\/\s?#]+(?:[/?#]|$)/i.test(raw)) {
+    return '';
+  }
   try {
     const parsed = new URL(raw);
     return ['http:', 'https:'].includes(parsed.protocol) && parsed.hostname
@@ -20,7 +24,9 @@ export function activeImageUrl(src) {
 /** Render the modal shell used for expanded post images. */
 export function imageLightboxMarkup(src) {
   const safeSrc = activeImageUrl(src);
-  if (!safeSrc) return '';
+  if (!safeSrc) {
+    return '';
+  }
   return `<div class="post-image-lightbox" role="dialog" aria-modal="true" aria-label="Post image preview" tabindex="-1">
     <button type="button" class="post-image-lightbox-close" aria-label="Close image preview">&times;</button>
     <img src="${sanitize(safeSrc)}" alt="Expanded post image">
@@ -45,21 +51,29 @@ export function imageFallbackMarkup(src) {
  * per-page reinitialization.
  */
 export function initPostImageLightbox(root = document) {
-  if (!root?.addEventListener || initializedRoots.has(root)) return;
+  if (!root?.addEventListener || initializedRoots.has(root)) {
+    return;
+  }
   initializedRoots.add(root);
 
   root.addEventListener('click', event => {
     const trigger = event.target?.closest?.('[data-post-image-src]');
-    if (!trigger) return;
+    if (!trigger) {
+      return;
+    }
 
     event.preventDefault();
     const src = trigger.getAttribute('data-post-image-src');
-    if (!src) return;
+    if (!src) {
+      return;
+    }
 
     const wrapper = document.createElement('div');
     wrapper.innerHTML = imageLightboxMarkup(src);
     const dialog = wrapper.firstElementChild;
-    if (!dialog) return;
+    if (!dialog) {
+      return;
+    }
 
     document.body.appendChild(dialog);
     const previouslyFocused = document.activeElement;
@@ -73,7 +87,9 @@ export function initPostImageLightbox(root = document) {
         close();
         return;
       }
-      if (keyEvent.key !== 'Tab') return;
+      if (keyEvent.key !== 'Tab') {
+        return;
+      }
 
       const focusable = [...dialog.querySelectorAll('button, a, img, [tabindex]:not([tabindex="-1"])')]
           .filter(element => !element.hasAttribute('disabled'));
@@ -96,7 +112,9 @@ export function initPostImageLightbox(root = document) {
 
     dialog.querySelector('.post-image-lightbox-close')?.addEventListener('click', close);
     dialog.addEventListener('click', clickEvent => {
-      if (clickEvent.target === dialog) close();
+      if (clickEvent.target === dialog) {
+        close();
+      }
     });
     document.addEventListener('keydown', handleKeydown);
     dialog.querySelector('.post-image-lightbox-close')?.focus();

@@ -12,7 +12,9 @@ const curlOutput = document.getElementById('vinCurlOutput');
 
 function setText(id, value) {
   const el = document.getElementById(id);
-  if (el) el.textContent = value || '-';
+  if (el) {
+    el.textContent = value || '-';
+  }
 }
 
 function plantText(decoded) {
@@ -46,13 +48,19 @@ function render(decoded) {
   setText('vinPlant', plantText(decoded));
 
   const formattedJson = JSON.stringify(decoded, null, 2);
-  if (jsonOutput) jsonOutput.textContent = formattedJson;
-  if (curlOutput) curlOutput.textContent = curlFor(decoded.vin);
+  if (jsonOutput) {
+    jsonOutput.textContent = formattedJson;
+  }
+  if (curlOutput) {
+    curlOutput.textContent = curlFor(decoded.vin);
+  }
   result?.classList.remove('d-none');
 }
 
 async function copyText(el, buttonEl) {
-  if (!el || !buttonEl) return;
+  if (!el || !buttonEl) {
+    return;
+  }
   try {
     await navigator.clipboard.writeText(el.textContent || '');
     const original = buttonEl.textContent;
@@ -77,7 +85,9 @@ form?.addEventListener('submit', async (event) => {
   }
 
   try {
-    if (button) button.disabled = true;
+    if (button) {
+      button.disabled = true;
+    }
     const decoded = await fetchJson(API.vehicles.decodeVin, {
       method: 'POST',
       body: JSON.stringify({ vin })
@@ -87,7 +97,9 @@ form?.addEventListener('submit', async (event) => {
     showAlert(err.message || 'VIN decode failed.');
     result?.classList.add('d-none');
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+    }
   }
 });
 

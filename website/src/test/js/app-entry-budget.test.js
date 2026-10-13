@@ -21,7 +21,9 @@ function assertInsideRoot(file, root) {
 async function initialGraph(entry, root = JS_ROOT, visited = new Set()) {
   const resolved = path.resolve(entry);
   assertInsideRoot(resolved, root);
-  if (visited.has(resolved)) return visited;
+  if (visited.has(resolved)) {
+    return visited;
+  }
 
   visited.add(resolved);
   const source = await readFile(resolved, 'utf8');

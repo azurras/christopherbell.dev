@@ -69,7 +69,9 @@ export async function prepareSharedFolderMediaAuth(requestUrl) {
 }
 
 function isExpectedWorker(worker) {
-  if (!worker) return false;
+  if (!worker) {
+    return false;
+  }
   const url = new URL(worker.scriptURL);
   return url.pathname === SHARED_FOLDER_AUTH_WORKER_PATH
     && url.search === `?v=${SHARED_FOLDER_AUTH_WORKER_REVISION}`;
@@ -86,7 +88,9 @@ function waitForExpectedController() {
     }, 5000);
     const onControllerChange = () => {
       const controller = navigator.serviceWorker.controller;
-      if (!isExpectedWorker(controller)) return;
+      if (!isExpectedWorker(controller)) {
+        return;
+      }
       window.clearTimeout(timeout);
       navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
       resolve(controller);

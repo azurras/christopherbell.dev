@@ -238,8 +238,11 @@ test('component publishes exact title artist album and artwork to Media Session'
       artwork: [{ src: 'blob:album-cover', type: 'image/jpeg' }],
     });
   } finally {
-    if (previousNavigator) Object.defineProperty(globalThis, 'navigator', previousNavigator);
-    else delete globalThis.navigator;
+    if (previousNavigator) {
+      Object.defineProperty(globalThis, 'navigator', previousNavigator);
+    } else {
+      delete globalThis.navigator;
+    }
     globalThis.MediaMetadata = previousMediaMetadata;
   }
 });
@@ -298,11 +301,16 @@ function fakeEventTarget() {
     },
     removeEventListener(name, listener) {
       const remaining = (listeners.get(name) || []).filter(candidate => candidate !== listener);
-      if (remaining.length > 0) listeners.set(name, remaining);
-      else listeners.delete(name);
+      if (remaining.length > 0) {
+        listeners.set(name, remaining);
+      } else {
+        listeners.delete(name);
+      }
     },
     dispatch(name, event = undefined) {
-      for (const listener of [...(listeners.get(name) || [])]) listener(event);
+      for (const listener of [...(listeners.get(name) || [])]) {
+        listener(event);
+      }
     },
     eventNames() { return [...listeners.keys()].sort(); },
   };

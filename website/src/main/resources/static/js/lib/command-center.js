@@ -24,12 +24,20 @@ export function displayMetric(reading) {
   }
   if (reading.unit === 'commit') {
     const detail = reading.detail == null ? '' : String(reading.detail);
-    if (!detail) return 'Unavailable';
+    if (!detail) {
+      return 'Unavailable';
+    }
     return /^[A-Za-z0-9._-]{1,64}$/.test(detail) ? detail.slice(0, 8) : detail;
   }
-  if (reading.unit === 'bytes') return formatBinaryMetric(Number(reading.value), false);
-  if (reading.unit === 'bytes/second') return formatBinaryMetric(Number(reading.value), true);
-  if (reading.unit === 'seconds') return formatDuration(Number(reading.value));
+  if (reading.unit === 'bytes') {
+    return formatBinaryMetric(Number(reading.value), false);
+  }
+  if (reading.unit === 'bytes/second') {
+    return formatBinaryMetric(Number(reading.value), true);
+  }
+  if (reading.unit === 'seconds') {
+    return formatDuration(Number(reading.value));
+  }
   const value = Number(reading.value).toLocaleString(undefined, { maximumFractionDigits: 1 });
   const units = {
     percent: '%',
@@ -46,23 +54,33 @@ export function displayMetric(reading) {
 /** Return optional secondary metric text without duplicating commit values. */
 export function metricDetail(reading) {
   const detail = reading?.detail == null ? '' : String(reading.detail);
-  if (!detail || reading?.unit === 'commit') return null;
+  if (!detail || reading?.unit === 'commit') {
+    return null;
+  }
   return detail;
 }
 
 /** Preserve the complete commit identifier as accessible title text. */
 export function metricTitle(reading) {
-  if (reading?.unit !== 'commit' || !reading?.detail) return null;
+  if (reading?.unit !== 'commit' || !reading?.detail) {
+    return null;
+  }
   return String(reading.detail);
 }
 
 function formatDuration(value) {
   const totalSeconds = Math.max(0, Math.floor(value));
-  if (totalSeconds < 60) return `${totalSeconds}s`;
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
   const totalMinutes = Math.floor(totalSeconds / 60);
-  if (totalMinutes < 60) return `${totalMinutes}m ${totalSeconds % 60}s`;
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m ${totalSeconds % 60}s`;
+  }
   const totalHours = Math.floor(totalMinutes / 60);
-  if (totalHours < 24) return `${totalHours}h ${totalMinutes % 60}m`;
+  if (totalHours < 24) {
+    return `${totalHours}h ${totalMinutes % 60}m`;
+  }
   return `${Math.floor(totalHours / 24)}d ${totalHours % 24}h`;
 }
 
@@ -74,14 +92,18 @@ function formatBinaryMetric(value, perSecond) {
     scaled /= 1024;
     unitIndex += 1;
   }
-  if (value < 0) scaled *= -1;
+  if (value < 0) {
+    scaled *= -1;
+  }
   const formatted = scaled.toLocaleString(undefined, { maximumFractionDigits: 1 });
   return `${formatted} ${units[unitIndex]}${perSecond ? '/s' : ''}`;
 }
 
 /** Resolve the CSS/display state for a reading. */
 export function metricState(reading) {
-  if (reading?.status === 'STALE') return 'stale';
+  if (reading?.status === 'STALE') {
+    return 'stale';
+  }
   if (!reading || reading.status === 'UNAVAILABLE' || reading.status === 'ERROR'
       || reading.value == null) return 'unavailable';
   return 'available';
@@ -100,14 +122,20 @@ export function shouldPoll(documentHidden, paused) {
 
 /** Decide whether a poll request starts, queues behind the active request, or is ignored. */
 export function pollRequestDecision({ hidden, revoked, inFlight }) {
-  if (hidden || revoked) return 'ignore';
+  if (hidden || revoked) {
+    return 'ignore';
+  }
   return inFlight ? 'queue' : 'start';
 }
 
 /** Classify poll failures without allowing stale generations to mask access loss. */
 export function pollFailureDecision(error, current) {
-  if (isAccessDenied(error)) return 'revoke';
-  if (error?.name === 'AbortError' || !current) return 'ignore';
+  if (isAccessDenied(error)) {
+    return 'revoke';
+  }
+  if (error?.name === 'AbortError' || !current) {
+    return 'ignore';
+  }
   return 'retry';
 }
 

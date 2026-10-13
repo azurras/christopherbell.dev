@@ -181,7 +181,9 @@ class AppNav extends HTMLElement {
             this.navigationAccess = accountNavigationAccess(null);
             return;
         }
-        if (this.userLoadInFlight) return;
+        if (this.userLoadInFlight) {
+          return;
+        }
         this.userLoadInFlight = true;
         try {
             const account = await fetchJson(API.accounts.me);
@@ -199,7 +201,9 @@ class AppNav extends HTMLElement {
     }
 
     async loadNotifications() {
-        if (!isLoggedIn() || this.notificationLoadInFlight) return;
+        if (!isLoggedIn() || this.notificationLoadInFlight) {
+          return;
+        }
         this.notificationLoadInFlight = true;
         try {
             const [items, unread] = await Promise.all([
@@ -427,7 +431,9 @@ class AppNav extends HTMLElement {
             const enableBrowserNotifications = this.querySelector('.notification-enable-btn');
             if (enableBrowserNotifications) {
                 enableBrowserNotifications.addEventListener('click', async () => {
-                    if (this.notificationPermissionStatus() !== 'default') return;
+                    if (this.notificationPermissionStatus() !== 'default') {
+                      return;
+                    }
                     const result = await window.Notification.requestPermission();
                     if (result === 'granted') {
                         this.seedBrowserNotificationIds(this.notifications || []);
