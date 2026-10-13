@@ -4,8 +4,8 @@ import java.net.IDN;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.text.Normalizer;
 import java.text.Normalizer.Form;
+import java.text.Normalizer;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -46,10 +46,14 @@ public final class EmailSanitizer {
    * - Enforces total length ≤ 254.
    */
   public static String sanitize(String input) {
-    if (input == null) throw new IllegalArgumentException("email is null");
+    if (input == null) {
+      throw new IllegalArgumentException("email is null");
+    }
 
     String strippedInput = input.strip();
-    if (strippedInput.isEmpty()) throw new IllegalArgumentException("email is empty");
+    if (strippedInput.isEmpty()) {
+      throw new IllegalArgumentException("email is empty");
+    }
 
     // Wrappers
     String emailWithoutMailtoPrefix = strippedInput;
@@ -98,7 +102,9 @@ public final class EmailSanitizer {
 
     // Total length (local + '@' + domain)
     int normalizedEmailLength = lowercaseLocalPart.length() + 1 + normalizedDomain.length();
-    if (normalizedEmailLength > MAX_EMAIL_LEN) throw new IllegalArgumentException("email too long");
+    if (normalizedEmailLength > MAX_EMAIL_LEN) {
+      throw new IllegalArgumentException("email too long");
+    }
 
     return lowercaseLocalPart + "@" + normalizedDomain;
   }
@@ -117,10 +123,14 @@ public final class EmailSanitizer {
 
   private static String normalizeDomain(String domainName) {
     // localhost
-    if ("localhost".equals(domainName)) return domainName;
+    if ("localhost".equals(domainName)) {
+      return domainName;
+    }
 
     // IPv4 unbracketed
-    if (IPV4.matcher(domainName).matches()) return domainName;
+    if (IPV4.matcher(domainName).matches()) {
+      return domainName;
+    }
 
     // Bracketed IPv6 literal: [::1] or [IPv6::1]
     if (domainName.startsWith("[") && domainName.endsWith("]")) {
@@ -153,11 +163,19 @@ public final class EmailSanitizer {
     }
 
     String[] asciiDomainLabels = asciiDomain.split("\\.");
-    if (asciiDomainLabels.length < 2) throw new IllegalArgumentException("domain must contain a dot");
+    if (asciiDomainLabels.length < 2) {
+      throw new IllegalArgumentException("domain must contain a dot");
+    }
     for (String label : asciiDomainLabels) {
-      if (label.isEmpty() || label.length() > 63) throw new IllegalArgumentException("bad domain label length");
-      if (!LABEL_SAFE.matcher(label).matches()) throw new IllegalArgumentException("invalid domain label char");
-      if (label.startsWith("-") || label.endsWith("-")) throw new IllegalArgumentException("hyphen placement");
+      if (label.isEmpty() || label.length() > 63) {
+        throw new IllegalArgumentException("bad domain label length");
+      }
+      if (!LABEL_SAFE.matcher(label).matches()) {
+        throw new IllegalArgumentException("invalid domain label char");
+      }
+      if (label.startsWith("-") || label.endsWith("-")) {
+        throw new IllegalArgumentException("hyphen placement");
+      }
     }
     String topLevelDomain = asciiDomainLabels[asciiDomainLabels.length - 1];
     char topLevelDomainFirstCharacter = topLevelDomain.charAt(0);

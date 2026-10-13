@@ -12,7 +12,9 @@ public class LeaseService {
   private final LeaseStore store;
   private final ConcurrentHashMap<LeaseIdentity, LeaseGrant> grants = new ConcurrentHashMap<>();
 
-  public LeaseService(LeaseStore store) { this.store = store; }
+  public LeaseService(LeaseStore store) {
+    this.store = store;
+  }
 
   public Optional<LeaseGrant> tryAcquire(String name, String ownerId, Duration duration) {
     Optional<LeaseGrant> acquired = store.tryAcquire(name, ownerId, requireDuration(duration));
@@ -28,7 +30,9 @@ public class LeaseService {
 
   public boolean release(LeaseGrant grant) {
     boolean released = store.release(grant);
-    if (released) grants.remove(new LeaseIdentity(grant.leaseName(), grant.ownerId()), grant);
+    if (released) {
+      grants.remove(new LeaseIdentity(grant.leaseName(), grant.ownerId()), grant);
+    }
     return released;
   }
 
@@ -47,7 +51,9 @@ public class LeaseService {
   }
 
   private static Duration duration(Instant start, Instant end) {
-    if (start == null || end == null) throw new IllegalArgumentException("Lease deadline is required.");
+    if (start == null || end == null) {
+      throw new IllegalArgumentException("Lease deadline is required.");
+    }
     return requireDuration(Duration.between(start, end));
   }
 

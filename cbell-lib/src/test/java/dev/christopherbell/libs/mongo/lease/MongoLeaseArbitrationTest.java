@@ -236,15 +236,21 @@ class MongoLeaseArbitrationTest {
       if (!(expected instanceof Map<?, ?> operations)) {
         return Objects.equals(actual, expected);
       }
-      if (actual == null) return false;
+      if (actual == null) {
+        return false;
+      }
       for (Map.Entry<?, ?> operation : operations.entrySet()) {
         int comparison = compare(actual, operation.getValue());
         switch (String.valueOf(operation.getKey())) {
           case "$lte" -> {
-            if (comparison > 0) return false;
+            if (comparison > 0) {
+              return false;
+            }
           }
           case "$gt" -> {
-            if (comparison <= 0) return false;
+            if (comparison <= 0) {
+              return false;
+            }
           }
           default -> throw new IllegalArgumentException(
               "Unsupported lease query operation " + operation.getKey() + ".");
@@ -258,8 +264,12 @@ class MongoLeaseArbitrationTest {
     }
 
     private Instant instant(Object value) {
-      if (value instanceof Instant instant) return instant;
-      if (value instanceof Date date) return date.toInstant();
+      if (value instanceof Instant instant) {
+        return instant;
+      }
+      if (value instanceof Date date) {
+        return date.toInstant();
+      }
       throw new IllegalArgumentException("Expected a time value but found " + value + ".");
     }
 
@@ -275,8 +285,12 @@ class MongoLeaseArbitrationTest {
     }
 
     private Document document(Object value) {
-      if (value == null) return null;
-      if (value instanceof Document document) return document;
+      if (value == null) {
+        return null;
+      }
+      if (value instanceof Document document) {
+        return document;
+      }
       if (value instanceof Map<?, ?> map) {
         var document = new Document();
         map.forEach((key, entryValue) -> document.put(String.valueOf(key), entryValue));

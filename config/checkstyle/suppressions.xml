@@ -15,6 +15,4 @@
   <suppress files="[\/]sharedfolder[\/]fs[\/]" checks=".*"/>
   <!-- Slice 20: application and cross-feature tests. -->
   <suppress files="[\/]test[\/]java[\/]dev[\/]christopherbell[\/]architecture[\/]" checks=".*"/>
-  <!-- Slice 21: cbell-lib. -->
-  <suppress files="[\/]cbell-lib[\/]" checks=".*"/>
 </suppressions>

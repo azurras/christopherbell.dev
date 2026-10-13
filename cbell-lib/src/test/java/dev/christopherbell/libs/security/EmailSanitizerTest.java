@@ -7,7 +7,11 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 import java.net.UnknownHostException;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("EmailSanitizer (pragmatic): normalization, strict whitespace, ASCII local, IDN domain")
 public final class EmailSanitizerTest {

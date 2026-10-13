@@ -2,6 +2,7 @@ package dev.christopherbell.libs.mongo.lease;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.time.Instant;
 import dev.christopherbell.libs.lease.ScheduledCollectorRun;
@@ -13,7 +14,7 @@ class MongoStorePortContractTest {
   void leaseStoreIsANarrowPhysicalNameFreePort() throws Exception {
     assertThat(MongoLeaseStore.class.isInterface()).isTrue();
     assertThat(MongoLeaseStore.class.getDeclaredMethods())
-        .extracting(java.lang.reflect.Method::getName)
+        .extracting(Method::getName)
         .containsExactlyInAnyOrder("tryAcquire", "renew", "release");
     assertThat(MongoLeaseStore.class.getDeclaredFields())
         .allMatch(field -> !Modifier.isStatic(field.getModifiers()));
@@ -26,7 +27,7 @@ class MongoStorePortContractTest {
   void collectorRunStoreOwnsOnlyDurableRunWrites() throws Exception {
     assertThat(ScheduledCollectorRunStore.class.isInterface()).isTrue();
     assertThat(ScheduledCollectorRunStore.class.getDeclaredMethods())
-        .extracting(java.lang.reflect.Method::getName)
+        .extracting(Method::getName)
         .containsExactly("save");
     assertThat(ScheduledCollectorRunStore.class.getMethod("save", ScheduledCollectorRun.class))
         .isNotNull();

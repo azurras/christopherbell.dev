@@ -1,10 +1,9 @@
 package dev.christopherbell.libs.api.model;
 
+import java.util.List;
 import java.util.UUID;
 import lombok.Data;
 import lombok.experimental.SuperBuilder;
-
-import java.util.List;
 
 /**
  * Generic API response envelope containing a payload and metadata.
