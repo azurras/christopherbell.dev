@@ -277,9 +277,8 @@ rules:
 - imported types instead of `java.`, `javax.` or `jakarta.` names written with
   their package.
 
-Run it alone with `./gradlew checkstyleMain checkstyleTest`.
-`config/checkstyle/suppressions.xml` lists code whose style migration has not
-merged yet; remove a line when its migration lands, and add nothing else.
+Run it alone with `./gradlew checkstyleMain checkstyleTest`. Every Java source
+is covered; fix a violation rather than suppressing it.
 
 ## Backend Architecture
 

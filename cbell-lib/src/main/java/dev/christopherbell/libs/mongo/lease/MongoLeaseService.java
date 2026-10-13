@@ -6,7 +6,9 @@ import java.time.Instant;
 public class MongoLeaseService {
   private final MongoLeaseStore store;
 
-  public MongoLeaseService(MongoLeaseStore store) { this.store = store; }
+  public MongoLeaseService(MongoLeaseStore store) {
+    this.store = store;
+  }
 
   public boolean tryAcquire(
       String name, String ownerToken, Instant now, Instant expiresAt) {

@@ -3,11 +3,12 @@ package dev.christopherbell.libs.security;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.security.spec.InvalidKeySpecException;
+import java.util.Base64;
+import java.util.Optional;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
-import java.security.SecureRandom;
-import java.util.Base64;
 import lombok.experimental.UtilityClass;
 
 /**
@@ -56,17 +57,16 @@ public class PasswordUtil {
       throws NoSuchAlgorithmException, InvalidKeySpecException {
     try {
       var encoded = parse(storedHash);
-      if (storedHash != null && storedHash.startsWith(FORMAT_PREFIX) && encoded == null) {
+      if (storedHash != null && storedHash.startsWith(FORMAT_PREFIX) && encoded.isEmpty()) {
         return false;
       }
-      if (encoded == null && (salt == null || salt.isBlank())) {
+      if (encoded.isEmpty() && (salt == null || salt.isBlank())) {
         return false;
       }
-      var expected = encoded == null
-          ? derive(password, salt, LEGACY_ITERATIONS)
-          : derive(password, encoded.salt(), encoded.iterations());
-      padVerificationCost(password, encoded == null ? LEGACY_ITERATIONS : encoded.iterations());
-      var actual = encoded == null ? storedHash : encoded.hash();
+      int iterations = encoded.map(EncodedHash::iterations).orElse(LEGACY_ITERATIONS);
+      var expected = derive(password, encoded.map(EncodedHash::salt).orElse(salt), iterations);
+      padVerificationCost(password, iterations);
+      var actual = encoded.map(EncodedHash::hash).orElse(storedHash);
       return actual != null && MessageDigest.isEqual(
           expected.getBytes(StandardCharsets.US_ASCII),
           actual.getBytes(StandardCharsets.US_ASCII));
@@ -77,17 +77,16 @@ public class PasswordUtil {
 
   /** Returns whether a verified credential should be rewritten in the current format. */
   public static boolean needsRehash(String legacySalt, String storedHash) {
-    var encoded = parse(storedHash);
-    return encoded == null
-        || encoded.iterations() != CURRENT_ITERATIONS
-        || (legacySalt != null && !legacySalt.isBlank());
+    boolean isCurrentFormat = parse(storedHash)
+        .map(encoded -> encoded.iterations() == CURRENT_ITERATIONS)
+        .orElse(false);
+    return !isCurrentFormat || (legacySalt != null && !legacySalt.isBlank());
   }
 
   /** Re-encodes a verified password deterministically so concurrent upgrades agree. */
   public static String upgradePassword(String password, String legacySalt, String storedHash)
       throws NoSuchAlgorithmException, InvalidKeySpecException {
-    var encoded = parse(storedHash);
-    var salt = encoded == null ? legacySalt : encoded.salt();
+    var salt = parse(storedHash).map(EncodedHash::salt).orElse(legacySalt);
     if (salt == null || salt.isBlank()) {
       throw new IllegalArgumentException("Verified password hash has no reusable salt.");
     }
@@ -95,9 +94,9 @@ public class PasswordUtil {
   }
 
   static int verificationIterationsFor(String legacySalt, String storedHash) {
-    var encoded = parse(storedHash);
-    if (encoded != null) return Math.max(CURRENT_ITERATIONS, encoded.iterations());
-    return legacySalt == null || legacySalt.isBlank() ? 0 : CURRENT_ITERATIONS;
+    return parse(storedHash)
+        .map(encoded -> Math.max(CURRENT_ITERATIONS, encoded.iterations()))
+        .orElseGet(() -> legacySalt == null || legacySalt.isBlank() ? 0 : CURRENT_ITERATIONS);
   }
 
   private static String encode(String password, String salt, int iterations)
@@ -133,18 +132,23 @@ public class PasswordUtil {
     }
   }
 
-  private static EncodedHash parse(String storedHash) {
-    if (storedHash == null || !storedHash.startsWith(FORMAT_PREFIX)) return null;
+  /** The current-format hash, or empty for a legacy or malformed stored value. */
+  private static Optional<EncodedHash> parse(String storedHash) {
+    if (storedHash == null || !storedHash.startsWith(FORMAT_PREFIX)) {
+      return Optional.empty();
+    }
     var parts = storedHash.split("\\$", -1);
-    if (parts.length != 4 || !FORMAT.equals(parts[0])) return null;
+    if (parts.length != 4 || !FORMAT.equals(parts[0])) {
+      return Optional.empty();
+    }
     try {
       var iterations = Integer.parseInt(parts[1]);
-      if (iterations < 1 || iterations > MAX_ACCEPTED_ITERATIONS) return null;
-      if (Base64.getDecoder().decode(parts[2]).length != SALT_LENGTH) return null;
-      if (Base64.getDecoder().decode(parts[3]).length * Byte.SIZE != HASH_KEY_LENGTH) return null;
-      return new EncodedHash(iterations, parts[2], parts[3]);
+      boolean isValid = iterations >= 1 && iterations <= MAX_ACCEPTED_ITERATIONS
+          && Base64.getDecoder().decode(parts[2]).length == SALT_LENGTH
+          && Base64.getDecoder().decode(parts[3]).length * Byte.SIZE == HASH_KEY_LENGTH;
+      return isValid ? Optional.of(new EncodedHash(iterations, parts[2], parts[3])) : Optional.empty();
     } catch (IllegalArgumentException malformed) {
-      return null;
+      return Optional.empty();
     }
   }
 

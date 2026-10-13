@@ -1,7 +1,10 @@
 package dev.christopherbell.libs.lease;
 
+import java.io.IOException;
+import java.net.http.HttpTimeoutException;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -17,15 +20,18 @@ public class ScheduledCollectorCoordinator {
   public ScheduledCollectorCoordinator(
       LeaseService leases, ScheduledCollectorRunStore runs, Clock clock) {
     this(new LeaseAccess() {
-      @Override public boolean tryAcquire(
-          String name, String owner, java.time.Instant now, java.time.Instant expiresAt) {
+      @Override
+      public boolean tryAcquire(
+          String name, String owner, Instant now, Instant expiresAt) {
         return leases.tryAcquire(name, owner, now, expiresAt);
       }
-      @Override public boolean renew(
-          String name, String owner, java.time.Instant now, java.time.Instant expiresAt) {
+      @Override
+      public boolean renew(
+          String name, String owner, Instant now, Instant expiresAt) {
         return leases.renew(name, owner, now, expiresAt);
       }
-      @Override public boolean release(String name, String owner) {
+      @Override
+      public boolean release(String name, String owner) {
         return leases.release(name, owner);
       }
     }, runs, clock);
@@ -98,10 +104,10 @@ public class ScheduledCollectorCoordinator {
     if (failure instanceof LeaseOwnershipLostException) {
       return "LEASE_LOST";
     }
-    if (failure instanceof java.net.http.HttpTimeoutException) {
+    if (failure instanceof HttpTimeoutException) {
       return "REMOTE_TIMEOUT";
     }
-    if (failure instanceof java.io.IOException) {
+    if (failure instanceof IOException) {
       return "REMOTE_IO";
     }
     return "COLLECTOR_FAILED";
@@ -116,9 +122,9 @@ public class ScheduledCollectorCoordinator {
 
   private interface LeaseAccess {
     boolean tryAcquire(
-        String name, String owner, java.time.Instant now, java.time.Instant expiresAt);
+        String name, String owner, Instant now, Instant expiresAt);
     boolean renew(
-        String name, String owner, java.time.Instant now, java.time.Instant expiresAt);
+        String name, String owner, Instant now, Instant expiresAt);
     boolean release(String name, String owner);
   }
 }

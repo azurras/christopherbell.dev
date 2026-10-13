@@ -25,9 +25,9 @@
     const noop = async () => ({ likesCount: 0, liked: false });
     const canDelete = () => true;
 
-    for (const p of testPosts) {
-      const el = createFeedItem(p, { sanitize, formatWhen, isLoggedIn: () => true, canDelete, fetchRoot: fakeFetchRoot, onLike: noop, onDelete: async () => {} });
-      harness.appendChild(el);
+    for (const testPost of testPosts) {
+      const feedItem = createFeedItem(testPost, { sanitize, formatWhen, isLoggedIn: () => true, canDelete, fetchRoot: fakeFetchRoot, onLike: noop, onDelete: async () => {} });
+      harness.appendChild(feedItem);
     }
   </script>
 </body>

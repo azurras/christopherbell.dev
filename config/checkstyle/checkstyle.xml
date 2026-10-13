@@ -5,15 +5,11 @@
 <!--
   The mechanical subset of Chris Street Style (Builder's write-chris-street-style-code, Java
   "Settled Decisions"). Review covers the judgment calls; this keeps the mechanical rules from
-  regressing once a package conforms. suppressions.xml lists packages whose migration slice has
-  not landed yet; delete a line when its slice merges.
+  regressing. Every Java source in website and cbell-lib is covered; there are no suppressions.
 -->
 <module name="Checker">
   <property name="charset" value="UTF-8"/>
   <property name="severity" value="error"/>
-  <module name="SuppressionFilter">
-    <property name="file" value="${config_loc}/suppressions.xml"/>
-  </module>
   <module name="TreeWalker">
     <!-- Every branch and loop body is a braced block, so adding a statement cannot escape it. -->
     <module name="NeedBraces">

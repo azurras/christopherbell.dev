@@ -1,7 +1,7 @@
 package dev.christopherbell.libs.security;
 
-import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.APIConstants;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import java.util.List;
 import lombok.experimental.UtilityClass;
 
