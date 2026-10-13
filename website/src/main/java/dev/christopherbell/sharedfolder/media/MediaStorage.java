@@ -1,13 +1,14 @@
 package dev.christopherbell.sharedfolder.media;
 
 import dev.christopherbell.configuration.SharedFolderProperties;
-import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary;
 import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary.FileAccess;
+import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary;
 import jakarta.annotation.PostConstruct;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -71,7 +72,9 @@ public class MediaStorage {
 
   @PostConstruct
   public void initialize() throws IOException {
-    if (!enabled) return;
+    if (!enabled) {
+      return;
+    }
     for (String name : new String[] {JOBS, PARTIAL, READY, STATUS, CANCEL}) {
       boundary.usableSpace(name);
     }
@@ -115,20 +118,21 @@ public class MediaStorage {
 
   public String readDescriptor(String id) throws IOException {
     requireKey(id);
-    return new String(readBounded(JOBS, id + ".json", 64 * 1024), java.nio.charset.StandardCharsets.UTF_8);
+    return new String(readBounded(JOBS, id + ".json", 64 * 1024), StandardCharsets.UTF_8);
   }
 
   public boolean readyMatches(MediaJob job, long expectedBytes, long maxOutputBytes)
       throws IOException {
-    OptionalLong actual = readyLength(job, maxOutputBytes);
-    return actual.isPresent() && actual.getAsLong() == expectedBytes;
+    return readyLength(job, maxOutputBytes).equals(OptionalLong.of(expectedBytes));
   }
 
   /** Returns empty only when the completed output is absent; all other failures remain visible. */
   public OptionalLong readyLength(MediaJob job, long maxOutputBytes) throws IOException {
     try {
       long size = boundary.metadata(READY, readyKey(job)).attributes().size();
-      if (size > maxOutputBytes) throw new MediaOutputLimitException();
+      if (size > maxOutputBytes) {
+        throw new MediaOutputLimitException();
+      }
       return OptionalLong.of(size);
     } catch (NoSuchFileException exception) {
       return OptionalLong.empty();
@@ -138,7 +142,9 @@ public class MediaStorage {
   public long partialLength(MediaJob job, long maxOutputBytes) throws IOException {
     try {
       long size = boundary.metadata(PARTIAL, partialKey(job)).attributes().size();
-      if (size > maxOutputBytes) throw new MediaOutputLimitException();
+      if (size > maxOutputBytes) {
+        throw new MediaOutputLimitException();
+      }
       return size;
     } catch (NoSuchFileException exception) {
       return 0;
@@ -149,14 +155,20 @@ public class MediaStorage {
   public long copy(
       MediaJob job, boolean ready, long position, long length, OutputStream output,
       long maxOutputBytes) throws IOException {
-    if (position < 0 || length < 0) throw new IllegalArgumentException("Invalid media copy range");
+    if (position < 0 || length < 0) {
+      throw new IllegalArgumentException("Invalid media copy range");
+    }
     String directory = ready ? READY : PARTIAL;
     String key = ready ? readyKey(job) : partialKey(job);
     try (ReadyLease ignored = ready ? acquireReadyLease(job) : null) {
       return boundary.operateOnRegularFile(directory, key, FileAccess.READ, channel -> {
         long size = channel.size();
-        if (size > maxOutputBytes) throw new MediaOutputLimitException();
-        if (position > size) throw new IOException("Media output changed during streaming");
+        if (size > maxOutputBytes) {
+          throw new MediaOutputLimitException();
+        }
+        if (position > size) {
+          throw new IOException("Media output changed during streaming");
+        }
         long remaining = Math.min(length, size - position);
         channel.position(position);
         ByteBuffer buffer = ByteBuffer.allocate(64 * 1024);
@@ -165,7 +177,9 @@ public class MediaStorage {
           buffer.clear();
           buffer.limit((int) Math.min(buffer.capacity(), remaining - copied));
           int read = channel.read(buffer);
-          if (read <= 0) break;
+          if (read <= 0) {
+            break;
+          }
           output.write(buffer.array(), 0, read);
           copied += read;
         }
@@ -176,7 +190,9 @@ public class MediaStorage {
 
   public boolean deleteReady(MediaJob job) throws IOException {
     synchronized (readyLeaseLock) {
-      if (readerCount(job.getCacheKey()) > 0) return false;
+      if (readerCount(job.getCacheKey()) > 0) {
+        return false;
+      }
       return boundary.deleteIfExists(READY, readyKey(job));
     }
   }
@@ -247,7 +263,7 @@ public class MediaStorage {
     }
     final tools.jackson.databind.JsonNode root;
     try {
-      root = mapper.readTree(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+      root = mapper.readTree(new String(bytes, StandardCharsets.UTF_8));
     } catch (JacksonException | IllegalArgumentException invalid) {
       throw new MediaWorkerProtocolException("Invalid media worker status protocol", invalid);
     }
@@ -265,7 +281,9 @@ public class MediaStorage {
     if (outputBytes < 0) {
       throw new MediaWorkerProtocolException("Invalid media worker status protocol");
     }
-    if (outputBytes > maxOutputBytes) throw new MediaOutputLimitException();
+    if (outputBytes > maxOutputBytes) {
+      throw new MediaOutputLimitException();
+    }
     String category = root.path("failureCategory").isMissingNode()
         || root.path("failureCategory").isNull() ? null
         : root.path("failureCategory").asText();
@@ -292,12 +310,16 @@ public class MediaStorage {
     writeReplacingForTest(STATUS, job.getId() + ".json", mapper.writeValueAsBytes(values));
   }
 
-  void setUsableSpaceForTest(long bytes) { usableSpaceForTest = bytes; }
+  void setUsableSpaceForTest(long bytes) {
+    usableSpaceForTest = bytes;
+  }
 
   private void writeNew(String directory, String key, byte[] bytes) throws IOException {
     boundary.operateOnRegularFile(directory, key, FileAccess.CREATE_NEW, channel -> {
       ByteBuffer buffer = ByteBuffer.wrap(bytes);
-      while (buffer.hasRemaining()) channel.write(buffer);
+      while (buffer.hasRemaining()) {
+        channel.write(buffer);
+      }
       channel.force(true);
       return null;
     });
@@ -310,7 +332,9 @@ public class MediaStorage {
 
   private byte[] readBounded(String directory, String key, int limit) throws IOException {
     return boundary.operateOnRegularFile(directory, key, FileAccess.READ, channel -> {
-      if (channel.size() > limit) throw new MediaDocumentSizeException();
+      if (channel.size() > limit) {
+        throw new MediaDocumentSizeException();
+      }
       ByteArrayOutputStream output = new ByteArrayOutputStream((int) channel.size());
       ByteBuffer buffer = ByteBuffer.allocate(4096);
       while (channel.read(buffer) > 0) {
@@ -329,7 +353,9 @@ public class MediaStorage {
     boundary.usableSpace(directory);
     Path parent = systemRoot.resolve(directory).normalize();
     Path leaf = parent.resolve(key).normalize();
-    if (!leaf.getParent().equals(parent)) throw new IOException("Media storage path escaped");
+    if (!leaf.getParent().equals(parent)) {
+      throw new IOException("Media storage path escaped");
+    }
     return leaf;
   }
 
@@ -344,13 +370,17 @@ public class MediaStorage {
   }
 
   private void requireKey(String key) throws IOException {
-    if (key == null || !key.matches(SAFE_KEY)) throw new IOException("Invalid media identifier");
+    if (key == null || !key.matches(SAFE_KEY)) {
+      throw new IOException("Invalid media identifier");
+    }
   }
 
   private void releaseReader(String cacheKey) {
     synchronized (readyLeaseLock) {
       AtomicInteger count = readers.get(cacheKey);
-      if (count != null && count.decrementAndGet() <= 0) readers.remove(cacheKey, count);
+      if (count != null && count.decrementAndGet() <= 0) {
+        readers.remove(cacheKey, count);
+      }
     }
   }
 
@@ -376,7 +406,9 @@ public class MediaStorage {
 
     @Override
     public void close() {
-      if (closed.compareAndSet(false, true)) storage.releaseReader(cacheKey);
+      if (closed.compareAndSet(false, true)) {
+        storage.releaseReader(cacheKey);
+      }
     }
   }
 
@@ -389,7 +421,9 @@ public class MediaStorage {
 
   /** Existing durable descriptor bytes conflict with the website-owned publication protocol. */
   public static final class MediaDescriptorProtocolException extends IOException {
-    private MediaDescriptorProtocolException(String message) { super(message); }
+    private MediaDescriptorProtocolException(String message) {
+      super(message);
+    }
 
     private MediaDescriptorProtocolException(String message, Throwable cause) {
       super(message, cause);
@@ -398,7 +432,9 @@ public class MediaStorage {
 
   /** Worker status bytes exist but do not satisfy the fixed website protocol. */
   public static final class MediaWorkerProtocolException extends IOException {
-    private MediaWorkerProtocolException(String message) { super(message); }
+    private MediaWorkerProtocolException(String message) {
+      super(message);
+    }
 
     private MediaWorkerProtocolException(String message, Throwable cause) {
       super(message, cause);
@@ -406,6 +442,8 @@ public class MediaStorage {
   }
 
   private static final class MediaDocumentSizeException extends IOException {
-    private MediaDocumentSizeException() { super("Private media document is too large"); }
+    private MediaDocumentSizeException() {
+      super("Private media document is too large");
+    }
   }
 }

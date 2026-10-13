@@ -23,7 +23,11 @@ public enum MediaJobStatus {
     return !ACTIVE.contains(this);
   }
 
-  public static List<MediaJobStatus> active() { return ACTIVE; }
+  public static List<MediaJobStatus> active() {
+    return ACTIVE;
+  }
 
-  public static List<MediaJobStatus> processing() { return PROCESSING; }
+  public static List<MediaJobStatus> processing() {
+    return PROCESSING;
+  }
 }

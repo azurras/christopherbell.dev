@@ -4,9 +4,11 @@ import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundary;
+import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
+import java.util.Locale;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -24,13 +26,19 @@ public final class MediaSourceBoundary {
   }
 
   public MediaSourceSnapshot resolve(String path) {
-    if (!properties.enabled() || path == null) throw notFound();
+    if (!properties.enabled() || path == null) {
+      throw notFound();
+    }
     try {
       var segments = SharedFolderPathResolver.safeRelativeSegments(path, false);
       Path absolute = properties.root().toAbsolutePath().normalize();
-      for (String segment : segments) absolute = absolute.resolve(segment);
+      for (String segment : segments) {
+        absolute = absolute.resolve(segment);
+      }
       absolute = absolute.normalize();
-      if (!absolute.startsWith(properties.root().toAbsolutePath().normalize())) throw notFound();
+      if (!absolute.startsWith(properties.root().toAbsolutePath().normalize())) {
+        throw notFound();
+      }
       if (nativeBoundary.nativeMode()) {
         var metadata = nativeBoundary.mediaFileMetadata(path);
         return new MediaSourceSnapshot(path, absolute, metadata.size(), metadata.modifiedAt());
@@ -39,7 +47,9 @@ public final class MediaSourceBoundary {
       Path existing = resolver.existing(path);
       var handle = resolver.readHandle(existing);
       BasicFileAttributes attributes = handle.attributes();
-      if (!attributes.isRegularFile()) throw notFound();
+      if (!attributes.isRegularFile()) {
+        throw notFound();
+      }
       return new MediaSourceSnapshot(
           path, existing.toAbsolutePath().normalize(), attributes.size(),
           attributes.lastModifiedTime().toInstant());
@@ -57,8 +67,8 @@ public final class MediaSourceBoundary {
       String relativePath, Path absolutePath, long size, Instant modifiedAt) {
     /** Collapses Windows case aliases without merging distinct case-sensitive provider paths. */
     public String cacheIdentity() {
-      return java.io.File.separatorChar == '\\'
-          ? relativePath.toLowerCase(java.util.Locale.ROOT) : relativePath;
+      return File.separatorChar == '\\'
+          ? relativePath.toLowerCase(Locale.ROOT) : relativePath;
     }
   }
 }

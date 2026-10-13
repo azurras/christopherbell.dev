@@ -2,7 +2,6 @@ package dev.christopherbell.sharedfolder.media;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -16,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import java.io.OutputStream;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -107,7 +107,7 @@ class ProgressiveMediaControllerTest {
     when(selection.length()).thenReturn(5L);
     when(selection.partial()).thenReturn(false);
     doAnswer(invocation -> {
-      invocation.<java.io.OutputStream>getArgument(1).write("ready".getBytes());
+      invocation.<OutputStream>getArgument(1).write("ready".getBytes());
       return null;
     }).when(streamer).copyReady(any(), any());
 
