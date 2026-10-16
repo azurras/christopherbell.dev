@@ -84,7 +84,7 @@ class SurviveControllerTest {
         .andExpect(status().isForbidden());
     mvc.perform(post("/api/survive/v1/gifts").with(csrf()).contentType("application/json").content(gift))
         .andExpect(status().isNotFound());
-    for (var body : new String[] {"{}", gift.replace("WOOD", "STONE"),
+    for (var body : new String[] {"{}", gift.replace("WOOD", "IRON"),
         gift.replace("\"quantity\":1", "\"quantity\":0"), gift.replace("\"quantity\":1", "\"quantity\":11"),
         gift.replace("\"revision\":0", "\"revision\":-1")}) {
       mvc.perform(post("/api/survive/v1/gifts").with(csrf()).contentType("application/json").content(body))

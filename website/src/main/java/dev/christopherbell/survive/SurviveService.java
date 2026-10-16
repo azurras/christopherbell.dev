@@ -48,7 +48,7 @@ public class SurviveService {
 
   /** Resumes a live account survivor; only a terminal character can be replaced. */
   public synchronized JoinedSurvivor joinForOwner(String previousToken, String requestedName, String accountId) {
-    loadWorld();
+    loadSettledWorld();
     String ownerKey = ownerKey(previousToken, accountId);
     var existing = world.players.get(ownerKey);
     if (accountId != null && existing != null && existing.status != Status.DEAD && existing.status != Status.ESCAPED) {
@@ -86,7 +86,7 @@ public class SurviveService {
 
   /** Refreshes durable presence without deleting inactive saved characters. */
   public synchronized Optional<SurviveSnapshot> findForOwner(String token, String accountId) {
-    loadWorld();
+    loadSettledWorld();
     expireInactivePlayers();
     var player = world.players.get(ownerKey(token, accountId));
     if (player == null) {
@@ -104,7 +104,7 @@ public class SurviveService {
 
   /** Authenticated account ownership takes precedence over every guest cookie. */
   public synchronized SurviveSnapshot actForOwner(String token, String accountId, SurviveAction action, long expectedRevision) {
-    loadWorld();
+    loadSettledWorld();
     expireInactivePlayers();
     var player = world.players.get(ownerKey(token, accountId));
     if (player == null) {
@@ -113,11 +113,12 @@ public class SurviveService {
     if (expectedRevision != player.revision) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "Your survivor changed. Refresh the game before acting again.");
     }
-    if (action == null || !world.actionsFor(player).contains(action)) {
+    var now = clock.instant();
+    if (action == null || !world.actionsFor(player, now).contains(action)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That action is unavailable in the current state.");
     }
-    player.lastSeen = clock.instant();
-    world.perform(action, player, rollPercent);
+    player.lastSeen = now;
+    world.perform(action, player, now, rollPercent);
     commitWorld();
     return snapshotFor(player);
   }
@@ -139,7 +140,7 @@ public class SurviveService {
   /** Commits both sides of a gift in one durable world replacement. */
   public synchronized SurviveSnapshot giveSuppliesForOwner(String token, String accountId, String recipientId,
       SurviveResource resource, int quantity, long expectedRevision) {
-    loadWorld();
+    loadSettledWorld();
     expireInactivePlayers();
     var sender = world.players.get(ownerKey(token, accountId));
     if (sender == null) {
@@ -149,7 +150,7 @@ public class SurviveService {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "Your survivor changed. Refresh before giving supplies.");
     }
     if (resource == null || quantity < 1 || quantity > SurviveWorld.INVENTORY_CAPACITY) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Give 1 to 10 wood or food.");
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Give 1 to 10 wood, food or stone.");
     }
     var recipient = world.players.values().stream()
         .filter(player -> player.survivorId.equals(recipientId) && player.lastSeen.isAfter(clock.instant().minus(IDLE_TIMEOUT))).findFirst()
@@ -157,14 +158,10 @@ public class SurviveService {
     if (sender == recipient || sender.status != Status.EXPLORING || recipient.status != Status.EXPLORING) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Both survivors must be at camp to give supplies to each other.");
     }
-    int available = switch (resource) {
-      case WOOD -> sender.wood;
-      case FOOD -> sender.food;
-    };
-    if (available < quantity) {
+    if (SurviveWorld.suppliesOf(sender, resource) < quantity) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "You do not have enough supplies to give.");
     }
-    if (recipient.wood + recipient.food + quantity > SurviveWorld.INVENTORY_CAPACITY) {
+    if (recipient.inventoryCount() + quantity > SurviveWorld.INVENTORY_CAPACITY) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That survivor's inventory has no room for this gift.");
     }
     sender.lastSeen = clock.instant();
@@ -185,10 +182,16 @@ public class SurviveService {
     catch (IllegalArgumentException invalidToken) { return null; }
   }
 
-  private void loadWorld() {
+  /**
+   * Loads the durable world and applies any nightfalls and dawns that passed since it was saved.
+   * The settlement reaches storage with the caller's next successful commit; a request that
+   * commits nothing settles again next time, with the same result.
+   */
+  private void loadSettledWorld() {
     var saved = repository.load().orElseGet(SurviveSavedWorld::empty);
     world = SurviveWorld.restore(saved);
     storageVersion = saved.version();
+    world.settleUntil(clock.instant());
   }
 
   private void commitWorld() {
@@ -200,7 +203,8 @@ public class SurviveService {
   }
 
   private SurviveSnapshot snapshotFor(SurvivePlayer player) {
-    return world.snapshotFor(player, clock.instant().minus(IDLE_TIMEOUT));
+    var now = clock.instant();
+    return world.snapshotFor(player, now, now.minus(IDLE_TIMEOUT));
   }
 
   /** Internal join result: the controller writes the credential only to a private cookie. */

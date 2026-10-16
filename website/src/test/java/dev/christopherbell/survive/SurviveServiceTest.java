@@ -180,7 +180,10 @@ class SurviveServiceTest {
     act(service, replacement.token(), SurviveAction.BUILD_SHELTER);
     when(mutableClock.instant()).thenReturn(clock.instant().plus(Duration.ofHours(2)));
     assertTrue(service.find(replacement.token()).isEmpty());
-    assertEquals(1, service.join(null, "Later").state().shelters());
+    // Two idle hours span several nightfalls whose raids may burn the shelter; the journal proves
+    // expiry kept the shared camp rather than resetting it.
+    var laterJournal = service.join(null, "Later").state().events();
+    assertTrue(laterJournal.stream().anyMatch(event -> event.contains("built a shelter")));
     assertTrue(service.find("unknown-token").isEmpty());
   }
 

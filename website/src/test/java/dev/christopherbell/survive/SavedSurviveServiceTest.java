@@ -153,6 +153,10 @@ class SavedSurviveServiceTest {
     var old = world.findForOwner(null, "alice").orElseThrow();
     for (int hit = 0; hit < 10; hit++) {
       var state = world.findForOwner(null, "alice").orElseThrow();
+      // Hunger can end the survivor before the tenth exchange.
+      if (state.status() == dev.christopherbell.survive.model.SurviveSnapshot.Status.DEAD) {
+        break;
+      }
       if (state.status() != dev.christopherbell.survive.model.SurviveSnapshot.Status.COMBAT) {
         state = world.actForOwner(null, "alice", SurviveAction.HUNT, state.revision());
       }
@@ -169,4 +173,37 @@ class SavedSurviveServiceTest {
     assertEquals(1, repository.load().orElseThrow().players().size());
   }
 
+  @Test void nightfallIsSettledOnceAndPersistsAcrossReloadsAndRestarts() {
+    var repository = new InMemorySurviveWorldRepository();
+    service(repository).joinForOwner(null, "Alice", "alice");
+    var afterNightfall = Clock.offset(clock, Duration.ofMinutes(7));
+    var nightService = new SurviveService(afterNightfall, () -> 50, 1000, repository);
+
+    var firstLook = nightService.findForOwner(null, "alice").orElseThrow();
+    var secondLook = nightService.findForOwner(null, "alice").orElseThrow();
+    var afterRestart = new SurviveService(afterNightfall, () -> 50, 1000, repository)
+        .findForOwner(null, "alice").orElseThrow();
+
+    assertEquals(dev.christopherbell.survive.model.SurviveSnapshot.Phase.NIGHT, firstLook.phase());
+    assertTrue(firstLook.events().getLast().contains("raiders"));
+    assertEquals(firstLook.events(), secondLook.events());
+    assertEquals(firstLook.events(), afterRestart.events());
+    assertEquals(firstLook.worldRevision(), afterRestart.worldRevision());
+  }
+
+  @Test void stoneCanBeGivenLikeOtherSupplies() {
+    var repository = new InMemorySurviveWorldRepository();
+    var world = new SurviveService(clock, () -> 40, 1000, repository);
+    world.joinForOwner(null, "Alice", "alice");
+    var bob = world.joinForOwner(null, "Bob", "bob").state();
+    var alice = world.actForOwner(null, "alice", SurviveAction.GATHER_STONE, 0);
+    assertEquals(1, alice.stone());
+
+    var afterGift = world.giveSuppliesForOwner(null, "alice", bob.survivorId(), SurviveResource.STONE, 1, alice.revision());
+
+    assertEquals(0, afterGift.stone());
+    assertEquals(1, world.findForOwner(null, "bob").orElseThrow().stone());
+    assertEquals(400, assertThrows(ResponseStatusException.class, () -> world.giveSuppliesForOwner(
+        null, "alice", bob.survivorId(), SurviveResource.STONE, 1, afterGift.revision())).getStatusCode().value());
+  }
 }

@@ -43,6 +43,11 @@
 .survive-join input { border: 1px solid #52664c; border-radius: 9px; color: #eef4e8; background: #0f1712; padding: 13px; min-width: 0; max-width: 100%; }
 .survive-page .survive-primary { background: #d4a075; color: #1b211a; border-color: #d4a075; font-weight: 700; }
 .survive-enemy { display: flex; justify-content: space-between; padding: 16px; margin-bottom: 24px; border: 1px solid #9d6156; border-radius: 8px; color: #f1b29f; }
+.survive-clock { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; padding: 10px 14px; margin: 0 0 18px; border: 1px solid #5d6f7e; border-radius: 8px; color: #d6e2ea; }
+.survive-clock[data-phase="DUSK"] { border-color: #a8774f; color: #f1cfa4; }
+.survive-clock[data-phase="NIGHT"] { border-color: #6c6aa0; color: #c9c7f2; background: rgba(28, 26, 58, .45); }
+.survive-countdown { margin-left: auto; font-variant-numeric: tabular-nums; }
+.survive-warning { color: #f1c0a4; font-size: .85rem; margin: 6px 0 0; }
 .survive-notice { color: #f1c0a4; border: 1px solid #946b58; padding: 18px; border-radius: 10px; }
 .survive-guide { margin-top: 24px; color: #bdc7b8; line-height: 1.8; font-size: .88rem; }
 .survive-guide summary { color: #e0ceb2; cursor: pointer; font-weight: 600; }

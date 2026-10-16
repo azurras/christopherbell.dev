@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { disposeSurviveOnPageHide, mountSurvive, renderSurviveState } from '../../main/resources/static/js/survive.js';
+import { disposeSurviveOnPageHide, formatCountdown, mountSurvive, renderSurviveState } from '../../main/resources/static/js/survive.js';
 
 const snapshot = {
   name: '<img src=x onerror=alert(1)>', health: 8, strength: 3, stamina: 11,
@@ -9,6 +9,8 @@ const snapshot = {
   shelters: 1, boats: 0, survivors: ['Alice', 'Bob'], events: ['Earlier', '<script>bad</script>'],
   actions: ['GATHER', 'HUNT', 'EAT', 'REST'], message: 'You gathered one wood.',
   survivorId: 'alice-public-id', recipients: [{ survivorId: 'bob-public-id', name: '<Bob>' }],
+  phase: 'DUSK', day: 3, secondsToNextPhase: 125, hunger: 6, stone: 2, weapon: 'SPEAR', weaponDurability: 9,
+  enemy: null, bedsInUse: 1, beds: 2, guarding: false,
 };
 
 test('back/forward cache preserves mounted controls and final navigation releases them', () => {
@@ -33,7 +35,7 @@ function documentFixture() {
       querySelectorAll() { return []; },
     };
   }
-  const buttons = ['GATHER', 'BUILD_BOAT', 'HUNT', 'ATTACK', 'DEFEND', 'FLEE'].map(action => {
+  const buttons = ['GATHER', 'GATHER_STONE', 'BUILD_BOAT', 'HUNT', 'ATTACK', 'DEFEND', 'FLEE', 'WAKE'].map(action => {
     const button = element();
     button.dataset.action = action;
     button.closest = () => button;
@@ -129,14 +131,17 @@ test('renders survivor and shared camp using text nodes and server allowed actio
   renderSurviveState(documentRoot, snapshot);
   assert.equal(documentRoot.getElementById('survivePlayerName').textContent, snapshot.name);
   assert.equal(documentRoot.getElementById('surviveHealth').value, 8);
-  assert.equal(documentRoot.getElementById('surviveInventoryCount').textContent, '5 / 10');
+  assert.equal(documentRoot.getElementById('surviveInventoryCount').textContent, '7 / 10');
   assert.equal(documentRoot.getElementById('surviveShelters').textContent, '1');
   assert.equal(documentRoot.getElementById('surviveEvents').children[0].textContent, '<script>bad</script>');
   assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'BUILD_BOAT').disabled, true);
   assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'GATHER').disabled, false);
   assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'ATTACK').hidden, true);
-  renderSurviveState(documentRoot, { ...snapshot, status: 'COMBAT', enemyHealth: 5, actions: ['ATTACK'] });
+  renderSurviveState(documentRoot, { ...snapshot, status: 'COMBAT', enemy: 'WOLF', enemyHealth: 8, actions: ['ATTACK'] });
   assert.equal(documentRoot.getElementById('surviveEnemy').hidden, false);
+  assert.equal(documentRoot.getElementById('surviveEnemyName').textContent, 'Grey wolf');
+  assert.equal(documentRoot.getElementById('surviveEnemyHealth').textContent, '8 health');
+  assert.equal(documentRoot.getElementById('surviveScene').textContent, 'A wolf circles you');
   assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'ATTACK').disabled, false);
   renderSurviveState(documentRoot, { ...snapshot, status: 'DEAD', actions: [] });
   assert.ok(documentRoot.buttons.every(button => button.disabled));
@@ -203,4 +208,41 @@ test('saved live survivors show durable ownership and only terminal characters c
   renderSurviveState(documentRoot, { ...snapshot, saved: false });
   assert.match(documentRoot.getElementById('surviveSaveStatus').textContent, /Temporary guest/);
   assert.equal(documentRoot.getElementById('surviveRestart').disabled, false);
+});
+
+test('shows the shared clock, hunger, stone, weapon and beds from the server snapshot', () => {
+  const documentRoot = documentFixture();
+  renderSurviveState(documentRoot, snapshot);
+  assert.equal(documentRoot.getElementById('surviveClock').dataset.phase, 'DUSK');
+  assert.equal(documentRoot.getElementById('survivePhase').textContent, 'Dusk');
+  assert.equal(documentRoot.getElementById('surviveDay').textContent, 'Day 3');
+  assert.equal(documentRoot.getElementById('surviveNextPhase').textContent, 'Nightfall in');
+  assert.equal(documentRoot.getElementById('surviveCountdown').textContent, '2:05');
+  assert.equal(documentRoot.getElementById('surviveHungerText').textContent, '6 / 10');
+  assert.equal(documentRoot.getElementById('surviveHungerWarning').hidden, true);
+  assert.equal(documentRoot.getElementById('surviveStone').textContent, '2');
+  assert.equal(documentRoot.getElementById('surviveWeapon').textContent, 'Spear · 9 uses left');
+  assert.equal(documentRoot.getElementById('surviveBeds').textContent, '1 / 2');
+  renderSurviveState(documentRoot, { ...snapshot, hunger: 3, weapon: null, weaponDurability: 0, guarding: true });
+  assert.equal(documentRoot.getElementById('surviveHungerWarning').hidden, false);
+  assert.equal(documentRoot.getElementById('surviveWeapon').textContent, 'Bare hands');
+  assert.equal(documentRoot.getElementById('surviveStatus').textContent, 'On guard');
+});
+
+test('a sleeping survivor sees only the wake control', () => {
+  const documentRoot = documentFixture();
+  renderSurviveState(documentRoot, { ...snapshot, status: 'SLEEPING', actions: ['WAKE'] });
+  const shown = documentRoot.buttons.filter(button => !button.hidden).map(button => button.dataset.action);
+  assert.deepEqual(shown, ['WAKE']);
+  assert.equal(documentRoot.getElementById('surviveStatus').textContent, 'Asleep');
+  renderSurviveState(documentRoot, snapshot);
+  assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'WAKE').hidden, true);
+  assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'GATHER_STONE').hidden, false);
+});
+
+test('countdowns read as minutes and padded seconds and never go negative', () => {
+  assert.equal(formatCountdown(0), '0:00');
+  assert.equal(formatCountdown(59), '0:59');
+  assert.equal(formatCountdown(840), '14:00');
+  assert.equal(formatCountdown(-3), '0:00');
 });

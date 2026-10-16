@@ -20,7 +20,8 @@ class InMemorySurviveWorldRepository implements SurviveWorldRepository {
       throw new OptimisticLockingFailureException("World changed");
     }
     saved = new SurviveSavedWorld(candidate.id(), saved == null ? 0L : saved.version() + 1,
-        candidate.revision(), candidate.shelters(), candidate.boats(), candidate.events(), candidate.players());
+        candidate.revision(), candidate.shelters(), candidate.boats(), candidate.events(), candidate.players(),
+        candidate.settledBoundaries());
     return saved;
   }
 }
