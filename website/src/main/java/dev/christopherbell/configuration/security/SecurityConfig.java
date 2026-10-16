@@ -40,6 +40,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.security.web.header.writers.StaticHeadersWriter;
@@ -192,6 +193,7 @@ public class SecurityConfig {
     return http
         .csrf(csrf -> csrf
             .spa()
+            .csrfTokenRepository(csrfTokenCookies(browserSecurityProperties))
             .ignoringRequestMatchers(
                 SecurityConfig::hasExplicitBearerToken,
                 SecurityConfig::isLegacyApiLogin))
@@ -281,6 +283,20 @@ public class SecurityConfig {
       Clock clock) {
     return new BrowserSessionService(
         browserSessions, activity, authentications, accounts, loginTokens, clock);
+  }
+
+  /**
+   * Stores the CSRF token in a script-readable cookie whose Secure attribute follows configuration.
+   *
+   * <p>The proxy terminates TLS, so the default, which copies the request's scheme, never marks the
+   * cookie Secure in production.</p>
+   */
+  private static CookieCsrfTokenRepository csrfTokenCookies(
+      BrowserSecurityProperties browserSecurityProperties) {
+    var csrfTokenCookies = CookieCsrfTokenRepository.withHttpOnlyFalse();
+    csrfTokenCookies.setCookieCustomizer(cookie -> cookie
+        .secure(browserSecurityProperties.authenticationCookieSecure()));
+    return csrfTokenCookies;
   }
 
   /** Whether the request carries a non-blank bearer token, which exempts it from CSRF. */
