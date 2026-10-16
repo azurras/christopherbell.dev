@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -33,6 +34,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @Import({SurviveService.class, SecurityConfig.class, ApplicationClockConfiguration.class,
     LoginTokensFixture.TestConfigurationWithLoginTokens.class, BrowserAuthenticationCookies.class,
     InteractiveBrowserRequest.class, ControllerExceptionHandler.class})
+// Production terminates TLS at the proxy, so requests reach the application as plain HTTP.
+@TestPropertySource(properties = "app.browser-security.authentication-cookie-secure=true")
 class SurviveControllerTest {
   @org.springframework.boot.test.context.TestConfiguration
   static class Storage {
@@ -92,11 +95,12 @@ class SurviveControllerTest {
   @Test
   void anonymousJoinNeedsCsrfAndUsesPrivateCookieWithoutExposingToken() throws Exception {
     mvc.perform(get("/api/survive/v1/game"))
-        .andExpect(status().isNoContent()).andExpect(header().string("Cache-Control", "no-store"));
+        .andExpect(status().isNoContent()).andExpect(header().string("Cache-Control", "no-store"))
+        .andExpect(cookie().secure("XSRF-TOKEN", true)).andExpect(cookie().httpOnly("XSRF-TOKEN", false));
     mvc.perform(post("/api/survive/v1/game").contentType("application/json")
         .content("{\"name\":\"Chris\"}"))
         .andExpect(status().isForbidden());
-    var joined = mvc.perform(post("/api/survive/v1/game").with(csrf()).secure(true)
+    var joined = mvc.perform(post("/api/survive/v1/game").with(csrf())
         .contentType("application/json").content("{\"name\":\"Chris\"}"))
         .andExpect(status().isOk())
         .andExpect(header().string("Cache-Control", "no-store"))

@@ -2,8 +2,8 @@ package dev.christopherbell.survive;
 
 import dev.christopherbell.survive.model.SurviveRequests;
 import dev.christopherbell.survive.model.SurviveSnapshot;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.CacheControl;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
@@ -23,9 +23,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class SurviveController {
   static final String COOKIE_NAME = "CBELL_SURVIVOR";
   private final SurviveService survivors;
+  private final boolean secureCookies;
 
-  public SurviveController(SurviveService survivors) {
+  /**
+   * Takes the site-wide browser cookie setting, because the proxy terminates TLS and the request
+   * scheme cannot tell whether the survivor cookie travels over HTTPS.
+   */
+  public SurviveController(
+      SurviveService survivors,
+      @Value("${app.browser-security.authentication-cookie-secure}") boolean secureCookies) {
     this.survivors = survivors;
+    this.secureCookies = secureCookies;
   }
 
   /** Reads a current survivor or returns 204 so the browser can show its join form. */
@@ -41,14 +49,15 @@ public class SurviveController {
   @PostMapping("/game")
   public ResponseEntity<SurviveSnapshot> joinGame(
       @CookieValue(name = COOKIE_NAME, required = false) String previousToken,
-      @Valid @RequestBody SurviveRequests.Join request, HttpServletRequest httpRequest) {
+      @Valid @RequestBody SurviveRequests.Join request) {
     var joined = survivors.joinForOwner(previousToken, request.name(), accountId());
     if (joined.token() == null) {
       return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(joined.state());
     }
     // A session cookie survives page refresh; the server enforces sliding idle expiry.
     var cookie = ResponseCookie.from(COOKIE_NAME, joined.token()).httpOnly(true)
-        .secure(httpRequest.isSecure()).sameSite("Strict").path("/api/survive/v1").build();
+        .secure(secureCookies)
+        .sameSite("Strict").path("/api/survive/v1").build();
     return ResponseEntity.ok().cacheControl(CacheControl.noStore())
         .header(HttpHeaders.SET_COOKIE, cookie.toString()).body(joined.state());
   }
