@@ -63,6 +63,14 @@ subprojects {
         mavenCentral()
     }
 
+    // Spring Boot 4.1.1 manages versions with published advisories: Jackson parsing denial of
+    // service (CVE-2026-89425, CVE-2026-89407, CVE-2026-91777, CVE-2026-91776, CVE-2026-68497)
+    // and Tomcat access control (CVE-2026-65182, CVE-2026-65905, CVE-2026-68525). Drop these
+    // overrides once a Boot release manages these versions or newer.
+    extra["jackson-bom.version"] = "3.1.7"
+    extra["jackson-2-bom.version"] = "2.21.7"
+    extra["tomcat.version"] = "11.0.26"
+
     plugins.withType<JavaPlugin> {
         // The mechanical Chris Street Style rules; config/checkstyle/suppressions.xml lists
         // packages whose migration slice has not merged yet.

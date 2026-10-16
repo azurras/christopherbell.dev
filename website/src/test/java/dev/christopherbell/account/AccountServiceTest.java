@@ -2,6 +2,7 @@ package dev.christopherbell.account;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -64,6 +65,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Base64;
@@ -606,6 +608,45 @@ public class AccountServiceTest {
     verify(passwordResetNotificationService).sendPasswordReset(eq(account), resetUrl.capture());
     assertTrue(
         resetUrl.getValue().startsWith("https://example.com/reset-password?token="));
+  }
+
+  @Test
+  @DisplayName("Password reset request: a token issued within the cooldown is kept and no mail is sent")
+  void requestPasswordReset_whenTokenIssuedOneMinuteAgo_keepsTokenWithoutSending() {
+    var account = AccountServiceStub.getAccountWhenExistsStub();
+    var expiryOfTokenIssuedOneMinuteAgo = Instant.now().plus(Duration.ofMinutes(59));
+    account.setPasswordResetTokenHash("first-token-hash");
+    account.setPasswordResetTokenExpiresOn(expiryOfTokenIssuedOneMinuteAgo);
+    when(accountRepository.findByEmailIgnoreCase(eq("old@example.com")))
+        .thenReturn(Optional.of(account));
+
+    accountService.requestPasswordReset(
+        new AccountPasswordResetRequest("Old@Example.com"),
+        "https://example.com");
+
+    assertEquals("first-token-hash", account.getPasswordResetTokenHash());
+    assertEquals(expiryOfTokenIssuedOneMinuteAgo, account.getPasswordResetTokenExpiresOn());
+    verify(accountRepository).findByEmailIgnoreCase(eq("old@example.com"));
+    verifyNoMoreInteractions(accountRepository, passwordResetNotificationService);
+  }
+
+  @Test
+  @DisplayName("Password reset request: a token issued before the cooldown is replaced and mailed")
+  void requestPasswordReset_whenTokenIssuedSixMinutesAgo_replacesTokenAndSends() {
+    var account = AccountServiceStub.getAccountWhenExistsStub();
+    account.setPasswordResetTokenHash("first-token-hash");
+    account.setPasswordResetTokenExpiresOn(Instant.now().plus(Duration.ofMinutes(54)));
+    when(accountRepository.findByEmailIgnoreCase(eq("old@example.com")))
+        .thenReturn(Optional.of(account));
+    when(accountRepository.save(eq(account))).thenReturn(account);
+
+    accountService.requestPasswordReset(
+        new AccountPasswordResetRequest("Old@Example.com"),
+        "https://example.com");
+
+    assertNotEquals("first-token-hash", account.getPasswordResetTokenHash());
+    verify(accountRepository).save(eq(account));
+    verify(passwordResetNotificationService).sendPasswordReset(eq(account), anyString());
   }
 
   @Test
