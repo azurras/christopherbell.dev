@@ -2,11 +2,37 @@
 import { API } from './lib/api.js';
 import { fetchJson } from './lib/util.js';
 
-const STATUS_LABELS = { EXPLORING: 'At camp', COMBAT: 'In combat', DEAD: 'Game over', ESCAPED: 'Survived' };
+const STATUS_LABELS = {
+  EXPLORING: 'At camp', COMBAT: 'In combat', SLEEPING: 'Asleep', DEAD: 'Game over', ESCAPED: 'Survived',
+};
 const SCENE_LABELS = {
-  EXPLORING: 'At the edge of the wilderness', COMBAT: 'A hog blocks your path',
+  EXPLORING: 'At the edge of the wilderness', SLEEPING: 'Asleep in a shelter bed',
   DEAD: 'The wilderness claimed you', ESCAPED: 'A new horizon awaits',
 };
+const COMBAT_SCENES = { HOG: 'A wild hog blocks your path', WOLF: 'A wolf circles you', BEAR: 'A bear rears up before you' };
+const ENEMY_LABELS = { HOG: 'Wild hog', WOLF: 'Grey wolf', BEAR: 'Brown bear' };
+const WEAPON_LABELS = { CLUB: 'Club', STONE_AXE: 'Stone axe', SPEAR: 'Spear' };
+const PHASE_LABELS = { DAY: 'Day', DUSK: 'Dusk', NIGHT: 'Night' };
+const NEXT_PHASE_LABELS = { DAY: 'Dusk in', DUSK: 'Nightfall in', NIGHT: 'Dawn in' };
+const COMBAT_ACTIONS = ['ATTACK', 'DEFEND', 'FLEE'];
+const HUNGER_WARNING_LEVEL = 3;
+
+/** Minutes and seconds until the next phase, for example 4:05. */
+export function formatCountdown(secondsLeft) {
+  const wholeSeconds = Math.max(0, Math.floor(secondsLeft));
+  return `${Math.floor(wholeSeconds / 60)}:${String(wholeSeconds % 60).padStart(2, '0')}`;
+}
+
+/** Each status shows only its own controls: combat moves in a fight, waking while asleep. */
+function isActionShownFor(status, action) {
+  if (status === 'COMBAT') {
+    return COMBAT_ACTIONS.includes(action);
+  }
+  if (status === 'SLEEPING') {
+    return action === 'WAKE';
+  }
+  return !COMBAT_ACTIONS.includes(action) && action !== 'WAKE';
+}
 
 /** Render server-supplied text as text nodes, including names and public journal entries. */
 export function renderSurviveState(documentRoot, state, pending = false, mutationPending = pending) {
@@ -19,8 +45,16 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   documentRoot.getElementById('surviveRestart').disabled = pending
     || Boolean(state.saved && !['DEAD', 'ESCAPED'].includes(state.status));
   setText('survivePublicId', `Camp ID: ${state.survivorId.slice(0, 8)}`);
-  setText('surviveStatus', STATUS_LABELS[state.status] || state.status);
-  setText('surviveScene', SCENE_LABELS[state.status] || 'The wilderness');
+  const isGuarding = state.status === 'EXPLORING' && state.guarding;
+  setText('surviveStatus', isGuarding ? 'On guard' : STATUS_LABELS[state.status] || state.status);
+  setText('surviveScene', state.status === 'COMBAT'
+    ? COMBAT_SCENES[state.enemy] || 'Something blocks your path'
+    : SCENE_LABELS[state.status] || 'The wilderness');
+  documentRoot.getElementById('surviveClock').dataset.phase = state.phase;
+  setText('survivePhase', PHASE_LABELS[state.phase] || state.phase);
+  setText('surviveDay', `Day ${state.day}`);
+  setText('surviveNextPhase', NEXT_PHASE_LABELS[state.phase] || 'Next phase in');
+  setText('surviveCountdown', formatCountdown(state.secondsToNextPhase));
   const message = documentRoot.getElementById('surviveMessage');
   if (message.textContent !== state.message) {
     message.textContent = state.message;
@@ -30,18 +64,27 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveStrength', state.strength);
   setText('surviveStamina', state.stamina);
   setText('surviveExperience', `${state.experience} / ${state.experienceToNextLevel}`);
+  setText('surviveHungerText', `${state.hunger} / 10`);
+  documentRoot.getElementById('surviveHunger').value = state.hunger;
+  documentRoot.getElementById('surviveHungerWarning').hidden = state.hunger > HUNGER_WARNING_LEVEL;
   setText('surviveWood', state.wood);
   setText('surviveFood', state.food);
-  setText('surviveInventoryCount', `${state.wood + state.food} / ${state.inventoryCapacity}`);
+  setText('surviveStone', state.stone);
+  const carried = state.wood + state.food + state.stone;
+  setText('surviveInventoryCount', `${carried} / ${state.inventoryCapacity}`);
+  setText('surviveWeapon', state.weapon
+    ? `${WEAPON_LABELS[state.weapon] || state.weapon} · ${state.weaponDurability} uses left`
+    : 'Bare hands');
   setText('surviveShelters', state.shelters);
+  setText('surviveBeds', `${state.bedsInUse} / ${state.beds}`);
   setText('surviveBoats', state.boats);
   setText('survivePlayerCount', state.survivors.length);
   documentRoot.getElementById('surviveEnemy').hidden = state.status !== 'COMBAT';
-  setText('surviveEnemyHealth', `${state.enemyHealth} / 5 health`);
+  setText('surviveEnemyName', ENEMY_LABELS[state.enemy] || 'Wild animal');
+  setText('surviveEnemyHealth', `${state.enemyHealth} health`);
   for (const button of documentRoot.querySelectorAll('[data-action]')) {
     button.disabled = pending || !state.actions.includes(button.dataset.action);
-    const isCombatAction = ['ATTACK', 'DEFEND', 'FLEE'].includes(button.dataset.action);
-    button.hidden = isCombatAction !== (state.status === 'COMBAT');
+    button.hidden = !isActionShownFor(state.status, button.dataset.action);
   }
   for (const [id, entries] of [['survivePlayers', state.survivors], ['surviveEvents', [...state.events].reverse()]]) {
     const list = documentRoot.getElementById(id);
@@ -70,7 +113,7 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   }
   recipientPicker.value = state.recipients.some(recipient => recipient.survivorId === previousRecipient)
     ? previousRecipient : '';
-  const unavailable = !state.recipients.length || state.wood + state.food === 0;
+  const unavailable = !state.recipients.length || carried === 0;
   for (const id of ['surviveRecipient', 'surviveGiftResource', 'surviveGiftQuantity']) {
     documentRoot.getElementById(id).disabled = mutationPending || unavailable;
   }
@@ -89,6 +132,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   let state = null;
   let pending = false;
   let mutationPending = false;
+  let phaseEndsAtMilliseconds = 0;
   const errorBox = documentRoot.getElementById('surviveError');
   const restart = documentRoot.getElementById('surviveRestart');
   const refresh = documentRoot.getElementById('surviveRefresh');
@@ -114,6 +158,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     joinForm.hidden = Boolean(state);
     cancel.hidden = !state;
     if (state) {
+      phaseEndsAtMilliseconds = Date.now() + state.secondsToNextPhase * 1000;
       renderSurviveState(documentRoot, state, pending, mutationPending);
     }
   }
@@ -188,17 +233,30 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   restart.addEventListener('click', showJoin);
   cancel.addEventListener('click', cancelJoin);
   refresh.addEventListener('click', readWorld);
-  // Poll only when actively viewing a joined survivor; no background game mutation occurs.
+  const isWatchingWorld = () => state && !pending && joinForm.hidden && !documentRoot.hidden;
+  // Poll only when actively viewing a joined survivor; the server settles world time on each read.
   const timer = setInterval(() => {
-    if (state && !pending && joinForm.hidden && !documentRoot.hidden) {
+    if (isWatchingWorld()) {
       readWorld();
     }
   }, 5000);
+  // Count down locally between polls and read the world as soon as the phase changes.
+  const clockTimer = setInterval(() => {
+    if (!state) {
+      return;
+    }
+    const secondsLeft = Math.max(0, Math.ceil((phaseEndsAtMilliseconds - Date.now()) / 1000));
+    documentRoot.getElementById('surviveCountdown').textContent = formatCountdown(secondsLeft);
+    if (secondsLeft === 0 && isWatchingWorld()) {
+      readWorld();
+    }
+  }, 1000);
   readWorld();
   return {
     refresh: readWorld,
     dispose() {
       clearInterval(timer);
+      clearInterval(clockTimer);
       joinForm.removeEventListener('submit', join);
       documentRoot.getElementById('surviveActions').removeEventListener('click', act);
       restart.removeEventListener('click', showJoin);
