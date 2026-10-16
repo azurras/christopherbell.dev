@@ -32,6 +32,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class PasswordResetService {
   private static final Duration PASSWORD_RESET_TTL = Duration.ofHours(1);
+  // Bounds reset mail to one per account per window however many clients ask, and keeps
+  // the link already sent valid instead of replacing it.
+  private static final Duration PASSWORD_RESET_COOLDOWN = Duration.ofMinutes(5);
   private static final int PASSWORD_RESET_TOKEN_BYTES = 32;
 
   private final AccountRepository accountRepository;
@@ -57,6 +60,11 @@ public class PasswordResetService {
   }
 
   private void sendResetLink(Account account, String baseUrl) {
+    if (holdsTokenIssuedWithinCooldown(account)) {
+      log.info("Password reset for account id {} skipped; a link was sent within {}.",
+          account.getId(), PASSWORD_RESET_COOLDOWN);
+      return;
+    }
     log.info("Password reset requested for account id: {}", account.getId());
     var token = generatePasswordResetToken();
     account.setPasswordResetTokenHash(hashPasswordResetToken(token));
@@ -64,6 +72,16 @@ public class PasswordResetService {
     accountRepository.save(account);
     var resetUrl = buildPasswordResetUrl(baseUrl, token);
     passwordResetNotificationService.sendPasswordReset(account, resetUrl);
+  }
+
+  /** The stored expiry is the issue time plus the TTL, so it dates the last link sent. */
+  private boolean holdsTokenIssuedWithinCooldown(Account account) {
+    var tokenExpiresOn = account.getPasswordResetTokenExpiresOn();
+    if (account.getPasswordResetTokenHash() == null || tokenExpiresOn == null) {
+      return false;
+    }
+    var tokenIssuedOn = tokenExpiresOn.minus(PASSWORD_RESET_TTL);
+    return tokenIssuedOn.plus(PASSWORD_RESET_COOLDOWN).isAfter(clock.instant());
   }
 
   /**
