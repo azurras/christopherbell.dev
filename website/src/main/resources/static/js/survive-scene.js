@@ -33,15 +33,18 @@ const ROCKS = [
 ];
 const STARS = Array.from({ length: 28 }, (_, index) => [(index * 137 + 41) % 940 + 10, (index * 53 + 17) % 200 + 10]);
 
-/** Hit areas sized so the smallest side stays at least 44 CSS pixels at a 375-pixel-wide scene. */
+/**
+ * Hit areas whose smaller side is at least 145 scene units: 44 CSS pixels when the scene is 300 pixels
+ * wide, as it is inside the adventure panel on a 375-pixel-wide phone.
+ */
 const HOTSPOTS = {
-  trees: { x: 0, y: 160, width: 330, height: 240 },
-  rocks: { x: 40, y: 410, width: 270, height: 125 },
-  forestEdge: { x: 330, y: 230, width: 120, height: 120 },
-  tents: { x: 420, y: 215, width: 350, height: 125 },
-  fire: { x: 530, y: 405, width: 120, height: 125 },
-  boats: { x: 780, y: 400, width: 180, height: 135 },
-  enemy: { x: 330, y: 375, width: 120, height: 150 },
+  trees: { x: 0, y: 160, width: 318, height: 235 },
+  rocks: { x: 30, y: 395, width: 280, height: 145 },
+  forestEdge: { x: 318, y: 222, width: 145, height: 145 },
+  tents: { x: 420, y: 200, width: 350, height: 145 },
+  fire: { x: 518, y: 395, width: 145, height: 145 },
+  boats: { x: 780, y: 395, width: 180, height: 145 },
+  enemy: { x: 318, y: 375, width: 145, height: 160 },
 };
 
 const sceneMemory = new WeakMap();

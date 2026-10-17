@@ -199,3 +199,13 @@ test('the page exposes the scene as one labelled image above the move buttons', 
   assert.match(html, /<svg id="surviveCampScene" class="survive-scene" role="img" aria-label="[^"]+"/);
   assert.ok(html.indexOf('id="surviveCampScene"') < html.indexOf('id="surviveActions"'));
 });
+
+test('every hotspot is large enough to tap at phone width', () => {
+  const svg = render({ ...camp, status: 'COMBAT', enemy: 'HOG', enemyHealth: 5, actions: ['ATTACK'] });
+  const hotspots = descendantsOf(svg).filter(node => node.dataset.action);
+  assert.equal(hotspots.length, 7);
+  for (const hitArea of hotspots) {
+    const smallerSide = Math.min(Number(hitArea.getAttribute('width')), Number(hitArea.getAttribute('height')));
+    assert.ok(smallerSide >= 145, `${hitArea.dataset.action} is ${smallerSide} units`);
+  }
+});
