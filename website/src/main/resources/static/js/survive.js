@@ -1,6 +1,7 @@
 /** Display and transport only: the Java world owns all rules and allowed actions. */
 import { API } from './lib/api.js';
 import { fetchJson } from './lib/util.js';
+import { renderSurviveScene } from './survive-scene.js';
 
 const STATUS_LABELS = {
   EXPLORING: 'At camp', COMBAT: 'In combat', SLEEPING: 'Asleep', DEAD: 'Game over', ESCAPED: 'Survived',
@@ -50,6 +51,7 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveScene', state.status === 'COMBAT'
     ? COMBAT_SCENES[state.enemy] || 'Something blocks your path'
     : SCENE_LABELS[state.status] || 'The wilderness');
+  renderSurviveScene(documentRoot, documentRoot.getElementById('surviveCampScene'), state, pending);
   documentRoot.getElementById('surviveClock').dataset.phase = state.phase;
   setText('survivePhase', PHASE_LABELS[state.phase] || state.phase);
   setText('surviveDay', `Day ${state.day}`);
@@ -190,13 +192,18 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       method: 'POST', body: JSON.stringify({ name: documentRoot.getElementById('surviveName').value.trim() }),
     });
   };
+  // Buttons and scene hotspots share one path: only an action the latest snapshot allows, one at a time.
   const act = event => {
-    const button = event.target.closest('[data-action]');
-    if (!button || button.disabled || !state) {
+    const control = event.target.closest('[data-action]');
+    if (!control || control.disabled || !state || pending) {
+      return;
+    }
+    const action = control.dataset.action;
+    if (!state.actions.includes(action)) {
       return;
     }
     void sendRequest(API.survive.actions, {
-      method: 'POST', body: JSON.stringify({ action: button.dataset.action, revision: state.revision }),
+      method: 'POST', body: JSON.stringify({ action, revision: state.revision }),
     });
   };
   const showJoin = () => {
@@ -230,6 +237,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   documentRoot.getElementById('surviveRecipient').addEventListener('change', chooseRecipient);
   joinForm.addEventListener('submit', join);
   documentRoot.getElementById('surviveActions').addEventListener('click', act);
+  documentRoot.getElementById('surviveCampScene').addEventListener('click', act);
   restart.addEventListener('click', showJoin);
   cancel.addEventListener('click', cancelJoin);
   refresh.addEventListener('click', readWorld);
@@ -259,6 +267,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       clearInterval(clockTimer);
       joinForm.removeEventListener('submit', join);
       documentRoot.getElementById('surviveActions').removeEventListener('click', act);
+      documentRoot.getElementById('surviveCampScene').removeEventListener('click', act);
       restart.removeEventListener('click', showJoin);
       cancel.removeEventListener('click', cancelJoin);
       refresh.removeEventListener('click', readWorld);
