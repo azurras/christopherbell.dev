@@ -27,11 +27,27 @@ function documentFixture() {
   function element() {
     return {
       textContent: '', hidden: false, disabled: false, value: 'Chris', children: [],
-      listeners: new Map(), dataset: {}, focus() {},
+      listeners: new Map(), dataset: {}, attributes: new Map(), focus() {},
+      setAttribute(name, value) { this.attributes.set(name, String(value)); },
+      getAttribute(name) { return this.attributes.get(name) ?? null; },
+      appendChild(child) { child.parent = this; this.children.push(child); return child; },
+      closest() {
+        for (let candidate = this; candidate; candidate = candidate.parent) {
+          if (candidate.dataset.action) {
+            return candidate;
+          }
+        }
+        return null;
+      },
       set innerHTML(_) { throw new Error('Untrusted content must never use innerHTML'); },
       addEventListener(name, handler) { this.listeners.set(name, handler); },
       removeEventListener(name) { this.listeners.delete(name); },
-      replaceChildren(...children) { this.children = children; },
+      replaceChildren(...children) {
+        for (const child of children) {
+          child.parent = this;
+        }
+        this.children = children;
+      },
       querySelectorAll() { return []; },
     };
   }
@@ -51,6 +67,7 @@ function documentFixture() {
     },
     querySelectorAll() { return buttons; },
     createElement() { return element(); },
+    createElementNS() { return element(); },
   };
 }
 
@@ -245,4 +262,54 @@ test('countdowns read as minutes and padded seconds and never go negative', () =
   assert.equal(formatCountdown(59), '0:59');
   assert.equal(formatCountdown(840), '14:00');
   assert.equal(formatCountdown(-3), '0:00');
+});
+
+function sceneHotspot(documentRoot, action) {
+  const scene = documentRoot.getElementById('surviveCampScene');
+  const descendants = node => node.children.flatMap(child => [child, ...descendants(child)]);
+  return descendants(scene).find(node => node.dataset.action === action);
+}
+
+test('clicking an allowed scene hotspot sends that action once with the current revision', async () => {
+  const documentRoot = documentFixture();
+  const requests = [];
+  let finishAction;
+  const mounted = mountSurvive(documentRoot, async (url, options) => {
+    requests.push({ url, options });
+    if (options.method === 'POST') {
+      return new Promise(resolve => { finishAction = resolve; });
+    }
+    return snapshot;
+  });
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    const sceneClick = documentRoot.getElementById('surviveCampScene').listeners.get('click');
+    const trees = sceneHotspot(documentRoot, 'GATHER');
+    assert.match(trees.getAttribute('class'), /is-available/);
+    sceneClick({ target: trees });
+    sceneClick({ target: trees });
+    const posts = requests.filter(request => request.options.method === 'POST');
+    assert.equal(posts.length, 1);
+    assert.deepEqual(JSON.parse(posts[0].options.body), { action: 'GATHER', revision: 7 });
+    finishAction(snapshot);
+  } finally { mounted.dispose(); }
+});
+
+test('scene hotspots the server does not allow send nothing', async () => {
+  const documentRoot = documentFixture();
+  const requests = [];
+  const mounted = mountSurvive(documentRoot, async (url, options) => {
+    requests.push({ url, options });
+    return snapshot;
+  });
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    const sceneClick = documentRoot.getElementById('surviveCampScene').listeners.get('click');
+    const boats = sceneHotspot(documentRoot, 'ESCAPE');
+    assert.doesNotMatch(boats.getAttribute('class'), /is-available/);
+    sceneClick({ target: boats });
+    sceneClick({ target: documentRoot.getElementById('surviveCampScene') });
+    assert.equal(requests.filter(request => request.options.method === 'POST').length, 0);
+  } finally { mounted.dispose(); }
+  assert.equal(documentRoot.getElementById('surviveCampScene').listeners.has('click'), false);
 });

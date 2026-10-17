@@ -127,3 +127,13 @@ Tests inject clock and percent rolls. `SurviveServiceTest` verifies shared camp,
 private survivor state, expiry, capacity, validation and stale command rejection;
 `SurviveWorldTest` covers mechanics; controller tests cover anonymous CSRF-protected HTTP behavior and the real bearer authentication filter. Saved-state tests cover restart, failed saves, competing processes and account/guest isolation. UI renders server snapshots with text nodes and polls every five
 seconds while visible. JavaScript owns no gameplay rules.
+
+`survive-scene.js` draws the camp as an SVG from the same snapshot: the sky by
+phase, tents, boats, survivors, the player's gear and state, any enemy, and a
+flash when the newest journal entry is a raid. Layers redraw only when their
+inputs change. Its hotspots carry the same `data-action` values as the buttons and
+share one click handler, which sends only actions the latest snapshot allows, one
+request at a time. Hotspots are hidden from assistive technology because the
+buttons are the accessible path; the SVG's label describes the scene. The scene
+owns no rules: its phase lengths and animal health values only place the sun and
+scale the health bar.
