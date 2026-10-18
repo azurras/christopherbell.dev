@@ -95,6 +95,22 @@ export function syncActionMenus(documentRoot, actionBar) {
   }
 }
 
+/**
+ * After a render changes the bar's shape (a fight starts, sleep, the end of the game), returns
+ * focus that was in the bar to its first usable control instead of letting it fall to the page.
+ */
+export function keepFocusInActionBar(documentRoot, actionBar) {
+  const focused = documentRoot.activeElement;
+  const focusIsUsable = Boolean(focused) && actionBar.contains(focused) && !focused.disabled
+    && !focused.closest('[hidden]');
+  if (focusIsUsable) {
+    return;
+  }
+  const usableControls = [...actionBar.querySelectorAll('button')]
+    .filter(control => !control.disabled && !control.closest('[hidden]'));
+  usableControls[0]?.focus();
+}
+
 /** Wires the side panel tabs, restoring the remembered tab. Returns its disposer. */
 export function mountPanelTabs(documentRoot, tablist, storage = browserStorage()) {
   const tabs = [...tablist.querySelectorAll('[role="tab"]')];

@@ -29,7 +29,7 @@ function documentFixture() {
   function element(id = '') {
     return {
       id, textContent: '', hidden: false, disabled: false, value: 'Chris', children: [],
-      listeners: new Map(), dataset: {}, attributes: new Map(), focus() {},
+      listeners: new Map(), dataset: {}, attributes: new Map(), focus() {}, contains() { return false; },
       setAttribute(name, value) { this.attributes.set(name, String(value)); },
       getAttribute(name) { return this.attributes.get(name) ?? null; },
       appendChild(child) { child.parent = this; this.children.push(child); return child; },

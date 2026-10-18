@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mountActionMenus, mountPanelTabs, noteJournalEvents, syncActionMenus } from '../../main/resources/static/js/survive-menus.js';
+import {
+  keepFocusInActionBar, mountActionMenus, mountPanelTabs, noteJournalEvents, syncActionMenus,
+} from '../../main/resources/static/js/survive-menus.js';
 import { createFakeDocument } from './support/fake-dom.js';
 
 function actionBarFixture() {
@@ -179,6 +181,29 @@ test('focus moves to an enabled menu button when the focused menu empties', () =
     assert.equal(byId('surviveMenuBuildButton').disabled, true);
     assert.equal(documentRoot.activeElement, byId('surviveMenuExploreButton'));
   } finally { menus.dispose(); }
+});
+
+test('focus that was in the bar moves to the first usable control when the bar changes shape', () => {
+  const { documentRoot, h } = createFakeDocument();
+  const explore = h('button', { type: 'button', id: 'explore' }, 'Explore');
+  const menus = h('div', { id: 'menus' }, explore);
+  const attack = h('button', { type: 'button', 'data-action': 'ATTACK' }, 'Attack');
+  const startOver = h('button', { type: 'button', id: 'startOver' }, 'Start a new survivor');
+  const actionBar = h('div', { id: 'surviveActionBar' }, menus, h('div', {}, attack, startOver));
+  documentRoot.body.appendChild(actionBar);
+  attack.hidden = true;
+  startOver.hidden = true;
+  explore.focus();
+  keepFocusInActionBar(documentRoot, actionBar);
+  assert.equal(documentRoot.activeElement, explore);
+  menus.hidden = true;
+  attack.hidden = false;
+  keepFocusInActionBar(documentRoot, actionBar);
+  assert.equal(documentRoot.activeElement, attack);
+  attack.hidden = true;
+  startOver.hidden = false;
+  keepFocusInActionBar(documentRoot, actionBar);
+  assert.equal(documentRoot.activeElement, startOver);
 });
 
 test('disposing removes every listener, including the outside-click listener', () => {

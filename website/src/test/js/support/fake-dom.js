@@ -131,6 +131,10 @@ function matchesSimple(element, selector) {
   const attribute = /^\[([\w-]+)(?:="([^"]*)")?\]$/.exec(selector);
   if (attribute) {
     const [, name, value] = attribute;
+    if (name === 'hidden' && value === undefined) {
+      // The `hidden` property reflects the attribute in browsers.
+      return element.hidden;
+    }
     return value === undefined ? element.hasAttribute(name) : element.getAttribute(name) === value;
   }
   if (selector.startsWith('#')) {

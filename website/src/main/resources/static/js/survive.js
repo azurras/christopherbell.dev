@@ -1,7 +1,9 @@
 /** Display and transport only: the Java world owns all rules and allowed actions. */
 import { API } from './lib/api.js';
 import { fetchJson } from './lib/util.js';
-import { mountActionMenus, mountPanelTabs, noteJournalEvents, syncActionMenus } from './survive-menus.js';
+import {
+  keepFocusInActionBar, mountActionMenus, mountPanelTabs, noteJournalEvents, syncActionMenus,
+} from './survive-menus.js';
 import { renderSurviveScene } from './survive-scene.js';
 
 const STATUS_LABELS = {
@@ -75,6 +77,7 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveEnemyHealth', `${state.enemyHealth} health`);
   // Menus and the direct group list only moves the server allows now; menus appear while exploring.
   const actionBar = documentRoot.getElementById('surviveActionBar');
+  const focusWasInActionBar = actionBar.contains(documentRoot.activeElement);
   for (const move of actionBar.querySelectorAll('[data-action]')) {
     const isAllowed = state.actions.includes(move.dataset.action);
     move.hidden = !isAllowed;
@@ -88,6 +91,9 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   startOver.hidden = !['DEAD', 'ESCAPED'].includes(state.status);
   startOver.disabled = pending;
   syncActionMenus(documentRoot, actionBar);
+  if (focusWasInActionBar) {
+    keepFocusInActionBar(documentRoot, actionBar);
+  }
   noteJournalEvents(documentRoot, state.worldRevision);
   for (const [id, entries] of [['survivePlayers', state.survivors], ['surviveEvents', [...state.events].reverse()]]) {
     const list = documentRoot.getElementById(id);
