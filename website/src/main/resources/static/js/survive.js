@@ -1,6 +1,7 @@
 /** Display and transport only: the Java world owns all rules and allowed actions. */
 import { API } from './lib/api.js';
 import { fetchJson } from './lib/util.js';
+import { mountActionMenus, mountPanelTabs, noteJournalEvents, syncActionMenus } from './survive-menus.js';
 import { renderSurviveScene } from './survive-scene.js';
 
 const STATUS_LABELS = {
@@ -15,24 +16,12 @@ const ENEMY_LABELS = { HOG: 'Wild hog', WOLF: 'Grey wolf', BEAR: 'Brown bear' };
 const WEAPON_LABELS = { CLUB: 'Club', STONE_AXE: 'Stone axe', SPEAR: 'Spear' };
 const PHASE_LABELS = { DAY: 'Day', DUSK: 'Dusk', NIGHT: 'Night' };
 const NEXT_PHASE_LABELS = { DAY: 'Dusk in', DUSK: 'Nightfall in', NIGHT: 'Dawn in' };
-const COMBAT_ACTIONS = ['ATTACK', 'DEFEND', 'FLEE'];
 const HUNGER_WARNING_LEVEL = 3;
 
 /** Minutes and seconds until the next phase, for example 4:05. */
 export function formatCountdown(secondsLeft) {
   const wholeSeconds = Math.max(0, Math.floor(secondsLeft));
   return `${Math.floor(wholeSeconds / 60)}:${String(wholeSeconds % 60).padStart(2, '0')}`;
-}
-
-/** Each status shows only its own controls: combat moves in a fight, waking while asleep. */
-function isActionShownFor(status, action) {
-  if (status === 'COMBAT') {
-    return COMBAT_ACTIONS.includes(action);
-  }
-  if (status === 'SLEEPING') {
-    return action === 'WAKE';
-  }
-  return !COMBAT_ACTIONS.includes(action) && action !== 'WAKE';
 }
 
 /** Render server-supplied text as text nodes, including names and public journal entries. */
@@ -84,10 +73,19 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   documentRoot.getElementById('surviveEnemy').hidden = state.status !== 'COMBAT';
   setText('surviveEnemyName', ENEMY_LABELS[state.enemy] || 'Wild animal');
   setText('surviveEnemyHealth', `${state.enemyHealth} health`);
-  for (const button of documentRoot.querySelectorAll('[data-action]')) {
-    button.disabled = pending || !state.actions.includes(button.dataset.action);
-    button.hidden = !isActionShownFor(state.status, button.dataset.action);
+  // Menus and the direct group list only moves the server allows now; menus appear while exploring.
+  const actionBar = documentRoot.getElementById('surviveActionBar');
+  for (const move of actionBar.querySelectorAll('[data-action]')) {
+    const isAllowed = state.actions.includes(move.dataset.action);
+    move.hidden = !isAllowed;
+    move.disabled = pending || !isAllowed;
   }
+  documentRoot.getElementById('surviveMenus').hidden = state.status !== 'EXPLORING';
+  const startOver = documentRoot.getElementById('surviveStartOver');
+  startOver.hidden = !['DEAD', 'ESCAPED'].includes(state.status);
+  startOver.disabled = pending;
+  syncActionMenus(documentRoot, actionBar);
+  noteJournalEvents(documentRoot, state.worldRevision);
   for (const [id, entries] of [['survivePlayers', state.survivors], ['surviveEvents', [...state.events].reverse()]]) {
     const list = documentRoot.getElementById(id);
     const items = entries.map(text => {
@@ -137,6 +135,10 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   let phaseEndsAtMilliseconds = 0;
   const errorBox = documentRoot.getElementById('surviveError');
   const restart = documentRoot.getElementById('surviveRestart');
+  const startOver = documentRoot.getElementById('surviveStartOver');
+  const actionBar = documentRoot.getElementById('surviveActionBar');
+  const menus = mountActionMenus(documentRoot, actionBar);
+  const tabs = mountPanelTabs(documentRoot, documentRoot.getElementById('surviveTabs'));
   const refresh = documentRoot.getElementById('surviveRefresh');
   const cancel = documentRoot.getElementById('surviveCancel');
   const giftForm = documentRoot.getElementById('surviveGift');
@@ -236,7 +238,8 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   giftForm.addEventListener('submit', give);
   documentRoot.getElementById('surviveRecipient').addEventListener('change', chooseRecipient);
   joinForm.addEventListener('submit', join);
-  documentRoot.getElementById('surviveActions').addEventListener('click', act);
+  actionBar.addEventListener('click', act);
+  startOver.addEventListener('click', showJoin);
   documentRoot.getElementById('surviveCampScene').addEventListener('click', act);
   restart.addEventListener('click', showJoin);
   cancel.addEventListener('click', cancelJoin);
@@ -266,7 +269,10 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       clearInterval(timer);
       clearInterval(clockTimer);
       joinForm.removeEventListener('submit', join);
-      documentRoot.getElementById('surviveActions').removeEventListener('click', act);
+      actionBar.removeEventListener('click', act);
+      startOver.removeEventListener('click', showJoin);
+      menus.dispose();
+      tabs.dispose();
       documentRoot.getElementById('surviveCampScene').removeEventListener('click', act);
       restart.removeEventListener('click', showJoin);
       cancel.removeEventListener('click', cancelJoin);

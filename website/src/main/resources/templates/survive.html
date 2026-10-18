@@ -14,8 +14,7 @@
     <header class="survive-hero">
       <p class="survive-eyebrow">A shared world · A text adventure</p>
       <h1>Survive<span aria-hidden="true">.</span></h1>
-      <p>The wilderness is unforgiving. You don't have to face it alone.</p>
-      <div class="survive-intro"><span aria-hidden="true">↟</span> Gather wood and stone. Build a camp. Survive the nights. Find your way out.</div>
+      <p>Gather, build and make it through the nights together.</p>
     </header>
 
     <noscript><p class="survive-notice">Enable JavaScript for the controls. All gameplay runs on the Java server.</p></noscript>
@@ -30,80 +29,109 @@
 
     <div id="surviveGame" class="survive-grid" hidden>
       <section class="survive-panel survive-adventure" aria-labelledby="surviveScene">
-        <div class="survive-section-heading"><p class="survive-eyebrow">Your adventure</p><span id="surviveStatus" class="survive-badge"></span></div>
-        <div id="surviveClock" class="survive-clock" data-phase="DAY" role="group" aria-label="World time">
-          <strong id="survivePhase">Day</strong><span id="surviveDay"></span>
-          <span class="survive-countdown"><span id="surviveNextPhase">Dusk in</span> <strong id="surviveCountdown"></strong></span>
+        <div class="survive-section-heading">
+          <div id="surviveClock" class="survive-clock" data-phase="DAY" role="group" aria-label="World time">
+            <strong id="survivePhase">Day</strong><span id="surviveDay"></span>
+            <span class="survive-countdown"><span id="surviveNextPhase">Dusk in</span> <strong id="surviveCountdown"></strong></span>
+          </div>
+          <span id="surviveStatus" class="survive-badge"></span>
         </div>
         <svg id="surviveCampScene" class="survive-scene" role="img" aria-label="The camp" viewBox="0 0 960 540"></svg>
         <h2 id="surviveScene">At the edge of the wilderness</h2>
         <p id="surviveMessage" class="survive-message" role="status" aria-live="polite" aria-atomic="true"></p>
         <div id="surviveEnemy" class="survive-enemy" hidden><strong id="surviveEnemyName">Wild hog</strong><span id="surviveEnemyHealth"></span></div>
-        <p class="survive-eyebrow">Choose your next move</p>
-        <div id="surviveActions" class="survive-actions">
-          <button type="button" data-action="GATHER">Gather wood <small>50% chance · +1 wood</small></button>
-          <button type="button" data-action="GATHER_STONE">Gather stone <small>40% chance · +1 stone</small></button>
-          <button type="button" data-action="HUNT">Hunt <small>Hogs by day · Wolves and bears after dark</small></button>
-          <button type="button" data-action="BUILD_SHELTER">Build shelter <small>5 wood · Two beds for the camp</small></button>
-          <button type="button" data-action="BUILD_BOAT">Build boat <small>10 wood · One escape</small></button>
-          <button type="button" data-action="CRAFT_CLUB">Craft club <small>2 wood · +1 damage · 8 uses</small></button>
-          <button type="button" data-action="CRAFT_AXE">Craft stone axe <small>2 wood, 2 stone · +2 damage · Better wood gathering</small></button>
-          <button type="button" data-action="CRAFT_SPEAR">Craft spear <small>3 wood, 3 stone · +3 damage · Reach</small></button>
-          <button type="button" data-action="EAT">Eat food <small>1 food · +5 fullness, +2 health</small></button>
-          <button type="button" data-action="REST">Rest <small>Requires shelter · +2 health</small></button>
-          <button type="button" data-action="GUARD">Stand guard <small>Dusk only · Defend the camp from tonight's raid</small></button>
-          <button type="button" data-action="SLEEP">Sleep <small>Dusk or night · Uses a shelter bed · Heal through the night</small></button>
-          <button type="button" data-action="WAKE">Wake up <small>Keep the health you have recovered so far</small></button>
-          <button type="button" data-action="ESCAPE">Sail away <small>Use a shared boat · Survive</small></button>
-          <button type="button" data-action="ATTACK">Attack <small>Strike with your weapon · The animal bites back</small></button>
-          <button type="button" data-action="DEFEND">Defend <small>Block the next bite</small></button>
-          <button type="button" data-action="FLEE">Flee <small>Return to camp · Take one bite</small></button>
+        <div id="surviveActionBar" class="survive-action-bar">
+          <div id="surviveMenus" class="survive-menus" role="group" aria-label="Moves">
+          <div class="survive-menu">
+            <button type="button" id="surviveMenuExploreButton" class="survive-menu-button" aria-haspopup="menu" aria-expanded="false" aria-controls="surviveMenuExplore" data-menu-button>Explore <span class="survive-menu-count" data-menu-count>0</span></button>
+            <div id="surviveMenuExplore" class="survive-menu-list" role="menu" aria-labelledby="surviveMenuExploreButton" hidden>
+              <button type="button" role="menuitem" data-action="GATHER">Gather wood <small>50% chance · +1 wood</small></button>
+              <button type="button" role="menuitem" data-action="GATHER_STONE">Gather stone <small>40% chance · +1 stone</small></button>
+              <button type="button" role="menuitem" data-action="HUNT">Hunt <small>Hogs by day · Wolves and bears after dark</small></button>
+            </div>
+          </div>
+          <div class="survive-menu">
+            <button type="button" id="surviveMenuBuildButton" class="survive-menu-button" aria-haspopup="menu" aria-expanded="false" aria-controls="surviveMenuBuild" data-menu-button>Build <span class="survive-menu-count" data-menu-count>0</span></button>
+            <div id="surviveMenuBuild" class="survive-menu-list" role="menu" aria-labelledby="surviveMenuBuildButton" hidden>
+              <button type="button" role="menuitem" data-action="BUILD_SHELTER">Build shelter <small>5 wood · Two beds for the camp</small></button>
+              <button type="button" role="menuitem" data-action="BUILD_BOAT">Build boat <small>10 wood · One escape</small></button>
+              <button type="button" role="menuitem" id="surviveCraftButton" class="survive-submenu-button" aria-haspopup="menu" aria-expanded="false" aria-controls="surviveMenuCraft" data-submenu-button>Craft <small>Weapons from wood and stone</small><span aria-hidden="true">▸</span></button>
+              <div id="surviveMenuCraft" class="survive-menu-list survive-submenu" role="menu" aria-labelledby="surviveCraftButton" hidden>
+                <button type="button" role="menuitem" data-action="CRAFT_CLUB">Club <small>2 wood · +1 damage · 8 uses</small></button>
+                <button type="button" role="menuitem" data-action="CRAFT_AXE">Stone axe <small>2 wood, 2 stone · +2 damage · Better wood gathering</small></button>
+                <button type="button" role="menuitem" data-action="CRAFT_SPEAR">Spear <small>3 wood, 3 stone · +3 damage · Reach</small></button>
+              </div>
+            </div>
+          </div>
+          <div class="survive-menu">
+            <button type="button" id="surviveMenuCampButton" class="survive-menu-button" aria-haspopup="menu" aria-expanded="false" aria-controls="surviveMenuCamp" data-menu-button>Camp <span class="survive-menu-count" data-menu-count>0</span></button>
+            <div id="surviveMenuCamp" class="survive-menu-list" role="menu" aria-labelledby="surviveMenuCampButton" hidden>
+              <button type="button" role="menuitem" data-action="EAT">Eat food <small>1 food · +5 fullness, +2 health</small></button>
+              <button type="button" role="menuitem" data-action="REST">Rest <small>In a shelter · +2 health</small></button>
+              <button type="button" role="menuitem" data-action="GUARD">Stand guard <small>Defend the camp from tonight's raid</small></button>
+              <button type="button" role="menuitem" data-action="SLEEP">Sleep <small>Uses a shelter bed · Heal through the night</small></button>
+              <button type="button" role="menuitem" data-action="ESCAPE">Sail away <small>Use a shared boat · Survive</small></button>
+            </div>
+          </div>
+          </div>
+          <div id="surviveDirectActions" class="survive-direct-actions" role="group" aria-label="Moves right now">
+            <button type="button" data-action="ATTACK">Attack <small>The animal bites back</small></button>
+            <button type="button" data-action="DEFEND">Defend <small>Block the next bite</small></button>
+            <button type="button" data-action="FLEE">Flee <small>Return to camp · Take one bite</small></button>
+            <button type="button" data-action="WAKE">Wake up <small>Keep the health you have recovered</small></button>
+            <button id="surviveStartOver" type="button" class="survive-primary" hidden>Start a new survivor</button>
+          </div>
         </div>
-        <div class="survive-secondary"><button id="surviveRefresh" type="button">Refresh world</button><button id="surviveRestart" type="button">New survivor</button></div>
       </section>
 
       <aside class="survive-sidebar" aria-label="Survivor and camp">
-        <section class="survive-panel" aria-labelledby="survivePlayerName">
-          <p class="survive-eyebrow">Your survivor</p><h2 id="survivePlayerName"></h2>
-          <p id="surviveSaveStatus" class="survive-muted" role="status"></p>
-          <p id="survivePublicId" class="survive-muted"></p>
+        <section class="survive-panel survive-vitals" aria-labelledby="survivePlayerName">
+          <h2 id="survivePlayerName"></h2>
           <label class="survive-health-label" for="surviveHealth">Health <strong id="surviveHealthText"></strong></label>
           <meter id="surviveHealth" min="0" max="10" low="3" high="7" optimum="10" value="10"></meter>
           <label class="survive-health-label" for="surviveHunger">Fullness <strong id="surviveHungerText"></strong></label>
           <meter id="surviveHunger" min="0" max="10" low="4" high="7" optimum="10" value="10"></meter>
           <p id="surviveHungerWarning" class="survive-warning" role="status" hidden>You are hungry. Eat soon: at 0, every effort costs health.</p>
-          <dl class="survive-stats"><div><dt>Strength</dt><dd id="surviveStrength"></dd></div><div><dt>Stamina</dt><dd id="surviveStamina"></dd></div><div><dt>Gathering XP</dt><dd id="surviveExperience"></dd></div></dl>
-          <h3>Inventory <span id="surviveInventoryCount"></span></h3>
-          <dl class="survive-stats"><div><dt>Wood</dt><dd id="surviveWood"></dd></div><div><dt>Food</dt><dd id="surviveFood"></dd></div><div><dt>Stone</dt><dd id="surviveStone"></dd></div></dl>
-          <h3>Weapon</h3>
-          <p id="surviveWeapon" class="survive-muted"></p>
         </section>
-        <section class="survive-panel" aria-labelledby="surviveCampTitle">
-          <p class="survive-eyebrow">One world, built together</p><h2 id="surviveCampTitle">Shared camp</h2>
-          <dl class="survive-stats"><div><dt>Shelters</dt><dd id="surviveShelters"></dd></div><div><dt>Beds in use</dt><dd id="surviveBeds"></dd></div><div><dt>Boats</dt><dd id="surviveBoats"></dd></div></dl>
-          <h3>Survivors in camp <span id="survivePlayerCount"></span></h3><ul id="survivePlayers" class="survive-players"></ul>
-          <form id="surviveGift" class="survive-gift" aria-labelledby="surviveGiftTitle">
-            <h3 id="surviveGiftTitle">Share supplies</h3>
-            <label for="surviveRecipient">Give to</label>
-            <select id="surviveRecipient" name="recipientId" required></select>
-            <div class="survive-gift-amount">
-              <div><label for="surviveGiftResource">Supply</label><select id="surviveGiftResource" name="resource"><option value="WOOD">Wood</option><option value="FOOD">Food</option><option value="STONE">Stone</option></select></div>
-              <div><label for="surviveGiftQuantity">Amount</label><input id="surviveGiftQuantity" name="quantity" type="number" min="1" max="10" step="1" value="1" required /></div>
-            </div>
-            <button id="surviveGive" type="submit">Give supplies</button>
-            <p id="surviveGiftHint" class="survive-muted"></p>
-          </form>
-          <p class="survive-muted">Camp updates every 5 seconds while this page is visible.</p>
-        </section>
-      </aside>
-      <section class="survive-panel survive-journal" aria-labelledby="surviveJournalTitle">
-        <div class="survive-section-heading"><h2 id="surviveJournalTitle">Camp journal</h2><span class="survive-eyebrow">The last 30 events</span></div>
-        <ol id="surviveEvents" reversed></ol>
-      </section>
-    </div>
-
-    <details class="survive-panel survive-guide"><summary>Field guide · How to play</summary>
-      <p>The camp picture shows the shared world as it is now. Click the trees to gather wood, the rocks for stone, the dark forest edge to hunt, the fire to stand guard or rest, a tent to sleep or wake, a boat to sail away, and an animal to attack it. Glowing places are the moves you can make now; every move is also a button below.</p>
+        <div class="survive-panel survive-tabs">
+          <div id="surviveTabs" class="survive-tablist" role="tablist" aria-label="Survivor details">
+            <button type="button" role="tab" id="surviveTabSurvivor" aria-controls="survivePanelSurvivor" aria-selected="true" data-tab="survivor">Survivor</button>
+            <button type="button" role="tab" id="surviveTabCamp" aria-controls="survivePanelCamp" aria-selected="false" tabindex="-1" data-tab="camp">Camp</button>
+            <button type="button" role="tab" id="surviveTabJournal" aria-controls="survivePanelJournal" aria-selected="false" tabindex="-1" data-tab="journal">Journal <span id="surviveJournalUnread" class="survive-unread" hidden><span class="survive-visually-hidden">(new events)</span></span></button>
+            <button type="button" role="tab" id="surviveTabGuide" aria-controls="survivePanelGuide" aria-selected="false" tabindex="-1" data-tab="guide">Guide</button>
+          </div>
+          <section id="survivePanelSurvivor" class="survive-tab-panel" role="tabpanel" aria-labelledby="surviveTabSurvivor">
+            <dl class="survive-stats"><div><dt>Strength</dt><dd id="surviveStrength"></dd></div><div><dt>Stamina</dt><dd id="surviveStamina"></dd></div><div><dt>Gathering XP</dt><dd id="surviveExperience"></dd></div></dl>
+            <h3>Inventory <span id="surviveInventoryCount"></span></h3>
+            <dl class="survive-stats"><div><dt>Wood</dt><dd id="surviveWood"></dd></div><div><dt>Food</dt><dd id="surviveFood"></dd></div><div><dt>Stone</dt><dd id="surviveStone"></dd></div></dl>
+            <h3>Weapon</h3>
+            <p id="surviveWeapon" class="survive-muted"></p>
+            <p id="surviveSaveStatus" class="survive-muted" role="status"></p>
+            <p id="survivePublicId" class="survive-muted"></p>
+            <div class="survive-secondary"><button id="surviveRefresh" type="button">Refresh world</button><button id="surviveRestart" type="button">New survivor</button></div>
+          </section>
+          <section id="survivePanelCamp" class="survive-tab-panel" role="tabpanel" aria-labelledby="surviveTabCamp" hidden>
+            <dl class="survive-stats"><div><dt>Shelters</dt><dd id="surviveShelters"></dd></div><div><dt>Beds in use</dt><dd id="surviveBeds"></dd></div><div><dt>Boats</dt><dd id="surviveBoats"></dd></div></dl>
+            <h3>Survivors in camp <span id="survivePlayerCount"></span></h3><ul id="survivePlayers" class="survive-players"></ul>
+            <form id="surviveGift" class="survive-gift" aria-labelledby="surviveGiftTitle">
+              <h3 id="surviveGiftTitle">Share supplies</h3>
+              <label for="surviveRecipient">Give to</label>
+              <select id="surviveRecipient" name="recipientId" required></select>
+              <div class="survive-gift-amount">
+                <div><label for="surviveGiftResource">Supply</label><select id="surviveGiftResource" name="resource"><option value="WOOD">Wood</option><option value="FOOD">Food</option><option value="STONE">Stone</option></select></div>
+                <div><label for="surviveGiftQuantity">Amount</label><input id="surviveGiftQuantity" name="quantity" type="number" min="1" max="10" step="1" value="1" required /></div>
+              </div>
+              <button id="surviveGive" type="submit">Give supplies</button>
+              <p id="surviveGiftHint" class="survive-muted"></p>
+            </form>
+            <p class="survive-muted">Camp updates every 5 seconds while this page is visible.</p>
+          </section>
+          <section id="survivePanelJournal" class="survive-tab-panel" role="tabpanel" aria-labelledby="surviveTabJournal" hidden>
+            <p class="survive-muted">The last 30 events, newest first.</p>
+            <ol id="surviveEvents" reversed></ol>
+          </section>
+          <section id="survivePanelGuide" class="survive-tab-panel survive-guide" role="tabpanel" aria-labelledby="surviveTabGuide" hidden>
+      <p>The camp picture shows the shared world as it is now. Click the trees to gather wood, the rocks for stone, the dark forest edge to hunt, the fire to stand guard or rest, a tent to sleep or wake, a boat to sail away, and an animal to attack it. Glowing places are the moves you can make now; every move is also in the menus below the picture.</p>
       <p>Time is shared by the whole world: each 24-minute day has 14 minutes of daylight, 4 of dusk and 6 of night. At every nightfall raiders attack the camp. Survivors who stand guard at dusk add their attack damage to the defense; if the raiders are stronger they burn shelters and boats. Raids build through a seven-night week and then begin again. Nobody is hurt while away, but the shared camp is.</p>
       <p>Outside camp you can be ambushed: rarely by day, more often at dusk and night. Hunting finds hogs by day; after dark wolves (8 health, bite 2) and bears (14 health, bite 3) roam. Fleeing costs one bite.</p>
       <p>Gather stone (40% chance) to craft weapons. A club costs 2 wood (+1 damage, 8 uses), a stone axe 2 wood and 2 stone (+2 damage, 12 uses, wood gathering rises to 70%), a spear 3 wood and 3 stone (+3 damage, 12 uses, and its reach spares you the first bite of each fight). Each attack wears your weapon down until it breaks; crafting replaces the one you hold.</p>
@@ -114,7 +142,10 @@
       <p>Your attack deals 1 + strength + weapon damage, and the animal bites back on every attack, even the final blow. Defend blocks one bite. Defeating a hog or wolf gives 1 food and a bear up to 3, as your inventory allows. A shared shelter restores 2 health per rest.</p>
       <p>Sail away to survive, or start again after death. New survivor replaces only your character. Saved account characters can start again after death or escape; joining again resumes a living character. Shelters, boats, and other players remain in the shared world. Names and recent actions are visible to other players; use a nickname.</p>
       <p>Your logged-in account has one saved survivor. Moves, supplies, combat and the shared camp are saved after each successful command and survive server restarts. Log in again to resume. Guests use a temporary browser session and expire after two idle hours. Saved survivors keep their progress while inactive and return to the active camp when resumed. Guest progress stays separate from your account character. This version has no chat or matchmaking.</p>
-    </details>
+          </section>
+        </div>
+      </aside>
+    </div>
     <p class="survive-attribution">Adapted from <a href="https://github.com/azurras/survive">azurras/Survive</a> · Java game engine · <a href="/licenses/survive-MIT.txt">MIT license</a>. Browser adaptation completes the original's unfinished combat and food actions.</p>
   </main>
   <footer id="footer"></footer>
