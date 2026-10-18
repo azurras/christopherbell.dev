@@ -169,6 +169,18 @@ test('a poll keeps an open menu open and moves focus only when the focused move 
   } finally { menus.dispose(); }
 });
 
+test('focus moves to an enabled menu button when the focused menu empties', () => {
+  const { documentRoot, actionBar, byId, allow } = actionBarFixture();
+  const menus = mountActionMenus(documentRoot, actionBar);
+  try {
+    allow('GATHER', 'CRAFT_AXE');
+    byId('surviveMenuBuildButton').focus();
+    allow('GATHER');
+    assert.equal(byId('surviveMenuBuildButton').disabled, true);
+    assert.equal(documentRoot.activeElement, byId('surviveMenuExploreButton'));
+  } finally { menus.dispose(); }
+});
+
 test('disposing removes every listener, including the outside-click listener', () => {
   const { documentRoot, actionBar, byId, allow } = actionBarFixture();
   const menus = mountActionMenus(documentRoot, actionBar);

@@ -201,7 +201,7 @@ test('serializes actions with the server revision and reconciles failure without
     click({ target: gather });
     assert.equal(requests.filter(request => request.options.method === 'POST').length, 1);
     assert.deepEqual(JSON.parse(requests[1].options.body), { action: 'GATHER', revision: 7 });
-    assert.ok(documentRoot.buttons.every(button => button.disabled));
+    assert.equal(documentRoot.getElementById('surviveActionBar').getAttribute('aria-busy'), 'true');
     rejectAction(new Error('Lost response'));
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(requests.length, 3);
@@ -294,12 +294,13 @@ test('the action bar shows menus while exploring and only situation moves otherw
   assert.equal(startOver.disabled, true);
 });
 
-test('allowed moves are disabled while a request is pending', () => {
+test('a pending request marks the action bar busy without disabling the focused move', () => {
   const documentRoot = documentFixture();
   renderSurviveState(documentRoot, snapshot, true);
-  assert.ok(documentRoot.buttons.every(button => button.disabled));
-  renderSurviveState(documentRoot, snapshot, false);
+  assert.equal(documentRoot.getElementById('surviveActionBar').getAttribute('aria-busy'), 'true');
   assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'GATHER').disabled, false);
+  renderSurviveState(documentRoot, snapshot, false);
+  assert.equal(documentRoot.getElementById('surviveActionBar').getAttribute('aria-busy'), 'false');
 });
 
 test('countdowns read as minutes and padded seconds and never go negative', () => {

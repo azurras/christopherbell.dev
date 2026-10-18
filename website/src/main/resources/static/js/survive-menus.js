@@ -71,7 +71,9 @@ export function mountActionMenus(documentRoot, actionBar) {
  */
 export function syncActionMenus(documentRoot, actionBar) {
   repairFocus(documentRoot, actionBar);
-  for (const menuButton of actionBar.querySelectorAll('[data-menu-button]')) {
+  const menuButtons = [...actionBar.querySelectorAll('[data-menu-button]')];
+  const focusedMenuButton = menuButtons.find(button => button === documentRoot.activeElement);
+  for (const menuButton of menuButtons) {
     const list = listControlledBy(documentRoot, menuButton);
     for (const submenuButton of list.querySelectorAll('[data-submenu-button]')) {
       const submenuIsEmpty = visibleMoves(listControlledBy(documentRoot, submenuButton)).length === 0;
@@ -86,6 +88,10 @@ export function syncActionMenus(documentRoot, actionBar) {
     if (moveCount === 0 && isExpanded(menuButton)) {
       closeList(documentRoot, menuButton);
     }
+  }
+  // A move that empties its own menu disables the button holding focus; keep focus in the bar.
+  if (focusedMenuButton?.disabled) {
+    menuButtons.find(button => !button.disabled)?.focus();
   }
 }
 

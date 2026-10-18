@@ -78,8 +78,11 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   for (const move of actionBar.querySelectorAll('[data-action]')) {
     const isAllowed = state.actions.includes(move.dataset.action);
     move.hidden = !isAllowed;
-    move.disabled = pending || !isAllowed;
+    move.disabled = !isAllowed;
   }
+  // Busy rather than disabled: disabling the focused move during a poll would drop keyboard focus.
+  // The click handler already ignores every move while a request is in flight.
+  actionBar.setAttribute('aria-busy', String(pending));
   documentRoot.getElementById('surviveMenus').hidden = state.status !== 'EXPLORING';
   const startOver = documentRoot.getElementById('surviveStartOver');
   startOver.hidden = !['DEAD', 'ESCAPED'].includes(state.status);

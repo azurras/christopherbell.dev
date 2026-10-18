@@ -27,6 +27,7 @@
 .survive-direct-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .survive-direct-actions:has(> :not([hidden])) { margin-top: 10px; }
 .survive-direct-actions button { flex: 1 1 140px; }
+.survive-action-bar[aria-busy="true"] button { opacity: .6; cursor: progress; }
 .survive-page button { border: 1px solid #52664c; background: #243222; color: #eef4e8; border-radius: 9px; padding: 13px 16px; font: inherit; text-align: left; cursor: pointer; }
 .survive-page button:hover:not(:disabled) { background: #34482d; border-color: #9ba985; }
 .survive-page button:focus-visible, .survive-page input:focus-visible, .survive-page select:focus-visible, .survive-guide summary:focus-visible { outline: 3px solid #f2b779; outline-offset: 3px; }
