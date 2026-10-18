@@ -70,6 +70,7 @@
 .survive-page .survive-tablist [role="tab"][aria-selected="true"] { color: #f2e6d2; border-bottom-color: #e9ad75; background: #1b261f; }
 .survive-tab-panel { padding: 20px 22px 24px; }
 .survive-tab-panel[hidden] { display: none; }
+.survive-panel-title { margin: 0 0 12px; }
 .survive-unread { display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: #e9ad75; vertical-align: middle; }
 .survive-unread[hidden] { display: none; }
 .survive-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
