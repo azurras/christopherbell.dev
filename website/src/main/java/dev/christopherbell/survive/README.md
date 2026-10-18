@@ -137,3 +137,10 @@ request at a time. Hotspots are hidden from assistive technology because the
 buttons are the accessible path; the SVG's label describes the scene. The scene
 owns no rules: its phase lengths and animal health values only place the sun and
 scale the health bar.
+
+The page groups moves into Explore, Build (with a Craft submenu) and Camp menus
+that list only moves the latest snapshot allows; in a fight, asleep or after the
+game ends the action bar shows only that situation's moves. `survive-menus.js`
+owns the menu-button and tab keyboard behavior and keeps open menus valid across
+polls. Vitals stay visible above Survivor, Camp, Journal and Guide tabs; the chosen
+tab is remembered per browser when storage allows.

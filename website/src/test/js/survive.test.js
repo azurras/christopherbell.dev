@@ -24,10 +24,12 @@ test('back/forward cache preserves mounted controls and final navigation release
 
 function documentFixture() {
   const elements = new Map();
-  function element() {
+  let buttons = [];
+  let tabs = [];
+  function element(id = '') {
     return {
-      textContent: '', hidden: false, disabled: false, value: 'Chris', children: [],
-      listeners: new Map(), dataset: {}, attributes: new Map(), focus() {},
+      id, textContent: '', hidden: false, disabled: false, value: 'Chris', children: [],
+      listeners: new Map(), dataset: {}, attributes: new Map(), focus() {}, contains() { return false; },
       setAttribute(name, value) { this.attributes.set(name, String(value)); },
       getAttribute(name) { return this.attributes.get(name) ?? null; },
       appendChild(child) { child.parent = this; this.children.push(child); return child; },
@@ -48,23 +50,38 @@ function documentFixture() {
         }
         this.children = children;
       },
-      querySelectorAll() { return []; },
+      querySelector() { return element(); },
+      querySelectorAll(selector) {
+        if (id === 'surviveActionBar' && selector === '[data-action]') {
+          return buttons;
+        }
+        return id === 'surviveTabs' && selector === '[role="tab"]' ? tabs : [];
+      },
     };
   }
-  const buttons = ['GATHER', 'GATHER_STONE', 'BUILD_BOAT', 'HUNT', 'ATTACK', 'DEFEND', 'FLEE', 'WAKE'].map(action => {
+  buttons = ['GATHER', 'GATHER_STONE', 'BUILD_BOAT', 'HUNT', 'ATTACK', 'DEFEND', 'FLEE', 'WAKE'].map(action => {
     const button = element();
     button.dataset.action = action;
     button.closest = () => button;
     return button;
   });
+  const getElementById = id => {
+    if (!elements.has(id)) {
+      elements.set(id, element(id));
+    }
+    return elements.get(id);
+  };
+  tabs = ['Survivor', 'Camp', 'Journal', 'Guide'].map(name => {
+    const tab = getElementById(`surviveTab${name}`);
+    tab.setAttribute('aria-controls', `survivePanel${name}`);
+    tab.dataset.tab = name.toLowerCase();
+    return tab;
+  });
   return {
     hidden: false, buttons,
-    getElementById(id) {
-      if (!elements.has(id)) {
-        elements.set(id, element());
-      }
-      return elements.get(id);
-    },
+    getElementById,
+    addEventListener() {},
+    removeEventListener() {},
     querySelectorAll() { return buttons; },
     createElement() { return element(); },
     createElementNS() { return element(); },
@@ -179,12 +196,12 @@ test('serializes actions with the server revision and reconciles failure without
   try {
     await new Promise(resolve => setImmediate(resolve));
     const gather = documentRoot.buttons[0];
-    const click = documentRoot.getElementById('surviveActions').listeners.get('click');
+    const click = documentRoot.getElementById('surviveActionBar').listeners.get('click');
     click({ target: gather });
     click({ target: gather });
     assert.equal(requests.filter(request => request.options.method === 'POST').length, 1);
     assert.deepEqual(JSON.parse(requests[1].options.body), { action: 'GATHER', revision: 7 });
-    assert.ok(documentRoot.buttons.every(button => button.disabled));
+    assert.equal(documentRoot.getElementById('surviveActionBar').getAttribute('aria-busy'), 'true');
     rejectAction(new Error('Lost response'));
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(requests.length, 3);
@@ -254,7 +271,36 @@ test('a sleeping survivor sees only the wake control', () => {
   assert.equal(documentRoot.getElementById('surviveStatus').textContent, 'Asleep');
   renderSurviveState(documentRoot, snapshot);
   assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'WAKE').hidden, true);
-  assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'GATHER_STONE').hidden, false);
+  assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'GATHER_STONE').hidden, true);
+  assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'GATHER').hidden, false);
+});
+
+test('the action bar shows menus while exploring and only situation moves otherwise', () => {
+  const documentRoot = documentFixture();
+  const menus = documentRoot.getElementById('surviveMenus');
+  const startOver = documentRoot.getElementById('surviveStartOver');
+  renderSurviveState(documentRoot, snapshot);
+  assert.equal(menus.hidden, false);
+  assert.equal(startOver.hidden, true);
+  renderSurviveState(documentRoot, { ...snapshot, status: 'COMBAT', enemy: 'HOG', enemyHealth: 5, actions: ['ATTACK', 'DEFEND', 'FLEE'] });
+  assert.equal(menus.hidden, true);
+  const shown = documentRoot.buttons.filter(button => !button.hidden).map(button => button.dataset.action);
+  assert.deepEqual(shown, ['ATTACK', 'DEFEND', 'FLEE']);
+  renderSurviveState(documentRoot, { ...snapshot, status: 'DEAD', health: 0, actions: [] });
+  assert.equal(menus.hidden, true);
+  assert.equal(startOver.hidden, false);
+  renderSurviveState(documentRoot, { ...snapshot, status: 'ESCAPED', actions: [] }, true);
+  assert.equal(startOver.hidden, false);
+  assert.equal(startOver.disabled, true);
+});
+
+test('a pending request marks the action bar busy without disabling the focused move', () => {
+  const documentRoot = documentFixture();
+  renderSurviveState(documentRoot, snapshot, true);
+  assert.equal(documentRoot.getElementById('surviveActionBar').getAttribute('aria-busy'), 'true');
+  assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'GATHER').disabled, false);
+  renderSurviveState(documentRoot, snapshot, false);
+  assert.equal(documentRoot.getElementById('surviveActionBar').getAttribute('aria-busy'), 'false');
 });
 
 test('countdowns read as minutes and padded seconds and never go negative', () => {

@@ -197,7 +197,7 @@ test('unknown values from a newer server draw neutral fallbacks instead of faili
 test('the page exposes the scene as one labelled image above the move buttons', () => {
   const html = readFileSync(new URL('../../main/resources/templates/survive.html', import.meta.url), 'utf8');
   assert.match(html, /<svg id="surviveCampScene" class="survive-scene" role="img" aria-label="[^"]+"/);
-  assert.ok(html.indexOf('id="surviveCampScene"') < html.indexOf('id="surviveActions"'));
+  assert.ok(html.indexOf('id="surviveCampScene"') < html.indexOf('id="surviveActionBar"'));
 });
 
 test('every hotspot is large enough to tap at phone width', () => {

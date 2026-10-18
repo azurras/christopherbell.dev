@@ -1,11 +1,9 @@
 .survive-main { max-width: 1180px; margin: 0 auto; padding: 40px 24px 64px; color: #e9ebe4; }
-.survive-hero { padding: 36px 0 40px; border-bottom: 1px solid #384139; margin-bottom: 28px; background: radial-gradient(ellipse at 80% 50%, #1b382940, transparent 65%); }
+.survive-hero { padding: 22px 0 22px; border-bottom: 1px solid #384139; margin-bottom: 28px; background: radial-gradient(ellipse at 80% 50%, #1b382940, transparent 65%); }
 .survive-eyebrow { color: #adc6a9; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .16em; margin: 0 0 14px; }
-.survive-hero h1 { font-family: Georgia, serif; font-size: clamp(3.5rem, 10vw, 6.5rem); letter-spacing: -.05em; line-height: 1; margin: 0 0 24px; }
+.survive-hero h1 { font-family: Georgia, serif; font-size: clamp(2.6rem, 7vw, 4.2rem); letter-spacing: -.05em; line-height: 1; margin: 0 0 10px; }
 .survive-hero h1 span { color: #e9ad75; }
 .survive-hero > p:not(.survive-eyebrow) { color: #b8c0b6; font-size: 1.1rem; }
-.survive-intro { margin-top: 22px; color: #e9ad75; font-family: monospace; }
-.survive-intro > span { font-size: 1.6rem; margin-right: 12px; }
 .survive-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: 20px; align-items: start; }
 .survive-panel { background: #141c18; border: 1px solid #344238; border-radius: 14px; padding: 26px; }
 .survive-panel h2 { font-family: Georgia, serif; font-size: 1.55rem; margin-bottom: 22px; }
@@ -14,12 +12,27 @@
 .survive-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .survive-badge { border: 1px solid #607659; color: #c7d9b4; font-size: .7rem; padding: 5px 9px; border-radius: 30px; }
 .survive-message { color: #ebd6bf; min-height: 88px; font-size: 1.1rem; line-height: 1.7; border-left: 2px solid #d39d6c; padding-left: 18px; }
-.survive-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.survive-action-bar { margin-top: 18px; }
+.survive-menus { position: relative; display: flex; flex-wrap: wrap; gap: 10px; }
+.survive-menus[hidden], .survive-menu-list[hidden] { display: none; }
+.survive-menu-button { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.survive-menu-button::after { content: '▾'; font-size: .8em; color: #c9d4bd; }
+.survive-menu-count { min-width: 1.7em; padding: 1px 6px; border-radius: 999px; background: #3b5134; color: #eef4e8; font-size: .75rem; text-align: center; }
+.survive-menu-list { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(100%, 420px); display: grid; gap: 4px; padding: 8px; background: #18221c; border: 1px solid #52664c; border-radius: 12px; box-shadow: 0 14px 30px rgba(0, 0, 0, .45); }
+.survive-page .survive-menu-list > button { width: 100%; border-color: transparent; background: transparent; }
+.survive-page .survive-menu-list > button:hover:not(:disabled), .survive-page .survive-menu-list > button:focus-visible { background: #2c3d29; }
+.survive-submenu { position: static; width: auto; margin: 0 0 4px 14px; box-shadow: none; border-color: #3d4e39; }
+.survive-submenu-button > span[aria-hidden="true"] { float: right; display: inline-block; transition: transform .15s; }
+.survive-submenu-button[aria-expanded="true"] > span[aria-hidden="true"] { transform: rotate(90deg); }
+.survive-direct-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.survive-direct-actions:has(> :not([hidden])) { margin-top: 10px; }
+.survive-direct-actions button { flex: 1 1 140px; }
+.survive-action-bar[aria-busy="true"] button { opacity: .6; cursor: progress; }
 .survive-page button { border: 1px solid #52664c; background: #243222; color: #eef4e8; border-radius: 9px; padding: 13px 16px; font: inherit; text-align: left; cursor: pointer; }
 .survive-page button:hover:not(:disabled) { background: #34482d; border-color: #9ba985; }
 .survive-page button:focus-visible, .survive-page input:focus-visible, .survive-page select:focus-visible, .survive-guide summary:focus-visible { outline: 3px solid #f2b779; outline-offset: 3px; }
 .survive-page button:disabled { opacity: .42; cursor: not-allowed; }
-.survive-actions small { display: block; font-size: .69rem; color: #b9c2ae; margin-top: 6px; line-height: 1.5; }
+.survive-action-bar small { display: block; font-size: .69rem; color: #b9c2ae; margin-top: 6px; line-height: 1.5; }
 .survive-secondary { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 26px; padding-top: 20px; border-top: 1px solid #344238; }
 .survive-secondary button { padding: 8px 12px; background: transparent; color: #bfcab9; font-size: .8rem; }
 .survive-sidebar { display: grid; gap: 20px; }
@@ -31,10 +44,9 @@
 .survive-stats dd { font-family: monospace; margin: 0; color: #f0dbc0; }
 .survive-players { list-style: none; padding: 0; display: flex; gap: 6px; flex-wrap: wrap; max-height: 140px; overflow-y: auto; }
 .survive-players li { font-size: .75rem; background: #273125; border-radius: 6px; padding: 5px 9px; overflow-wrap: anywhere; }
-.survive-journal { grid-column: 1 / -1; }
-.survive-journal ol { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow-y: auto; }
-.survive-journal li { padding: 12px 0; border-bottom: 1px solid #2d372f; color: #bfc9b7; font-size: .83rem; line-height: 1.7; overflow-wrap: anywhere; }
-.survive-journal li:first-child { color: #ead3b4; }
+#survivePanelJournal ol { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow-y: auto; }
+#survivePanelJournal li { padding: 12px 0; border-bottom: 1px solid #2d372f; color: #bfc9b7; font-size: .83rem; line-height: 1.7; overflow-wrap: anywhere; }
+#survivePanelJournal li:first-child { color: #ead3b4; }
 .survive-join { display: flex; align-items: end; gap: 14px; flex-wrap: wrap; margin-bottom: 24px; }
 .survive-join > div { width: 100%; }
 .survive-join h2 { margin-bottom: 12px; }
@@ -49,9 +61,20 @@
 .survive-countdown { margin-left: auto; font-variant-numeric: tabular-nums; }
 .survive-warning { color: #f1c0a4; font-size: .85rem; margin: 6px 0 0; }
 .survive-notice { color: #f1c0a4; border: 1px solid #946b58; padding: 18px; border-radius: 10px; }
-.survive-guide { margin-top: 24px; color: #bdc7b8; line-height: 1.8; font-size: .88rem; }
-.survive-guide summary { color: #e0ceb2; cursor: pointer; font-weight: 600; }
-.survive-guide p { margin: 18px 0 0; }
+.survive-guide { color: #bdc7b8; line-height: 1.8; font-size: .88rem; max-height: 520px; overflow-y: auto; }
+.survive-guide p { margin: 0 0 16px; }
+.survive-section-heading .survive-clock { flex: 1; margin: 0; }
+.survive-vitals h2 { margin: 0 0 14px; overflow-wrap: anywhere; }
+.survive-tabs { padding: 0; overflow: hidden; }
+.survive-tablist { display: flex; border-bottom: 1px solid #344238; }
+.survive-page .survive-tablist [role="tab"] { flex: 1; border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; text-align: center; padding: 12px 4px; color: #b8c2b0; font-size: .85rem; }
+.survive-page .survive-tablist [role="tab"][aria-selected="true"] { color: #f2e6d2; border-bottom-color: #e9ad75; background: #1b261f; }
+.survive-tab-panel { padding: 20px 22px 24px; }
+.survive-tab-panel[hidden] { display: none; }
+.survive-panel-title { margin: 0 0 12px; }
+.survive-unread { display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: #e9ad75; vertical-align: middle; }
+.survive-unread[hidden] { display: none; }
+.survive-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .survive-muted, .survive-attribution { font-size: .73rem; color: #acb5a6; line-height: 1.7; }
 .survive-attribution { margin-top: 24px; }
 .survive-attribution a { color: #e7b582; }
@@ -66,12 +89,12 @@
   .survive-hero { padding: 24px 0; }
   .survive-grid { grid-template-columns: 1fr; }
   .survive-panel { padding: 20px; }
-  .survive-sidebar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .survive-menu-list { width: 100%; }
   .survive-section-heading { flex-wrap: wrap; }
 }
 @media (max-width: 500px) {
   .survive-sidebar { grid-template-columns: 1fr; }
-  .survive-actions { grid-template-columns: 1fr; }
+  .survive-tab-panel { padding: 18px 16px 20px; }
   .survive-join input, .survive-join .survive-primary { width: 100%; }
 }
 
