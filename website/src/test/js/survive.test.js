@@ -25,7 +25,6 @@ test('back/forward cache preserves mounted controls and final navigation release
 function documentFixture() {
   const elements = new Map();
   let buttons = [];
-  let tabs = [];
   function element(id = '') {
     return {
       id, textContent: '', hidden: false, disabled: false, value: 'Chris', children: [],
@@ -55,7 +54,7 @@ function documentFixture() {
         if (id === 'surviveActionBar' && selector === '[data-action]') {
           return buttons;
         }
-        return id === 'surviveTabs' && selector === '[role="tab"]' ? tabs : [];
+        return [];
       },
     };
   }
@@ -71,12 +70,6 @@ function documentFixture() {
     }
     return elements.get(id);
   };
-  tabs = ['Survivor', 'Camp', 'Journal', 'Guide'].map(name => {
-    const tab = getElementById(`surviveTab${name}`);
-    tab.setAttribute('aria-controls', `survivePanel${name}`);
-    tab.dataset.tab = name.toLowerCase();
-    return tab;
-  });
   return {
     hidden: false, buttons,
     getElementById,
@@ -358,4 +351,31 @@ test('scene hotspots the server does not allow send nothing', async () => {
     assert.equal(requests.filter(request => request.options.method === 'POST').length, 0);
   } finally { mounted.dispose(); }
   assert.equal(documentRoot.getElementById('surviveCampScene').listeners.has('click'), false);
+});
+
+test('the status card shows inventory, weapon, stats and the three newest events', () => {
+  const documentRoot = documentFixture();
+  const events = ['First', 'Second', 'Third', 'Fourth', '<b>Newest</b>'];
+  renderSurviveState(documentRoot, { ...snapshot, events });
+  const recent = documentRoot.getElementById('surviveRecentEvents').children.map(item => item.textContent);
+  assert.deepEqual(recent, ['<b>Newest</b>', 'Fourth', 'Third']);
+  assert.equal(documentRoot.getElementById('surviveEvents').children.length, 5);
+  assert.equal(documentRoot.getElementById('surviveWood').textContent, '4');
+  assert.equal(documentRoot.getElementById('surviveStone').textContent, '2');
+  assert.equal(documentRoot.getElementById('surviveInventoryCount').textContent, '7 / 10');
+  assert.equal(documentRoot.getElementById('surviveWeapon').textContent, 'Spear · 9 uses left');
+  assert.equal(documentRoot.getElementById('surviveCampSummary').textContent, '1 shelter · 0 boats · 2 survivors');
+});
+
+test('rendering never opens or closes the side panel sections', () => {
+  const documentRoot = documentFixture();
+  const camp = documentRoot.getElementById('surviveSectionCamp');
+  const journal = documentRoot.getElementById('surviveSectionJournal');
+  camp.open = true;
+  journal.open = false;
+  renderSurviveState(documentRoot, snapshot);
+  renderSurviveState(documentRoot, { ...snapshot, worldRevision: 11, events: [...snapshot.events, 'Later'] });
+  assert.equal(camp.open, true);
+  assert.equal(journal.open, false);
+  assert.equal(documentRoot.getElementById('surviveJournalUnread').hidden, false);
 });

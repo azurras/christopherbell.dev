@@ -1,10 +1,8 @@
 /**
- * Menu and tab behavior for the Survive page. Display only: which moves exist is decided by the
+ * Menu behavior for the Survive action bar. Display only: which moves exist is decided by the
  * server snapshot, which `renderSurviveState` applies by hiding moves before `syncActionMenus` runs.
- * Menus follow the menu-button pattern; tabs use roving focus.
+ * Menus follow the menu-button pattern.
  */
-const TAB_STORAGE_KEY = 'survive.tab';
-
 /** Wires every menu button, item and submenu inside the action bar. Returns its disposer. */
 export function mountActionMenus(documentRoot, actionBar) {
   const onClick = event => {
@@ -109,77 +107,6 @@ export function keepFocusInActionBar(documentRoot, actionBar) {
   const usableControls = [...actionBar.querySelectorAll('button')]
     .filter(control => !control.disabled && !control.closest('[hidden]'));
   usableControls[0]?.focus();
-}
-
-/** Wires the side panel tabs, restoring the remembered tab. Returns its disposer. */
-export function mountPanelTabs(documentRoot, tablist, storage = browserStorage()) {
-  const tabs = [...tablist.querySelectorAll('[role="tab"]')];
-  const select = (tab, { moveFocus }) => {
-    for (const candidate of tabs) {
-      const isSelected = candidate === tab;
-      candidate.setAttribute('aria-selected', String(isSelected));
-      candidate.setAttribute('tabindex', isSelected ? '0' : '-1');
-      documentRoot.getElementById(candidate.getAttribute('aria-controls')).hidden = !isSelected;
-    }
-    if (moveFocus) {
-      tab.focus();
-    }
-    if (tab.id === 'surviveTabJournal') {
-      markJournalRead(documentRoot);
-    }
-    writeSafely(storage, TAB_STORAGE_KEY, tab.dataset.tab);
-  };
-  const rememberedName = readSafely(storage, TAB_STORAGE_KEY);
-  const initialTab = tabs.find(tab => tab.dataset.tab === rememberedName) ?? tabs[0];
-  select(initialTab, { moveFocus: false });
-
-  const onClick = event => {
-    const tab = event.target.closest('[role="tab"]');
-    if (tab) {
-      select(tab, { moveFocus: true });
-    }
-  };
-  const onKeydown = event => {
-    const tab = event.target.closest('[role="tab"]');
-    const index = tabs.indexOf(tab);
-    const targetIndex = {
-      ArrowRight: (index + 1) % tabs.length,
-      ArrowLeft: (index - 1 + tabs.length) % tabs.length,
-      Home: 0,
-      End: tabs.length - 1,
-    }[event.key];
-    if (tab && targetIndex !== undefined) {
-      event.preventDefault();
-      select(tabs[targetIndex], { moveFocus: true });
-    }
-  };
-  tablist.addEventListener('click', onClick);
-  tablist.addEventListener('keydown', onKeydown);
-  return {
-    dispose() {
-      tablist.removeEventListener('click', onClick);
-      tablist.removeEventListener('keydown', onKeydown);
-    },
-  };
-}
-
-/** Marks the Journal tab when the world changed since the journal was last on screen. */
-export function noteJournalEvents(documentRoot, worldRevision) {
-  const journalTab = documentRoot.getElementById('surviveTabJournal');
-  const revision = String(worldRevision);
-  journalTab.dataset.latestRevision = revision;
-  if (journalTab.getAttribute('aria-selected') === 'true' || journalTab.dataset.seenRevision === undefined) {
-    journalTab.dataset.seenRevision = revision;
-  }
-  documentRoot.getElementById('surviveJournalUnread').hidden = journalTab.dataset.seenRevision === revision;
-}
-
-function markJournalRead(documentRoot) {
-  const journalTab = documentRoot.getElementById('surviveTabJournal');
-  if (journalTab.dataset.latestRevision !== undefined) {
-    journalTab.dataset.seenRevision = journalTab.dataset.latestRevision;
-  }
-  documentRoot.getElementById('surviveJournalUnread').hidden = true;
 }
 
 function handleMenuKey(documentRoot, actionBar, menu, event) {
@@ -302,28 +229,4 @@ function focusableItems(menu) {
 /** Moves left visible anywhere in a menu, including its submenus. */
 function visibleMoves(menu) {
   return [...menu.querySelectorAll('[data-action]')].filter(move => !move.hidden);
-}
-
-function browserStorage() {
-  return {
-    read: key => globalThis.localStorage?.getItem(key) ?? null,
-    write: (key, value) => globalThis.localStorage?.setItem(key, value),
-  };
-}
-
-/** Storage can be missing or blocked (private windows, previews); the page works without it. */
-function readSafely(storage, key) {
-  try {
-    return storage.read(key);
-  } catch (storageFailure) {
-    return null;
-  }
-}
-
-function writeSafely(storage, key, value) {
-  try {
-    storage.write(key, value);
-  } catch (storageFailure) {
-    // The tab still changes; it just will not be remembered.
-  }
 }
