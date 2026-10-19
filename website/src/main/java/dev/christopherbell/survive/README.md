@@ -141,6 +141,8 @@ scale the health bar.
 The page groups moves into Explore, Build (with a Craft submenu) and Camp menus
 that list only moves the latest snapshot allows; in a fight, asleep or after the
 game ends the action bar shows only that situation's moves. `survive-menus.js`
-owns the menu-button and tab keyboard behavior and keeps open menus valid across
-polls. Vitals stay visible above Survivor, Camp, Journal and Guide tabs; the chosen
-tab is remembered per browser when storage allows.
+owns the menu-button keyboard behavior and keeps open menus valid across polls.
+The side panel's status card always shows vitals, inventory, weapon, stats and the
+three newest events. Camp & sharing, the full journal and the guide are native
+`details` sections that start closed; `survive-panel.js` remembers each one's open
+state per browser when storage allows, and renders never open or close them.

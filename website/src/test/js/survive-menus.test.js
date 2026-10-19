@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  keepFocusInActionBar, mountActionMenus, mountPanelTabs, noteJournalEvents, syncActionMenus,
+  keepFocusInActionBar, mountActionMenus, syncActionMenus,
 } from '../../main/resources/static/js/survive-menus.js';
 import { createFakeDocument } from './support/fake-dom.js';
 
@@ -214,88 +214,4 @@ test('disposing removes every listener, including the outside-click listener', (
   byId('surviveMenuExploreButton').click();
   assert.equal(byId('surviveMenuExplore').hidden, true);
   assert.equal(documentRoot.listeners.get('click')?.size ?? 0, 0);
-});
-
-function tabsFixture() {
-  const { documentRoot, h } = createFakeDocument();
-  const names = ['Survivor', 'Camp', 'Journal', 'Guide'];
-  const tablist = h('div', { role: 'tablist', id: 'surviveTabs' }, ...names.map((name, index) => h('button', {
-    type: 'button', role: 'tab', id: `surviveTab${name}`, 'aria-controls': `survivePanel${name}`,
-    'aria-selected': index === 0 ? 'true' : 'false', 'data-tab': name.toLowerCase(),
-  }, name)));
-  documentRoot.getElementById = id => documentRoot.body.querySelector(`#${id}`);
-  documentRoot.body.appendChild(tablist);
-  documentRoot.getElementById('surviveTabJournal').appendChild(h('span', { id: 'surviveJournalUnread' }));
-  for (const name of names) {
-    documentRoot.body.appendChild(h('section', { role: 'tabpanel', id: `survivePanel${name}` }));
-  }
-  const memory = new Map();
-  const storage = { read: key => memory.get(key) ?? null, write: (key, value) => memory.set(key, value) };
-  return { documentRoot, tablist, storage, memory, byId: id => documentRoot.getElementById(id) };
-}
-
-test('tabs select by click and arrow keys with one focusable tab and one visible panel', () => {
-  const { documentRoot, tablist, storage, memory, byId } = tabsFixture();
-  const tabs = mountPanelTabs(documentRoot, tablist, storage);
-  try {
-    assert.equal(byId('survivePanelSurvivor').hidden, false);
-    assert.equal(byId('survivePanelCamp').hidden, true);
-    assert.equal(byId('surviveTabSurvivor').getAttribute('tabindex'), '0');
-    assert.equal(byId('surviveTabCamp').getAttribute('tabindex'), '-1');
-    byId('surviveTabCamp').click();
-    assert.equal(byId('surviveTabCamp').getAttribute('aria-selected'), 'true');
-    assert.equal(byId('survivePanelCamp').hidden, false);
-    assert.equal(byId('survivePanelSurvivor').hidden, true);
-    assert.equal(memory.get('survive.tab'), 'camp');
-    press(byId('surviveTabCamp'), 'ArrowRight');
-    assert.equal(documentRoot.activeElement, byId('surviveTabJournal'));
-    assert.equal(byId('survivePanelJournal').hidden, false);
-    press(byId('surviveTabJournal'), 'End');
-    assert.equal(documentRoot.activeElement, byId('surviveTabGuide'));
-    press(byId('surviveTabGuide'), 'ArrowRight');
-    assert.equal(documentRoot.activeElement, byId('surviveTabSurvivor'));
-    press(byId('surviveTabSurvivor'), 'ArrowLeft');
-    assert.equal(documentRoot.activeElement, byId('surviveTabGuide'));
-    press(byId('surviveTabGuide'), 'Home');
-    assert.equal(documentRoot.activeElement, byId('surviveTabSurvivor'));
-  } finally { tabs.dispose(); }
-});
-
-test('the remembered tab is restored and broken storage falls back to the first tab', () => {
-  const remembered = tabsFixture();
-  remembered.memory.set('survive.tab', 'guide');
-  mountPanelTabs(remembered.documentRoot, remembered.tablist, remembered.storage).dispose();
-  assert.equal(remembered.byId('survivePanelGuide').hidden, false);
-  const broken = tabsFixture();
-  const throwingStorage = { read() { throw new Error('blocked'); }, write() { throw new Error('blocked'); } };
-  const tabs = mountPanelTabs(broken.documentRoot, broken.tablist, throwingStorage);
-  assert.equal(broken.byId('survivePanelSurvivor').hidden, false);
-  broken.byId('surviveTabCamp').click();
-  assert.equal(broken.byId('survivePanelCamp').hidden, false);
-  tabs.dispose();
-  const unknown = tabsFixture();
-  unknown.memory.set('survive.tab', 'settings');
-  mountPanelTabs(unknown.documentRoot, unknown.tablist, unknown.storage).dispose();
-  assert.equal(unknown.byId('survivePanelSurvivor').hidden, false);
-});
-
-test('new journal events mark the Journal tab until it is opened', () => {
-  const { documentRoot, tablist, storage, byId } = tabsFixture();
-  const tabs = mountPanelTabs(documentRoot, tablist, storage);
-  try {
-    const unread = byId('surviveJournalUnread');
-    noteJournalEvents(documentRoot, 10);
-    assert.equal(unread.hidden, true);
-    noteJournalEvents(documentRoot, 10);
-    assert.equal(unread.hidden, true);
-    noteJournalEvents(documentRoot, 11);
-    assert.equal(unread.hidden, false);
-    byId('surviveTabJournal').click();
-    assert.equal(unread.hidden, true);
-    noteJournalEvents(documentRoot, 12);
-    assert.equal(unread.hidden, true);
-    byId('surviveTabCamp').click();
-    noteJournalEvents(documentRoot, 12);
-    assert.equal(unread.hidden, true);
-  } finally { tabs.dispose(); }
 });

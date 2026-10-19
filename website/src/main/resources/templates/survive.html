@@ -85,32 +85,27 @@
       </section>
 
       <aside class="survive-sidebar" aria-label="Survivor and camp">
-        <section class="survive-panel survive-vitals" aria-labelledby="survivePlayerName">
-          <h2 id="survivePlayerName"></h2>
+        <section class="survive-panel survive-status-card" aria-labelledby="survivePlayerName">
+          <div class="survive-status-head"><h2 id="survivePlayerName"></h2><p id="surviveSaveStatus" class="survive-muted" role="status"></p></div>
           <label class="survive-health-label" for="surviveHealth">Health <strong id="surviveHealthText"></strong></label>
           <meter id="surviveHealth" min="0" max="10" low="3" high="7" optimum="10" value="10"></meter>
           <label class="survive-health-label" for="surviveHunger">Fullness <strong id="surviveHungerText"></strong></label>
           <meter id="surviveHunger" min="0" max="10" low="4" high="7" optimum="10" value="10"></meter>
           <p id="surviveHungerWarning" class="survive-warning" role="status" hidden>You are hungry. Eat soon: at 0, every effort costs health.</p>
+          <dl class="survive-inventory" aria-label="Inventory">
+            <div><dt>Wood</dt><dd id="surviveWood"></dd></div>
+            <div><dt>Food</dt><dd id="surviveFood"></dd></div>
+            <div><dt>Stone</dt><dd id="surviveStone"></dd></div>
+            <div><dt>Carried</dt><dd id="surviveInventoryCount"></dd></div>
+          </dl>
+          <p class="survive-card-line"><span class="survive-muted">Weapon</span> <strong id="surviveWeapon"></strong></p>
+          <p class="survive-card-line survive-muted">Strength <strong id="surviveStrength"></strong> · Stamina <strong id="surviveStamina"></strong> · XP <strong id="surviveExperience"></strong></p>
+          <div class="survive-recent-heading"><h3>Recent</h3><a href="#surviveSectionJournal" id="surviveFullJournal">Full journal</a></div>
+          <ol id="surviveRecentEvents" class="survive-recent"></ol>
+          <div class="survive-card-footer"><span id="survivePublicId" class="survive-muted"></span><span class="survive-secondary"><button id="surviveRefresh" type="button">Refresh world</button><button id="surviveRestart" type="button">New survivor</button></span></div>
         </section>
-        <div class="survive-panel survive-tabs">
-          <div id="surviveTabs" class="survive-tablist" role="tablist" aria-label="Survivor details">
-            <button type="button" role="tab" id="surviveTabSurvivor" aria-controls="survivePanelSurvivor" aria-selected="true" data-tab="survivor">Survivor</button>
-            <button type="button" role="tab" id="surviveTabCamp" aria-controls="survivePanelCamp" aria-selected="false" tabindex="-1" data-tab="camp">Camp</button>
-            <button type="button" role="tab" id="surviveTabJournal" aria-controls="survivePanelJournal" aria-selected="false" tabindex="-1" data-tab="journal">Journal <span id="surviveJournalUnread" class="survive-unread" hidden><span class="survive-visually-hidden">(new events)</span></span></button>
-            <button type="button" role="tab" id="surviveTabGuide" aria-controls="survivePanelGuide" aria-selected="false" tabindex="-1" data-tab="guide">Guide</button>
-          </div>
-          <section id="survivePanelSurvivor" class="survive-tab-panel" role="tabpanel" aria-labelledby="surviveTabSurvivor">
-            <dl class="survive-stats"><div><dt>Strength</dt><dd id="surviveStrength"></dd></div><div><dt>Stamina</dt><dd id="surviveStamina"></dd></div><div><dt>Gathering XP</dt><dd id="surviveExperience"></dd></div></dl>
-            <h3>Inventory <span id="surviveInventoryCount"></span></h3>
-            <dl class="survive-stats"><div><dt>Wood</dt><dd id="surviveWood"></dd></div><div><dt>Food</dt><dd id="surviveFood"></dd></div><div><dt>Stone</dt><dd id="surviveStone"></dd></div></dl>
-            <h3>Weapon</h3>
-            <p id="surviveWeapon" class="survive-muted"></p>
-            <p id="surviveSaveStatus" class="survive-muted" role="status"></p>
-            <p id="survivePublicId" class="survive-muted"></p>
-            <div class="survive-secondary"><button id="surviveRefresh" type="button">Refresh world</button><button id="surviveRestart" type="button">New survivor</button></div>
-          </section>
-          <section id="survivePanelCamp" class="survive-tab-panel" role="tabpanel" aria-labelledby="surviveTabCamp" hidden>
+        <details id="surviveSectionCamp" class="survive-panel survive-section">
+          <summary><span class="survive-section-title">Camp &amp; sharing</span> <span id="surviveCampSummary" class="survive-muted"></span></summary>
             <h3 class="survive-panel-title">Shared camp <span class="survive-muted">· One world, built together</span></h3>
             <dl class="survive-stats"><div><dt>Shelters</dt><dd id="surviveShelters"></dd></div><div><dt>Beds in use</dt><dd id="surviveBeds"></dd></div><div><dt>Boats</dt><dd id="surviveBoats"></dd></div></dl>
             <h3>Survivors in camp <span id="survivePlayerCount"></span></h3><ul id="survivePlayers" class="survive-players"></ul>
@@ -126,12 +121,13 @@
               <p id="surviveGiftHint" class="survive-muted"></p>
             </form>
             <p class="survive-muted">Camp updates every 5 seconds while this page is visible.</p>
-          </section>
-          <section id="survivePanelJournal" class="survive-tab-panel" role="tabpanel" aria-labelledby="surviveTabJournal" hidden>
-            <p class="survive-muted">The last 30 events, newest first.</p>
-            <ol id="surviveEvents" reversed></ol>
-          </section>
-          <section id="survivePanelGuide" class="survive-tab-panel survive-guide" role="tabpanel" aria-labelledby="surviveTabGuide" hidden>
+        </details>
+        <details id="surviveSectionJournal" class="survive-panel survive-section">
+          <summary><span class="survive-section-title">Journal</span> <span id="surviveJournalUnread" class="survive-unread" hidden><span class="survive-visually-hidden">(new events)</span></span> <span class="survive-muted">Last 30 events, newest first</span></summary>
+          <ol id="surviveEvents" reversed></ol>
+        </details>
+        <details id="surviveSectionGuide" class="survive-panel survive-section survive-guide">
+          <summary><span class="survive-section-title">Guide</span> <span class="survive-muted">How to play, costs and odds</span></summary>
       <p>The camp picture shows the shared world as it is now. Click the trees to gather wood, the rocks for stone, the dark forest edge to hunt, the fire to stand guard or rest, a tent to sleep or wake, a boat to sail away, and an animal to attack it. Glowing places are the moves you can make now; every move is also in the menus below the picture.</p>
       <p>Time is shared by the whole world: each 24-minute day has 14 minutes of daylight, 4 of dusk and 6 of night. At every nightfall raiders attack the camp. Survivors who stand guard at dusk add their attack damage to the defense; if the raiders are stronger they burn shelters and boats. Raids build through a seven-night week and then begin again. Nobody is hurt while away, but the shared camp is.</p>
       <p>Outside camp you can be ambushed: rarely by day, more often at dusk and night. Hunting finds hogs by day; after dark wolves (8 health, bite 2) and bears (14 health, bite 3) roam. Fleeing costs one bite.</p>
@@ -143,8 +139,7 @@
       <p>Your attack deals 1 + strength + weapon damage, and the animal bites back on every attack, even the final blow. Defend blocks one bite. Defeating a hog or wolf gives 1 food and a bear up to 3, as your inventory allows. A shared shelter restores 2 health per rest.</p>
       <p>Sail away to survive, or start again after death. New survivor replaces only your character. Saved account characters can start again after death or escape; joining again resumes a living character. Shelters, boats, and other players remain in the shared world. Names and recent actions are visible to other players; use a nickname.</p>
       <p>Your logged-in account has one saved survivor. Moves, supplies, combat and the shared camp are saved after each successful command and survive server restarts. Log in again to resume. Guests use a temporary browser session and expire after two idle hours. Saved survivors keep their progress while inactive and return to the active camp when resumed. Guest progress stays separate from your account character. This version has no chat or matchmaking.</p>
-          </section>
-        </div>
+        </details>
       </aside>
     </div>
     <p class="survive-attribution">Adapted from <a href="https://github.com/azurras/survive">azurras/Survive</a> · Java game engine · <a href="/licenses/survive-MIT.txt">MIT license</a>. Browser adaptation completes the original's unfinished combat and food actions.</p>

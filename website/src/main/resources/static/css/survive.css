@@ -44,9 +44,9 @@
 .survive-stats dd { font-family: monospace; margin: 0; color: #f0dbc0; }
 .survive-players { list-style: none; padding: 0; display: flex; gap: 6px; flex-wrap: wrap; max-height: 140px; overflow-y: auto; }
 .survive-players li { font-size: .75rem; background: #273125; border-radius: 6px; padding: 5px 9px; overflow-wrap: anywhere; }
-#survivePanelJournal ol { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow-y: auto; }
-#survivePanelJournal li { padding: 12px 0; border-bottom: 1px solid #2d372f; color: #bfc9b7; font-size: .83rem; line-height: 1.7; overflow-wrap: anywhere; }
-#survivePanelJournal li:first-child { color: #ead3b4; }
+#surviveSectionJournal ol { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow-y: auto; }
+#surviveSectionJournal li, .survive-recent li { padding: 12px 0; border-bottom: 1px solid #2d372f; color: #bfc9b7; font-size: .83rem; line-height: 1.7; overflow-wrap: anywhere; }
+#surviveSectionJournal li:first-child, .survive-recent li:first-child { color: #ead3b4; }
 .survive-join { display: flex; align-items: end; gap: 14px; flex-wrap: wrap; margin-bottom: 24px; }
 .survive-join > div { width: 100%; }
 .survive-join h2 { margin-bottom: 12px; }
@@ -61,16 +61,33 @@
 .survive-countdown { margin-left: auto; font-variant-numeric: tabular-nums; }
 .survive-warning { color: #f1c0a4; font-size: .85rem; margin: 6px 0 0; }
 .survive-notice { color: #f1c0a4; border: 1px solid #946b58; padding: 18px; border-radius: 10px; }
-.survive-guide { color: #bdc7b8; line-height: 1.8; font-size: .88rem; max-height: 520px; overflow-y: auto; }
+.survive-guide > p { color: #bdc7b8; line-height: 1.8; font-size: .88rem; }
 .survive-guide p { margin: 0 0 16px; }
 .survive-section-heading .survive-clock { flex: 1; margin: 0; }
-.survive-vitals h2 { margin: 0 0 14px; overflow-wrap: anywhere; }
-.survive-tabs { padding: 0; overflow: hidden; }
-.survive-tablist { display: flex; border-bottom: 1px solid #344238; }
-.survive-page .survive-tablist [role="tab"] { flex: 1; border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; text-align: center; padding: 12px 4px; color: #b8c2b0; font-size: .85rem; }
-.survive-page .survive-tablist [role="tab"][aria-selected="true"] { color: #f2e6d2; border-bottom-color: #e9ad75; background: #1b261f; }
-.survive-tab-panel { padding: 20px 22px 24px; }
-.survive-tab-panel[hidden] { display: none; }
+.survive-status-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 12px; }
+.survive-status-head h2 { margin: 0; overflow-wrap: anywhere; }
+.survive-status-head p { margin: 0; font-size: .75rem; }
+.survive-inventory { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 16px 0 12px; }
+.survive-inventory > div { padding: 8px 6px; border: 1px solid #2f3b31; border-radius: 9px; background: #18221c; text-align: center; }
+.survive-inventory dt { color: #9fab98; font-size: .7rem; }
+.survive-inventory dd { margin: 2px 0 0; color: #eef4e8; font-weight: 700; font-variant-numeric: tabular-nums; }
+.survive-card-line { margin: 6px 0; font-size: .85rem; }
+.survive-recent-heading { display: flex; align-items: baseline; justify-content: space-between; margin-top: 16px; }
+.survive-recent-heading h3 { margin: 0; font-size: .9rem; }
+.survive-recent-heading a { color: #e9ad75; font-size: .8rem; }
+.survive-recent { list-style: none; padding: 0; margin: 6px 0 0; }
+.survive-card-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #2d372f; }
+.survive-card-footer .survive-secondary { margin: 0; padding: 0; border: 0; }
+.survive-section { padding: 0; }
+.survive-section > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 16px 22px; cursor: pointer; list-style: none; }
+.survive-section > summary::-webkit-details-marker { display: none; }
+.survive-section > summary::before { content: '▸'; color: #e9ad75; transition: transform .15s; }
+.survive-section[open] > summary::before { transform: rotate(90deg); }
+.survive-section > summary:focus-visible { outline: 3px solid #f2b779; outline-offset: -3px; border-radius: 14px; }
+.survive-section-title { color: #f2e6d2; font-weight: 600; }
+.survive-section > summary .survive-muted { font-size: .78rem; }
+.survive-section > :not(summary) { margin-left: 22px; margin-right: 22px; }
+.survive-section[open] { padding-bottom: 18px; }
 .survive-panel-title { margin: 0 0 12px; }
 .survive-unread { display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: #e9ad75; vertical-align: middle; }
 .survive-unread[hidden] { display: none; }
@@ -94,7 +111,8 @@
 }
 @media (max-width: 500px) {
   .survive-sidebar { grid-template-columns: 1fr; }
-  .survive-tab-panel { padding: 18px 16px 20px; }
+  .survive-section > summary { padding: 14px 16px; }
+  .survive-section > :not(summary) { margin-left: 16px; margin-right: 16px; }
   .survive-join input, .survive-join .survive-primary { width: 100%; }
 }
 

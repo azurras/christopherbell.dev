@@ -1,9 +1,8 @@
 /** Display and transport only: the Java world owns all rules and allowed actions. */
 import { API } from './lib/api.js';
 import { fetchJson } from './lib/util.js';
-import {
-  keepFocusInActionBar, mountActionMenus, mountPanelTabs, noteJournalEvents, syncActionMenus,
-} from './survive-menus.js';
+import { keepFocusInActionBar, mountActionMenus, syncActionMenus } from './survive-menus.js';
+import { mountPanelSections, noteJournalEvents, summarizeCamp } from './survive-panel.js';
 import { renderSurviveScene } from './survive-scene.js';
 
 const STATUS_LABELS = {
@@ -95,7 +94,12 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
     keepFocusInActionBar(documentRoot, actionBar);
   }
   noteJournalEvents(documentRoot, state.worldRevision);
-  for (const [id, entries] of [['survivePlayers', state.survivors], ['surviveEvents', [...state.events].reverse()]]) {
+  setText('surviveCampSummary', summarizeCamp(state));
+  const newestEvents = [...state.events].reverse();
+  const listedEntries = [
+    ['survivePlayers', state.survivors], ['surviveEvents', newestEvents], ['surviveRecentEvents', newestEvents.slice(0, 3)],
+  ];
+  for (const [id, entries] of listedEntries) {
     const list = documentRoot.getElementById(id);
     const items = entries.map(text => {
       const item = documentRoot.createElement('li');
@@ -147,7 +151,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const startOver = documentRoot.getElementById('surviveStartOver');
   const actionBar = documentRoot.getElementById('surviveActionBar');
   const menus = mountActionMenus(documentRoot, actionBar);
-  const tabs = mountPanelTabs(documentRoot, documentRoot.getElementById('surviveTabs'));
+  const panel = mountPanelSections(documentRoot);
   const refresh = documentRoot.getElementById('surviveRefresh');
   const cancel = documentRoot.getElementById('surviveCancel');
   const giftForm = documentRoot.getElementById('surviveGift');
@@ -281,7 +285,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       actionBar.removeEventListener('click', act);
       startOver.removeEventListener('click', showJoin);
       menus.dispose();
-      tabs.dispose();
+      panel.dispose();
       documentRoot.getElementById('surviveCampScene').removeEventListener('click', act);
       restart.removeEventListener('click', showJoin);
       cancel.removeEventListener('click', cancelJoin);
