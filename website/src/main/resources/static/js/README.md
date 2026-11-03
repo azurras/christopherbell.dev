@@ -34,7 +34,9 @@ Owns browser-side behavior for server-rendered pages.
   conversation starter that avoids password-manager username heuristics,
   debounced username autocomplete against the account search API, and login
   redirect. A selection-generation guard prevents late history responses from
-  replacing the conversation that is currently selected.
+  replacing the conversation that is currently selected. Archive and send
+  completions use the same selection guard. Sending clears only the submitted
+  draft when its text and input generation are unchanged, preserving newer typing.
 - `notifications.js` renders the `/notifications` Signal Log page for signed-in
   users, showing notification category settings, the full notification list, and
   routing each item through the same mark-read behavior used by the nav dropdown.

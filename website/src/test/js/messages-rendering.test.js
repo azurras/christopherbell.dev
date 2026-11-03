@@ -65,6 +65,7 @@ function createPageNode() {
       return paragraph;
     },
   };
+  node.value = '';
   return node;
 }
 
@@ -118,7 +119,7 @@ globalThis.document = {
 };
 
 const pendingPageRequests = [];
-globalThis.fetch = requestUrl => {
+globalThis.fetch = (requestUrl, options) => {
   if (String(requestUrl).includes('/conversations?limit=30')) {
     return Promise.resolve(responseWithPayload([
       { username: 'alice' },
@@ -126,7 +127,7 @@ globalThis.fetch = requestUrl => {
     ]));
   }
   return new Promise((resolve, reject) => pendingPageRequests.push({
-    requestUrl: String(requestUrl), resolve, reject,
+    requestUrl: String(requestUrl), options, resolve, reject,
   }));
 };
 
@@ -263,6 +264,95 @@ test('conversation selection ignores a late older page from another recipient', 
 
   assert.deepEqual(renderedTexts(), ['latest bob message']);
   assert.equal(pageNodes.get('messagesAlert').textContent, '');
+});
+
+test('archiving an old selection preserves the newer selected conversation', async () => {
+  const aliceSelection = conversationRows[0].click();
+  pendingPageFor('alice').resolve(conversationPage('alice before archive'));
+  await aliceSelection;
+  const archive = pageNodes.get('archiveConversation').click();
+  const pendingArchive = pendingPageRequests.at(-1);
+  assert.match(pendingArchive.requestUrl, /alice\/archive$/);
+  const bobSelection = conversationRows[1].click();
+  pendingPageFor('bob').resolve(conversationPage('bob remains visible'));
+  await bobSelection;
+  pendingArchive.resolve(responseWithPayload({}));
+  await archive;
+  assert.equal(pageNodes.get('conversationTitle').textContent, '@bob');
+  assert.equal(currentUrl.searchParams.get('with'), 'bob');
+  assert.deepEqual(renderedTexts(), ['bob remains visible']);
+});
+
+test('send completion preserves a newer draft and does not reload another selection', async () => {
+  const aliceSelection = conversationRows[0].click();
+  pendingPageFor('alice').resolve(conversationPage('alice before send'));
+  await aliceSelection;
+  const textarea = pageNodes.get('messageText');
+  textarea.value = 'submitted to alice';
+  const send = pageNodes.get('messageForm').listeners.get('submit')({ preventDefault() {} });
+  const pendingSend = pendingPageRequests.at(-1);
+  assert.equal(JSON.parse(pendingSend.options.body).recipientUsername, 'alice');
+  const bobSelection = conversationRows[1].click();
+  pendingPageFor('bob').resolve(conversationPage('bob remains selected'));
+  await bobSelection;
+  textarea.value = 'new draft for bob';
+  const requestCount = pendingPageRequests.length;
+  pendingSend.resolve(responseWithPayload({}));
+  // Permit assertions even if the old implementation starts an unwanted reload.
+  await new Promise(resolve => setImmediate(resolve));
+  const extraRequests = pendingPageRequests.slice(requestCount);
+  extraRequests.forEach(request => request.resolve(conversationPage('unwanted reload')));
+  await send;
+  assert.equal(textarea.value, 'new draft for bob');
+  assert.equal(extraRequests.length, 0);
+  assert.deepEqual(renderedTexts(), ['bob remains selected']);
+});
+
+test('send refresh failures remain visible for the current selection', async () => {
+  const selection = conversationRows[0].click();
+  pendingPageFor('alice').resolve(conversationPage('alice before refresh failure'));
+  await selection;
+  pageNodes.get('messageText').value = 'submitted';
+  const send = pageNodes.get('messageForm').listeners.get('submit')({ preventDefault() {} });
+  pendingPageRequests.at(-1).resolve(responseWithPayload({}));
+  await new Promise(resolve => setImmediate(resolve));
+  pendingPageFor('alice').reject(new Error('current refresh failed'));
+  await send;
+  assert.equal(pageNodes.get('messagesAlert').textContent, 'current refresh failed');
+});
+
+test('send preserves edits to the draft in the same conversation', async () => {
+  const selection = conversationRows[0].click();
+  pendingPageFor('alice').resolve(conversationPage('alice before another draft'));
+  await selection;
+  const textarea = pageNodes.get('messageText');
+  textarea.value = 'submitted';
+  const send = pageNodes.get('messageForm').listeners.get('submit')({ preventDefault() {} });
+  const pendingSend = pendingPageRequests.at(-1);
+  textarea.value = 'another draft';
+  textarea.listeners.get('input')();
+  pendingSend.resolve(responseWithPayload({}));
+  await new Promise(resolve => setImmediate(resolve));
+  pendingPageFor('alice').resolve(conversationPage('sent message'));
+  await send;
+  assert.equal(textarea.value, 'another draft');
+});
+
+test('archive refresh failures remain visible after clearing the selection', async () => {
+  const selection = conversationRows[0].click();
+  pendingPageFor('alice').resolve(conversationPage('alice before archive refresh failure'));
+  await selection;
+  const archive = pageNodes.get('archiveConversation').click();
+  const pendingArchive = pendingPageRequests.at(-1);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.reject(new Error('current conversation list failed'));
+  try {
+    pendingArchive.resolve(responseWithPayload({}));
+    await archive;
+    assert.equal(pageNodes.get('messagesAlert').textContent, 'current conversation list failed');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('messageSuggestionListMarkup renders safe clickable username options', () => {
