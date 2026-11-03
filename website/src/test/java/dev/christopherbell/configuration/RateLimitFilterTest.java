@@ -11,8 +11,8 @@ import static org.mockito.Mockito.verify;
 import dev.christopherbell.configuration.filter.ApiErrorResponseWriter;
 import dev.christopherbell.configuration.filter.RateLimitFilter;
 import io.github.bucket4j.Bandwidth;
-import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Bucket4j;
+import io.github.bucket4j.Bucket;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -30,6 +30,53 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import tools.jackson.databind.ObjectMapper;
 
 public class RateLimitFilterTest {
+
+  @Test
+  void encodedAndLiteralEndpointsShareTheSensitiveBucket() throws Exception {
+    for (String encodedPath : List.of(
+        "/%61pi/accounts/2024-12-15/login",
+        "/api/accounts/2024-12-15/lo%67in")) {
+      var properties = new RateLimitProperties();
+      properties.getRules().stream().filter(rule -> "auth-mutations".equals(rule.getName()))
+          .findFirst().orElseThrow().setCapacity(1);
+      var filter = new RateLimitFilter(new ClientIpResolver(new ClientIpProperties()), properties);
+      var chain = mock(FilterChain.class);
+      var first = new MockHttpServletResponse();
+      filter.doFilter(request("POST", encodedPath), first, chain);
+      var denied = new MockHttpServletResponse();
+
+      filter.doFilter(request("POST", "/api/accounts/2024-12-15/login"), denied, chain);
+
+      assertThat(first.getHeader("X-RateLimit-Limit")).isEqualTo("1");
+      assertThat(denied.getStatus()).isEqualTo(429);
+      verify(chain).doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
+    }
+  }
+
+  @Test
+  void encodedSeparatorsRemainInsideTheirOriginalPathSegment() throws Exception {
+    var properties = new RateLimitProperties();
+    var filter = new RateLimitFilter(new ClientIpResolver(new ClientIpProperties()), properties);
+    var response = new MockHttpServletResponse();
+
+    filter.doFilter(request("POST", "/api%2Faccounts/2024-12-15/login"),
+        response, mock(FilterChain.class));
+
+    assertThat(response.getHeader("X-RateLimit-Limit")).isEqualTo("10000");
+  }
+
+  @Test
+  void malformedEncodedPathIsRejectedBeforeTheHandler() throws Exception {
+    var filter = new RateLimitFilter(
+        new ClientIpResolver(new ClientIpProperties()), new RateLimitProperties());
+    var chain = mock(FilterChain.class);
+    var response = new MockHttpServletResponse();
+
+    filter.doFilter(request("POST", "/api/accounts/2024-12-15/lo%GGin"), response, chain);
+
+    assertThat(response.getStatus()).isEqualTo(400);
+    verify(chain, times(0)).doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
+  }
 
   @Test
   void exhaustedBucketReturnsStandardEnvelopeAndRateLimitGuidance() throws Exception {

@@ -16,6 +16,9 @@ Owns cross-cutting servlet filters that are not specific to one feature.
 ## Design Notes
 
 Rate limits are applied by the first matching `rate-limit.rules` entry.
+Paths use MVC's parsed, segment-aware matching: encoded characters and their literal
+aliases share one endpoint bucket, encoded separators remain within their original
+segment, and malformed encodings are rejected before dispatch.
 Defaults are stricter for auth mutations and public VIN decode, broader for API
 mutations, and permissive for static assets.
 Denied requests include retry, limit, remaining-token, and reset guidance.
