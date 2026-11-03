@@ -292,8 +292,8 @@ class SocialDomainRepositoryMongoContractTest {
   void postPortPreservesEveryQueryCountPageAndDeleteMethod() {
     var repository = adapter(PostRepository.class,
         "dev.christopherbell.post.MongoPostRepository");
-    var root = post("post-root", "account-1", "thread-1", null, second(1), second(9));
-    var reply = post("post-reply", "account-1", "thread-1", "post-root", second(2), second(4));
+    var root = post("post-root", "account-1", "post-root", null, second(1), second(9));
+    var reply = post("post-reply", "account-1", "post-root", "post-root", second(2), second(4));
     var noExpiry = post("post-no-expiry", "account-2", "thread-2", null, second(3), null);
     assertThat(repository.save(root)).isEqualTo(root);
     repository.save(reply);
@@ -309,11 +309,11 @@ class SocialDomainRepositoryMongoContractTest {
     assertThat(repository.findAll(PageRequest.of(
         0, 2, Sort.by(Sort.Direction.DESC, "createdOn"))))
         .extracting(Post::getId).containsExactly("post-no-expiry", "post-reply");
-    assertThat(repository.findByRootIdOrderByCreatedOnAsc("thread-1"))
+    assertThat(repository.findByRootIdOrderByCreatedOnAsc("post-root"))
         .extracting(Post::getId).containsExactly("post-root", "post-reply");
     assertThat(repository.findByExpiresOnLessThanEqual(second(5), PageRequest.of(0, 10)))
-        .extracting(Post::getId).containsExactly("post-reply");
-    assertThat(repository.countByExpiresOnAfter(second(5))).isEqualTo(1);
+        .isEmpty();
+    assertThat(repository.countByExpiresOnAfter(second(5))).isEqualTo(2);
     assertThat(repository.findByExpiresOnAfter(second(5), PageRequest.of(0, 1)))
         .extracting(Post::getId).containsExactly("post-root");
     assertThat(repository.findByExpiresOnIsNull(PageRequest.of(0, 10)))

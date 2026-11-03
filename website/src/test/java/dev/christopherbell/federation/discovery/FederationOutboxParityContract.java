@@ -7,6 +7,7 @@ import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.model.Post;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +42,26 @@ interface FederationOutboxParityContract {
     posts().save(post("older", NOW.minusSeconds(2), NOW.plusSeconds(60), true));
     posts().save(post("expired", NOW.minusSeconds(3), NOW.minusSeconds(1), true));
     posts().save(post("private", NOW.minusSeconds(4), NOW.plusSeconds(60), false));
+  }
+
+  @Test
+  default void replyVisibilityUsesItsRootDeadlineForBothPageAndCount() {
+    var activeRoot = post("canonical-active-root", NOW.minusSeconds(10), NOW.plusSeconds(60), false);
+    var expiredRoot = post("canonical-expired-root", NOW.minusSeconds(10), NOW.minusSeconds(1), false);
+    var activeReply = post("canonical-active-reply", NOW, NOW.minusSeconds(1), true);
+    activeReply.setRootId(activeRoot.getId());
+    activeReply.setParentId(activeRoot.getId());
+    var expiredReply = post("canonical-expired-reply", NOW, NOW.plusSeconds(60), true);
+    expiredReply.setRootId(expiredRoot.getId());
+    expiredReply.setParentId(expiredRoot.getId());
+    for (var candidate : List.of(activeRoot, expiredRoot, activeReply, expiredReply)) {
+      candidate.setAccountId(ACCOUNT_ID + "-canonical");
+      posts().save(candidate);
+    }
+
+    var page = outbox().page(ACCOUNT_ID + "-canonical", Optional.empty(), 20, NOW);
+    assertThat(page.items()).extracting(FederationOutboxEntry::id).containsExactly(activeReply.getId());
+    assertThat(outbox().count(ACCOUNT_ID + "-canonical", NOW)).isEqualTo(1);
   }
 
   @Test

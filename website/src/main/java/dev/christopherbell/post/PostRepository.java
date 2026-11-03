@@ -10,6 +10,9 @@ import org.springframework.data.domain.Pageable;
 /** Persistence port for {@link Post} documents. */
 public interface PostRepository {
   Post save(Post post);
+  /** Replaces only edit-owned fields if the observed text/revision still exists. Never inserts. */
+  Optional<Post> editIfUnchanged(Post observed, Post replacement, Instant editingOn,
+      Instant oldestEditableCreation, int auditLimit, boolean requireActiveExpiration);
   Optional<Post> findById(String id);
   void delete(Post post);
   void deleteById(String id);
@@ -39,16 +42,16 @@ public interface PostRepository {
   /** All posts in a thread (includes root) ordered oldest-first (by createdOn). */
   List<Post> findByRootIdOrderByCreatedOnAsc(String rootId);
 
-  /** Finds posts whose expiration timestamp is at or before the provided instant. */
+  /** Finds thread roots whose current expiration is at or before the provided instant. */
   List<Post> findByExpiresOnLessThanEqual(Instant cutoff, Pageable pageable);
 
-  /** Counts posts whose configured expiration remains in the future. */
+  /** Counts posts whose authoritative thread expiration remains in the future. */
   long countByExpiresOnAfter(Instant cutoff);
 
-  /** Pages posts whose configured expiration remains in the future. */
+  /** Pages posts whose authoritative thread expiration remains in the future. */
   Page<Post> findByExpiresOnAfter(Instant cutoff, Pageable pageable);
 
-  /** Finds posts that have not been assigned an expiration timestamp yet. */
+  /** Finds thread roots that have not been assigned an expiration timestamp yet. */
   List<Post> findByExpiresOnIsNull(Pageable pageable);
 
   /** Count root posts authored by an account. */

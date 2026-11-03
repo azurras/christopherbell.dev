@@ -5,6 +5,7 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.post.PostMapper;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.expiration.PostExpirationService;
+import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.preview.PostLinkPreviewService;
 import java.time.Clock;
@@ -57,10 +58,20 @@ public class PostEditingService {
     if (excess > 0) {
       audit.subList(0, excess).clear();
     }
+    var observed = Post.builder()
+        .id(post.getId()).accountId(post.getAccountId()).text(post.getText())
+        .editedOn(post.getEditedOn()).build();
     post.setText(text);
     post.setEditedOn(now);
     post.setEditAudit(audit);
     post.setLinkPreviews(previews.resolveForText(text));
-    return mapper.toDetail(posts.save(post));
+    expiration.ensureActive(post);
+    var editingOn = clock.instant();
+    var saved = posts.editIfUnchanged(observed, post, editingOn,
+        editingOn.minus(properties.editWindow()), properties.editAuditLimit(),
+        expiration.activeCutoff().isPresent())
+        .orElseThrow(() -> new ResourceNotFoundException(NOT_EDITABLE));
+    expiration.ensureActive(saved);
+    return mapper.toDetail(saved);
   }
 }

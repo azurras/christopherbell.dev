@@ -3,6 +3,8 @@ package dev.christopherbell.post.editing;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -59,7 +61,8 @@ class PostEditingServiceTest {
     var preview = new PostLinkPreview("https://example.com", "Example", null, null, "example.com");
     when(posts.findById("post-1")).thenReturn(Optional.of(post));
     when(previews.resolveForText("after https://example.com")).thenReturn(List.of(preview));
-    when(posts.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(posts.editIfUnchanged(any(), any(), any(), any(), anyInt(), anyBoolean()))
+        .thenAnswer(invocation -> Optional.of(invocation.getArgument(1)));
     when(mapper.toDetail(any(Post.class))).thenAnswer(invocation -> {
       var saved = invocation.<Post>getArgument(0);
       return PostDetail.builder().id(saved.getId()).text(saved.getText()).editedOn(saved.getEditedOn()).build();
@@ -69,7 +72,7 @@ class PostEditingServiceTest {
         "post-1", new PostEditRequest("after https://example.com"), "author");
 
     var saved = ArgumentCaptor.forClass(Post.class);
-    verify(posts).save(saved.capture());
+    verify(posts).editIfUnchanged(any(), saved.capture(), any(), any(), anyInt(), anyBoolean());
     assertThat(saved.getValue().getCreatedOn()).isEqualTo(created);
     assertThat(saved.getValue().getEditedOn()).isEqualTo(NOW);
     assertThat(saved.getValue().getEditAudit()).singleElement().satisfies(event -> {
@@ -126,7 +129,8 @@ class PostEditingServiceTest {
     }
     post.setEditAudit(old);
     when(posts.findById("post-1")).thenReturn(Optional.of(post));
-    when(posts.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(posts.editIfUnchanged(any(), any(), any(), any(), anyInt(), anyBoolean()))
+        .thenAnswer(invocation -> Optional.of(invocation.getArgument(1)));
     when(mapper.toDetail(any(Post.class))).thenReturn(PostDetail.builder().id("post-1").build());
 
     service.edit("post-1", new PostEditRequest("newest"), "author");

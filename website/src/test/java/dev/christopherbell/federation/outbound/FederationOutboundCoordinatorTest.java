@@ -1,18 +1,18 @@
 package dev.christopherbell.federation.outbound;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
-import dev.christopherbell.federation.configuration.FederationOutboundProperties;
-import dev.christopherbell.federation.configuration.FederationProperties;
 import dev.christopherbell.federation.api.EncryptedPrivateKey;
 import dev.christopherbell.federation.api.FederationIdentity;
+import dev.christopherbell.federation.configuration.FederationOutboundProperties;
+import dev.christopherbell.federation.configuration.FederationProperties;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.model.Post;
 import java.net.URI;
@@ -87,6 +87,33 @@ class FederationOutboundCoordinatorTest {
 
     assertThat(store.terminal).isEqualTo("cancelled:AUTHOR_INELIGIBLE");
     assertThat(gateway.calls).isZero();
+  }
+
+  @Test
+  void replyDeliveryUsesTheCurrentRootDeadlineInsteadOfItsStoredProjection() {
+    for (boolean rootActive : List.of(true, false)) {
+      var store = new InMemoryStore();
+      store.claimed = job(1);
+      var reply = post("post-1", true);
+      reply.setParentId("root");
+      reply.setRootId("root");
+      reply.setExpiresOn(rootActive ? NOW.minusSeconds(1) : NOW.plusSeconds(60));
+      var root = post("root", true);
+      root.setExpiresOn(rootActive ? NOW.plusSeconds(60) : NOW.minusSeconds(1));
+      var posts = mock(PostRepository.class);
+      when(posts.findById("post-1")).thenReturn(Optional.of(reply));
+      when(posts.findById("root")).thenReturn(Optional.of(root));
+      var accounts = mock(AccountRepository.class);
+      when(accounts.findById("account-123")).thenReturn(Optional.of(account(true)));
+      var gateway = new RecordingGateway(new FederationDeliveryResult.Delivered(202));
+      var coordinator = new FederationOutboundCoordinator(properties(true), store, posts, accounts,
+          gateway, Clock.fixed(NOW, ZoneOffset.UTC), "worker-1");
+
+      coordinator.deliver();
+
+      assertThat(gateway.calls).isEqualTo(rootActive ? 1 : 0);
+      assertThat(store.terminal).isEqualTo(rootActive ? "succeeded:202" : "cancelled:POST_INELIGIBLE");
+    }
   }
 
   @Test

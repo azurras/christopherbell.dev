@@ -2,12 +2,16 @@ package dev.christopherbell.post.expiration;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.MongoCounterDeadlineMutation;
 import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.post.like.PostLike;
 import dev.christopherbell.post.model.Post;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -17,8 +21,17 @@ import org.springframework.data.mongodb.core.query.Update;
 public class MongoPostExpirationStore implements PostExpirationStore {
   private final KindScopedMongoOperations<Post> posts;
   private final KindScopedMongoOperations<PostLike> likes;
+  private final boolean expirationEnabled;
 
   public MongoPostExpirationStore(DomainMongoOperationsFactory factory) {
+    this(factory, true);
+  }
+
+  @Autowired
+  public MongoPostExpirationStore(DomainMongoOperationsFactory factory,
+      @Value("${posts.expiration.enabled:false}")
+      boolean expirationEnabled) {
+    this.expirationEnabled = expirationEnabled;
     this.posts = factory.forType(Post.class);
     this.likes = factory.forType(PostLike.class);
   }
@@ -36,16 +49,18 @@ public class MongoPostExpirationStore implements PostExpirationStore {
   @Override
   public Optional<Post> incrementCounter(
       String postId, String field, int delta, Instant changedOn, boolean extended) {
-    var criteria = Criteria.where("id").is(postId);
-    if (delta < 0) {
-      criteria = new Criteria().andOperator(criteria, Criteria.where(field).gt(0));
-    }
-    var update = new Update().inc(field, delta).set("lastUpdatedOn", changedOn);
-    if (extended) {
-      update.set("lastExtendedOn", changedOn);
-    }
-    return posts.findAndUpdate(new Query(criteria), update)
-        .or(() -> posts.findById(postId));
+    return posts.incrementCounterAndDeadline(postId,
+        new MongoCounterDeadlineMutation(
+            field, delta, List.of("likesCount", "threadReplyLikesCount", "threadReplyCount"),
+            "createdOn", "expiresOn", "lastUpdatedOn", "lastExtendedOn", changedOn,
+            Duration.ofHours(24), Duration.ofHours(24), extended, expirationEnabled));
+  }
+
+  @Override
+  public Optional<Post> removeExpiredRoot(String postId, Instant cutoff) {
+    return posts.findAndRemove(Query.query(new Criteria().andOperator(
+        Criteria.where("id").is(postId).and("expiresOn").lte(cutoff),
+        new Criteria().orOperator(Criteria.where("parentId").is(null), Criteria.where("parentId").is("")))));
   }
 
   @Override

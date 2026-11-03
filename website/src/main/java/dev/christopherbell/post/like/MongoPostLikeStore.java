@@ -11,6 +11,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -30,10 +31,12 @@ public class MongoPostLikeStore implements PostLikeStore {
 
   @Override
   public LikeTransition like(String postId, String accountId, Instant createdOn) {
+    var creationToken = UUID.randomUUID().toString();
     try {
       mongo.insert(PostLike.builder().id(PostLikeStore.edgeId(postId, accountId))
-          .postId(postId).accountId(accountId).createdOn(createdOn).build());
-      return new LikeTransition(true, false);
+          .postId(postId).accountId(accountId).createdOn(createdOn)
+          .creationToken(creationToken).build());
+      return new LikeTransition(true, false, creationToken);
     } catch (DuplicateKeyException duplicate) {
       return new LikeTransition(false, false);
     }
@@ -43,6 +46,16 @@ public class MongoPostLikeStore implements PostLikeStore {
   public LikeTransition unlike(String postId, String accountId) {
     var result = mongo.remove(exact(postId, accountId));
     return new LikeTransition(false, result.getDeletedCount() > 0);
+  }
+
+  @Override
+  public boolean undoCreatedLike(String postId, String accountId, String creationToken) {
+    if (creationToken == null) {
+      return false;
+    }
+    var query = exact(postId, accountId);
+    query.addCriteria(Criteria.where("creationToken").is(creationToken));
+    return mongo.remove(query).getDeletedCount() == 1;
   }
 
   @Override

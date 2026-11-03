@@ -8,7 +8,10 @@ Owns Spring Security wiring and request authentication infrastructure.
 - Survive exposes only GET `/survive` and `/survive/`, GET/POST `/api/survive/v1/game`, POST `/api/survive/v1/actions` and `/api/survive/v1/gifts`, and its MIT license GET. Mutations retain CSRF protection; private survivor cookies authorize commands within the shared world without website login. Public recipient IDs do not authorize control of their survivors.
 - `JwtAuthenticationFilter` reads bearer tokens, validates them, and populates the Spring Security context.
 - Browser-session activity is coalesced to at most one conditional Mongo update per five-minute
-  window. Due credential rotation is an atomic compare-and-set. A rare race loser reloads once
+  window. An activity-update race loser reloads the session and current account once and
+  authenticates only while the presented credential, expiry, and account fingerprint still
+  validate. It performs no additional renewal, rotation, or session creation. Due credential
+  rotation is an atomic compare-and-set. A rare rotation race loser reloads once
   and authenticates without another replacement token only when the presented credential is the
   winner's unexpired previous token and the reloaded session and ACTIVE account still pass every
   validity and fingerprint check. Revocation, invalid reloaded state, and persistence failures

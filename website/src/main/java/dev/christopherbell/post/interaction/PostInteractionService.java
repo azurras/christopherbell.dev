@@ -60,11 +60,24 @@ public class PostInteractionService {
       try {
         mutationLimiter.require(actor, VoidMutationKind.KEEP_ALIVE);
       } catch (RuntimeException exception) {
-        postLikes.unlike(postId, selfId);
+        if (!postLikes.undoCreatedLike(postId, selfId, transition.creationToken())) {
+          // A completed unlike already removed this incarnation and applied its negative delta.
+          // Account for the insertion it observed, without touching a possible newer edge.
+          try {
+            postExpirationService.applyLikeTransition(post, threadRoot, 1, now);
+          } catch (RuntimeException compensationFailure) {
+            exception.addSuppressed(compensationFailure);
+          }
+        }
         throw exception;
       }
     }
     var updated = postExpirationService.applyLikeTransition(post, threadRoot, transition.delta(), now);
+    // A later read failure can follow a committed mutation. Do not remove its committed edge;
+    // retrying the desired state is safe, whereas an edge-only rollback would corrupt lifespan.
+    var stillPresent = postRepository.findById(postId)
+        .orElseThrow(() -> new ResourceNotFoundException("Post no longer exists."));
+    postExpirationService.activeThreadRootForReply(stillPresent);
     if (transition.created() && !selfId.equals(author.getId())) {
       notificationDeliveryService.createPostLikeNotification(updated, actor, author);
     }

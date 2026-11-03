@@ -14,6 +14,9 @@ public interface PostExpirationStore {
 
   long deletePosts(List<String> postIds);
 
+  /** Claims expiration by removing only a root that is still due at the atomic write. */
+  Optional<Post> removeExpiredRoot(String postId, Instant cutoff);
+
   Optional<Post> decrementFloorZero(
       String postId, String field, int delta, Instant changedOn);
 

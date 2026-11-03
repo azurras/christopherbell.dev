@@ -15,6 +15,7 @@ import org.bson.Document;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
@@ -98,15 +99,16 @@ public class PostFeedQueryRepository implements PostFeedQueryPort {
                 new Document("$eq", List.of("$payload.followedAccountId", "$$authorId")))))),
             new Document("$limit", 1)))
         .append("as", "matchingFollow");
-    var aggregation = Aggregation.newAggregation(
-        context -> new Document("$match", criteria.getCriteriaObject()),
-        context -> new Document("$lookup", lookup),
-        context -> new Document("$match", new Document("matchingFollow.0", new Document("$exists", true))),
-        context -> new Document("$sort", new Document("createdOn", -1).append("_id", -1)),
-        context -> new Document("$limit", size + 1));
-    return slice(posts.aggregate(
-        KindScopedAggregation.withForeignKinds(
-            aggregation, KindScopedAggregation.ForeignKind.ACCOUNT_FOLLOW), Post.class), size);
+    var stages = new ArrayList<AggregationOperation>();
+    stages.add(context -> new Document("$match", criteria.getCriteriaObject()));
+    stages.add(context -> new Document("$lookup", lookup));
+    stages.add(context -> new Document("$match", new Document("matchingFollow.0", new Document("$exists", true))));
+    addCanonicalExpiration(stages, visibility);
+    stages.add(context -> new Document("$sort", new Document("createdOn", -1).append("_id", -1)));
+    stages.add(context -> new Document("$limit", size + 1));
+    return slice(posts.aggregate(KindScopedAggregation.withForeignKinds(
+        Aggregation.newAggregation(stages), KindScopedAggregation.ForeignKind.ACCOUNT_FOLLOW,
+        KindScopedAggregation.ForeignKind.POST), Post.class), size);
   }
 
   private PostFeedSlice page(
@@ -117,10 +119,25 @@ public class PostFeedQueryRepository implements PostFeedQueryPort {
   ) {
     int size = pageSize(requestedSize);
     Criteria criteria = visible(scope, cursor, visibility);
-    var query = new Query(criteria)
-        .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
-        .limit(size + 1);
-    return slice(posts.find(query, Pageable.unpaged()), size);
+    if (visibility.expiresAfter().isEmpty()) {
+      var query = new Query(criteria)
+          .with(Sort.by(Sort.Direction.DESC, "createdOn", "id")).limit(size + 1);
+      return slice(posts.find(query, Pageable.unpaged()), size);
+    }
+    var stages = new ArrayList<AggregationOperation>();
+    stages.add(context -> new Document("$match", criteria.getCriteriaObject()));
+    addCanonicalExpiration(stages, visibility);
+    stages.add(context -> new Document("$sort", new Document("createdOn", -1).append("_id", -1)));
+    stages.add(context -> new Document("$limit", size + 1));
+    return slice(posts.aggregate(KindScopedAggregation.withForeignKinds(
+        Aggregation.newAggregation(stages), KindScopedAggregation.ForeignKind.POST), Post.class), size);
+  }
+
+  private static void addCanonicalExpiration(
+      List<AggregationOperation> stages, PostFeedVisibility visibility) {
+    visibility.expiresAfter().ifPresent(cutoff -> {
+      stages.addAll(dev.christopherbell.post.api.PostExpirationAggregation.activeAt(cutoff));
+    });
   }
 
   private Criteria visible(
@@ -137,8 +154,6 @@ public class PostFeedQueryRepository implements PostFeedQueryPort {
         new Criteria().andOperator(
             Criteria.where("createdOn").is(boundary.timestamp()),
             Criteria.where("id").lt(boundary.id())))));
-    visibility.expiresAfter().ifPresent(cutoff ->
-        clauses.add(Criteria.where("expiresOn").gt(cutoff)));
     if (!visibility.excludedAccountIds().isEmpty()) {
       clauses.add(Criteria.where("accountId").nin(visibility.excludedAccountIds()));
     }

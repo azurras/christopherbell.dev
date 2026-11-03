@@ -110,7 +110,17 @@ public class PostCreationService {
         .build();
 
     var saved = postRepository.save(post);
-    postExpirationService.refreshThreadRootExpirationForNewReply(saved, now);
+    try {
+      if (saved.getParentId() != null && !saved.getParentId().isBlank()) {
+        var currentParent = postRepository.findById(saved.getParentId())
+            .orElseThrow(() -> new ResourceNotFoundException("Parent post no longer exists."));
+        postExpirationService.ensureActive(currentParent);
+      }
+      postExpirationService.refreshThreadRootExpirationForNewReply(saved, now);
+    } catch (ResourceNotFoundException | RuntimeException rejected) {
+      postRepository.deleteById(saved.getId());
+      throw rejected;
+    }
     notificationDeliveryService.createMentionNotifications(saved, account);
     parentAuthor.ifPresent(author ->
         notificationDeliveryService.createPostCommentNotification(saved, account, author));

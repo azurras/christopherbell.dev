@@ -1,17 +1,20 @@
 package dev.christopherbell.federation.discovery;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
+import dev.christopherbell.post.api.PostExpirationAggregation;
 import dev.christopherbell.post.model.Post;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Optional;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
+import org.bson.Document;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Bounded active-post queries for a local actor's public outbox. */
@@ -41,12 +44,11 @@ public class FederationOutboxQueryRepository implements FederationOutboxQueryPor
     if (cursor.isPresent()) {
       criteria = new Criteria().andOperator(criteria, descendingBoundary(cursor.orElseThrow()));
     }
-    var query = new Query(criteria)
-        .with(Sort.by(
-            new Sort.Order(Sort.Direction.DESC, "createdOn"),
-            new Sort.Order(Sort.Direction.DESC, "id")))
-        .limit(size + 1);
-    var loaded = mongo.find(query, Pageable.unpaged());
+    var stages = activeStages(criteria, now);
+    stages.add(context -> new Document("$sort", new Document("createdOn", -1).append("_id", -1)));
+    stages.add(context -> new Document("$limit", size + 1));
+    var loaded = mongo.aggregate(KindScopedAggregation.withForeignKinds(
+        Aggregation.newAggregation(stages), KindScopedAggregation.ForeignKind.POST), Post.class);
     boolean hasNext = loaded.size() > size;
     var items = loaded.stream().limit(size).map(FederationOutboxQueryRepository::entry).toList();
     String nextCursor = null;
@@ -68,13 +70,25 @@ public class FederationOutboxQueryRepository implements FederationOutboxQueryPor
 
   @Override
   public long count(String accountId, Instant now) {
-    return mongo.count(new Query(activeOwned(accountId, now)));
+    var stages = activeStages(activeOwned(accountId, now), now);
+    stages.add(context -> new Document("$count", "total"));
+    return mongo.aggregate(KindScopedAggregation.withForeignKinds(
+        Aggregation.newAggregation(stages), KindScopedAggregation.ForeignKind.POST), CountRow.class)
+        .stream().findFirst().map(CountRow::total).orElse(0L);
   }
+
+  private static ArrayList<AggregationOperation> activeStages(Criteria criteria, Instant now) {
+    var stages = new ArrayList<AggregationOperation>();
+    stages.add(context -> new Document("$match", criteria.getCriteriaObject()));
+    stages.addAll(PostExpirationAggregation.activeAt(now));
+    return stages;
+  }
+
+  public record CountRow(long total) {}
 
   private static Criteria activeOwned(String accountId, Instant now) {
     return Criteria.where("accountId").is(accountId)
         .and("federationOutboundEligible").is(true)
-        .and("expiresOn").gt(now)
         .and("createdOn").ne(null);
   }
 

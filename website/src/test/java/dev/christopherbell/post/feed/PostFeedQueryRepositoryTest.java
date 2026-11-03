@@ -88,21 +88,18 @@ class PostFeedQueryRepositoryTest {
   @Test
   @DisplayName("Visibility predicates are applied before the stable page limit")
   void global_appliesVisibilityInsideMongoQuery() {
-    when(mongo.find(any(Query.class), eq(Document.class), eq("content"))).thenReturn(List.of());
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
+        .thenReturn(new AggregationResults<>(List.of(), new Document()));
     var cutoff = Instant.parse("2026-07-29T04:00:00Z");
-
-    repository.global(
-        Optional.empty(),
-        20,
-        new PostFeedVisibility(
-            Set.of("muted-account"), Set.of("hidden-root"), Optional.of(cutoff)));
-
-    var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(query.capture(), eq(Document.class), eq("content"));
-    assertThat(query.getValue().getQueryObject().toString())
-        .contains("_kind=post", "payload.expiresOn", "payload.accountId",
-            "muted-account", "payload.rootId", "hidden-root");
-    assertThat(query.getValue().getLimit()).isEqualTo(21);
+    repository.global(Optional.empty(), 20, new PostFeedVisibility(
+        Set.of("muted-account"), Set.of("hidden-root"), Optional.of(cutoff)));
+    var aggregation = ArgumentCaptor.forClass(Aggregation.class);
+    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Document.class));
+    var pipeline = aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString();
+    assertThat(pipeline).contains("_kind=post", "payload.accountId", "muted-account",
+        "payload.rootId", "hidden-root", "$lookup", "expirationRoot.payload.expiresOn", "$limit=21");
+    assertThat(pipeline.indexOf("expirationRoot.payload.expiresOn"))
+        .isLessThan(pipeline.lastIndexOf("$limit=21"));
   }
 
   @Test

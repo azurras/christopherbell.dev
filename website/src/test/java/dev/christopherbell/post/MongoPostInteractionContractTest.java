@@ -22,6 +22,7 @@ class MongoPostInteractionContractTest implements PostInteractionParityContract 
   private static PostRepository posts;
   private static PostLikeStore likes;
   private static PostExpirationStore expiration;
+  private static dev.christopherbell.post.feed.PostFeedQueryPort feeds;
 
   @BeforeAll
   static void connectToDisposableMongo() {
@@ -36,6 +37,8 @@ class MongoPostInteractionContractTest implements PostInteractionParityContract 
     posts = new MongoPostRepository(factory);
     likes = new MongoPostLikeStore(factory);
     expiration = new MongoPostExpirationStore(factory);
+    feeds = new dev.christopherbell.post.feed.PostFeedQueryRepository(factory,
+        new dev.christopherbell.libs.pagination.StableCursorCodec());
   }
 
   @AfterAll
@@ -49,4 +52,5 @@ class MongoPostInteractionContractTest implements PostInteractionParityContract 
   @Override public PostRepository posts() { return posts; }
   @Override public PostLikeStore likes() { return likes; }
   @Override public PostExpirationStore expiration() { return expiration; }
+  @Override public dev.christopherbell.post.feed.PostFeedQueryPort feeds() { return feeds; }
 }

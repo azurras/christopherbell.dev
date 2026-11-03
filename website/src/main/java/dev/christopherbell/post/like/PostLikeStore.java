@@ -12,6 +12,9 @@ public interface PostLikeStore {
 
   LikeTransition unlike(String postId, String accountId);
 
+  /** Rolls back only the edge incarnation created by the rejected request. */
+  boolean undoCreatedLike(String postId, String accountId, String creationToken);
+
   boolean exists(String postId, String accountId);
 
   Map<String, Integer> counts(Collection<String> postIds);
@@ -28,7 +31,10 @@ public interface PostLikeStore {
     return postId + ":" + accountId;
   }
 
-  record LikeTransition(boolean created, boolean removed) {
+  record LikeTransition(boolean created, boolean removed, String creationToken) {
+    public LikeTransition(boolean created, boolean removed) {
+      this(created, removed, null);
+    }
     public int delta() {
       return created ? 1 : removed ? -1 : 0;
     }

@@ -173,9 +173,18 @@ final class FederationOutboundCoordinator {
         .findFirst();
   }
 
-  private static boolean active(Post post, Instant now) {
-    return post.isFederationOutboundEligible()
-        && (post.getExpiresOn() == null || post.getExpiresOn().isAfter(now));
+  private boolean active(Post post, Instant now) {
+    if (!post.isFederationOutboundEligible()) {
+      return false;
+    }
+    if (post.getParentId() != null && !post.getParentId().isBlank()) {
+      var root = posts.findById(post.getRootId());
+      if (root.isEmpty()) {
+        return false;
+      }
+      post.setExpiresOn(root.orElseThrow().getExpiresOn());
+    }
+    return post.getExpiresOn() == null || post.getExpiresOn().isAfter(now);
   }
 
   private static boolean active(Account account) {

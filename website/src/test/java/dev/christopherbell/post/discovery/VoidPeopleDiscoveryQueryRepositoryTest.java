@@ -21,7 +21,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
-import org.springframework.data.mongodb.core.query.Query;
 
 @ExtendWith(MockitoExtension.class)
 class VoidPeopleDiscoveryQueryRepositoryTest {
@@ -38,19 +37,18 @@ class VoidPeopleDiscoveryQueryRepositoryTest {
     when(likes.recentLikedPostIds("self")).thenReturn(List.of("liked-post"));
     var factory = DomainMongoOperationsTestFactory
         .create(mongo);
-    var postEnvelope =
-        DomainMongoOperationsTestFactory
-            .envelope(mongo, post);
-    when(mongo.find(any(Query.class), eq(Document.class), eq("content")))
-        .thenReturn(List.of(postEnvelope));
+    var postPayload = new Document("_id", "post-1").append("topics", List.of(
+        new Document("canonical", "music").append("display", "Music")));
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
+        .thenReturn(new AggregationResults<>(List.of(postPayload), new Document()));
     var interests = new VoidPeopleDiscoveryQueryRepository(factory, likes).interestsFor("self", NOW);
 
-    var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(query.capture(), eq(Document.class), eq("content"));
-    assertThat(query.getValue().getLimit()).isEqualTo(256);
-    assertThat(query.getValue().getQueryObject().toString())
-        .contains("_kind=post", "payload.expiresOn", "payload.accountId", "liked-post", "self")
-        .doesNotContain("likedBy");
+    var aggregation = ArgumentCaptor.forClass(Aggregation.class);
+    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Document.class));
+    var pipeline = aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString();
+    assertThat(pipeline).contains("_kind=post", "expirationRoot.payload.expiresOn", "payload.accountId",
+        "liked-post", "self", "$limit=256").doesNotContain("likedBy");
+    assertThat(pipeline.indexOf("expirationRoot.payload.expiresOn")).isLessThan(pipeline.lastIndexOf("$limit=256"));
     assertThat(interests).containsExactly("music");
   }
 

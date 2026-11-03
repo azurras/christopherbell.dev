@@ -3,8 +3,8 @@ package dev.christopherbell.configuration.filter;
 import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.configuration.RateLimitProperties;
 import io.github.bucket4j.Bandwidth;
-import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Bucket4j;
+import io.github.bucket4j.Bucket;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -17,8 +17,11 @@ import java.util.Locale;
 import java.util.function.Supplier;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.server.PathContainer;
 import org.springframework.util.AntPathMatcher;
+import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.ServletRequestPathUtils;
 import tools.jackson.databind.ObjectMapper;
 
 /** Applies endpoint-aware, per-client token buckets with bounded process-local state. */
@@ -36,7 +39,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
   private final ApiErrorResponseWriter errors;
   private final Clock clock;
   private final RateLimitBucketStore buckets;
-  private final AntPathMatcher pathMatcher = new AntPathMatcher();
+  private final AntPathMatcher pathMatcher = new DecodedSegmentPathMatcher();
 
   /** Creates a filter with configured endpoint-aware limits. */
   public RateLimitFilter(ClientIpResolver clientIpResolver, RateLimitProperties properties) {
@@ -88,8 +91,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
       HttpServletResponse response,
       FilterChain filterChain
   ) throws ServletException, IOException {
+    final PathContainer applicationPath;
+    try {
+      applicationPath = ServletRequestPathUtils.parseAndCache(request).pathWithinApplication();
+    } catch (IllegalArgumentException malformedPath) {
+      errors.write(response, HttpStatus.BAD_REQUEST.value(), "INVALID_REQUEST", "The request path is invalid.");
+      return;
+    }
     String ip = clientIpResolver.resolveClientIp(request);
-    MatchedRule matchedRule = matchingRule(request);
+    MatchedRule matchedRule = matchingRule(request, applicationPath);
     RateLimitProperties.Rule rule = matchedRule.rule();
     Bucket bucket = buckets.getOrCreate(
         bucketKey(matchedRule, ip), rule.getWindow(), () -> newBucket(rule));
@@ -127,12 +137,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
     response.setHeader("X-RateLimit-Reset", Long.toString(resetEpochSeconds));
   }
 
-  private MatchedRule matchingRule(HttpServletRequest request) {
+  private MatchedRule matchingRule(HttpServletRequest request, PathContainer applicationPath) {
     List<RateLimitProperties.Rule> configuredRules = rules();
     for (int index = 0; index < configuredRules.size(); index++) {
       RateLimitProperties.Rule rule = configuredRules.get(index);
       if (matchesMethod(rule, request.getMethod())
-          && matchesPath(rule, request.getRequestURI())) {
+          && matchesPath(rule, applicationPath)) {
         return new MatchedRule(index, rule);
       }
     }
@@ -154,12 +164,35 @@ public class RateLimitFilter extends OncePerRequestFilter {
     return methods.stream().anyMatch(configuredMethod -> configuredMethod.equalsIgnoreCase(method));
   }
 
-  private boolean matchesPath(RateLimitProperties.Rule rule, String path) {
+  private boolean matchesPath(RateLimitProperties.Rule rule, PathContainer applicationPath) {
     List<String> paths = rule.getPaths();
     if (paths == null || paths.isEmpty()) {
       return true;
     }
-    return paths.stream().anyMatch(pattern -> pathMatcher.match(pattern, path));
+    return paths.stream().anyMatch(pattern -> pathMatcher.match(pattern, applicationPath.value()));
+  }
+
+  /** Keeps configured Ant syntax while decoding only path data, never encoded separators. */
+  private static final class DecodedSegmentPathMatcher extends AntPathMatcher {
+    private DecodedSegmentPathMatcher() {
+      // Ant's raw-string prefix shortcut cannot inspect encoded request tokens correctly.
+      // This flag disables that shortcut; both overrides deliberately preserve whitespace.
+      setTrimTokens(true);
+    }
+
+    @Override
+    protected String[] tokenizePattern(String pattern) {
+      return StringUtils.tokenizeToStringArray(pattern, "/", false, true);
+    }
+
+    @Override
+    protected String[] tokenizePath(String path) {
+      return PathContainer.parsePath(path).elements().stream()
+          .filter(PathContainer.PathSegment.class::isInstance)
+          .map(PathContainer.PathSegment.class::cast)
+          .map(PathContainer.PathSegment::valueToMatch)
+          .toArray(String[]::new);
+    }
   }
 
   private String bucketKey(MatchedRule matchedRule, String ip) {

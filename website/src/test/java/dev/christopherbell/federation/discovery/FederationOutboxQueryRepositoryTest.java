@@ -10,6 +10,7 @@ import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.model.Post;
 import java.time.Instant;
+import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import org.bson.Document;
@@ -20,7 +21,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 
 @ExtendWith(MockitoExtension.class)
 class FederationOutboxQueryRepositoryTest {
@@ -43,13 +45,9 @@ class FederationOutboxQueryRepositoryTest {
       throws Exception {
     var boundary = post("post-2", NOW.minusSeconds(20));
     var extra = post("post-1", NOW.minusSeconds(30));
-    var documents = List.of(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
-            .envelope(mongo, boundary),
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
-            .envelope(mongo, extra));
-    when(mongo.find(any(Query.class), eq(Document.class), eq("content")))
-        .thenReturn(documents);
+    var documents = List.of(postDocument(boundary), postDocument(extra));
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
+        .thenReturn(new AggregationResults<>(documents, new Document()));
 
     var page = repository.page(
         "account-123",
@@ -57,16 +55,13 @@ class FederationOutboxQueryRepositoryTest {
         1,
         NOW);
 
-    var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(query.capture(), eq(Document.class), eq("content"));
-    var cursor = NOW.minusSeconds(10);
-    assertThat(query.getValue().getQueryObject().toString())
-        .contains("_kind=post", "payload.accountId=account-123",
-            "payload.federationOutboundEligible=true", "payload.expiresOn",
-            "payload.createdOn", "_id.legacyId", "post-3");
-    assertThat(query.getValue().getSortObject())
-        .isEqualTo(new Document("payload.createdOn", -1).append("_id.legacyId", -1));
-    assertThat(query.getValue().getLimit()).isEqualTo(2);
+    var aggregation = ArgumentCaptor.forClass(Aggregation.class);
+    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Document.class));
+    var pipeline = aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString();
+    assertThat(pipeline).contains("_kind=post", "payload.accountId=account-123",
+        "payload.federationOutboundEligible=true", "expirationRoot.payload.expiresOn",
+        "payload.createdOn", "_id.legacyId", "post-3", "$limit=2");
+    assertThat(pipeline.indexOf("expirationRoot.payload.expiresOn")).isLessThan(pipeline.lastIndexOf("$limit=2"));
     assertThat(page.items()).containsExactly(new FederationOutboxEntry(
         boundary.getId(),
         boundary.getText(),
@@ -79,28 +74,32 @@ class FederationOutboxQueryRepositoryTest {
 
   @Test
   void countUsesMongoTrueEqualitySoFalseNullAndMissingHistoricalValuesStayExcluded() {
-    when(mongo.count(any(Query.class), eq(Document.class), eq("content"))).thenReturn(7L);
-
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
+        .thenReturn(new AggregationResults<>(List.of(new Document("total", 7L)), new Document()));
     long count = repository.count("account-123", NOW);
-
-    var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).count(query.capture(), eq(Document.class), eq("content"));
-    assertThat(query.getValue().getQueryObject().toString())
+    var aggregation = ArgumentCaptor.forClass(Aggregation.class);
+    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Document.class));
+    assertThat(aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString())
         .contains("_kind=post", "payload.accountId=account-123",
-            "payload.federationOutboundEligible=true", "payload.expiresOn",
-            "payload.createdOn");
+            "payload.federationOutboundEligible=true", "expirationRoot.payload.expiresOn", "$count=total");
     assertThat(count).isEqualTo(7L);
   }
 
   @Test
   void requestedPageSizeIsClampedToTwenty() {
-    when(mongo.find(any(Query.class), eq(Document.class), eq("content"))).thenReturn(List.of());
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
+        .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
     repository.page("account-123", Optional.empty(), 500, NOW);
 
-    var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(query.capture(), eq(Document.class), eq("content"));
-    assertThat(query.getValue().getLimit()).isEqualTo(21);
+    var aggregation = ArgumentCaptor.forClass(Aggregation.class);
+    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Document.class));
+    assertThat(aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString()).contains("$limit=21");
+  }
+
+  private static Document postDocument(Post post) {
+    return new Document("_id", post.getId()).append("text", post.getText())
+        .append("accountId", post.getAccountId()).append("createdOn", Date.from(post.getCreatedOn()));
   }
 
   private static Post post(String id, Instant createdOn) {

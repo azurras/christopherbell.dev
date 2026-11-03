@@ -6,6 +6,7 @@ let ACTIVE_USERNAME = null;
 let CONVERSATIONS = [];
 let THREAD_STATE = { items: [], nextCursor: null };
 let conversationSelectionGeneration = 0;
+let messageDraftGeneration = 0;
 let suggestionTimer = null;
 let suggestionRequest = null;
 const MESSAGE_SUGGESTION_LIMIT = 8;
@@ -317,16 +318,23 @@ async function archiveActiveConversation() {
     return;
   }
   const button = document.getElementById('archiveConversation');
+  const selectedUsername = ACTIVE_USERNAME;
+  const selectionGeneration = conversationSelectionGeneration;
+  let clearedGeneration = null;
   try {
     if (button) {
       button.disabled = true;
     }
-    await fetchJson(API.messages.archiveConversation(ACTIVE_USERNAME), {
+    await fetchJson(API.messages.archiveConversation(selectedUsername), {
       method: 'POST',
       headers: authHeaders(),
       redirectOnUnauthorized: true,
       body: '{}',
     });
+    if (!isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) {
+      return;
+    }
+    clearedGeneration = ++conversationSelectionGeneration;
     ACTIVE_USERNAME = null;
     THREAD_STATE = { items: [], nextCursor: null };
     document.getElementById('messageForm')?.classList.add('d-none');
@@ -337,12 +345,17 @@ async function archiveActiveConversation() {
     }
     renderMessages([]);
     renderConversationActions();
-    await loadConversations();
+    await loadConversations(clearedGeneration);
+    if (conversationSelectionGeneration !== clearedGeneration) return;
     const url = new URL(window.location.href);
     url.searchParams.delete('with');
     window.history.replaceState({}, '', url.toString());
   } catch (archiveFailure) {
-    showAlert(archiveFailure?.message || 'Failed to archive conversation.');
+    if (isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)
+        || (clearedGeneration !== null && ACTIVE_USERNAME === null
+            && conversationSelectionGeneration === clearedGeneration)) {
+      showAlert(archiveFailure?.message || 'Failed to archive conversation.');
+    }
   } finally {
     if (button) {
       button.disabled = false;
@@ -357,6 +370,11 @@ async function sendActiveMessage() {
   if (!ACTIVE_USERNAME || !text) {
     return;
   }
+  const selectedUsername = ACTIVE_USERNAME;
+  const selectionGeneration = conversationSelectionGeneration;
+  const submittedDraft = textarea.value;
+  const submittedDraftGeneration = messageDraftGeneration;
+  let completionGeneration = selectionGeneration;
   clearAlert();
   try {
     if (button) {
@@ -366,15 +384,20 @@ async function sendActiveMessage() {
       method: 'POST',
       headers: authHeaders(),
       redirectOnUnauthorized: true,
-      body: JSON.stringify({ recipientUsername: ACTIVE_USERNAME, text })
+      body: JSON.stringify({ recipientUsername: selectedUsername, text })
     });
-    if (textarea) {
+    if (!isCurrentConversationSelectionFor(selectedUsername, selectionGeneration)) return;
+    if (textarea && textarea.value === submittedDraft
+        && messageDraftGeneration === submittedDraftGeneration) {
       textarea.value = '';
     }
     updateCounter();
-    await openConversation(ACTIVE_USERNAME);
+    completionGeneration = conversationSelectionGeneration + 1;
+    await openConversation(selectedUsername);
   } catch (sendFailure) {
-    showAlert(sendFailure.message);
+    if (isCurrentConversationSelectionFor(selectedUsername, completionGeneration)) {
+      showAlert(sendFailure.message);
+    }
   } finally {
     if (button) {
       button.disabled = false;
@@ -388,7 +411,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  document.getElementById('messageText')?.addEventListener('input', updateCounter);
+  document.getElementById('messageText')?.addEventListener('input', () => {
+    messageDraftGeneration += 1;
+    updateCounter();
+  });
   document.getElementById('recipientHandle')?.addEventListener('input', (event) => {
     scheduleRecipientSuggestionLoad(event.target.value);
   });

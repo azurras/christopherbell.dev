@@ -4,21 +4,20 @@ import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFacto
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.persistence.MongoPersistence;
+import dev.christopherbell.post.api.PostExpirationAggregation;
 import dev.christopherbell.post.like.PostLikeStore;
 import dev.christopherbell.post.model.Post;
 import java.time.Instant;
-import java.util.Date;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Stream;
 import org.bson.Document;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Bounded active-post queries used to suggest people without popularity signals. */
@@ -42,12 +41,14 @@ public class VoidPeopleDiscoveryQueryRepository implements VoidPeopleDiscoveryQu
     var participation = new Criteria().orOperator(
         Criteria.where("accountId").is(accountId),
         Criteria.where("id").in(likes.recentLikedPostIds(accountId)));
-    var query = new Query(new Criteria().andOperator(
-        Criteria.where("expiresOn").gt(now), participation))
-        .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
-        .limit(MAX_INTEREST_POSTS);
+    var stages = new ArrayList<AggregationOperation>();
+    stages.add(context -> new Document("$match", participation.getCriteriaObject()));
+    stages.addAll(PostExpirationAggregation.activeAt(now));
+    stages.add(context -> new Document("$sort", new Document("createdOn", -1).append("_id", -1)));
+    stages.add(context -> new Document("$limit", MAX_INTEREST_POSTS));
     var interests = new LinkedHashSet<String>();
-    posts.find(query, Pageable.unpaged()).stream()
+    posts.aggregate(KindScopedAggregation.withForeignKinds(
+        Aggregation.newAggregation(stages), KindScopedAggregation.ForeignKind.POST), Post.class).stream()
         .flatMap(post -> post.getTopics() == null ? Stream.empty() : post.getTopics().stream())
         .filter(Objects::nonNull)
         .map(topic -> topic.canonical())
@@ -59,9 +60,10 @@ public class VoidPeopleDiscoveryQueryRepository implements VoidPeopleDiscoveryQu
   public List<VoidPersonCandidate> recentActiveCandidates(
       Instant now, int requestedLimit) {
     int limit = Math.max(1, Math.min(requestedLimit, MAX_CANDIDATES));
-    var aggregation = Aggregation.newAggregation(
-        context -> new Document("$match", new Document("expiresOn", new Document("$gt", Date.from(now)))
-            .append("accountId", new Document("$type", "string"))),
+    var stages = new ArrayList<AggregationOperation>();
+    stages.add(context -> new Document("$match", new Document("accountId", new Document("$type", "string"))));
+    stages.addAll(PostExpirationAggregation.activeAt(now));
+    stages.addAll(List.of(
         context -> new Document("$project", new Document("accountId", 1)
             .append("topics", 1)
             .append("recentActivityOn", new Document(
@@ -76,7 +78,8 @@ public class VoidPeopleDiscoveryQueryRepository implements VoidPeopleDiscoveryQu
         context -> new Document("$project", new Document("_id", 0)
             .append("accountId", "$_id")
             .append("topics", 1)
-            .append("recentActivityOn", 1)));
-    return posts.aggregate(KindScopedAggregation.local(aggregation), VoidPersonCandidate.class);
+            .append("recentActivityOn", 1))));
+    return posts.aggregate(KindScopedAggregation.withForeignKinds(
+        Aggregation.newAggregation(stages), KindScopedAggregation.ForeignKind.POST), VoidPersonCandidate.class);
   }
 }
