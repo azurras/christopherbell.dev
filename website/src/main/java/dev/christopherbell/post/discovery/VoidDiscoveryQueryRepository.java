@@ -65,8 +65,7 @@ public class VoidDiscoveryQueryRepository implements VoidDiscoveryQueryPort {
   ) {
     int size = pageSize(requestedSize);
     var operations = new ArrayList<AggregationOperation>();
-    operations.add(raw("$match", new Document("expiresOn", new Document("$gt", Date.from(now)))
-        .append("topics.canonical", canonical)));
+    operations.add(raw("$match", new Document("topics.canonical", canonical)));
     operations.add(raw("$group", new Document("_id", "$rootId")));
     operations.add(raw("$lookup", new Document("from", POSTS_COLLECTION)
         .append("let", new Document("rootId", "$_id"))
@@ -94,8 +93,7 @@ public class VoidDiscoveryQueryRepository implements VoidDiscoveryQueryPort {
       Optional<StableCursor> cursor, int requestedSize, Instant now) {
     int size = pageSize(requestedSize);
     var operations = new ArrayList<AggregationOperation>();
-    operations.add(raw("$match", new Document("expiresOn", new Document("$gt", Date.from(now)))
-        .append("topics.0", new Document("$exists", true))));
+    operations.add(raw("$match", new Document("topics.0", new Document("$exists", true))));
     operations.add(raw("$unwind", "$topics"));
     operations.add(raw("$lookup", new Document("from", POSTS_COLLECTION)
         .append("let", new Document("rootId", "$rootId"))

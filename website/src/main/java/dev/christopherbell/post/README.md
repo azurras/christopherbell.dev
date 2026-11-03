@@ -10,7 +10,7 @@ Owns Void posts and feed behavior.
 - Global, following, user, and current-user feeds live under `feed`.
 - Single-post and thread retrieval live under `thread`.
 - Like toggling and delete authorization live under `interaction`.
-- Lifespan calculation, expiration repair, reply synchronization, and cleanup live under `expiration`.
+- Lifespan calculation, expiration repair, root-authoritative reply deadlines, and cleanup live under `expiration`.
 - Per-account hidden thread roots live under `hide`.
 - Time-bounded editing lives under `editing`; only the original author can edit,
   including when another caller has an administrator role.
@@ -53,12 +53,22 @@ Owns Void posts and feed behavior.
   usable.
 - Replies are stored as regular posts with `parentId`, `rootId`, and `level`.
   The root id lets thread reads avoid recursive traversal.
-- Replies inherit the thread root expiration so every nested reply lives exactly
-  as long as the parent thread. Reads repair older reply documents that still
-  carry their own shorter expiration. Any reply creation or like change that
-  extends or shortens the root lifespan synchronizes that expiration across the
-  full reply tree. Reply deletion still removes that reply subtree so descendants
-  do not survive a missing parent.
+- Replies use the current thread root expiration. Feed queries resolve that deadline
+  before filtering and pagination, and direct reads check the root. Stored reply
+  expiration is a compatibility projection and never authorizes expiration deletion.
+  Cleanup atomically removes only roots whose current deadline is still due, then
+  removes their descendants. Explicit reply deletion still removes its subtree.
+- Engagement counters retain signed in-flight deltas: an unlike can finish its
+  counter write before the corresponding like. Completed opposite transitions
+  cancel regardless of order. One MongoDB pipeline updates each counter and its
+  derived deadline; only the total used to calculate lifespan is clamped to zero.
+  Displayed engagement counts come from relationship edges, not pending counters.
+- Edits compare the observed text and edit timestamp, update only edit-owned
+  fields, and append bounded audit history without inserting missing posts.
+  Failed like admission rolls back its exact edge incarnation rather than a newer
+  like created by an overlapping request. These guarantees support standalone
+  MongoDB and do not claim cross-document crash recovery or serialized subtree
+  admission.
 - Post creation extracts each distinct HTTP or HTTPS URL from text and stores
   bounded, SSRF-checked link preview metadata on the post. Every initial and
   redirected destination is resolved once and connected through an address

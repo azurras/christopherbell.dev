@@ -81,6 +81,7 @@ class SocialDomainRepositoryPortContractTest {
         "findFederationEligibleAfter(Instant,String,int)",
         "findFederationOutboxPage(String,Instant,String,int,Instant)",
         "findById(String)",
+        "editIfUnchanged(Post,Post,Instant,Instant,int,boolean)",
         "findByRootIdOrderByCreatedOnAsc(String)",
         "save(Post)"));
     assertPort(HiddenPostThreadRepository.class, Set.of(

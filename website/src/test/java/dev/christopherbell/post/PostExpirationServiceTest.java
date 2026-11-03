@@ -1,9 +1,9 @@
 package dev.christopherbell.post;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -89,7 +89,7 @@ class PostExpirationServiceTest {
   }
 
   @Test
-  void likeTransitionUsesOneAtomicCounterWriteAndOneBulkReplySynchronization() {
+  void likeTransitionDerivesExpirationWithTheCounterWithoutStaleBulkSynchronization() {
     var changedOn = Instant.parse("2026-07-29T03:00:00Z");
     var root = Post.builder()
         .id("root")
@@ -131,15 +131,15 @@ class PostExpirationServiceTest {
         counterUpdate.capture(),
         any(FindAndModifyOptions.class),
         eq(Document.class), eq("content"));
-    assertEquals(1, counterUpdate.getValue().getUpdateObject()
-        .get("$inc", Document.class).getInteger("payload.likesCount"));
-    verify(mongo).updateMulti(
+    org.assertj.core.api.Assertions.assertThat(counterUpdate.getValue().getUpdateObject().toString())
+        .contains("payload.likesCount", "$add", "payload.expiresOn", "$multiply");
+    verify(mongo, never()).updateMulti(
         any(Query.class), any(UpdateDefinition.class), eq(Document.class), eq("content"));
     verify(postRepository, never()).findByRootIdOrderByCreatedOnAsc(any());
   }
 
   @Test
-  void replyCountClampIsOneAtomicWriteAcrossAConcurrentIncrement() {
+  void replyDeletionAppliesASignedDeltaAndDeadlineInOneAtomicWrite() {
     var changedOn = Instant.parse("2026-07-29T03:00:00Z");
     var root = Post.builder()
         .id("root")
@@ -177,7 +177,7 @@ class PostExpirationServiceTest {
         eq(Document.class), eq("content")))
         .thenAnswer(invocation -> {
           var update = invocation.<UpdateDefinition>getArgument(1).getUpdateObject();
-          if (update.toString().contains("$max") && update.toString().contains("$subtract")) {
+          if (update.toString().contains("$max") && update.toString().contains("$add")) {
             return linearizedEnvelope;
           }
           return null;

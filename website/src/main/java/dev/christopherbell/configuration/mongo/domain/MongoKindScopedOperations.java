@@ -350,6 +350,57 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   }
 
   @Override
+  public Optional<T> findAndRemove(Query domainQuery) {
+    try {
+      return Optional.ofNullable(mongo.findAndRemove(
+          fieldMapper.mapMutationQuery(domainQuery, kind.schemaVersion()),
+          Document.class, kind.collection())).map(codec::decode);
+    } catch (RuntimeException failure) {
+      throw translateMalformed(failure);
+    }
+  }
+
+  @Override
+  public Optional<T> incrementCounterAndDeadline(
+      Object legacyId, MongoCounterDeadlineMutation mutation) {
+    var counterPath = fieldMapper.mapWritablePath(mutation.counterField());
+    var updatedPath = fieldMapper.mapWritablePath(mutation.updatedOnField());
+    var extendedPath = fieldMapper.mapWritablePath(mutation.extendedOnField());
+    var createdPath = fieldMapper.mapWritablePath(mutation.createdOnField());
+    var deadlinePath = fieldMapper.mapWritablePath(mutation.deadlineField());
+    var assignments = new Document(counterPath, new Document("$add", List.of(
+        new Document("$ifNull", List.of("$" + counterPath, 0)), mutation.delta())))
+        .append(updatedPath, Date.from(mutation.changedOn()));
+    if (mutation.recordExtension()) {
+      assignments.append(extendedPath, Date.from(mutation.changedOn()));
+    }
+    var counters = mutation.deadlineCounterFields().stream()
+        .map(fieldMapper::mapWritablePath)
+        .map(path -> new Document("$ifNull", List.of("$" + path, 0)))
+        .toList();
+    var total = new Document("$max", List.of(0, new Document("$add", counters)));
+    var milliseconds = new Document("$add", List.of(mutation.baseLifespan().toMillis(),
+        new Document("$multiply", List.of(total, mutation.extensionPerCount().toMillis()))));
+    var deadline = new Document("$add", List.of(
+        new Document("$ifNull", List.of("$" + createdPath,
+            Date.from(mutation.changedOn()))), milliseconds));
+    var stages = new ArrayList<AggregationOperation>();
+    stages.add(context -> new Document("$set", assignments));
+    if (mutation.deriveDeadline()) {
+      stages.add(context -> new Document("$set", new Document(deadlinePath, deadline)));
+    }
+    var update = AggregationUpdate.from(stages);
+    try {
+      var envelope = mongo.findAndModify(
+          fieldMapper.guardMutation(fieldMapper.idQuery(mappedLegacyId(legacyId)), kind.schemaVersion()),
+          update, FindAndModifyOptions.options().returnNew(true), Document.class, kind.collection());
+      return Optional.ofNullable(envelope).map(codec::decode);
+    } catch (RuntimeException failure) {
+      throw translateMalformed(failure);
+    }
+  }
+
+  @Override
   public UpdateResult updateMulti(Query domainQuery, Update domainUpdate) {
     try {
       return mongo.updateMulti(

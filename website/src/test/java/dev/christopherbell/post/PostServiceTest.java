@@ -5,11 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -707,23 +707,22 @@ public class PostServiceTest {
   }
 
   @Test
-  @DisplayName("Cleanup job removes descendants when a parent expires")
+  @DisplayName("Cleanup job removes descendants when the root expires")
   public void testPurgeExpiredPosts_deletesExpiredPostTree() {
     var parent = Post.builder()
         .id("parent")
-        .rootId("root")
-        .parentId("root")
+        .rootId("parent")
         .expiresOn(Instant.now().minus(Duration.ofMinutes(1)))
         .build();
     var child = Post.builder()
         .id("child")
-        .rootId("root")
+        .rootId("parent")
         .parentId("parent")
         .expiresOn(Instant.now().plus(Duration.ofHours(1)))
         .build();
     when(postRepository.findByExpiresOnLessThanEqual(any(Instant.class), any()))
         .thenReturn(List.of(parent));
-    when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root"))).thenReturn(List.of(parent, child));
+    when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("parent"))).thenReturn(List.of(parent, child));
 
     postExpirationService.purgeExpiredPosts();
 

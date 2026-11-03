@@ -24,4 +24,6 @@ public class PostLike {
   private String postId;
   private String accountId;
   private Instant createdOn;
+  /** Identifies this insertion so failed admission cannot remove a newer like. */
+  private String creationToken;
 }

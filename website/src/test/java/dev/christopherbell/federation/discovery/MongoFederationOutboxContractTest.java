@@ -47,5 +47,9 @@ class MongoFederationOutboxContractTest implements FederationOutboxParityContrac
   @Override public PostRepository posts() { return posts; }
   @Override public FederationOutboxQueryPort outbox() { return outbox; }
   @Override public StableCursorCodec cursors() { return cursors; }
-  @Override public void ensureAccount(Account account) { accounts.save(account); }
+  @Override public void ensureAccount(Account account) {
+    if (!accounts.existsById(account.getId())) {
+      accounts.save(account);
+    }
+  }
 }

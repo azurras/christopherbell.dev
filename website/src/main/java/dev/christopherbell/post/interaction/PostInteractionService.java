@@ -12,6 +12,7 @@ import dev.christopherbell.post.abuse.VoidMutationKind;
 import dev.christopherbell.post.expiration.PostExpirationService;
 import dev.christopherbell.post.feed.PostFeedItemAssembler;
 import dev.christopherbell.post.like.PostLikeStore;
+import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
 import java.time.Clock;
@@ -60,11 +61,30 @@ public class PostInteractionService {
       try {
         mutationLimiter.require(actor, VoidMutationKind.KEEP_ALIVE);
       } catch (RuntimeException exception) {
-        postLikes.unlike(postId, selfId);
+        if (!postLikes.undoCreatedLike(postId, selfId, transition.creationToken())) {
+          // A completed unlike already removed this incarnation and applied its negative delta.
+          // Account for the insertion it observed, without touching a possible newer edge.
+          try {
+            postExpirationService.applyLikeTransition(post, threadRoot, 1, now);
+          } catch (RuntimeException compensationFailure) {
+            exception.addSuppressed(compensationFailure);
+          }
+        }
         throw exception;
       }
     }
-    var updated = postExpirationService.applyLikeTransition(post, threadRoot, transition.delta(), now);
+    Post updated;
+    try {
+      updated = postExpirationService.applyLikeTransition(post, threadRoot, transition.delta(), now);
+      var stillPresent = postRepository.findById(postId)
+          .orElseThrow(() -> new ResourceNotFoundException("Post no longer exists."));
+      postExpirationService.activeThreadRootForReply(stillPresent);
+    } catch (ResourceNotFoundException | RuntimeException rejected) {
+      if (transition.created()) {
+        postLikes.undoCreatedLike(postId, selfId, transition.creationToken());
+      }
+      throw rejected;
+    }
     if (transition.created() && !selfId.equals(author.getId())) {
       notificationDeliveryService.createPostLikeNotification(updated, actor, author);
     }

@@ -54,6 +54,12 @@ public interface KindScopedMongoOperations<T> {
 
   <R> List<R> aggregate(KindScopedAggregation domainAggregation, Class<R> resultType);
 
+  /** Removes and returns exactly one current matching document, without a stale read/delete gap. */
+  Optional<T> findAndRemove(Query domainQuery);
+
+  /** Applies a signed counter delta and derives its deadline from that same atomic document state. */
+  Optional<T> incrementCounterAndDeadline(Object legacyId, MongoCounterDeadlineMutation mutation);
+
   DeleteResult remove(Query domainQuery);
 
   String collectionName();

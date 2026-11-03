@@ -9,9 +9,13 @@ import dev.christopherbell.account.model.Role;
 import dev.christopherbell.post.expiration.PostExpirationStore;
 import dev.christopherbell.post.like.PostLikeStore;
 import dev.christopherbell.post.model.Post;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +34,8 @@ interface PostInteractionParityContract {
   PostLikeStore likes();
 
   PostExpirationStore expiration();
+
+  dev.christopherbell.post.feed.PostFeedQueryPort feeds();
 
   @BeforeEach
   default void resetInteractionFixtures() {
@@ -75,6 +81,129 @@ interface PostInteractionParityContract {
     assertThat(posts().findById(REPLY).orElseThrow().getExpiresOn()).isEqualTo(synchronizedExpiry);
     expiration().updateExpiration(ROOT, synchronizedExpiry);
     assertThat(posts().findById(ROOT).orElseThrow().getExpiresOn()).isEqualTo(synchronizedExpiry);
+  }
+
+  @Test
+  default void oppositeLikeDeltasCommuteWhenRemovalFinishesBeforeInsertionCounter() {
+    var created = likes().like(ROOT, ACCOUNT, NOW);
+    var removed = likes().unlike(ROOT, ACCOUNT);
+    expiration().incrementCounter(ROOT, "likesCount", removed.delta(), NOW, false);
+    expiration().incrementCounter(ROOT, "likesCount", created.delta(), NOW, true);
+    var current = posts().findById(ROOT).orElseThrow();
+    assertThat(current.getLikesCount()).isZero();
+    assertThat(current.getExpiresOn()).isEqualTo(NOW.plus(Duration.ofDays(1)));
+    assertThat(likes().counts(List.of(ROOT))).isEmpty();
+  }
+
+  @Test
+  default void counterMutationReturnsItsAtomicallyDerivedExpiration() {
+    var current = expiration().incrementCounter(ROOT, "likesCount", 2, NOW, true).orElseThrow();
+    assertThat(current.getLikesCount()).isEqualTo(2);
+    assertThat(current.getExpiresOn()).isEqualTo(NOW.plus(Duration.ofDays(3)));
+    assertThat(posts().findById(ROOT).orElseThrow().getExpiresOn()).isEqualTo(current.getExpiresOn());
+  }
+
+  @Test
+  default void editingDoesNotReplaceAnEngagementWriteDuringPreviewResolution() throws Exception {
+    var previews = org.mockito.Mockito.mock(dev.christopherbell.post.preview.PostLinkPreviewService.class);
+    org.mockito.Mockito.when(previews.resolveForText("edited")).thenAnswer(invocation -> {
+      expiration().incrementCounter(ROOT, "likesCount", 1, NOW, true);
+      return List.of();
+    });
+    var service = editingService(previews);
+    service.edit(ROOT, new dev.christopherbell.post.editing.PostEditRequest("edited"), ACCOUNT);
+    var current = posts().findById(ROOT).orElseThrow();
+    assertThat(current.getText()).isEqualTo("edited");
+    assertThat(current.getLikesCount()).isOne();
+    assertThat(current.getEditAudit()).hasSize(1);
+  }
+
+  @Test
+  default void editingCannotRecreateAPostDeletedDuringPreviewResolution() {
+    var previews = org.mockito.Mockito.mock(dev.christopherbell.post.preview.PostLinkPreviewService.class);
+    org.mockito.Mockito.when(previews.resolveForText("edited")).thenAnswer(invocation -> {
+      posts().deleteById(ROOT);
+      return List.of();
+    });
+    var service = editingService(previews);
+    org.junit.jupiter.api.Assertions.assertThrows(dev.christopherbell.libs.api.exception.ResourceNotFoundException.class, () -> service.edit(
+        ROOT, new dev.christopherbell.post.editing.PostEditRequest("edited"), ACCOUNT));
+    assertThat(posts().findById(ROOT)).isEmpty();
+  }
+
+  @Test
+  default void cleanupDoesNotDeleteARootExtendedAfterItsExpiredPageWasRead() {
+    expiration().updateExpiration(ROOT, NOW.minusSeconds(1));
+    var stale = posts().findById(ROOT).orElseThrow();
+    var repository = org.mockito.Mockito.spy(posts());
+    org.mockito.Mockito.doAnswer(invocation -> {
+      expiration().incrementCounter(ROOT, "likesCount", 1, NOW, true);
+      return List.of(stale);
+    }).when(repository).findByExpiresOnLessThanEqual(org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any());
+    var service = new dev.christopherbell.post.expiration.PostExpirationService(
+        repository, expiration(), Clock.fixed(NOW, ZoneOffset.UTC), true);
+    service.purgeExpiredPosts();
+    assertThat(posts().findById(ROOT)).isPresent();
+    assertThat(posts().findById(REPLY)).isPresent();
+  }
+
+  @Test
+  default void replyVisibilityAndDeadlineUseCurrentRootInsteadOfItsStaleCopy() {
+    expiration().updateExpiration(REPLY, NOW.minusSeconds(1));
+    expiration().incrementCounter(ROOT, "likesCount", 1, NOW, true);
+    var page = feeds().account(ACCOUNT, Optional.empty(), 100,
+        new dev.christopherbell.post.feed.PostFeedVisibility(
+            Set.of(), Set.of(), Optional.of(NOW)));
+    assertThat(page.posts()).extracting(Post::getId).contains(REPLY);
+    assertThat(page.posts().stream().filter(post -> REPLY.equals(post.getId())).findFirst().orElseThrow()
+        .getExpiresOn()).isEqualTo(NOW.plus(Duration.ofDays(2)));
+    expiration().updateExpiration(ROOT, NOW.minusSeconds(1));
+    expiration().updateExpiration(REPLY, NOW.plus(Duration.ofDays(10)));
+    var expired = feeds().account(ACCOUNT, Optional.empty(), 100,
+        new dev.christopherbell.post.feed.PostFeedVisibility(
+            Set.of(), Set.of(), Optional.of(NOW)));
+    assertThat(expired.posts()).extracting(Post::getId).doesNotContain(ROOT, REPLY);
+  }
+
+  @Test
+  default void sitemapAndOutboxUseTheSameRootDeadlineAsFeeds() {
+    for (var id : List.of(ROOT, REPLY)) {
+      var post = posts().findById(id).orElseThrow();
+      post.setFederationOutboundEligible(true);
+      posts().save(post);
+    }
+    expiration().updateExpiration(REPLY, NOW.minusSeconds(1));
+    var before = posts().countByExpiresOnAfter(NOW);
+    assertThat(posts().findByExpiresOnAfter(NOW,
+        org.springframework.data.domain.PageRequest.of(0, 1000)).getContent())
+        .extracting(Post::getId).contains(ROOT, REPLY);
+    assertThat(posts().findFederationOutboxPage(ACCOUNT, null, null, 100, NOW))
+        .extracting(Post::getId).contains(ROOT, REPLY);
+    expiration().updateExpiration(ROOT, NOW.minusSeconds(1));
+    expiration().updateExpiration(REPLY, NOW.plus(Duration.ofDays(10)));
+    assertThat(posts().countByExpiresOnAfter(NOW)).isEqualTo(before - 2);
+    assertThat(posts().findFederationOutboxPage(ACCOUNT, null, null, 100, NOW))
+        .extracting(Post::getId).doesNotContain(ROOT, REPLY);
+  }
+
+  @Test
+  default void failedLikeRollbackDoesNotRemoveANewerIncarnation() {
+    var original = likes().like(ROOT, ACCOUNT, NOW);
+    likes().unlike(ROOT, ACCOUNT);
+    var replacement = likes().like(ROOT, ACCOUNT, NOW);
+    assertThat(likes().undoCreatedLike(ROOT, ACCOUNT, original.creationToken())).isFalse();
+    assertThat(likes().exists(ROOT, ACCOUNT)).isTrue();
+    assertThat(likes().undoCreatedLike(ROOT, ACCOUNT, replacement.creationToken())).isTrue();
+  }
+
+  private dev.christopherbell.post.editing.PostEditingService editingService(
+      dev.christopherbell.post.preview.PostLinkPreviewService previews) {
+    var clock = Clock.fixed(NOW.plusSeconds(2), ZoneOffset.UTC);
+    return new dev.christopherbell.post.editing.PostEditingService(posts(),
+        org.mockito.Mockito.mock(PostMapper.class), previews,
+        new dev.christopherbell.post.expiration.PostExpirationService(posts(), expiration(), clock, true),
+        new dev.christopherbell.post.editing.PostEditingProperties(Duration.ofMinutes(15), 10), clock);
   }
 
   private static Account account(String id) {

@@ -15,8 +15,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 /** Owns post lifespan calculations, repair, synchronization, and cleanup. */
 @Service
@@ -77,7 +79,7 @@ public class PostExpirationService {
     }
     int likes = post.getLikesCount() != null ? post.getLikesCount() : 0;
     int replyLikes = post.getThreadReplyLikesCount() != null ? post.getThreadReplyLikesCount() : 0;
-    int replies = threadReplyCount(post);
+    int replies = post.getThreadReplyCount() == null ? 0 : post.getThreadReplyCount();
     post.setExpiresOn(calculateExpiration(post.getCreatedOn(), likes + replyLikes + replies));
   }
 
@@ -85,6 +87,13 @@ public class PostExpirationService {
   public boolean isExpired(Post post) {
     if (!expirationEnabled || post == null) {
       return false;
+    }
+    if (isReply(post)) {
+      var root = postRepository.findById(post.getRootId()).orElse(null);
+      if (root == null) {
+        return true;
+      }
+      post.setExpiresOn(root.getExpiresOn());
     }
     Instant expiresOn = post.getExpiresOn();
     return expiresOn != null && !expiresOn.isAfter(clock.instant());
@@ -95,12 +104,26 @@ public class PostExpirationService {
     return expirationEnabled ? Optional.of(clock.instant()) : Optional.empty();
   }
 
-  /** Ensures a post is not expired, deleting expired subtrees before returning 404. */
+  /** Rejects expired replies and conditionally claims a currently expired root before cleanup. */
   public void ensureActive(Post post) throws ResourceNotFoundException {
-    if (isExpired(post)) {
-      deletePostTree(post);
-      throw new ResourceNotFoundException(String.format("Post with id %s not found.", post.getId()));
+    if (!isExpired(post)) {
+      return;
     }
+    if (store != null && !isReply(post)) {
+      var removed = store.removeExpiredRoot(post.getId(), clock.instant());
+      if (removed.isPresent()) {
+        deletePostTree(removed.orElseThrow());
+      } else {
+        var current = postRepository.findById(post.getId());
+        if (current.isPresent() && !isExpired(current.orElseThrow())) {
+          post.setExpiresOn(current.orElseThrow().getExpiresOn());
+          return;
+        }
+      }
+    } else if (store == null) {
+      deletePostTree(post);
+    }
+    throw new ResourceNotFoundException(String.format("Post with id %s not found.", post.getId()));
   }
 
   /** Returns the active root for a reply, or null for root posts. */
@@ -118,7 +141,7 @@ public class PostExpirationService {
     return root;
   }
 
-  /** Updates a root's reply-like extension count and synchronizes reply expirations. */
+  /** Atomically updates the root's reply-like counter and its authoritative deadline. */
   public void refreshThreadRootExpiration(
       Post threadRoot, int replyLikeDelta, Instant extendedOn) {
     if (!expirationEnabled || threadRoot == null || replyLikeDelta == 0) {
@@ -127,6 +150,7 @@ public class PostExpirationService {
     var now = extendedOn != null ? extendedOn : clock.instant();
     var updated = incrementCounter(
         threadRoot, "threadReplyLikesCount", replyLikeDelta, now, replyLikeDelta > 0);
+    requireMutationTarget(updated);
     refreshAndPersistExpiration(updated);
   }
 
@@ -139,6 +163,7 @@ public class PostExpirationService {
     var threadRoot = activeThreadRootForReply(reply);
     var updated = incrementCounter(
         threadRoot, "threadReplyCount", 1, Objects.requireNonNull(extendedOn), true);
+    requireMutationTarget(updated);
     refreshAndPersistExpiration(updated);
   }
 
@@ -204,8 +229,12 @@ public class PostExpirationService {
       return post;
     }
     var updated = incrementCounter(post, "likesCount", delta, changedOn, delta > 0);
+    requireMutationTarget(updated);
     refreshAndPersistExpiration(updated);
     refreshThreadRootExpiration(threadRoot, delta, delta > 0 ? changedOn : null);
+    if (isReply(updated)) {
+      setReplyExpirationFromRoot(updated);
+    }
     return updated;
   }
 
@@ -264,34 +293,41 @@ public class PostExpirationService {
     var missing = postRepository.findByExpiresOnIsNull(page);
     if (!missing.isEmpty()) {
       missing.forEach(post -> {
-        refreshExpiration(post);
-        postRepository.save(post);
+        if (store != null && !isReply(post)) {
+          store.incrementCounter(post.getId(), "likesCount", 0, clock.instant(), false);
+        } else if (store == null) {
+          refreshExpiration(post);
+          postRepository.save(post);
+        }
       });
       log.info("Post expiration cleanup repaired {} posts missing expiration timestamps.", missing.size());
     }
 
-    var expired = postRepository.findByExpiresOnLessThanEqual(clock.instant(), page);
-    if (!expired.isEmpty()) {
-      expired.forEach(this::deletePostTree);
-      log.info("Post expiration cleanup deleted {} expired post trees.", expired.size());
+    var cutoff = clock.instant();
+    var expired = postRepository.findByExpiresOnLessThanEqual(cutoff, page);
+    int removed = 0;
+    for (Post candidate : expired) {
+      if (isReply(candidate)) {
+        continue;
+      }
+      if (store == null) {
+        deletePostTree(candidate);
+        removed++;
+      } else {
+        var claimed = store.removeExpiredRoot(candidate.getId(), cutoff);
+        if (claimed.isPresent()) {
+          deletePostTree(claimed.orElseThrow());
+          removed++;
+        }
+      }
+    }
+    if (removed > 0) {
+      log.info("Post expiration cleanup deleted {} expired post trees.", removed);
     }
   }
 
   private boolean isReply(Post post) {
     return post != null && post.getParentId() != null && !post.getParentId().isBlank();
-  }
-
-  private int threadReplyCount(Post post) {
-    if (post == null || isReply(post)) {
-      return 0;
-    }
-    var rootId = post.getRootId() != null && !post.getRootId().isBlank()
-        ? post.getRootId()
-        : post.getId();
-    if (rootId == null || rootId.isBlank()) {
-      return 0;
-    }
-    return post.getThreadReplyCount() == null ? 0 : Math.max(0, post.getThreadReplyCount());
   }
 
   private Post incrementCounter(
@@ -331,24 +367,33 @@ public class PostExpirationService {
     var changedOn = clock.instant();
     if (store == null) {
       var updated = incrementCounter(root, "threadReplyCount", -delta, changedOn, false);
+      requireMutationTarget(updated);
       refreshAndPersistExpiration(updated);
       return;
     }
-    var updated = store.decrementFloorZero(
-        root.getId(), "threadReplyCount", delta, changedOn).orElse(null);
+    var updated = store.incrementCounter(
+        root.getId(), "threadReplyCount", -delta, changedOn, false).orElse(null);
+    requireMutationTarget(updated);
     refreshAndPersistExpiration(updated);
+  }
+
+  private static void requireMutationTarget(Post post) {
+    if (post == null) {
+      throw new ResponseStatusException(
+          HttpStatus.NOT_FOUND, "Post no longer exists.");
+    }
   }
 
   private void refreshAndPersistExpiration(Post post) {
     if (post == null) {
       return;
     }
-    refreshExpiration(post);
-    if (store != null) {
-      store.updateExpiration(post.getId(), post.getExpiresOn());
-    } else {
+    if (store == null) {
+      refreshExpiration(post);
       postRepository.save(post);
+      synchronizeReplyExpirations(post);
     }
-    synchronizeReplyExpirations(post);
+    // The production store derives the root deadline in the same write as its signed delta.
+    // Replies resolve their root's deadline at reads; competing bulk copies cannot regress it.
   }
 }
