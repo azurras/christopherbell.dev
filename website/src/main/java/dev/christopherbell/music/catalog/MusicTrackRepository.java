@@ -5,6 +5,7 @@ import java.util.Optional;
 
 /** Persistence boundary for indexed Music tracks. */
 public interface MusicTrackRepository {
+  /** Inserts a new track, or refreshes only metadata while preserving stored listener preferences. */
   MusicTrack save(MusicTrack track);
 
   Optional<MusicTrack> findById(String id);
