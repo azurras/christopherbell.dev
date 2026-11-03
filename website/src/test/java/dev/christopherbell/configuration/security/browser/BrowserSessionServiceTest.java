@@ -8,29 +8,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountMapper;
 import dev.christopherbell.account.AccountRepository;
-import dev.christopherbell.account.moderation.AccountModerationService;
+import dev.christopherbell.account.api.LoginTokens;
+import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.moderation.AccountModerationService;
 import dev.christopherbell.admin.activity.AdminActivityService;
-import dev.christopherbell.account.api.LoginTokens;
-import dev.christopherbell.account.api.LoginTokensFixture;
 import dev.christopherbell.permission.PermissionService;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -144,6 +145,77 @@ class BrowserSessionServiceTest {
         now,
         fixture.session().getAbsoluteExpiresOn());
     verify(fixture.activity, never()).rotate(anyString(), anyString(), any(), anyString(), any(), any(), any());
+  }
+
+  @Test
+  void concurrentActivityLoserReloadsWinnerAndAuthenticatesWithoutReplacement() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    Instant touchTime = START.plus(BrowserSessionService.ACTIVITY_WRITE_INTERVAL);
+    var staleSnapshot = copy(fixture.session());
+    fixture.at(touchTime).authenticate(token, true).orElseThrow();
+    var winnerSnapshot = copy(fixture.session());
+    when(fixture.activity.touch(anyString(), any(), any(), any())).thenReturn(Optional.empty());
+    when(fixture.authentications.findById(fixture.session().getId())).thenReturn(
+        Optional.of(authentication(staleSnapshot, fixture.account)),
+        Optional.of(authentication(winnerSnapshot, fixture.account)));
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.activity, fixture.authentications);
+
+    var authenticated = fixture.authenticate(token, true).orElseThrow();
+
+    assertTrue(authenticated.rotatedToken().isEmpty());
+    assertEquals(fixture.account.getId(), authenticated.accountId());
+    verify(fixture.authentications, org.mockito.Mockito.times(2)).findById(staleSnapshot.getId());
+    verify(fixture.activity).touch(staleSnapshot.getId(), START, touchTime,
+        touchTime.plus(BrowserSessionService.IDLE_LIFETIME));
+    verify(fixture.sessions, never()).save(any(BrowserSession.class));
+    verify(fixture.sessions, never()).delete(any(BrowserSession.class));
+  }
+
+  @Test
+  void activityCasLoserDoesNotReviveADeletedSession() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    var staleSnapshot = copy(fixture.session());
+    when(fixture.activity.touch(anyString(), any(), any(), any())).thenReturn(Optional.empty());
+    when(fixture.authentications.findById(staleSnapshot.getId())).thenReturn(
+        Optional.of(authentication(staleSnapshot, fixture.account)), Optional.empty());
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.authentications);
+
+    assertTrue(fixture.at(START.plus(BrowserSessionService.ACTIVITY_WRITE_INTERVAL))
+        .authenticate(token, true).isEmpty());
+
+    verify(fixture.authentications, org.mockito.Mockito.times(2)).findById(staleSnapshot.getId());
+    verify(fixture.sessions, never()).save(any(BrowserSession.class));
+  }
+
+  @Test
+  void activityCasLoserRevalidatesReloadedCredentialExpiryAndAccount() {
+    for (String invalidState : List.of("credential", "expiry", "fingerprint", "inactive")) {
+      var fixture = new Fixture(START);
+      String token = fixture.create();
+      Instant touchTime = START.plus(BrowserSessionService.ACTIVITY_WRITE_INTERVAL);
+      var staleSnapshot = copy(fixture.session());
+      var invalidSnapshot = copy(staleSnapshot);
+      var initialAuthentication = authentication(staleSnapshot, fixture.account);
+      switch (invalidState) {
+        case "credential" -> invalidSnapshot.setTokenHash("replacement-credential");
+        case "expiry" -> invalidSnapshot.setIdleExpiresOn(touchTime);
+        case "fingerprint" -> fixture.account.setPasswordHash("replacement-password");
+        case "inactive" -> fixture.account.setStatus(AccountStatus.SUSPENDED);
+        default -> throw new AssertionError(invalidState);
+      }
+      when(fixture.activity.touch(anyString(), any(), any(), any())).thenReturn(Optional.empty());
+      when(fixture.authentications.findById(staleSnapshot.getId())).thenReturn(
+          Optional.of(initialAuthentication),
+          Optional.of(authentication(invalidSnapshot, fixture.account)));
+      org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.authentications);
+
+      assertTrue(fixture.at(touchTime).authenticate(token, true).isEmpty(), invalidState);
+
+      verify(fixture.authentications, org.mockito.Mockito.times(2)).findById(staleSnapshot.getId());
+      verify(fixture.sessions, never()).save(any(BrowserSession.class));
+    }
   }
 
   @Test

@@ -111,9 +111,13 @@ public class BrowserSessionService implements AccountSessionRevoker {
       return rotate(session, account, credential, now, idleExpiresOn);
     }
     if (dueForActivityWrite(session, now)) {
-      return activity.touch(session.getId(), session.getLastSeenOn(), now, idleExpiresOn)
-          .filter(touched -> usable(touched, credential.secret(), now))
-          .map(touched -> authenticated(account, Optional.empty()));
+      var touched = activity.touch(session.getId(), session.getLastSeenOn(), now, idleExpiresOn);
+      if (touched.isEmpty()) {
+        return afterLostActivityWrite(session.getId(), credential, now);
+      }
+      return touched
+          .filter(current -> usable(current, credential.secret(), now))
+          .map(current -> authenticated(account, Optional.empty()));
     }
     return Optional.of(authenticated(account, Optional.empty()));
   }
@@ -128,6 +132,23 @@ public class BrowserSessionService implements AccountSessionRevoker {
 
   private boolean dueForActivityWrite(BrowserSession session, Instant now) {
     return !now.isBefore(session.getLastSeenOn().plus(ACTIVITY_WRITE_INTERVAL));
+  }
+
+  /** Revalidates a concurrent activity winner without renewing or restoring any stored state. */
+  private Optional<AuthenticatedBrowserSession> afterLostActivityWrite(
+      String sessionId,
+      Credential credential,
+      Instant now
+  ) {
+    return authentications.findById(sessionId).flatMap(reloaded -> {
+      var session = reloaded.session();
+      var account = reloaded.account();
+      if (!usable(session, credential.secret(), now)
+          || !account.validates(session.getAccountSecurityFingerprint())) {
+        return revoked(session);
+      }
+      return Optional.of(authenticated(account, Optional.empty()));
+    });
   }
 
   /** Atomically rotates the secret; when another request rotated first, falls back to the overlap. */
