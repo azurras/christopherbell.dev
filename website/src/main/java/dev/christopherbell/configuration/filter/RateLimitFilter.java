@@ -18,9 +18,10 @@ import java.util.function.Supplier;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.PathContainer;
+import org.springframework.util.AntPathMatcher;
+import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ServletRequestPathUtils;
-import org.springframework.web.util.pattern.PathPatternParser;
 import tools.jackson.databind.ObjectMapper;
 
 /** Applies endpoint-aware, per-client token buckets with bounded process-local state. */
@@ -38,6 +39,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
   private final ApiErrorResponseWriter errors;
   private final Clock clock;
   private final RateLimitBucketStore buckets;
+  private final AntPathMatcher pathMatcher = new DecodedSegmentPathMatcher();
 
   /** Creates a filter with configured endpoint-aware limits. */
   public RateLimitFilter(ClientIpResolver clientIpResolver, RateLimitProperties properties) {
@@ -167,8 +169,30 @@ public class RateLimitFilter extends OncePerRequestFilter {
     if (paths == null || paths.isEmpty()) {
       return true;
     }
-    return paths.stream().anyMatch(pattern ->
-        PathPatternParser.defaultInstance.parse(pattern).matches(applicationPath));
+    return paths.stream().anyMatch(pattern -> pathMatcher.match(pattern, applicationPath.value()));
+  }
+
+  /** Keeps configured Ant syntax while decoding only path data, never encoded separators. */
+  private static final class DecodedSegmentPathMatcher extends AntPathMatcher {
+    private DecodedSegmentPathMatcher() {
+      // Ant's raw-string prefix shortcut cannot inspect encoded request tokens correctly.
+      // This flag disables that shortcut; both overrides deliberately preserve whitespace.
+      setTrimTokens(true);
+    }
+
+    @Override
+    protected String[] tokenizePattern(String pattern) {
+      return StringUtils.tokenizeToStringArray(pattern, "/", false, true);
+    }
+
+    @Override
+    protected String[] tokenizePath(String path) {
+      return PathContainer.parsePath(path).elements().stream()
+          .filter(PathContainer.PathSegment.class::isInstance)
+          .map(PathContainer.PathSegment.class::cast)
+          .map(PathContainer.PathSegment::valueToMatch)
+          .toArray(String[]::new);
+    }
   }
 
   private String bucketKey(MatchedRule matchedRule, String ip) {

@@ -32,6 +32,35 @@ import tools.jackson.databind.ObjectMapper;
 public class RateLimitFilterTest {
 
   @Test
+  void configuredLiteralWhitespaceAndPercentRemainPathData() throws Exception {
+    for (String[] paths : List.of(
+        new String[]{"/api/ name /login", "/api/%20name%20/login"},
+        new String[]{"/api/%/login", "/api/%25/login"})) {
+      var properties = new RateLimitProperties();
+      properties.setRules(List.of(rule("literal", 1, Duration.ofMinutes(1), List.of("POST"),
+          List.of(paths[0]))));
+      var response = new MockHttpServletResponse();
+      new RateLimitFilter(new ClientIpResolver(new ClientIpProperties()), properties)
+          .doFilter(request("POST", paths[1]), response, mock(FilterChain.class));
+      assertThat(response.getHeader("X-RateLimit-Limit")).isEqualTo("1");
+    }
+  }
+
+  @Test
+  void configuredAntPatternsKeepSupportingNonterminalDoubleWildcards() throws Exception {
+    var properties = new RateLimitProperties();
+    properties.setRules(List.of(rule("custom-auth", 1, Duration.ofMinutes(1), List.of("POST"),
+        List.of("/api/accounts/**/login"))));
+    var filter = new RateLimitFilter(new ClientIpResolver(new ClientIpProperties()), properties);
+    var first = new MockHttpServletResponse();
+    filter.doFilter(request("POST", "/%61pi/accounts/2024-12-15/login"), first, mock(FilterChain.class));
+    var second = new MockHttpServletResponse();
+    filter.doFilter(request("POST", "/api/accounts/2024-12-15/login"), second, mock(FilterChain.class));
+    assertThat(first.getHeader("X-RateLimit-Limit")).isEqualTo("1");
+    assertThat(second.getStatus()).isEqualTo(429);
+  }
+
+  @Test
   void encodedAndLiteralEndpointsShareTheSensitiveBucket() throws Exception {
     for (String encodedPath : List.of(
         "/%61pi/accounts/2024-12-15/login",
