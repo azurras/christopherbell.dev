@@ -69,6 +69,8 @@ Owns Void posts and feed behavior.
   like created by an overlapping request. These guarantees support standalone
   MongoDB and do not claim cross-document crash recovery or serialized subtree
   admission.
+  A response can fail after a like mutation commits. Later read failures preserve
+  the committed edge; callers retry the desired like state rather than toggle it.
 - Post creation extracts each distinct HTTP or HTTPS URL from text and stores
   bounded, SSRF-checked link preview metadata on the post. Every initial and
   redirected destination is resolved once and connected through an address

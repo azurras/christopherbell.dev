@@ -12,7 +12,6 @@ import dev.christopherbell.post.abuse.VoidMutationKind;
 import dev.christopherbell.post.expiration.PostExpirationService;
 import dev.christopherbell.post.feed.PostFeedItemAssembler;
 import dev.christopherbell.post.like.PostLikeStore;
-import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
 import java.time.Clock;
@@ -73,18 +72,12 @@ public class PostInteractionService {
         throw exception;
       }
     }
-    Post updated;
-    try {
-      updated = postExpirationService.applyLikeTransition(post, threadRoot, transition.delta(), now);
-      var stillPresent = postRepository.findById(postId)
-          .orElseThrow(() -> new ResourceNotFoundException("Post no longer exists."));
-      postExpirationService.activeThreadRootForReply(stillPresent);
-    } catch (ResourceNotFoundException | RuntimeException rejected) {
-      if (transition.created()) {
-        postLikes.undoCreatedLike(postId, selfId, transition.creationToken());
-      }
-      throw rejected;
-    }
+    var updated = postExpirationService.applyLikeTransition(post, threadRoot, transition.delta(), now);
+    // A later read failure can follow a committed mutation. Do not remove its committed edge;
+    // retrying the desired state is safe, whereas an edge-only rollback would corrupt lifespan.
+    var stillPresent = postRepository.findById(postId)
+        .orElseThrow(() -> new ResourceNotFoundException("Post no longer exists."));
+    postExpirationService.activeThreadRootForReply(stillPresent);
     if (transition.created() && !selfId.equals(author.getId())) {
       notificationDeliveryService.createPostLikeNotification(updated, actor, author);
     }

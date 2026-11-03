@@ -188,6 +188,30 @@ interface PostInteractionParityContract {
   }
 
   @Test
+  default void postCommitReadFailurePreservesTheCommittedLikeAndCounter() {
+    var observed = posts().findById(ROOT).orElseThrow();
+    var repository = org.mockito.Mockito.spy(posts());
+    org.mockito.Mockito.doReturn(Optional.of(observed))
+        .doThrow(new IllegalStateException("Read failed after commit"))
+        .when(repository).findById(ROOT);
+    var clock = Clock.fixed(NOW.plusSeconds(2), ZoneOffset.UTC);
+    var service = new dev.christopherbell.post.interaction.PostInteractionService(repository,
+        accounts(), org.mockito.Mockito.mock(PostMapper.class),
+        org.mockito.Mockito.mock(dev.christopherbell.notification.delivery.NotificationDeliveryService.class),
+        new dev.christopherbell.post.expiration.PostExpirationService(repository, expiration(), clock, true),
+        likes(), org.mockito.Mockito.mock(dev.christopherbell.post.feed.PostFeedItemAssembler.class),
+        org.mockito.Mockito.mock(dev.christopherbell.post.abuse.NewAccountVoidMutationLimiter.class), clock);
+
+    org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+        () -> service.setLiked(ROOT, ACCOUNT, true));
+
+    assertThat(likes().exists(ROOT, ACCOUNT)).isTrue();
+    var current = posts().findById(ROOT).orElseThrow();
+    assertThat(current.getLikesCount()).isOne();
+    assertThat(current.getExpiresOn()).isEqualTo(NOW.plus(Duration.ofDays(2)));
+  }
+
+  @Test
   default void failedLikeRollbackDoesNotRemoveANewerIncarnation() {
     var original = likes().like(ROOT, ACCOUNT, NOW);
     likes().unlike(ROOT, ACCOUNT);
