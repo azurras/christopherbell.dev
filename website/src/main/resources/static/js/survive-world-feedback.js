@@ -10,6 +10,8 @@ export function worldChangesBetween(before, after) {
   const numbers = [];
   for (const [field, label] of [['wood', 'wood'], ['stone', 'stone'], ['food', 'food'], ['health', 'health'], ['hunger', 'fullness']]) {
     const delta = after[field] - before[field];
+    // Routine effort already updates the fullness meter; reserve floating labels for salient outcomes.
+    if (field === 'hunger' && delta < 0) continue;
     if (Number.isFinite(delta) && delta !== 0) {
       numbers.push({ text: `${delta > 0 ? '+' : '−'}${Math.abs(delta)} ${label}`,
         tone: delta > 0 ? 'gain' : field === 'health' ? 'damage' : 'cost', target: 'player' });

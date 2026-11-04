@@ -13,6 +13,7 @@ test('confirmed gains become explicit resource and level labels without inventin
   assert.ok(change.numbers.some(number => number.text === '+1 wood'));
   assert.ok(change.numbers.some(number => number.text === 'Level up!'));
   assert.equal(change.numbers.some(number => number.text.includes('XP')), false);
+  assert.equal(change.numbers.some(number => number.text.includes('fullness')), false);
 });
 
 test('initial resume, repeated polls, stale revisions and replacement never announce fabricated gains', () => {
@@ -95,6 +96,6 @@ test('multiple reward labels occupy separate screen lines even when their world 
   feedback.acceptState({ ...before, revision: 2, wood: 1, hunger: 9, strength: 3 });
   feedback.draw(() => ({ x: 0, y: 0, visible: true }), { x: 0, z: 0 }, { x: 0, z: -3 });
   const labels = documentRoot.getElementById('surviveWorldNumbers').children;
-  assert.equal(labels.length, 3);
-  assert.equal(new Set(labels.map(label => label.style.marginTop)).size, 3);
+  assert.equal(labels.length, 2);
+  assert.equal(new Set(labels.map(label => label.style.marginTop)).size, 2);
 });
