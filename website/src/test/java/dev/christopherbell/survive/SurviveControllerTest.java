@@ -57,6 +57,29 @@ class SurviveControllerTest {
   @MockitoBean private BrowserSessionService browserSessions;
 
   @Test
+  @org.springframework.test.annotation.DirtiesContext(methodMode = org.springframework.test.annotation.DirtiesContext.MethodMode.AFTER_METHOD)
+  void publicMovementNeedsCsrfAndAnOwnerAndRejectsMalformedCoordinates() throws Exception {
+    String body = "{\"x\":0,\"z\":0,\"heading\":0,\"sequence\":0}";
+    mvc.perform(post("/api/survive/v1/movement").contentType("application/json").content(body))
+        .andExpect(status().isForbidden());
+    mvc.perform(post("/api/survive/v1/movement").with(csrf()).contentType("application/json").content(body))
+        .andExpect(status().isNotFound());
+    var joined = mvc.perform(post("/api/survive/v1/game").with(csrf()).contentType("application/json")
+        .content("{\"name\":\"Walker\"}")).andExpect(status().isOk()).andReturn();
+    var survivor = joined.getResponse().getCookie(SurviveController.COOKIE_NAME);
+    mvc.perform(post("/api/survive/v1/movement").cookie(survivor).with(csrf())
+        .contentType("application/json").content(body)).andExpect(status().isOk())
+        .andExpect(header().string("Cache-Control", "no-store"))
+        .andExpect(jsonPath("self.name").value("Walker"))
+        .andExpect(jsonPath("self.token").doesNotExist()).andExpect(jsonPath("self.accountId").doesNotExist());
+    for (String invalid : new String[] {"{\"x\":90,\"z\":0,\"heading\":0,\"sequence\":1}",
+        "{\"x\":0,\"z\":0,\"heading\":0,\"sequence\":-1}", "{}"}) {
+      mvc.perform(post("/api/survive/v1/movement").cookie(survivor).with(csrf())
+          .contentType("application/json").content(invalid)).andExpect(status().isBadRequest());
+    }
+  }
+
+  @Test
   void accountSurvivorResumesWithoutGuestCookieAndRepeatedJoinCannotReplaceIt() throws Exception {
     var account = dev.christopherbell.account.model.Account.builder().id("saved-owner")
         .role(dev.christopherbell.account.model.Role.USER).status(dev.christopherbell.account.model.AccountStatus.ACTIVE)

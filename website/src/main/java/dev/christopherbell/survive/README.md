@@ -146,3 +146,37 @@ The side panel's status card always shows vitals, inventory, weapon, stats and t
 three newest events. Camp & sharing, the full journal and the guide are native
 `details` sections that start closed; `survive-panel.js` remembers each one's open
 state per browser when storage allows, and renders never open or close them.
+
+## Shared 3D island
+
+The browser renders a generated low-poly island with native WebGL and a third-person
+camera. WASD/arrows walk, dragging rotates the camera, Q/R turn it, E uses the first
+contextual action, and Escape stops walking. Touch direction buttons and destination
+buttons also walk through the same world. Pine forest (-24,-15), stone ridge (30,-12),
+hunting grounds (-36,25), camp (0,0) and boat shore (0,62) gate their respective actions.
+Existing hunger, combat, weapons, day/night, raids, gifts and durable progress remain
+Java-owned. Rendering does not award supplies. Saved characters and inventory retain
+the existing Mongo representation; no position schema is added.
+
+`POST /api/survive/v1/movement` accepts `{ "x": 0, "z": 0, "heading": 0, "sequence": 1 }`.
+Cookie/account ownership resolves the survivor; IDs and names cannot select another
+character. It returns `self`, `others` and `accepted`. Coordinates are finite, inside
+78 metres, with heading in radians and a nonnegative sequence. The server bounds
+speed, rejects stale sequences and prevents movement outside EXPLORING. Pulses load
+ownership without writing the saved world or changing survival revisions. Locations
+are process-local: the first pulse, reconnection after 30 idle seconds and application
+restart spawn at camp. At most 1000 poses are kept, with two-hour expiry; other
+players disappear after 30 seconds without a pulse. This first release assumes one
+application process. Multiple tabs sharing one character reconcile the same sequence.
+
+Once on the island, existing command endpoints enforce landmark proximity under the
+same service monitor. Flee relocates to camp after the durable action commits. Older
+text clients keep their existing mechanics. `POST /api/survive/v1/movement/leave`
+releases only the caller's pose for the accessible text fallback, without touching
+saved progress. Both routes retain CSRF, no-store and existing API rate limits.
+
+Visible browsers pulse every 500 ms with one outstanding request and a four-second
+timeout; hidden tabs pause, errors stop prediction and show adaptive backoff, and
+remote positions interpolate. The existing 300 mutations/minute/IP limit remains:
+large shared-IP groups may see connection pauses. Render geometry/pixel density are
+bounded. WebGL failure exposes the prior illustration and action menus.

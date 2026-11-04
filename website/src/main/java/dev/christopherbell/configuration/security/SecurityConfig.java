@@ -93,6 +93,8 @@ public class SecurityConfig {
       "POST:/api/survive/v1/game",
       "POST:/api/survive/v1/actions",
       "POST:/api/survive/v1/gifts",
+      "POST:/api/survive/v1/movement",
+      "POST:/api/survive/v1/movement/leave",
       "GET:/software-handoff-kit/preview",
       "GET:/sitemap.xml",
       "GET:/sitemap-*.xml",

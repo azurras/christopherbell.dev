@@ -28,6 +28,7 @@ public class SurviveService {
   private final Clock clock;
   private final IntSupplier rollPercent;
   private final int playerCapacity;
+  private final SurvivePresence presence = new SurvivePresence();
 
   @Autowired
   public SurviveService(SurviveWorldRepository repository) {
@@ -66,6 +67,7 @@ public class SurviveService {
       throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "The camp is full. Please try later.");
     }
     if (replacingPlayer) {
+      presence.remove(world.players.get(ownerKey).survivorId);
       world.players.remove(ownerKey);
     }
     String token = UUID.randomUUID().toString();
@@ -117,10 +119,37 @@ public class SurviveService {
     if (action == null || !world.actionsFor(player, now).contains(action)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That action is unavailable in the current state.");
     }
+    if (!presence.permits(player.survivorId, action, now)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Walk to the action's landmark first.");
+    }
     player.lastSeen = now;
     world.perform(action, player, now, rollPercent);
     commitWorld();
+    if (action == SurviveAction.FLEE) {
+      presence.returnToCamp(player.survivorId);
+    }
     return snapshotFor(player);
+  }
+
+  /** Reads ownership without rewriting saved progress, then acknowledges one bounded transient pose. */
+  public synchronized SurvivePresence.View pulseForOwner(String token, String accountId,
+      dev.christopherbell.survive.model.SurviveMovement movement) {
+    loadSettledWorld();
+    var player = world.players.get(ownerKey(token, accountId));
+    var now = clock.instant();
+    if (player == null || !player.lastSeen.isAfter(now.minus(IDLE_TIMEOUT))) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Your survivor expired. Rejoin the camp.");
+    }
+    return presence.pulse(player.survivorId, player.name, player.status, movement, now);
+  }
+
+  /** Releases only this owner's transient pose when the browser falls back to the text adventure. */
+  public synchronized void leaveIslandForOwner(String token, String accountId) {
+    loadSettledWorld();
+    var player = world.players.get(ownerKey(token, accountId));
+    if (player != null) {
+      presence.remove(player.survivorId);
+    }
   }
 
   private void expireInactivePlayers() {

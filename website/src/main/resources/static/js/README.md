@@ -222,3 +222,13 @@ frontend directory structure changes.
 are escaped, mutation controls retain disabled states after failures, and reports
 use protected plain-text attachment routes. The public shell explains pilot caps,
 bounded coverage, dashboard-only results and deferred billing/email delivery.
+
+### Survive island
+
+`survive-world-model.js` owns display-only landmark filtering, camera projection and
+movement prediction. `survive-world-renderer.js` owns generated WebGL geometry and
+GPU disposal. `survive-world.js` owns scoped keyboard/touch input, destination walking,
+sequenced presence pulses, timeout/backoff, player labels and frame/listener cleanup.
+`survive.js` still serializes durable survival commands. New presence uses the API
+constants in `lib/api.js`; it never computes survival rewards. The SVG scene remains
+the fallback for unavailable/lost WebGL. Labels use text nodes, never HTML.
