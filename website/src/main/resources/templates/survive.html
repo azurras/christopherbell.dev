@@ -41,8 +41,17 @@
           <div class="survive-world-viewport">
             <canvas id="surviveWorldCanvas" tabindex="0" aria-label="Third-person island. WASD or arrows to walk; drag to turn the camera. Q and R rotate, E interacts, Escape stops walking." aria-describedby="surviveWorldHelp"></canvas>
             <div id="surviveWorldLabels" class="survive-world-labels" aria-hidden="true"></div>
+            <div id="surviveWorldCombat" class="survive-world-combat" role="status" hidden>
+              <strong>In combat — attack, defend or flee!</strong>
+              <span id="surviveWorldEnemyName"></span>
+              <meter id="surviveWorldEnemyMeter" min="0" max="5" value="5" aria-label="Enemy health"></meter>
+              <span id="surviveWorldPlayerHealth"></span>
+            </div>
+            <p id="surviveWorldNotice" class="survive-world-notice" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+            <span id="surviveWorldEnemyMarker" class="survive-world-enemy-marker" aria-hidden="true" hidden></span>
+            <div id="surviveWorldNumbers" class="survive-world-numbers" aria-hidden="true"></div>
+            <div id="surviveWorldActions" class="survive-world-actions" role="group" aria-label="Actions at your location"></div>
           </div>
-          <div id="surviveWorldActions" class="survive-world-actions" role="group" aria-label="Actions at your location"></div>
           <div id="surviveWorldDirections" class="survive-world-directions" role="group" aria-label="Walking and camera controls">
             <button type="button" data-walk="forward" aria-label="Walk forward">↑</button>
             <button type="button" data-walk="left" aria-label="Walk left">←</button>

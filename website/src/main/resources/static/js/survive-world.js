@@ -1,7 +1,8 @@
 /** Owns 3D input, prediction, acknowledged live presence, labels and cleanup for one page. */
 import { API } from './lib/api.js';
-import { advancePosition, actionsAt, ACTION_LABELS, LANDMARKS } from './survive-world-model.js';
+import { advancePosition, actionsAt, ACTION_LABELS, LANDMARKS, combatPosition } from './survive-world-model.js';
 import { createWorldRenderer } from './survive-world-renderer.js';
+import { createWorldFeedback } from './survive-world-feedback.js';
 
 /** Missing/unsupported canvas leaves the existing accessible adventure fully operational. */
 export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererFactory = createWorldRenderer) {
@@ -37,8 +38,10 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     };
   }
   documentRoot.getElementById('surviveCampScene').setAttribute('hidden', '');
+  const worldFeedback = createWorldFeedback(documentRoot);
   shell.dataset.active = 'true';
   const view = documentRoot.defaultView;
+  const motionPreference = view.matchMedia?.('(prefers-reduced-motion: reduce)');
   const pressed = new Set();
   const listeners = [];
   let state = null;
@@ -253,7 +256,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         other.drawX += (other.x - other.drawX) * Math.min(1, seconds * 8);
         other.drawZ += (other.z - other.drawZ) * Math.min(1, seconds * 8);
       }
-      const rendered = renderer.draw(position, yaw, state, others.map(other => ({ ...other, x: other.drawX, z: other.drawZ })));
+      const rendered = renderer.draw(position, yaw, state, others.map(other => ({ ...other, x: other.drawX, z: other.drawZ })), motionPreference?.matches ? null : worldFeedback.effect());
+      worldFeedback.draw(rendered.project, position, combatPosition(position, yaw));
       for (const label of desiredNameLabels) {
         const projected = rendered.project([label.x, label.landmark ? 4 : 3, label.z]);
         label.element.hidden = !projected.visible;
@@ -276,10 +280,13 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     view.cancelAnimationFrame(frameId);
     for (const remove of listeners) remove();
     renderer.dispose();
+    worldFeedback.dispose();
     labels.replaceChildren();
   }
   return {
     setState(nextState, isBusy = false) {
+      if (disposed) return;
+      worldFeedback.acceptState(nextState, isBusy);
       if (state?.survivorId !== nextState?.survivorId) {
         requestGeneration++;
         controller?.abort();
@@ -295,6 +302,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       busy = isBusy;
       if (busy || state?.status !== 'EXPLORING') stopWalking();
     },
+    beginAction(action) { if (!disposed) worldFeedback.beginAction(action); },
+    showError(message) { if (!disposed) worldFeedback.showError(message); },
     dispose,
   };
 }

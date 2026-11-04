@@ -145,3 +145,16 @@ test('a failed pulse removes remote avatars instead of displaying disconnected p
   assert.equal(fixture.documentRoot.getElementById('surviveWorldLabels').children.length, 5);
   world.dispose();
 });
+
+test('graphics loss cannot resurrect combat overlays or action notices after disposal', () => {
+  const fixture = worldFixture();
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({}), () => {}, () => fixture.renderer);
+  world.setState({ ...worldState, revision: 1 });
+  fixture.documentRoot.getElementById('surviveWorldCanvas').emit('webglcontextlost', { preventDefault() {} });
+  world.setState({ ...worldState, revision: 2, status: 'COMBAT', enemy: 'HOG', enemyHealth: 5, health: 10 });
+  world.beginAction('ATTACK');
+  world.showError('The request failed.');
+  assert.equal(fixture.documentRoot.getElementById('surviveWorldCombat').hidden, true);
+  assert.equal(fixture.documentRoot.getElementById('surviveWorldNotice').hidden, true);
+  assert.equal(fixture.frames.size, 0);
+});

@@ -14,6 +14,11 @@ export const ACTION_LABELS = {
 };
 const PORTABLE_ACTIONS = ['EAT', 'ATTACK', 'DEFEND', 'FLEE', 'WAKE'];
 
+/** Keep an encounter in the follow camera's forward view even when the survivor faces the camera. */
+export function combatPosition(position, yaw) {
+  return { x: position.x - Math.sin(yaw) * 3.5, z: position.z - Math.cos(yaw) * 3.5 };
+}
+
 /** Camera-relative movement at six metres per second, normalized before the island boundary. */
 export function advancePosition(position, right, forward, yaw, seconds) {
   const length = Math.hypot(right, forward);
