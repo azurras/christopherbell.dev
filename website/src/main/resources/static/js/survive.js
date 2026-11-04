@@ -4,9 +4,10 @@ import { fetchJson } from './lib/util.js';
 import { keepFocusInActionBar, mountActionMenus, syncActionMenus } from './survive-menus.js';
 import { mountPanelSections, noteJournalEvents, summarizeCamp } from './survive-panel.js';
 import { renderSurviveScene } from './survive-scene.js';
+import { mountSurviveWorld } from './survive-world.js';
 
 const STATUS_LABELS = {
-  EXPLORING: 'At camp', COMBAT: 'In combat', SLEEPING: 'Asleep', DEAD: 'Game over', ESCAPED: 'Survived',
+  EXPLORING: 'Exploring', COMBAT: 'In combat', SLEEPING: 'Asleep', DEAD: 'Game over', ESCAPED: 'Survived',
 };
 const SCENE_LABELS = {
   EXPLORING: 'At the edge of the wilderness', SLEEPING: 'Asleep in a shelter bed',
@@ -155,6 +156,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const refresh = documentRoot.getElementById('surviveRefresh');
   const cancel = documentRoot.getElementById('surviveCancel');
   const giftForm = documentRoot.getElementById('surviveGift');
+  const world = mountSurviveWorld(documentRoot, requestJson, performAction);
 
   function setPending(isPending, isMutation = false) {
     pending = isPending;
@@ -167,6 +169,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     if (state) {
       renderSurviveState(documentRoot, state, pending, mutationPending);
     }
+    world.setState(state, mutationPending);
   }
 
   function acceptState(serverState) {
@@ -178,6 +181,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       phaseEndsAtMilliseconds = Date.now() + state.secondsToNextPhase * 1000;
       renderSurviveState(documentRoot, state, pending, mutationPending);
     }
+    world.setState(state, mutationPending);
   }
 
   async function sendRequest(url, options = {}) {
@@ -213,14 +217,14 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     if (!control || control.disabled || !state || pending) {
       return;
     }
-    const action = control.dataset.action;
-    if (!state.actions.includes(action)) {
-      return;
-    }
+    performAction(control.dataset.action);
+  };
+  function performAction(action) {
+    if (!state || pending || !state.actions.includes(action)) return;
     void sendRequest(API.survive.actions, {
       method: 'POST', body: JSON.stringify({ action, revision: state.revision }),
     });
-  };
+  }
   const showJoin = () => {
     joinForm.hidden = false;
     cancel.hidden = !state;
@@ -286,6 +290,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       startOver.removeEventListener('click', showJoin);
       menus.dispose();
       panel.dispose();
+      world.dispose();
       documentRoot.getElementById('surviveCampScene').removeEventListener('click', act);
       restart.removeEventListener('click', showJoin);
       cancel.removeEventListener('click', cancelJoin);

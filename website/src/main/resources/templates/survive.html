@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Survive', 'Gather, craft, and survive in a shared text adventure world.', 'https://www.christopherbell.dev/survive', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'Survive on christopherbell.dev')}"></th:block>
+  <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Survive', 'Explore a shared 3D island. Gather, build, and survive together.', 'https://www.christopherbell.dev/survive', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'Survive on christopherbell.dev')}"></th:block>
   <title>Survive | Christopher Bell</title>
   <link rel="stylesheet" href="/css/main.css" th:href="@{/css/main.css}" />
   <link rel="stylesheet" href="/css/survive.css" th:href="@{/css/survive.css}" />
@@ -12,9 +12,9 @@
   <div id="nav"></div>
   <main class="site-main survive-main">
     <header class="survive-hero">
-      <p class="survive-eyebrow">A shared world · A text adventure</p>
+      <p class="survive-eyebrow">A shared island · A world to explore</p>
       <h1>Survive<span aria-hidden="true">.</span></h1>
-      <p>Gather, build and make it through the nights together.</p>
+      <p>Walk into the wilderness. Find your people. Make it through the night.</p>
     </header>
 
     <noscript><p class="survive-notice">Enable JavaScript for the controls. All gameplay runs on the Java server.</p></noscript>
@@ -35,6 +35,27 @@
             <span class="survive-countdown"><span id="surviveNextPhase">Dusk in</span> <strong id="surviveCountdown"></strong></span>
           </div>
           <span id="surviveStatus" class="survive-badge"></span>
+        </div>
+        <div id="surviveWorld" class="survive-world">
+          <div class="survive-world-toolbar"><strong id="surviveWorldLocation">Shared island</strong><span id="surviveWorldConnection" role="status">Connecting to the island…</span></div>
+          <div class="survive-world-viewport">
+            <canvas id="surviveWorldCanvas" tabindex="0" aria-label="Third-person island. WASD or arrows to walk; drag to turn the camera. Q and R rotate, E interacts, Escape stops walking." aria-describedby="surviveWorldHelp"></canvas>
+            <div id="surviveWorldLabels" class="survive-world-labels" aria-hidden="true"></div>
+          </div>
+          <div id="surviveWorldActions" class="survive-world-actions" role="group" aria-label="Actions at your location"></div>
+          <div id="surviveWorldDirections" class="survive-world-directions" role="group" aria-label="Walking and camera controls">
+            <button type="button" data-walk="forward" aria-label="Walk forward">↑</button>
+            <button type="button" data-walk="left" aria-label="Walk left">←</button>
+            <button type="button" data-walk="back" aria-label="Walk backward">↓</button>
+            <button type="button" data-walk="right" aria-label="Walk right">→</button>
+            <button type="button" data-camera-turn="-1" aria-label="Turn camera left">↶</button>
+            <button type="button" data-camera-turn="1" aria-label="Turn camera right">↷</button>
+          </div>
+          <p id="surviveWorldHelp" class="survive-muted">Focus the island to walk with WASD or arrows. Drag to look around; Q / R turn, E interacts. Hold the direction buttons on touch screens, or choose a destination to walk there.</p>
+          <nav class="survive-world-destinations" aria-label="Walk to a landmark">
+            <button type="button" data-destination="0">Camp</button><button type="button" data-destination="1">Pine forest</button><button type="button" data-destination="2">Stone ridge</button><button type="button" data-destination="3">Hunting grounds</button><button type="button" data-destination="4">Boat shore</button>
+          </nav>
+          <p class="survive-muted">Your progress stays saved as before. Reconnecting to the island returns you to camp.</p>
         </div>
         <svg id="surviveCampScene" class="survive-scene" role="img" aria-label="The camp" viewBox="0 0 960 540"></svg>
         <h2 id="surviveScene">At the edge of the wilderness</h2>

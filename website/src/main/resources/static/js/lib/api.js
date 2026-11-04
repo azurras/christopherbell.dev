@@ -13,6 +13,8 @@ function discoveryPageUrl(path, cursor, size) {
  */
 export const API = {
   survive: {
+    movement: '/api/survive/v1/movement',
+    leaveIsland: '/api/survive/v1/movement/leave',
     game: '/api/survive/v1/game',
     actions: '/api/survive/v1/actions',
     gifts: '/api/survive/v1/gifts',

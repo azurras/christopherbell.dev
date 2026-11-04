@@ -110,3 +110,7 @@ Owns site styling for server-rendered pages and frontend components.
 
 Update this README when stylesheet ownership, responsive layout strategy, shared
 class contracts, or legacy stylesheet usage changes.
+
+The Survive stylesheet also owns the responsive third-person WebGL viewport, projected
+player/landmark labels, contextual actions, destination walking and touch controls.
+The canvas is focusable with visible focus; keyboard input is scoped to that canvas.

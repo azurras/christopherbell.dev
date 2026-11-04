@@ -179,3 +179,27 @@
   .scene-raid-flash { display: none; }
   .scene-smoke { opacity: .5; }
 }
+/* A bounded, responsive 3D viewport; the surrounding native controls remain accessible. */
+.survive-world { margin: 1rem 0; border: 1px solid #557064; border-radius: 1rem; overflow: hidden; background: #152820; }
+.survive-world-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; padding: .8rem 1rem; color: #eee4cc; font-size: .85rem; }
+.survive-world-viewport { position: relative; }
+#surviveWorldCanvas { display: block; width: 100%; height: clamp(340px, 55vh, 650px); touch-action: none; cursor: grab; }
+#surviveWorldCanvas:active { cursor: grabbing; }
+#surviveWorldCanvas:focus-visible { outline: 3px solid #f3c67c; outline-offset: -3px; }
+.survive-world-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.survive-world-label { position: absolute; transform: translate(-50%, -100%); padding: .2rem .5rem; border-radius: .35rem; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; color: #fff; background: #172c35df; }
+.survive-world-label.is-landmark { color: #ffdda0; background: #18251bd9; }
+.survive-world-label[hidden] { display: none; }
+.survive-world-actions, .survive-world-directions, .survive-world-destinations { display: flex; flex-wrap: wrap; gap: .45rem; padding: .65rem .9rem; }
+.survive-world button { min-height: 44px; border: 1px solid #7c8b65; border-radius: .5rem; padding: .55rem .8rem; color: #f4ead3; background: #304438; font: inherit; cursor: pointer; }
+.survive-world button:hover { background: #465d47; }
+.survive-world button:disabled { opacity: .5; cursor: wait; }
+.survive-world-directions { padding-top: 0; }
+.survive-world-directions button { min-width: 44px; touch-action: none; user-select: none; }
+.survive-world .survive-muted { padding: 0 .9rem; color: #bdc9bc; font-size: .8rem; }
+.survive-world-destinations { border-top: 1px solid #405346; }
+.survive-world-destinations button { font-size: .8rem; }
+.survive-world:not([data-active]) .survive-world-actions, .survive-world:not([data-active]) .survive-world-destinations { display: none; }
+.survive-world [hidden] { display: none !important; }
+@media (min-width: 1050px) { .survive-page .survive-main { max-width: 1500px; } .survive-page .survive-grid { grid-template-columns: minmax(0, 1fr) 300px; } }
+@media (max-width: 600px) { #surviveWorldCanvas { height: 400px; } .survive-world-directions { justify-content: center; } }

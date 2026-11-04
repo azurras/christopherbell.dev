@@ -80,6 +80,23 @@ public class SurviveController {
         .body(survivors.giveSuppliesForOwner(token, accountId(), request.recipientId(), request.resource(),
             request.quantity(), request.revision()));
   }
+  /** A pulse authenticates from the same owner as commands; it never changes durable progress. */
+  @PostMapping("/movement")
+  public ResponseEntity<SurvivePresence.View> move(
+      @CookieValue(name = COOKIE_NAME, required = false) String token,
+      @RequestBody dev.christopherbell.survive.model.SurviveMovement request) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(survivors.pulseForOwner(token, accountId(), request));
+  }
+
+  /** Releases this owner's transient pose without changing their saved survivor. */
+  @PostMapping("/movement/leave")
+  public ResponseEntity<Void> leaveIsland(
+      @CookieValue(name = COOKIE_NAME, required = false) String token) {
+    survivors.leaveIslandForOwner(token, accountId());
+    return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
+  }
+
   private static String accountId() {
     var authentication = SecurityContextHolder.getContext().getAuthentication();
     return authentication == null || !authentication.isAuthenticated()
