@@ -87,3 +87,14 @@ test('pending and failed actions show text but never award resources', () => {
   feedback.dispose();
   assert.equal(documentRoot.getElementById('surviveWorldNotice').hidden, true);
 });
+
+test('multiple reward labels occupy separate screen lines even when their world projection is identical', () => {
+  const documentRoot = fixture();
+  const feedback = createWorldFeedback(documentRoot);
+  feedback.acceptState(before);
+  feedback.acceptState({ ...before, revision: 2, wood: 1, hunger: 9, strength: 3 });
+  feedback.draw(() => ({ x: 0, y: 0, visible: true }), { x: 0, z: 0 }, { x: 0, z: -3 });
+  const labels = documentRoot.getElementById('surviveWorldNumbers').children;
+  assert.equal(labels.length, 3);
+  assert.equal(new Set(labels.map(label => label.style.marginTop)).size, 3);
+});

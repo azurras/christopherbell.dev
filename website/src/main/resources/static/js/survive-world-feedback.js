@@ -77,7 +77,7 @@ export function createWorldFeedback(documentRoot, now = () => Date.now()) {
     },
     showError(message) {
       pending = false;
-      show(message || 'The action could not be completed.', 'damage');
+      show(message || 'The action could not be completed.', 'error');
     },
     acceptState(next, busy = false) {
       if (previous?.survivorId !== next?.survivorId) reset();
@@ -121,9 +121,13 @@ export function createWorldFeedback(documentRoot, now = () => Date.now()) {
         element.style.top = `${(1 - projected.y) * 50}%`;
       };
       if (previous.status === 'COMBAT') place(enemyMarker, [enemy.x, 3.4, enemy.z]);
-      for (const [index, particle] of particles.entries()) {
+      const linesByTarget = new Map();
+      for (const particle of particles) {
         const anchor = particle.target === 'enemy' ? enemy : position;
-        place(particle.element, [anchor.x, 2.9 + index * 0.55, anchor.z]);
+        const line = linesByTarget.get(particle.target) || 0;
+        place(particle.element, [anchor.x, 2.9, anchor.z]);
+        particle.element.style.marginTop = `${-line * 1.8}rem`;
+        linesByTarget.set(particle.target, line + 1);
       }
     },
     effect() { return !pending && visual && now() < expiresAt ? { ...visual, ageSeconds: (now() - visual.startedAt) / 1000 } : null; },

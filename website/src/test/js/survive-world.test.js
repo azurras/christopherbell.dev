@@ -158,3 +158,18 @@ test('graphics loss cannot resurrect combat overlays or action notices after dis
   assert.equal(fixture.documentRoot.getElementById('surviveWorldNotice').hidden, true);
   assert.equal(fixture.frames.size, 0);
 });
+
+test('reduced motion suppresses reward particles while keeping confirmed gain text', () => {
+  const fixture = worldFixture();
+  fixture.view.matchMedia = () => ({ matches: true });
+  let renderedEffect = 'not rendered';
+  const originalDraw = fixture.renderer.draw;
+  fixture.renderer.draw = (...args) => { renderedEffect = args[4]; return originalDraw(...args); };
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({}), () => {}, () => fixture.renderer);
+  world.setState({ ...worldState, revision: 1, wood: 0 });
+  world.setState({ ...worldState, revision: 2, wood: 1, message: 'Gathered wood.' });
+  fixture.frame(0);
+  assert.equal(renderedEffect, null);
+  assert.equal(fixture.documentRoot.getElementById('surviveWorldNotice').textContent, 'Gathered wood.');
+  world.dispose();
+});
