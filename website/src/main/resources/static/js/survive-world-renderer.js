@@ -1,7 +1,7 @@
 /** Native WebGL renderer for the island terrain, adventurers and landmarks. */
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from './survive-world-art.js';
 import { createIslandMaterials } from './survive-world-materials.js';
-import { drawBoat, drawShelter } from './survive-world-props.js';
+import { drawBoat, drawCampFlame, drawShelter } from './survive-world-props.js';
 import { actionPose } from './survive-action-pose.js';
 import { cameraMatrix, projectPoint } from './survive-world-model.js';
 
@@ -17,6 +17,15 @@ varying float depth;
 varying float surfaceMaterial;
 varying vec2 uv;
 void main() {
+  if (surfaceMaterial > 10.0) {
+    gl_FragColor = vec4(tint * 1.42, 1.0);
+    return;
+  }
+  if (surfaceMaterial > 9.0) {
+    if (uv.x >= 0.99) discard;
+    gl_FragColor = vec4(tint, (1.0 - uv.x) * 0.48);
+    return;
+  }
   gl_Position = camera * vec4(position, 1.0);
   tint = color;
   surface = position;
@@ -124,6 +133,8 @@ export function createWorldRenderer(canvas) {
     const skyUniform = gl.getUniformLocation(program, 'sky');
     const timeUniform = gl.getUniformLocation(program, 'time');
     gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     const vertexBytes = MESH_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
     const attributes = [[positionAttribute, 3, 0], [colorAttribute, 3, 12], [materialAttribute, 1, 24], [uvAttribute, 2, 28]];
     function drawBuffer(buffer, count) {
@@ -154,6 +165,7 @@ export function createWorldRenderer(canvas) {
         gl.uniform1f(timeUniform, animationSeconds % 120);
         drawBuffer(staticBuffer, scenery.vertices.length / MESH_VERTEX_FLOATS);
         const actors = meshBuilder();
+        drawCampFlame(actors, position.animate ? animationSeconds : 0);
         const stride = avatar => avatar.moving ? Math.sin(animationSeconds * 11) : 0;
         const pose = actionPose(gesture) || (state.status === 'SLEEPING' && position.animate
           ? { kind: 'sleep', weight: Math.sin(animationSeconds * 2.6) } : null);
@@ -183,8 +195,9 @@ export function createWorldRenderer(canvas) {
         }
         if (state.status === 'COMBAT') {
           const scale = state.enemy === 'BEAR' ? 1.6 : 1;
-          const y = groundHeight(enemy.x, enemy.z);
-          actors.disk(enemy.x, y + 0.12, enemy.z, 1.5, state.nextStrikeAt ? [0.56, 0.16, 0.10] : [0.58, 0.43, 0.17], 16);
+          const radius = scale * 0.86;
+          const ringColor = state.nextStrikeAt ? [0.67, 0.23, 0.15] : [0.64, 0.48, 0.21];
+          drawTargetRing(actors, enemy, radius, ringColor);
           const facing = Math.atan2(position.x - enemy.x, position.z - enemy.z);
           actors.animal(enemy.x, enemy.z, state.enemy, scale, facing, stride(enemy), pose?.kind === 'strike' ? pose.weight : 0);
         }
@@ -198,5 +211,24 @@ export function createWorldRenderer(canvas) {
   } catch (error) {
     dispose();
     throw error;
+  }
+}
+
+function drawTargetRing(mesh, enemy, radius, color) {
+  const sides = 28;
+  const point = (distance, angle) => {
+    const x = enemy.x + Math.cos(angle) * distance;
+    const z = enemy.z + Math.sin(angle) * distance;
+    return [x, groundHeight(x, z) + 0.10, z];
+  };
+  for (let segment = 0; segment < sides; segment++) {
+    const angle = segment / sides * Math.PI * 2;
+    const next = (segment + 1) / sides * Math.PI * 2;
+    const a = point(radius, angle);
+    const b = point(radius, next);
+    const c = point(radius - 0.055, next);
+    const d = point(radius - 0.055, angle);
+    mesh.triangle(a, b, c, color);
+    mesh.triangle(a, c, d, color);
   }
 }

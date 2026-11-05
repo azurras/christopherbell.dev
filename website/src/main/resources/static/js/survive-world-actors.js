@@ -37,7 +37,30 @@ const ANIMALS = {
   },
 };
 
-export function createActorModels({ triangle, beam, ellipsoid, disk, groundHeight }) {
+export function createActorModels({ triangle, beam, ellipsoid, groundHeight }) {
+  function groundShadow(x, z, length, width) {
+    const sides = 18;
+    const point = (radius, angle) => {
+      const dx = Math.cos(angle) * length * radius;
+      const dz = Math.sin(angle) * width * radius;
+      const worldX = x + length * 0.31 + dx * 0.8 - dz * 0.6;
+      const worldZ = z + length * 0.24 + dx * 0.6 + dz * 0.8;
+      return [worldX, groundHeight(worldX, worldZ) + 0.067, worldZ];
+    };
+    const center = point(0, 0);
+    const color = [0.10, 0.12, 0.10];
+    for (let side = 0; side < sides; side++) {
+      const angle = side / sides * TAU;
+      const next = (side + 1) / sides * TAU;
+      const a = point(0.48, angle);
+      const b = point(0.48, next);
+      const c = point(1, next);
+      const d = point(1, angle);
+      triangle(center, a, b, color, 9.5, [[0, 0], [0.27, 0], [0.27, 0]]);
+      triangle(a, c, b, color, 9.5, [[0.27, 0], [1, 0], [0.27, 0]]);
+      triangle(a, d, c, color, 9.5, [[0.27, 0], [1, 0], [1, 0]]);
+    }
+  }
   function profile(pose, rings, color, material, sides) {
     const skin = rings.map(([height, width, depth, offset = 0], row) =>
       Array.from({ length: sides + 1 }, (_, column) => {
@@ -69,15 +92,15 @@ export function createActorModels({ triangle, beam, ellipsoid, disk, groundHeigh
     const crouch = action?.kind === 'rest' ? action.weight * 0.38 : 0;
     const pose = (across, height, forward = 0) => resting
       ? [x + across * cos + height * sin, y + 0.31 + forward, z - across * sin + height * cos]
-      : [x + across * cos + forward * sin, y + height - crouch * Math.min(1, height), z - across * sin + forward * cos];
+      : [x + across * cos + forward * sin, y + height + (0.12 - crouch) * Math.min(1, height), z - across * sin + forward * cos];
+    const headPose = (across, height, forward = 0) => pose(across * 0.87, 2.12 + (height - 2.12) * 0.84, forward * 0.91);
     const leather = [0.34, 0.21, 0.16];
     const trousers = [0.23, 0.25, 0.27];
     const skin = [0.72, 0.55, 0.42];
     const hardware = [0.58, 0.55, 0.43];
     const part = (at, width, height, depth, color, material = 0) =>
       ellipsoid(...at, width, resting ? depth : height, resting ? height : depth, color, detailed ? 10 : 6, 4, heading, material);
-    const shadowHeight = y + 0.045;
-    disk(x, shadowHeight, z, 0.68, [0.18, 0.21, 0.13], 10);
+    groundShadow(x, z, 1.08, 0.48);
     const breath = action?.kind === 'sleep' ? action.weight * 0.035 : 0;
     profile(pose, [[1.11, 0.32, 0.23], [1.34, 0.30, 0.22], [1.58, 0.40, 0.24],
       [1.79, 0.46, 0.26, breath], [1.91, 0.38, 0.23], [2.02, 0.18, 0.15]], cloth, CLOTH, detailed ? 16 : 8);
@@ -98,11 +121,11 @@ export function createActorModels({ triangle, beam, ellipsoid, disk, groundHeigh
     part(pose(0.22, 1.28, -0.21), 0.10, 0.13, 0.08, hardware);
     part(pose(0, 2.12), 0.13, 0.23, 0.13, skin);
     part(pose(0, 2.04), 0.25, 0.10, 0.20, [0.26, 0.27, 0.24]);
-    profile(pose, [[2.10, 0.125, 0.12, 0.04], [2.19, 0.16, 0.17, 0.035], [2.31, 0.205, 0.185, 0.02],
+    profile(headPose, [[2.10, 0.125, 0.12, 0.04], [2.19, 0.16, 0.17, 0.035], [2.31, 0.205, 0.185, 0.02],
       [2.43, 0.196, 0.18], [2.54, 0.13, 0.12], [2.59, 0.01, 0.01]], skin, 0, detailed ? 14 : 8);
-    profile(pose, [[2.26, 0.19, 0.14, -0.105], [2.38, 0.214, 0.20, -0.055],
+    profile(headPose, [[2.26, 0.19, 0.14, -0.105], [2.38, 0.214, 0.20, -0.055],
       [2.51, 0.195, 0.18, -0.023], [2.60, 0.12, 0.115, -0.025], [2.63, 0.01, 0.01]], [0.18, 0.125, 0.095], 0, 12);
-    part(pose(0, 2.29, 0.225), 0.071, 0.065, 0.05, skin);
+    part(headPose(0, 2.29, 0.225), 0.057, 0.053, 0.047, skin);
     let toolHand;
     for (const side of [-1, 1]) {
       const swing = resting ? 0 : stride * side;
@@ -122,13 +145,13 @@ export function createActorModels({ triangle, beam, ellipsoid, disk, groundHeigh
       beam(elbow, wrist, 0.104, 0.077, leather, 10, LEATHER);
       part(wrist, 0.082, 0.112, 0.077, leather, LEATHER);
       if (detailed) {
-        part(pose(side * 0.19, 2.29, 0.015), 0.040, 0.075, 0.046, skin);
-        part(pose(side * 0.075, 2.35, 0.185), 0.031, 0.012, 0.014, [0.16, 0.115, 0.10]);
+        part(headPose(side * 0.19, 2.29, 0.015), 0.034, 0.064, 0.041, skin);
+        part(headPose(side * 0.075, 2.35, 0.185), 0.027, 0.011, 0.012, [0.16, 0.115, 0.10]);
       }
       if (side === 1) toolHand = wrist;
     }
     const tool = resting ? null : action?.kind;
-    if (['chop', 'mine', 'hammer', 'fish', 'strike', 'row'].includes(tool)) {
+    if (['chop', 'mine', 'hammer', 'fish', 'row'].includes(tool) || (tool === 'strike' && weapon)) {
       const length = tool === 'fish' ? 2.1 : tool === 'row' || (tool === 'strike' && weapon === 'SPEAR') ? 1.5 : 0.82;
       const arc = Math.sin(action.progress * Math.PI * (tool === 'fish' ? 2 : 4));
       const tip = [toolHand[0] + sin * length * 0.73, toolHand[1] + length * (0.38 + 0.55 * arc),
@@ -166,6 +189,7 @@ export function createActorModels({ triangle, beam, ellipsoid, disk, groundHeigh
     const sides = detailed ? 14 : 8;
     const part = (point, width, height, depth, color, texture = 0) =>
       ellipsoid(...p(...point), width * scale, height * scale, depth * scale, color, detailed ? 9 : 6, 4, heading, texture);
+    groundShadow(x, z, 0.92 * scale, 0.46 * scale);
     profile(axis, model.body, fur, material, sides);
     profile(axis, model.head, tint(fur, 1.13), material, sides);
     for (const side of [-1, 1]) {

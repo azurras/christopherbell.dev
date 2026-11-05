@@ -142,8 +142,6 @@ export function islandMesh() {
   }
   mesh.beam([3.3, 0.25, -0.45], [4.7, 0.24, 0.45], 0.16, 0.13, BARK, 5);
   mesh.beam([3.3, 0.17, 0.43], [4.7, 0.22, -0.43], 0.16, 0.13, BARK, 5);
-  mesh.cone(4, 0.24, 0, 0.51, 1.16, [0.99, 0.52, 0.19], 7);
-  mesh.cone(4, 0.27, 0, 0.32, 0.78, [1, 0.79, 0.29], 6);
   for (let plank = 0; plank < 19; plank++) {
     mesh.box(0, 0.72, 68 + plank * 0.63, 3.35, 0.18, 0.59, tint([0.44, 0.32, 0.21], 0.88 + plank % 4 * 0.08), BARK_MATERIAL);
   }
@@ -351,6 +349,6 @@ export function meshBuilder() {
         [x + dx * 0.78, y + height * (1 - blade * 0.12), z + dz * 0.78], tint([0.36, 0.42, 0.21], 0.82 + blade * 0.12));
     }
   }
-  const actors = createActorModels({ triangle, beam, ellipsoid, disk, groundHeight });
+  const actors = createActorModels({ triangle, beam, ellipsoid, groundHeight });
   return { vertices, triangle, box, beam, cone, disk, ellipsoid, tree, grass, ...actors };
 }

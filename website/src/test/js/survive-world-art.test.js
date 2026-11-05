@@ -41,7 +41,7 @@ test('animated adventurers and each animal use bounded local texture coordinates
   for (const mesh of meshes) {
     assert.ok(mesh.length / (MESH_VERTEX_FLOATS * 3) < 2500);
     for (let index = 6; index < mesh.length; index += MESH_VERTEX_FLOATS) {
-      if (mesh[index] < 5) continue;
+      if (mesh[index] < 5 || mesh[index] > 9) continue;
       materials.add(mesh[index]);
       assert.ok(mesh[index + 1] >= 0 && mesh[index + 1] <= 1);
       assert.ok(mesh[index + 2] >= 0 && mesh[index + 2] <= 1);
