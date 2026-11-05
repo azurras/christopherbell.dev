@@ -60,9 +60,15 @@
               <strong id="surviveHudName"></strong>
               <span id="surviveHudHealth"></span><span id="surviveHudTp"></span>
             </div>
-            <div class="survive-game-log" aria-label="Recent world events">
-              <div class="survive-recent-heading"><h3>Log</h3><a href="#surviveSectionJournal" id="surviveFullJournal">Full journal</a></div>
-              <ol id="surviveRecentEvents" class="survive-recent"></ol>
+            <div id="surviveGameLog" class="survive-game-log">
+              <div class="survive-recent-heading">
+                <h3 id="surviveLogTitle">Chat log</h3>
+                <a href="#surviveSectionJournal" id="surviveFullJournal">Full journal</a>
+                <button type="button" id="surviveLogToggle" aria-controls="surviveLogScrollback" aria-expanded="false" aria-keyshortcuts="+">Expand</button>
+              </div>
+              <div id="surviveLogScrollback" class="survive-log-scrollback" role="log" aria-labelledby="surviveLogTitle" tabindex="0">
+                <ol id="surviveRecentEvents" class="survive-recent"></ol>
+              </div>
             </div>
             <details id="surviveMainMenu" class="survive-main-menu">
               <summary aria-keyshortcuts="-">Main Menu</summary>
@@ -144,7 +150,7 @@
             <button type="button" data-camera-turn="-1" aria-label="Turn camera left">↶</button>
             <button type="button" data-camera-turn="1" aria-label="Turn camera right">↷</button>
           </div>
-          <p id="surviveWorldHelp" class="survive-muted">Focus the island to walk with WASD or arrows. Drag or use Q / R to turn. Press Enter for Commands, minus for Main Menu, and Escape to close a window. Tap an animal’s label to target it.</p>
+          <p id="surviveWorldHelp" class="survive-muted">Focus the island to walk with WASD or arrows. Drag or use Q / R to turn. Press Enter for Commands, minus for Main Menu, plus for Chat log, and Escape to close a window. Tap an animal’s label to target it.</p>
         </div>
         <svg id="surviveCampScene" class="survive-scene" role="img" aria-label="The camp" viewBox="0 0 960 540"></svg>
         <h2 id="surviveScene">At the edge of the wilderness</h2>

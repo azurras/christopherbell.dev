@@ -238,13 +238,18 @@
 .survive-world .survive-world-destinations button:hover { background: #485c91; }
 .survive-game-vitals { display: flex; flex-wrap: wrap; gap: .15rem .65rem; padding: .35rem .55rem; font-variant-numeric: tabular-nums; }
 .survive-game-vitals strong { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.survive-game-log { padding: .25rem .55rem; overflow: auto; max-height: 5.75rem; }
+.survive-game-log { padding: .2rem .45rem; }
+.survive-log-scrollback { overflow: auto; max-height: 3.6rem; scrollbar-color: #8795b1 #172249; }
+.survive-game-log[data-expanded="true"] .survive-log-scrollback { max-height: min(36vh, 17rem); }
 .survive-game-log .survive-recent-heading { margin: 0; gap: .5rem; }
 .survive-game-log .survive-recent-heading h3 { margin: 0; color: inherit; }
+.survive-game-log:not([data-expanded="true"]) #surviveFullJournal { display: none; }
+.survive-world .survive-game-log button { min-height: 1.8rem; padding: .1rem .35rem; border-color: #7480a6; background: #273960; font-size: .75rem; }
 .survive-game-log .survive-recent li { padding: .12rem 0; line-height: 1.35; }
 .survive-world[data-active] .survive-main-menu { position: absolute; z-index: 8; top: .6rem; right: .6rem; width: min(18rem, calc(100% - 1.2rem)); }
 .survive-world[data-active] .survive-command-window { position: absolute; z-index: 6; left: .6rem; bottom: 6.65rem; }
 .survive-world[data-active] .survive-game-log { position: absolute; z-index: 4; bottom: .6rem; left: .6rem; width: min(28rem, 57%); }
+.survive-world[data-active] .survive-game-log[data-expanded="true"] { z-index: 7; width: min(38rem, calc(100% - 1.2rem)); }
 .survive-world[data-active] .survive-game-vitals { position: absolute; z-index: 4; bottom: .6rem; right: .6rem; max-width: 37%; }
 .survive-world:not([data-active]) :is(.survive-command-window, .survive-game-vitals) { display: none; }
 .survive-world:not([data-active]) :is(.survive-main-menu, .survive-game-log) { margin: .6rem; }

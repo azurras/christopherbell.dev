@@ -1,5 +1,6 @@
 /** Owns 3D input, prediction, acknowledged live presence, labels and cleanup for one page. */
 import { API } from './lib/api.js';
+import { appendSurviveLogMessage } from './survive-log.js';
 import { advancePosition, actionsAt, ACTION_LABELS, LANDMARKS, combatPosition, targetActionsFor } from './survive-world-model.js';
 import { createWorldRenderer } from './survive-world-renderer.js';
 import { createWorldFeedback } from './survive-world-feedback.js';
@@ -169,7 +170,10 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         selectTarget();
       } else if (action === 'CHECK_TARGET' && targetSelected) {
         const danger = { HOG: 'Low threat', WOLF: 'Dangerous', BEAR: 'Severe threat' };
-        targetDetails.textContent = `${danger[state.enemy] || 'Unknown threat'}. ${state.enemyHealth} health. Engaged fights continue while away.`;
+        const threat = danger[state.enemy] || 'Unknown threat';
+        const assessment = `${threat}. ${state.enemyHealth} health.`;
+        targetDetails.textContent = `${assessment} Engaged fights continue while away.`;
+        appendSurviveLogMessage(documentRoot, `${target.textContent} · ${threat}.`);
       } else if (!busy && targetActionsFor(state, targetSelected).includes(action) && state.actions.includes(action)) {
         onAction(action);
       }
@@ -248,7 +252,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       mainMenu.open = !mainMenu.open;
       const focusTarget = mainMenu.open ? mainMenu.querySelector('.survive-main-menu-list summary') : canvas;
       focusTarget.focus({ preventScroll: true });
-    } else if (event.code === 'Escape' && (mainMenu.open || !actionList.hidden)) {
+    } else if (event.code === 'Escape' && !event.target.closest('.survive-game-log')
+        && (mainMenu.open || !actionList.hidden)) {
       event.preventDefault();
       mainMenu.open = false;
       closeCommands();

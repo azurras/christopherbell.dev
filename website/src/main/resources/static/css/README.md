@@ -122,3 +122,5 @@ the contextual combat buttons. Text controls remain available when WebGL is inac
 The world uses one column. The Main Menu, vertical Commands window, event log,
 and HP/TP display sit over the canvas. The Main Menu and log flow normally in
 the text fallback.
+The Chat log keeps its header in view while the event lines scroll. Its expanded
+mode opens over the viewport and uses the same event list as the compact window.
