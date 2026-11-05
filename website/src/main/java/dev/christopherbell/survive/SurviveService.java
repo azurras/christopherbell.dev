@@ -166,7 +166,7 @@ public class SurviveService {
   /** Acknowledges movement and commits a new hostile encounter only after verified proximity. */
   public synchronized SurvivePresence.View pulseForOwner(String token, String accountId,
       dev.christopherbell.survive.model.SurviveMovement movement) {
-    loadSettledWorld();
+    restoreSettledWorld(repository.loadForMovement().orElseGet(SurviveSavedWorld::empty));
     var player = world.players.get(ownerKey(token, accountId));
     var now = clock.instant();
     if (player == null || !player.lastSeen.isAfter(now.minus(IDLE_TIMEOUT))) {
@@ -272,7 +272,10 @@ public class SurviveService {
    * Due combat rounds are committed here so even a stale command cannot discard elapsed attacks.
    */
   private void loadSettledWorld() {
-    var saved = repository.load().orElseGet(SurviveSavedWorld::empty);
+    restoreSettledWorld(repository.load().orElseGet(SurviveSavedWorld::empty));
+  }
+
+  private void restoreSettledWorld(SurviveSavedWorld saved) {
     world = SurviveWorld.restore(saved);
     storageVersion = saved.version();
     var now = clock.instant();
