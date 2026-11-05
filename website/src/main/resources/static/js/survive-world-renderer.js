@@ -17,15 +17,6 @@ varying float depth;
 varying float surfaceMaterial;
 varying vec2 uv;
 void main() {
-  if (surfaceMaterial > 10.0) {
-    gl_FragColor = vec4(tint * 1.42, 1.0);
-    return;
-  }
-  if (surfaceMaterial > 9.0) {
-    if (uv.x >= 0.99) discard;
-    gl_FragColor = vec4(tint, (1.0 - uv.x) * 0.48);
-    return;
-  }
   gl_Position = camera * vec4(position, 1.0);
   tint = color;
   surface = position;
@@ -53,6 +44,15 @@ float grain(vec3 cell) {
   return fract(sin(dot(mod(cell, 79.0), vec3(13.7, 27.1, 9.3))) * 137.2);
 }
 void main() {
+  if (surfaceMaterial > 10.0) {
+    gl_FragColor = vec4(tint * 1.42, 1.0);
+    return;
+  }
+  if (surfaceMaterial > 9.0) {
+    if (uv.x >= 0.99) discard;
+    gl_FragColor = vec4(tint, (1.0 - uv.x) * 0.48);
+    return;
+  }
   if (length(surface.xz) > 100.0 && surface.y > 0.0 || surface.y > 34.0) {
     float elevation = smoothstep(0.0, 105.0, surface.y);
     vec3 zenith = sky * vec3(0.60, 0.79, 1.08);
