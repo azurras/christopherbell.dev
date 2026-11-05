@@ -103,11 +103,12 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
     const part = (at, width, height, depth, color, material = 0) =>
       ellipsoid(...at, width, resting ? depth : height, resting ? height : depth, color, detailed ? 10 : 6, 4, heading, material);
     groundShadow(x, z, 1.08, 0.48);
-    const authored = actorArt?.adventurer;
+    const authored = detailed && actorArt?.adventurer;
     if (authored) {
-      const gesture = !resting && authored.poses[action?.kind];
-      const clip = gesture ? action.kind : (stride !== 0 ? 'walk' : 'idle');
-      const progress = gesture ? action.progress : seconds * (clip === 'walk' ? (action?.kind === 'run' ? 2.6 : 1.7) : 0.44);
+      const gesture = !resting && action?.kind !== 'run' && authored.poses[action?.kind];
+      const motion = action?.kind === 'run' ? 'run' : 'walk';
+      const clip = gesture ? action.kind : (stride !== 0 ? motion : 'idle');
+      const progress = gesture ? action.progress : seconds * { idle: 0.44, walk: 1.7, run: 2.6 }[clip];
       const hand = drawActorArt(triangle, authored, pose, clip, progress, !gesture);
       drawEquipment(hand);
       return;

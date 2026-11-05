@@ -1,8 +1,7 @@
 /** Samples baked skinning clips and submits the pose to the existing island mesh. */
-const COLORS = [[1, 1, 1], [0.86, 0.91, 1], [0.47, 0.50, 0.52], [0.37, 0.25, 0.19], [0.48, 0.31, 0.18]];
 const WHITE = [1, 1, 1];
 
-export function prepareActorArt(data, adventurer) {
+export function prepareActorArt(data) {
   const triangles = [];
   for (let index = 0; index < data.faces.length; index += 3) {
     const uv = [];
@@ -11,7 +10,6 @@ export function prepareActorArt(data, adventurer) {
     }
     triangles.push({
       indices: data.faces.slice(index, index + 3),
-      color: adventurer ? COLORS[data.surfaces[index / 3]] : WHITE,
       uv,
     });
   }
@@ -31,8 +29,8 @@ export function drawActorArt(triangle, model, pose, clip, progress, loop = false
   for (let offset = 0; offset < first.length; offset += 3) {
     points.push(pose(sample(first, second, offset), sample(first, second, offset + 1), sample(first, second, offset + 2)));
   }
-  for (const { indices: [a, b, c], color, uv } of model.triangles) {
-    triangle(points[a], points[b], points[c], color, 12, uv);
+  for (const { indices: [a, b, c], uv } of model.triangles) {
+    triangle(points[a], points[b], points[c], WHITE, 12, uv);
   }
   const hands = model.hands[clip];
   if (hands) return pose(...hands[index].map((_, offset) => sample(hands[index], hands[next], offset)));

@@ -128,7 +128,7 @@ export function createWorldRenderer(canvas) {
     materials = createIslandMaterials(gl, canvas.ownerDocument, program);
     for (const kind of ['adventurer', 'boar']) {
       fetchJson(`/images/survive/${kind}.json`, { signal: actorRequests.signal })
-        .then(data => { actorArt[kind] = prepareActorArt(data, kind === 'adventurer'); })
+        .then(data => { actorArt[kind] = prepareActorArt(data); })
         .catch(() => { /* The procedural model remains available. */ });
     }
     const scenery = islandMesh();
@@ -190,9 +190,9 @@ export function createWorldRenderer(canvas) {
         // Bound dynamic geometry in a crowded camp while drawing nearby players first.
         const nearestPlayers = others.map(other => ({ other, distance: Math.hypot(other.x - position.x, other.z - position.z) }))
           .filter(player => player.distance <= 60).sort((a, b) => a.distance - b.distance).slice(0, 24);
-        for (const { other, distance } of nearestPlayers) {
+        for (const [index, { other, distance }] of nearestPlayers.entries()) {
           actors.avatar(other.x, other.z, other.heading, [0.34, 0.43, 0.45], other.status, stride(other), null, null,
-            distance < 13, animationSeconds);
+            index < 6 && distance < 13, animationSeconds);
         }
         for (let index = 0; index < Math.min(8, state.shelters); index++) {
           const x = (index % 4) * 5 - 8;

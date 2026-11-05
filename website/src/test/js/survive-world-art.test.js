@@ -10,8 +10,8 @@ import { drawBoat, drawShelter } from '../../main/resources/static/js/survive-wo
 test('authored actors draw bounded texture coordinates and animate with the equipped tool', () => {
   const asset = kind => JSON.parse(readFileSync(new URL(`../../main/resources/static/images/survive/${kind}.json`, import.meta.url), 'utf8'));
   const actorArt = {
-    adventurer: prepareActorArt(asset('adventurer'), true),
-    boar: prepareActorArt(asset('boar'), false),
+    adventurer: prepareActorArt(asset('adventurer')),
+    boar: prepareActorArt(asset('boar')),
   };
   for (const model of Object.values(actorArt)) {
     assert.notDeepEqual(model.poses.walk[0], model.poses.walk[3]);
@@ -35,7 +35,7 @@ test('authored actors draw bounded texture coordinates and animate with the equi
     assert.ok(mining[index + 1] >= 0 && mining[index + 1] <= 1);
     assert.ok(mining[index + 2] >= 0 && mining[index + 2] <= 1);
   }
-  assert.equal(texturedCorners, (866 + 1144) * 3);
+  assert.equal(texturedCorners, (2151 + 1144) * 3);
 });
 
 test('the rendered island has finite geometry within its static triangle budget', () => {
