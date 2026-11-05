@@ -232,3 +232,11 @@ sequenced presence pulses, timeout/backoff, player labels and frame/listener cle
 `survive.js` still serializes durable survival commands. New presence uses the API
 constants in `lib/api.js`; it never computes survival rewards. The SVG scene remains
 the fallback for unavailable/lost WebGL. Labels use text nodes, never HTML.
+
+`survive-world-feedback.js` compares confirmed survivor revisions to show action
+outcomes and floating gains/costs/damage inside the viewport, without replaying
+polls or treating a resumed inventory as a reward. Its transient notices expire
+on the existing render loop; combat name/health and viewport actions remain
+visible for the fight. Enemies render in front of the follow camera, with a
+red ground marker. Reward sparks and floating-number animation respect reduced
+motion. Failed requests show in-world notices without predicting rewards.

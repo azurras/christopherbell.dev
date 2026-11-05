@@ -200,6 +200,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       }
       errorBox.textContent = `${error.message || 'The server could not be reached.'} Refresh the world before trying another move.`;
       errorBox.hidden = false;
+      if (options.method === 'POST') world.showError?.(errorBox.textContent);
     } finally {
       setPending(false);
     }
@@ -221,6 +222,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   };
   function performAction(action) {
     if (!state || pending || !state.actions.includes(action)) return;
+    world.beginAction?.(action);
     void sendRequest(API.survive.actions, {
       method: 'POST', body: JSON.stringify({ action, revision: state.revision }),
     });
