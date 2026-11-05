@@ -40,7 +40,7 @@ test('combat placement stays in front of the follow camera regardless of survivo
     const enemy = combatPosition(position, yaw);
     const projected = projectPoint(cameraMatrix(position, yaw, 16 / 9), [enemy.x, 1, enemy.z]);
     assert.equal(projected.visible, true);
-    assert.ok(Math.abs(projected.x) < 0.01);
+    assert.ok(projected.x > 0.1 && projected.x < 0.5, 'enemy must be visible beside the survivor silhouette');
   }
 });
 
