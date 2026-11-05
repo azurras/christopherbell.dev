@@ -227,7 +227,9 @@ bounded coverage, dashboard-only results and deferred billing/email delivery.
 
 `survive-world-model.js` owns display-only landmark filtering, camera projection and
 movement prediction. `survive-world-art.js` generates terrain, foliage and actor
-meshes. `survive-world-renderer.js` owns WebGL buffers, lighting, fog and disposal.
+meshes. `survive-world-materials.js` loads original grass, path, mossy stone,
+bark and foliage images from `static/images/survive` into WebGL textures.
+`survive-world-renderer.js` owns WebGL buffers, lighting, fog and disposal.
 `survive-world.js` owns scoped keyboard/touch input, destination walking,
 sequenced presence pulses, timeout/backoff, player labels and frame/listener cleanup.
 `survive.js` still serializes durable survival commands. New presence uses the API

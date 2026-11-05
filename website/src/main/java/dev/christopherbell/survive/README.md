@@ -152,7 +152,8 @@ when storage allows. World refreshes keep menus in the player's chosen state.
 
 ## Shared 3D island
 
-The browser renders original adventurer meshes, forest, terrain, and shore details
+The browser renders original adventurer meshes, textured forest and terrain,
+a weathered stone gate and shore details
 with native WebGL and a third-person
 camera. WASD/arrows walk, dragging rotates the camera, and Q/R turn it. Enter or E
 opens the contextual Commands window, minus opens the Main Menu, and Escape

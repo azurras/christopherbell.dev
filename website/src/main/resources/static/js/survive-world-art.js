@@ -2,6 +2,10 @@
 import { LANDMARKS } from './survive-world-model.js';
 
 const TAU = Math.PI * 2;
+export const MESH_VERTEX_FLOATS = 9;
+const STONE_MATERIAL = 2.5;
+const BARK_MATERIAL = 3.5;
+const FOLIAGE_MATERIAL = 4.5;
 const GRASS = [0.30, 0.37, 0.19];
 const EARTH = [0.48, 0.41, 0.28];
 const SAND = [0.63, 0.57, 0.40];
@@ -33,13 +37,13 @@ function trailDistance(x, z) {
   return distance;
 }
 
-function surfaceColor(x, z) {
+function groundSurface(x, z) {
   const distance = Math.hypot(x, z);
   const vegetation = 0.48 + 0.25 * Math.sin(x * 0.12 + z * 0.04) + 0.18 * Math.cos(z * 0.21);
   const grass = mix(GRASS, [0.39, 0.43, 0.22], vegetation);
   const trail = clampUnit((3.1 - trailDistance(x, z)) / 2.4);
   const shore = clampUnit((distance - 63 - Math.sin(x * 0.18) * 2) / 11);
-  return mix(mix(grass, EARTH, trail), SAND, shore);
+  return { color: mix(mix(grass, EARTH, trail), SAND, shore), material: 1 + Math.max(trail, shore) * 0.9 };
 }
 
 /** Build the static landscape once. All variation is deterministic across clients. */
@@ -61,9 +65,11 @@ export function islandMesh() {
     for (let sector = 0; sector < sectors; sector++) {
       const next = (sector + 1) % sectors;
       const points = [innerRing[sector], outerRing[sector], outerRing[next], innerRing[next]];
-      const colors = points.map(([x, , z]) => surfaceColor(x, z));
-      mesh.triangle(points[0], points[1], points[2], colors);
-      if (ring > 1) mesh.triangle(points[0], points[2], points[3], [colors[0], colors[2], colors[3]]);
+      const materials = points.map(([x, , z]) => groundSurface(x, z));
+      const paint = indices => mesh.triangle(...indices.map(index => points[index]),
+        indices.map(index => materials[index].color), indices.map(index => materials[index].material));
+      paint([0, 1, 2]);
+      if (ring > 1) paint([0, 2, 3]);
     }
     innerRing = outerRing;
   }
@@ -90,7 +96,7 @@ export function islandMesh() {
     if (trailDistance(x, z) > 2.5) {
       const size = 0.9 + (index * 7 % 13) * 0.21;
       mesh.ellipsoid(x, groundHeight(x, z) + size * 0.21, z, size, size * 0.62, size * 0.8,
-        tint(STONE, 0.81 + index % 6 * 0.055), 6, 3, angle);
+        tint(STONE, 0.81 + index % 6 * 0.055), 7, 4, angle, STONE_MATERIAL);
     }
   }
   for (let index = 0; index < 300; index++) {
@@ -145,7 +151,56 @@ export function islandMesh() {
     mesh.beam([-5 + side * 0.84, workbenchY, 3.34], [-5 + side * 0.77, workbenchY + 0.9, 3.23], 0.14, 0.11, BARK, 5);
   }
   mesh.box(-5.32, workbenchY + 1.14, 3.11, 0.56, 0.09, 0.29, STONE);
+  buildRuinedGate(mesh);
   return mesh;
+}
+
+/** Weathered masonry landmark north of camp. The central arch leaves the approach open. */
+function buildRuinedGate(mesh) {
+  const z = -18;
+  const foundation = groundHeight(0, z) - 0.35;
+  const masonry = [0.53, 0.53, 0.43];
+  for (const side of [-1, 1]) {
+    const x = side * 3.18;
+    mesh.box(x, foundation + 0.35, z, 2.1, 0.70, 3.1, tint(masonry, 0.85), STONE_MATERIAL);
+    mesh.box(x, foundation + 2.12, z, 1.55, 3.56, 2.05, masonry, STONE_MATERIAL);
+    mesh.box(x, foundation + 3.83, z, 1.9, 0.43, 2.35, tint(masonry, 1.13), STONE_MATERIAL);
+    for (let section = 0; section < 5; section++) {
+      const wallX = side * (4.5 + section * 1.45);
+      const wallY = groundHeight(wallX, z) - 0.25;
+      const height = [2.7, 2.35, 1.95, 1.65, 1.1][section];
+      mesh.box(wallX, wallY + height / 2, z, 1.51, height, 1.38, tint(masonry, 0.83 + section * 0.025), STONE_MATERIAL);
+      mesh.box(wallX, wallY + height + 0.10, z, 1.55, 0.20, 1.65, [0.37, 0.43, 0.25], STONE_MATERIAL);
+    }
+  }
+  const center = foundation + 3.55;
+  const innerRadius = 2.37;
+  const outerRadius = 3.30;
+  for (let index = 0; index < 11; index++) {
+    const from = index * Math.PI / 11 + 0.013;
+    const to = (index + 1) * Math.PI / 11 - 0.013;
+    const arc = (angle, radius, face) => [Math.cos(angle) * radius, center + Math.sin(angle) * radius, z + face];
+    const faces = [-0.96, 0.96].map(face => [arc(from, innerRadius, face), arc(from, outerRadius, face),
+      arc(to, outerRadius, face), arc(to, innerRadius, face)]);
+    for (const [a, b, c, d] of faces) {
+      const color = tint(masonry, index === 5 ? 1.15 : 0.9 + index % 4 * 0.04);
+      mesh.triangle(a, b, c, color, STONE_MATERIAL);
+      mesh.triangle(a, c, d, color, STONE_MATERIAL);
+    }
+    for (let edge = 0; edge < 4; edge++) {
+      const next = (edge + 1) % 4;
+      mesh.triangle(faces[0][edge], faces[1][edge], faces[1][next], masonry, STONE_MATERIAL);
+      mesh.triangle(faces[0][edge], faces[1][next], faces[0][next], masonry, STONE_MATERIAL);
+    }
+  }
+  for (let paving = 0; paving < 10; paving++) {
+    const pavingZ = z + 4.1 - paving * 0.84;
+    const pavingY = groundHeight(0, pavingZ);
+    for (const side of [-1, 1]) {
+      mesh.box(side * 1.04, pavingY + 0.025, pavingZ, 1.99, 0.14, 0.77,
+        tint(masonry, 0.91 + paving % 3 * 0.05), STONE_MATERIAL);
+    }
+  }
 }
 
 function cross(a, b) {
@@ -155,24 +210,30 @@ function cross(a, b) {
 /** Store interleaved world-space positions and baked directional color for WebGL. */
 export function meshBuilder() {
   const vertices = [];
-  function triangle(a, b, c, color) {
+  function triangle(a, b, c, color, material = 0, coordinates = null) {
     const normal = cross(b.map((value, index) => value - a[index]), c.map((value, index) => value - a[index]));
     const length = Math.hypot(...normal) || 1;
     const shade = 0.66 + 0.34 * Math.abs((-normal[0] * 0.39 + normal[1] * 0.83 - normal[2] * 0.36) / length);
     const colors = Array.isArray(color[0]) ? color : [color, color, color];
-    [a, b, c].forEach((point, index) => vertices.push(...point, ...tint(colors[index], shade)));
+    const weights = Array.isArray(material) ? material : [material, material, material];
+    const [nx, ny, nz] = normal.map(Math.abs);
+    [a, b, c].forEach((point, index) => {
+      const [x, y, z] = point;
+      const uv = coordinates?.[index] || (weights[index] < 2 || (ny >= nx && ny >= nz) ? [x, z] : nx > nz ? [z, y] : [x, y]);
+      vertices.push(...point, ...tint(colors[index], shade), weights[index], ...uv);
+    });
   }
-  function box(x, y, z, width, height, depth, color) {
+  function box(x, y, z, width, height, depth, color, material = 0) {
     const points = [];
     for (const dy of [-1, 1]) for (const dz of [-1, 1]) for (const dx of [-1, 1]) {
       points.push([x + dx * width / 2, y + dy * height / 2, z + dz * depth / 2]);
     }
     for (const [a, b, c, d] of [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]]) {
-      triangle(points[a], points[b], points[c], color);
-      triangle(points[a], points[c], points[d], color);
+      triangle(points[a], points[b], points[c], color, material);
+      triangle(points[a], points[c], points[d], color, material);
     }
   }
-  function beam(start, end, baseRadius, tipRadius, color, sides = 6) {
+  function beam(start, end, baseRadius, tipRadius, color, sides = 6, material = 0) {
     const axis = end.map((value, index) => value - start[index]);
     const length = Math.hypot(...axis);
     if (!length) return;
@@ -190,8 +251,8 @@ export function meshBuilder() {
       const b = point(start, baseRadius, next);
       const c = point(end, tipRadius, next);
       const d = point(end, tipRadius, angle);
-      triangle(a, b, c, color);
-      if (tipRadius > 0) triangle(a, c, d, color);
+      triangle(a, b, c, color, material);
+      if (tipRadius > 0) triangle(a, c, d, color, material);
     }
   }
   function cone(x, y, z, radius, height, color, sides = 8) {
@@ -206,7 +267,7 @@ export function meshBuilder() {
         [x + Math.cos(next) * radius, y, z + Math.sin(next) * radius], color);
     }
   }
-  function ellipsoid(x, y, z, width, height, depth, color, sides = 8, rows = 4, heading = 0) {
+  function ellipsoid(x, y, z, width, height, depth, color, sides = 8, rows = 4, heading = 0, material = 0) {
     const sin = Math.sin(heading);
     const cos = Math.cos(heading);
     const point = (row, column) => {
@@ -221,33 +282,45 @@ export function meshBuilder() {
       const b = point(row + 1, column);
       const c = point(row + 1, column + 1);
       const d = point(row, column + 1);
-      if (row < rows - 1) triangle(a, b, c, color);
-      if (row > 0) triangle(a, c, d, color);
+      if (row < rows - 1) triangle(a, b, c, color, material);
+      if (row > 0) triangle(a, c, d, color, material);
     }
   }
   function tree(x, z, height, angle, broadleaf) {
     const y = groundHeight(x, z);
     const leanX = Math.cos(angle) * height * 0.10;
     const leanZ = Math.sin(angle) * height * 0.10;
-    beam([x, y, z], [x + leanX, y + height * 0.92, z + leanZ], height * 0.058, 0.045, BARK, 7);
+    beam([x, y, z], [x + leanX, y + height * 0.92, z + leanZ], height * 0.058, 0.045, BARK, 9, BARK_MATERIAL);
     for (let branch = 0; branch < 6; branch++) {
       const branchAngle = angle + branch * 2.39996;
       const level = 0.40 + branch * 0.068;
       const spread = height * (0.26 - branch * 0.026);
       const trunk = [x + leanX * level, y + height * level, z + leanZ * level];
       const tip = [trunk[0] + Math.cos(branchAngle) * spread, trunk[1] + height * 0.055, trunk[2] + Math.sin(branchAngle) * spread];
-      beam(trunk, tip, 0.11, 0.025, BARK, 4);
+      beam(trunk, tip, 0.11, 0.025, BARK, 5, BARK_MATERIAL);
       const foliage = tint(broadleaf ? [0.33, 0.42, 0.23] : [0.22, 0.34, 0.23], 0.83 + branch * 0.071);
       if (broadleaf) {
-        ellipsoid(tip[0], tip[1] + height * 0.11, tip[2], height * 0.23, height * 0.20, height * 0.20, foliage, 7, 3, branchAngle);
+        ellipsoid(tip[0], tip[1] + height * 0.11, tip[2], height * 0.14, height * 0.11, height * 0.13, foliage, 7, 3, branchAngle);
       } else {
         const stem = [trunk[0] + (tip[0] - trunk[0]) * 0.44, tip[1], trunk[2] + (tip[2] - trunk[2]) * 0.44];
         beam(stem, [tip[0], tip[1] + height * 0.16, tip[2]], height * (0.15 - branch * 0.009), 0, foliage, 7);
         beam(stem, [trunk[0], tip[1] + height * 0.22, trunk[2]], height * 0.14, 0, tint(foliage, 1.09), 7);
       }
+      foliageCard(tip, height * (broadleaf ? 0.52 : 0.30), branchAngle, tint(foliage, 2.6));
+      foliageCard(tip, height * (broadleaf ? 0.45 : 0.26), branchAngle + Math.PI / 2, tint(foliage, 2.85));
     }
     ellipsoid(x + leanX, y + height * 0.89, z + leanZ, height * 0.14, height * 0.20, height * 0.14,
       broadleaf ? [0.35, 0.43, 0.24] : [0.28, 0.39, 0.24], 7, 3, angle);
+  }
+  function foliageCard([x, y, z], size, angle, color) {
+    const dx = Math.cos(angle) * size * 0.5;
+    const dz = Math.sin(angle) * size * 0.5;
+    const a = [x - dx, y - size * 0.15, z - dz];
+    const b = [x + dx, y - size * 0.15, z + dz];
+    const c = [x + dx * 0.78, y + size * 0.65, z + dz * 0.78];
+    const d = [x - dx * 0.78, y + size * 0.65, z - dz * 0.78];
+    triangle(a, b, c, color, FOLIAGE_MATERIAL, [[0, 1], [1, 1], [1, 0]]);
+    triangle(a, c, d, color, FOLIAGE_MATERIAL, [[0, 1], [1, 0], [0, 0]]);
   }
   function grass(x, z, angle, height) {
     const y = groundHeight(x, z);
@@ -268,8 +341,8 @@ export function meshBuilder() {
     const pose = (across, height, forward = 0) => resting
       ? [x + across * cos + height * sin, y + 0.31 + forward, z - across * sin + height * cos]
       : [x + across * cos + forward * sin, y + height - crouch * Math.min(1, height), z - across * sin + forward * cos];
-    const leather = [0.28, 0.20, 0.14];
-    const trousers = [0.25, 0.27, 0.22];
+    const leather = [0.34, 0.21, 0.16];
+    const trousers = [0.23, 0.25, 0.27];
     const skin = [0.72, 0.55, 0.42];
     const hardware = [0.58, 0.55, 0.43];
     const part = (at, width, height, depth, color) =>
@@ -279,10 +352,14 @@ export function meshBuilder() {
     const hip = pose(0, 1.1);
     const shoulders = pose(0, 1.88, action?.kind === 'sleep' ? action.weight * 0.045 : 0);
     beam(hip, shoulders, 0.32, 0.47, cloth, 7);
+    beam(pose(0, 0.99), pose(0, 1.27), 0.37, 0.31, [0.43, 0.29, 0.20], 7);
+    beam(pose(-0.30, 1.89, -0.33), pose(0.30, 1.27, -0.29), 0.045, 0.043, leather, 5);
+    beam(pose(-0.30, 1.89, 0.34), pose(0.30, 1.27, 0.28), 0.045, 0.043, leather, 5);
     part(pose(0, 1.29), 0.38, 0.11, 0.28, leather);
     part(pose(0, 1.29, 0.28), 0.095, 0.07, 0.05, hardware);
     part(pose(0, 1.66, -0.27), 0.27, 0.32, 0.16, leather);
     part(pose(0, 2.12), 0.13, 0.23, 0.13, skin);
+    part(pose(0, 2.04), 0.25, 0.10, 0.20, [0.26, 0.27, 0.24]);
     part(pose(0, 2.32, 0.02), 0.23, 0.29, 0.22, skin);
     part(pose(0, 2.46, -0.06), 0.245, 0.20, 0.23, [0.21, 0.16, 0.12]);
     part(pose(0, 2.29, 0.225), 0.071, 0.065, 0.05, skin);
@@ -293,13 +370,14 @@ export function meshBuilder() {
       const ankle = pose(side * 0.20, 0.16 + Math.max(0, swing) * 0.16, swing * 0.58);
       beam(pose(side * 0.19, 1.15), knee, 0.18, 0.14, trousers);
       beam(knee, ankle, 0.15, 0.12, leather);
+      part(pose(side * 0.19, 0.54 + Math.max(0, swing) * 0.17, swing * 0.36), 0.17, 0.07, 0.145, [0.51, 0.37, 0.25]);
       part(pose(side * 0.20, 0.13 + Math.max(0, swing) * 0.16, swing * 0.58 + 0.10), 0.15, 0.13, 0.23, leather);
       const reach = resting ? null : actionReach(action, side);
       const elbow = pose(side * 0.51, 1.48 + (reach?.lift ?? 0) * 0.48,
         -swing * 0.29 + (reach?.forward ?? 0) * 0.45);
       const wrist = pose(side * 0.55 - (reach?.inward ?? 0) * side, 1.14 + (reach?.lift ?? 0),
         0.09 - swing * 0.42 + (reach?.forward ?? 0));
-      part(pose(side * 0.41, 1.83), 0.22, 0.20, 0.21, tint(cloth, 1.20));
+      part(pose(side * 0.41, 1.85), 0.23, 0.16, 0.22, [0.49, 0.49, 0.43]);
       beam(pose(side * 0.44, 1.84), elbow, 0.16, 0.12, cloth);
       beam(elbow, wrist, 0.12, 0.09, leather);
       part(wrist, 0.105, 0.135, 0.10, skin);
