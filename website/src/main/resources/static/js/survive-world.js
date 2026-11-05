@@ -2,6 +2,7 @@
 import { API } from './lib/api.js';
 import { appendSurviveLogMessage } from './survive-log.js';
 import { advancePosition, actionsAt, ACTION_LABELS, LANDMARKS, combatPosition, targetActionsFor } from './survive-world-model.js';
+import { groundHeight } from './survive-world-art.js';
 import { createWorldRenderer } from './survive-world-renderer.js';
 import { createWorldFeedback } from './survive-world-feedback.js';
 
@@ -45,6 +46,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   const worldFeedback = createWorldFeedback(documentRoot);
   shell.dataset.active = 'true';
   const view = documentRoot.defaultView;
+  const motionPreference = view.matchMedia?.('(prefers-reduced-motion: reduce)');
   const pressed = new Set();
   const listeners = [];
   let state = null;
@@ -331,6 +333,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     const seconds = Math.min(0.05, Math.max(0, (timestamp - previousFrameAt) / 1000));
     previousFrameAt = timestamp;
     if (isVisible()) {
+      const previousPosition = position;
       if (connected && !busy && state.status === 'EXPLORING') {
         let right = Number(pressed.has('right')) - Number(pressed.has('left'));
         let forward = Number(pressed.has('forward')) - Number(pressed.has('back'));
@@ -352,13 +355,19 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       for (const other of others) {
         other.drawX ??= other.x;
         other.drawZ ??= other.z;
-        other.drawX += (other.x - other.drawX) * Math.min(1, seconds * 8);
-        other.drawZ += (other.z - other.drawZ) * Math.min(1, seconds * 8);
+        const dx = other.x - other.drawX;
+        const dz = other.z - other.drawZ;
+        other.moving = !motionPreference?.matches && Math.hypot(dx, dz) > 0.08;
+        other.drawX += dx * Math.min(1, seconds * 8);
+        other.drawZ += dz * Math.min(1, seconds * 8);
       }
-      const rendered = renderer.draw(position, yaw, state, others.map(other => ({ ...other, x: other.drawX, z: other.drawZ })));
+      const moving = !motionPreference?.matches && Math.hypot(position.x - previousPosition.x, position.z - previousPosition.z) > 0.001;
+      const rendered = renderer.draw({ ...position, moving }, yaw, state,
+        others.map(other => ({ ...other, x: other.drawX, z: other.drawZ })), timestamp / 1000);
       worldFeedback.draw(rendered.project, combatPosition(position, yaw));
       for (const label of desiredNameLabels) {
-        const projected = rendered.project([label.x, label.landmark ? 4 : 3, label.z]);
+        const y = groundHeight(label.x, label.z) + (label.landmark ? 4 : 3);
+        const projected = rendered.project([label.x, y, label.z]);
         label.element.hidden = !projected.visible;
         label.element.style.left = `${(projected.x + 1) * 50}%`;
         label.element.style.top = `${(1 - projected.y) * 50}%`;

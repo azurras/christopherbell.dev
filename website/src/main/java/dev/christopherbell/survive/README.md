@@ -152,7 +152,8 @@ when storage allows. World refreshes keep menus in the player's chosen state.
 
 ## Shared 3D island
 
-The browser renders a generated low-poly island with native WebGL and a third-person
+The browser renders original adventurer meshes, forest, terrain, and shore details
+with native WebGL and a third-person
 camera. WASD/arrows walk, dragging rotates the camera, and Q/R turn it. Enter or E
 opens the contextual Commands window, minus opens the Main Menu, and Escape
 closes a window or stops walking. Touch direction buttons and Map destinations

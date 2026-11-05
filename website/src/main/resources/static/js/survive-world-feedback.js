@@ -1,4 +1,6 @@
 /** The target HUD reflects current combat state. Command results belong in the chat log. */
+import { groundHeight } from './survive-world-art.js';
+
 const ENEMIES = { HOG: 'Wild hog', WOLF: 'Grey wolf', BEAR: 'Brown bear' };
 const ENEMY_HEALTH = { HOG: 5, WOLF: 8, BEAR: 14 };
 
@@ -8,6 +10,7 @@ export function createWorldFeedback(documentRoot) {
   const title = documentRoot.getElementById('surviveWorldCombatTitle');
   const enemyName = documentRoot.getElementById('surviveWorldEnemyName');
   const meter = documentRoot.getElementById('surviveWorldEnemyMeter');
+  let targetHeight = 2;
 
   function hideTarget() {
     combat.hidden = true;
@@ -23,6 +26,7 @@ export function createWorldFeedback(documentRoot) {
       combat.hidden = false;
       marker.hidden = false;
       const heading = state.nextStrikeAt ? 'In combat' : 'Animal nearby';
+      targetHeight = state.enemy === 'BEAR' ? 3.1 : 2;
       const label = `${ENEMIES[state.enemy] || 'Wild animal'} · ${state.enemyHealth} health`;
       if (title.textContent !== heading) title.textContent = heading;
       if (enemyName.textContent !== label) enemyName.textContent = label;
@@ -32,7 +36,7 @@ export function createWorldFeedback(documentRoot) {
     },
     draw(project, enemy) {
       if (combat.hidden) return;
-      const projected = project([enemy.x, 3.4, enemy.z]);
+      const projected = project([enemy.x, groundHeight(enemy.x, enemy.z) + targetHeight, enemy.z]);
       marker.hidden = !projected.visible;
       marker.style.left = `${(projected.x + 1) * 50}%`;
       marker.style.top = `${(1 - projected.y) * 50}%`;
