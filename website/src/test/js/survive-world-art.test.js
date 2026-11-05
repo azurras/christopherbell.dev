@@ -12,6 +12,8 @@ test('authored actors draw bounded texture coordinates and animate with the equi
   const actorArt = {
     adventurer: prepareActorArt(asset('adventurer')),
     boar: prepareActorArt(asset('boar')),
+    wolf: prepareActorArt(asset('wolf')),
+    bear: prepareActorArt(asset('bear')),
   };
   for (const model of Object.values(actorArt)) {
     assert.notDeepEqual(model.poses.walk[0], model.poses.walk[3]);
@@ -21,6 +23,8 @@ test('authored actors draw bounded texture coordinates and animate with the equi
     const mesh = meshBuilder(actorArt);
     mesh.avatar(8, 9, 0.4, [0.24, 0.31, 0.42], 'EXPLORING', 1, 'AXE', action, true, seconds);
     mesh.animal(20, -15, 'HOG', 1, 0.7, 1, 0, false, seconds);
+    mesh.animal(22, -15, 'WOLF', 1, 0.7, 1, 0, false, seconds);
+    mesh.animal(24, -15, 'BEAR', 1.6, 0.7, 1, 0, false, seconds);
     return mesh.vertices;
   };
   const walking = scene(0.2);
@@ -35,7 +39,7 @@ test('authored actors draw bounded texture coordinates and animate with the equi
     assert.ok(mining[index + 1] >= 0 && mining[index + 1] <= 1);
     assert.ok(mining[index + 2] >= 0 && mining[index + 2] <= 1);
   }
-  assert.equal(texturedCorners, (2151 + 1144) * 3);
+  assert.equal(texturedCorners, (2151 + 1144 + 1348 + 929) * 3);
 });
 
 test('the rendered island has finite geometry within its static triangle budget', () => {

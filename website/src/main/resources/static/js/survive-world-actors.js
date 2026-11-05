@@ -206,9 +206,10 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
     const part = (point, width, height, depth, color, texture = 0) =>
       ellipsoid(...p(...point), width * scale, height * scale, depth * scale, color, detailed ? 9 : 6, 4, heading, texture);
     groundShadow(x, z, 0.92 * scale, 0.46 * scale);
-    if (kind === 'HOG' && actorArt?.boar) {
+    const authored = actorArt?.[kind === 'HOG' ? 'boar' : kind?.toLowerCase()];
+    if (authored) {
       const clip = stride !== 0 ? 'walk' : 'idle';
-      drawActorArt(triangle, actorArt.boar, (across, height, forward) => p(forward, height, across),
+      drawActorArt(triangle, authored, (across, height, forward) => p(forward, height, across),
         clip, seconds * 1.55, true);
       return;
     }

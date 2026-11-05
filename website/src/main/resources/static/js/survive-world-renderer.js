@@ -126,7 +126,7 @@ export function createWorldRenderer(canvas) {
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error('The island renderer could not start.');
     materials = createIslandMaterials(gl, canvas.ownerDocument, program);
-    for (const kind of ['adventurer', 'boar']) {
+    for (const kind of ['adventurer', 'boar', 'wolf', 'bear']) {
       fetchJson(`/images/survive/${kind}.json`, { signal: actorRequests.signal })
         .then(data => { actorArt[kind] = prepareActorArt(data); })
         .catch(() => { /* The procedural model remains available. */ });
