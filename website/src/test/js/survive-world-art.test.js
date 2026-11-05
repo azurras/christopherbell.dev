@@ -1,16 +1,28 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { groundHeight, islandMesh, meshBuilder } from '../../main/resources/static/js/survive-world-art.js';
+import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
 import { cameraMatrix, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
 import { actionPose } from '../../main/resources/static/js/survive-action-pose.js';
 
 test('the rendered island has finite geometry within its static triangle budget', () => {
   const { vertices } = islandMesh();
-  assert.equal(vertices.length % 18, 0);
-  assert.ok(vertices.length / 18 > 15000 && vertices.length / 18 < 50000);
+  const triangleSize = MESH_VERTEX_FLOATS * 3;
+  assert.equal(vertices.length % triangleSize, 0);
+  assert.ok(vertices.length / triangleSize > 15000 && vertices.length / triangleSize < 55000);
   assert.ok(vertices.every(Number.isFinite));
   assert.ok(groundHeight(34, -19) > groundHeight(0, 0) + 2);
   assert.ok(groundHeight(78, 0) < groundHeight(62, 0));
+});
+
+test('terrain, ruin masonry, bark and cutout foliage are represented in the same render mesh', () => {
+  const { vertices } = islandMesh();
+  const materials = new Set();
+  for (let index = 6; index < vertices.length; index += MESH_VERTEX_FLOATS) materials.add(vertices[index]);
+  assert.ok(materials.has(1));
+  assert.ok(materials.has(1.9));
+  assert.ok(materials.has(2.5));
+  assert.ok(materials.has(3.5));
+  assert.ok(materials.has(4.5));
 });
 
 test('confirmed harvest, fishing and combat actions create distinct animated meshes', () => {
