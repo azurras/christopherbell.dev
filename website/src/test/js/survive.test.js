@@ -167,7 +167,7 @@ test('renders survivor and shared camp using text nodes and server allowed actio
   renderSurviveState(documentRoot, { ...snapshot, status: 'COMBAT', enemy: 'WOLF', enemyHealth: 8, actions: ['ATTACK'] });
   assert.equal(documentRoot.getElementById('surviveEnemy').hidden, false);
   assert.equal(documentRoot.getElementById('surviveEnemyName').textContent, 'Grey wolf');
-  assert.equal(documentRoot.getElementById('surviveEnemyHealth').textContent, '8 health');
+  assert.equal(documentRoot.getElementById('surviveEnemyHealth').textContent, '8 health · 0 TP');
   assert.equal(documentRoot.getElementById('surviveScene').textContent, 'A wolf circles you');
   assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'ATTACK').disabled, false);
   renderSurviveState(documentRoot, { ...snapshot, status: 'DEAD', actions: [] });
