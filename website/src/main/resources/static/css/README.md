@@ -123,3 +123,6 @@ the text fallback.
 The Chat log keeps its header in view while the event lines scroll. Its expanded
 mode opens over the viewport and uses the same event list as the compact window.
 Wildlife labels distinguish hostile and passive animals by wording and color.
+On phones the play shell hides the game until fullscreen and controller setup
+are complete. Fullscreen uses the available viewport for the canvas and leaves
+the existing HUD and game menus in view.

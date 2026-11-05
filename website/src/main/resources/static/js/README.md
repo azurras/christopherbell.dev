@@ -254,3 +254,11 @@ Chat log, using the server's event revision so repeated polls add nothing and
 identical outcomes still appear separately. Check and command errors add local
 lines. The log holds up to 60 lines and follows new entries only when already at
 the bottom. Plus or Expand opens a taller scrollback window.
+
+`survive-controller.js` uses browser device signals for the phone-only gate.
+Phones require the game shell to be the fullscreen element, native WebGL, and a
+connected standard Gamepad API mapping. The left stick drives movement, the
+right stick turns the camera, and the D-pad and face buttons reuse menu controls.
+Leaving fullscreen or disconnecting stops phone input and movement pulses.
+Desktop and laptop browsers support the same controller mapping alongside
+keyboard and mouse in ordinary windows at any viewport width.

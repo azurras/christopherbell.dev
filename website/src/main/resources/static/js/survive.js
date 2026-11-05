@@ -2,6 +2,7 @@
 import { API } from './lib/api.js';
 import { fetchJson } from './lib/util.js';
 import { appendSurviveLogMessage, syncSurviveLog } from './survive-log.js';
+import { mountSurviveController } from './survive-controller.js';
 import { keepFocusInActionBar, mountActionMenus, syncActionMenus } from './survive-menus.js';
 import { mountPanelSections, noteJournalEvents, summarizeCamp } from './survive-panel.js';
 import { renderSurviveScene } from './survive-scene.js';
@@ -163,6 +164,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const logToggle = documentRoot.getElementById('surviveLogToggle');
   const logScrollback = documentRoot.getElementById('surviveLogScrollback');
   const world = mountSurviveWorld(documentRoot, requestJson, performAction, undefined, () => readWorld());
+  const controller = mountSurviveController(documentRoot, world, () => { if (state) readWorld(); });
 
   function setLogExpanded(expanded) {
     const followsLatest = logScrollback.scrollHeight - logScrollback.clientHeight - logScrollback.scrollTop <= 4;
@@ -215,7 +217,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   }
 
   async function sendRequest(url, options = {}, action) {
-    if (pending) {
+    if (pending || (game.inert && options.method === 'POST')) {
       return;
     }
     setPending(true, options.method === 'POST');
@@ -299,7 +301,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   refresh.addEventListener('click', readWorld);
   logToggle.addEventListener('click', toggleLog);
   game.addEventListener('keydown', useLogShortcut);
-  const isWatchingWorld = () => state && !pending && joinForm.hidden && !documentRoot.hidden;
+  const isWatchingWorld = () => state && !pending && !game.inert && joinForm.hidden && !documentRoot.hidden;
   // Refresh shortly after a confirmed deadline while fighting. The server owns elapsed rounds.
   const timer = setInterval(() => {
     if (isWatchingWorld() && Date.now() >= nextWorldPollAt) {
@@ -332,6 +334,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       startOver.removeEventListener('click', showJoin);
       menus.dispose();
       panel.dispose();
+      controller.dispose();
       world.dispose();
       documentRoot.getElementById('surviveCampScene').removeEventListener('click', act);
       restart.removeEventListener('click', showJoin);

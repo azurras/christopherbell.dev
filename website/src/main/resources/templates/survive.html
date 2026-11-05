@@ -18,6 +18,13 @@
     </header>
 
     <noscript><p class="survive-notice">Enable JavaScript for the controls. All gameplay runs on the Java server.</p></noscript>
+    <div id="survivePlayShell" class="survive-play-shell">
+    <section id="survivePhoneGate" class="survive-panel survive-phone-gate" aria-labelledby="survivePhoneTitle" hidden>
+      <h2 id="survivePhoneTitle">Phone play requires a controller</h2>
+      <p id="survivePhoneStatus" role="status"></p>
+      <button id="surviveFullscreen" type="button" class="survive-primary">Enter fullscreen</button>
+      <p class="survive-muted">Left stick walks. Right stick turns the camera. D-pad moves through menus. A confirms, B cancels, X opens Main Menu, and Y opens the chat log.</p>
+    </section>
     <p id="surviveError" class="survive-notice" role="alert" hidden></p>
     <form id="surviveJoin" class="survive-panel survive-join">
       <div><h2 id="surviveJoinTitle">Enter the wilderness</h2><p>Your survivor is yours. The camp belongs to everyone. Log in for one saved character, or play as a temporary guest.</p></div>
@@ -146,7 +153,7 @@
             <button type="button" data-camera-turn="-1" aria-label="Turn camera left">↶</button>
             <button type="button" data-camera-turn="1" aria-label="Turn camera right">↷</button>
           </div>
-          <p id="surviveWorldHelp" class="survive-muted">Focus the island to walk with WASD or arrows. Drag or use Q / R to turn. Press Enter for Commands, minus for Main Menu, plus for Chat log, and Escape to close a window. Tap an animal’s label to target it.</p>
+          <p id="surviveWorldHelp" class="survive-muted">Focus the island to walk with WASD or arrows. Drag or use Q / R to turn. Enter opens Commands, minus opens Main Menu, plus opens Chat log, and Escape closes a window. On a controller, use the sticks to walk and turn, the D-pad for menus, A to confirm, B to cancel, X for Main Menu, and Y for Chat log.</p>
         </div>
         <svg id="surviveCampScene" class="survive-scene" role="img" aria-label="The camp" viewBox="0 0 960 540"></svg>
         <h2 id="surviveScene">At the edge of the wilderness</h2>
@@ -201,6 +208,7 @@
 
     </div>
     <p class="survive-attribution">Adapted from <a href="https://github.com/azurras/survive">azurras/Survive</a> · Java game engine · <a href="/licenses/survive-MIT.txt">MIT license</a>. Browser adaptation completes the original's unfinished combat and food actions.</p>
+    </div>
   </main>
   <footer id="footer"></footer>
   <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>

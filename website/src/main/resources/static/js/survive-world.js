@@ -70,6 +70,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   let pulseInterval = 500;
   let frameId = 0;
   let previousFrameAt = 0;
+  let controllerAxes = { right: 0, forward: 0, camera: 0 };
   let lastActionSignature = '';
   let lastActionsBlocked;
   let drag = null;
@@ -81,6 +82,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     listeners.push(() => target.removeEventListener(type, callback, options));
   }
   const isVisible = () => state && !documentRoot.hidden && !documentRoot.getElementById('surviveGame').hidden
+    && !documentRoot.getElementById('surviveGame').inert
     && documentRoot.getElementById('surviveJoin').hidden;
   function stopWalking() { pressed.clear(); goal = null; }
   function syncNameLabels() {
@@ -352,9 +354,11 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     previousFrameAt = timestamp;
     if (isVisible()) {
       const previousPosition = position;
+      yaw += controllerAxes.camera * seconds * 2.4;
       if (connected && !busy && state.status === 'EXPLORING') {
-        let right = Number(pressed.has('right')) - Number(pressed.has('left'));
-        let forward = Number(pressed.has('forward')) - Number(pressed.has('back'));
+        let right = Number(pressed.has('right')) - Number(pressed.has('left')) + controllerAxes.right;
+        let forward = Number(pressed.has('forward')) - Number(pressed.has('back')) + controllerAxes.forward;
+        if (controllerAxes.right || controllerAxes.forward) goal = null;
         if (goal) {
           const dx = goal.x - position.x;
           const dz = goal.z - position.z;
@@ -465,6 +469,11 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       if (busy || state?.status !== 'EXPLORING') stopWalking();
     },
     animateAction(action) { gesture = { action, at: Date.now() }; },
+    setControllerAxes(right, forward, camera) { controllerAxes = { right, forward, camera }; },
+    stopInput() {
+      stopWalking();
+      controllerAxes = { right: 0, forward: 0, camera: 0 };
+    },
     dispose,
   };
 }
