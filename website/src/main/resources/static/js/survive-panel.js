@@ -1,5 +1,5 @@
 /**
- * Side panel behavior for the Survive page: remembered collapsible sections, the journal's
+ * Main Menu section behavior for Survive: remembered collapsible sections, the journal's
  * new-events marker and the camp summary. Display only; renders never open or close sections.
  */
 const SECTION_NAMES = ['camp', 'journal', 'guide'];
@@ -22,21 +22,29 @@ export function mountPanelSections(documentRoot, storage = browserStorage()) {
     return { element, onToggle };
   });
   const fullJournalLink = documentRoot.getElementById('surviveFullJournal');
+  const mainMenu = documentRoot.getElementById('surviveMainMenu');
+  const readVisibleJournal = () => {
+    if (mainMenu.open && sectionElement(documentRoot, 'journal').open) markJournalRead(documentRoot);
+  };
   const openJournal = event => {
     event.preventDefault();
     const journal = sectionElement(documentRoot, 'journal');
+    mainMenu.open = true;
     journal.open = true;
     writeSafely(storage, SECTION_STORAGE_PREFIX + 'journal', 'open');
     markJournalRead(documentRoot);
+    journal.querySelector?.('summary')?.focus?.({ preventScroll: true });
     journal.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
   };
   fullJournalLink.addEventListener('click', openJournal);
+  mainMenu.addEventListener('toggle', readVisibleJournal);
   return {
     dispose() {
       for (const { element, onToggle } of togglers) {
         element.removeEventListener('toggle', onToggle);
       }
       fullJournalLink.removeEventListener('click', openJournal);
+      mainMenu.removeEventListener('toggle', readVisibleJournal);
     },
   };
 }
@@ -46,7 +54,8 @@ export function noteJournalEvents(documentRoot, worldRevision) {
   const journal = sectionElement(documentRoot, 'journal');
   const revision = String(worldRevision);
   journal.dataset.latestRevision = revision;
-  if (journal.open || journal.dataset.seenRevision === undefined) {
+  if ((journal.open && documentRoot.getElementById('surviveMainMenu').open !== false)
+      || journal.dataset.seenRevision === undefined) {
     journal.dataset.seenRevision = revision;
   }
   documentRoot.getElementById('surviveJournalUnread').hidden = journal.dataset.seenRevision === revision;

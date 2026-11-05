@@ -11,6 +11,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   const shell = documentRoot.getElementById('surviveWorld');
   const feedback = documentRoot.getElementById('surviveWorldConnection');
   const actionList = documentRoot.getElementById('surviveWorldActions');
+  const commandButton = documentRoot.getElementById('surviveCommandButton');
+  const mainMenu = documentRoot.getElementById('surviveMainMenu');
   const labels = documentRoot.getElementById('surviveWorldLabels');
   const directions = documentRoot.getElementById('surviveWorldDirections');
   const locationLabel = documentRoot.getElementById('surviveWorldLocation');
@@ -137,10 +139,28 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   }
 
   function selectTarget() {
-    if (state?.status !== 'COMBAT' || targetSelected) return;
-    targetSelected = true;
-    target.setAttribute('aria-pressed', 'true');
-    targetDetails.textContent = 'Engaged fights continue while you are away.';
+    if (state?.status !== 'COMBAT') return;
+    if (!targetSelected) {
+      targetSelected = true;
+      target.setAttribute('aria-pressed', 'true');
+      targetDetails.textContent = 'Engaged fights continue while you are away.';
+    }
+    openCommands();
+  }
+
+  function closeCommands() {
+    actionList.hidden = true;
+    commandButton.setAttribute('aria-expanded', 'false');
+  }
+
+  function openCommands() {
+    updateActions();
+    if (commandButton.hidden) return;
+    stopWalking();
+    mainMenu.open = false;
+    actionList.hidden = false;
+    commandButton.setAttribute('aria-expanded', 'true');
+    actionList.children[0]?.focus({ preventScroll: true });
   }
 
   async function interact(action) {
@@ -177,6 +197,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     }
     lastActionSignature = signature;
     lastActionsBlocked = blocked;
+    commandButton.hidden = available.length === 0;
+    if (!available.length) closeCommands();
     const focusedAction = documentRoot.activeElement?.dataset?.worldAction;
     const buttons = available.map(action => {
       const button = documentRoot.createElement('button');
@@ -188,7 +210,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     });
     actionList.replaceChildren(...buttons);
     if (focusedAction) {
-      (buttons.find(button => button.dataset.worldAction === focusedAction) || target).focus({ preventScroll: true });
+      (buttons.find(button => button.dataset.worldAction === focusedAction) || buttons[0] || canvas).focus({ preventScroll: true });
     }
   }
 
@@ -197,14 +219,50 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (button) void interact(button.dataset.worldAction);
   });
   listen(target, 'click', selectTarget);
+  listen(commandButton, 'click', () => {
+    if (actionList.hidden) openCommands();
+    else closeCommands();
+  });
+  listen(mainMenu, 'toggle', () => {
+    if (mainMenu.open) {
+      stopWalking();
+      closeCommands();
+    }
+  });
   listen(shell, 'click', event => {
     const destination = event.target.closest('[data-destination]');
     if (destination && connected && state?.status === 'EXPLORING') {
       goal = LANDMARKS[Number(destination.dataset.destination)];
+      mainMenu.open = false;
       canvas.focus({ preventScroll: true });
     }
     const rotate = event.target.closest('[data-camera-turn]');
     if (rotate) yaw += Number(rotate.dataset.cameraTurn) * Math.PI / 6;
+  });
+  listen(shell, 'keydown', event => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey
+        || event.target.closest('input, select, textarea')) return;
+    if (event.code === 'Minus' || event.code === 'NumpadSubtract') {
+      event.preventDefault();
+      if (event.repeat) return;
+      mainMenu.open = !mainMenu.open;
+      const focusTarget = mainMenu.open ? mainMenu.querySelector('.survive-main-menu-list summary') : canvas;
+      focusTarget.focus({ preventScroll: true });
+    } else if (event.code === 'Escape' && (mainMenu.open || !actionList.hidden)) {
+      event.preventDefault();
+      mainMenu.open = false;
+      closeCommands();
+      canvas.focus({ preventScroll: true });
+    } else if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+      const list = event.target.closest('#surviveWorldActions, .survive-main-menu-list');
+      if (!list) return;
+      const options = [...(list === actionList ? actionList.children : list.querySelectorAll(':scope > details > summary'))];
+      const index = options.indexOf(event.target);
+      if (index < 0) return;
+      event.preventDefault();
+      const step = event.code === 'ArrowUp' ? -1 : 1;
+      options[(index + step + options.length) % options.length].focus();
+    }
   });
   const directionKeys = new Map([['KeyW', 'forward'], ['ArrowUp', 'forward'], ['KeyS', 'back'], ['ArrowDown', 'back'],
     ['KeyA', 'left'], ['ArrowLeft', 'left'], ['KeyD', 'right'], ['ArrowRight', 'right']]);
@@ -214,15 +272,10 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (direction) { event.preventDefault(); pressed.add(direction); goal = null; }
     if (event.code === 'KeyQ') { event.preventDefault(); yaw -= 0.12; }
     if (event.code === 'KeyR') { event.preventDefault(); yaw += 0.12; }
-    if (event.code === 'KeyE' && !event.repeat) {
+    if ((event.code === 'Enter' || event.code === 'KeyE') && !event.repeat) {
       event.preventDefault();
-      if (state?.status === 'COMBAT') {
-        selectTarget();
-        target.focus({ preventScroll: true });
-        return;
-      }
-      const first = actionsAt(position, state?.actions || [])[0];
-      if (first) void interact(first);
+      if (state?.status === 'COMBAT') selectTarget();
+      else openCommands();
     }
     if (event.code === 'Escape') stopWalking();
   });
@@ -265,6 +318,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     dispose();
     delete shell.dataset.active;
     actionList.replaceChildren();
+    closeCommands();
+    commandButton.hidden = true;
     void releasePresence();
     canvas.hidden = true;
     directions.hidden = true;

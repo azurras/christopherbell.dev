@@ -53,6 +53,9 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
     message.textContent = state.message;
   }
   setText('surviveHealthText', `${state.health} / 10`);
+  setText('surviveHudName', state.name);
+  setText('surviveHudHealth', `HP ${state.health}/10`);
+  setText('surviveHudTp', `TP ${state.tacticalPoints ?? 0}`);
   documentRoot.getElementById('surviveHealth').value = state.health;
   setText('surviveStrength', state.strength);
   setText('surviveStamina', state.stamina);

@@ -142,17 +142,18 @@ The page groups moves into Explore, Build (with a Craft submenu) and Camp menus
 that list only moves the latest snapshot allows; in a fight, asleep or after the
 game ends the action bar shows only that situation's moves. `survive-menus.js`
 owns the menu-button keyboard behavior and keeps open menus valid across polls.
-The side panel's status card always shows vitals, inventory, weapon, stats and the
-three newest events. Camp & sharing, the full journal and the guide are native
-`details` sections that start closed; `survive-panel.js` remembers each one's open
-state per browser when storage allows, and renders never open or close them.
+The world HUD shows HP, TP and the three newest events. Open the Main Menu to
+inspect Status, Items, Equipment, Map, Camp & sharing, Journal or Guide.
+`survive-panel.js` remembers the camp, journal and guide disclosures per browser
+when storage allows. World refreshes keep menus in the player's chosen state.
 
 ## Shared 3D island
 
 The browser renders a generated low-poly island with native WebGL and a third-person
-camera. WASD/arrows walk, dragging rotates the camera, Q/R turn it, E uses the first
-contextual action, and Escape stops walking. Touch direction buttons and destination
-buttons also walk through the same world. Pine forest (-24,-15), stone ridge (30,-12),
+camera. WASD/arrows walk, dragging rotates the camera, and Q/R turn it. Enter or E
+opens the contextual Commands window, minus opens the Main Menu, and Escape
+closes a window or stops walking. Touch direction buttons and Map destinations
+also walk through the same world. Pine forest (-24,-15), stone ridge (30,-12),
 hunting grounds (-36,25), camp (0,0) and boat shore (0,62) gate their respective actions.
 Existing hunger, combat, weapons, day/night, raids, gifts and durable progress remain
 Java-owned. Rendering does not award supplies. Saved characters and inventory retain
