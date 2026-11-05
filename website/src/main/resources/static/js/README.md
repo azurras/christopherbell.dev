@@ -226,7 +226,8 @@ bounded coverage, dashboard-only results and deferred billing/email delivery.
 ### Survive island
 
 `survive-world-model.js` owns display-only landmark filtering, camera projection and
-movement prediction. `survive-world-art.js` generates terrain, foliage and actor
+movement prediction. `survive-world-art.js` generates terrain, layered tree
+crowns, underbrush and actor
 meshes. `survive-world-materials.js` loads original grass, path, mossy stone,
 bark and foliage images from `static/images/survive` into WebGL textures.
 `survive-authored-actors.js` samples textured adventurer and wildlife animation

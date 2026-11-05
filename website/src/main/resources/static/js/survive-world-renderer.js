@@ -75,7 +75,7 @@ void main() {
   } else if (surfaceMaterial > 4.0) {
     vec4 leaves = texture2D(foliageCard, uv);
     if (leaves.a < 0.45) discard;
-    albedo = leaves.rgb * (0.52 + tint.g * 0.42);
+    albedo = leaves.rgb * (vec3(0.38, 0.46, 0.40) + tint * 0.67);
   } else if (surfaceMaterial > 3.0) {
     albedo = mix(albedo, texture2D(barkTile, uv * vec2(0.73, 0.32)).rgb, 0.70);
   } else if (surfaceMaterial > 2.0) {
