@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advancePosition, actionsAt, cameraMatrix, projectPoint, targetActionsFor } from '../../main/resources/static/js/survive-world-model.js';
+import { advancePosition, actionsAt, cameraMatrix, LANDMARKS, projectPoint, targetActionsFor } from '../../main/resources/static/js/survive-world-model.js';
 
 test('the island offers Check and Engage after selection and weapon skills only when confirmed', () => {
   const encounter = { status: 'COMBAT', actions: ['ATTACK', 'ENGAGE', 'DEFEND', 'FLEE'] };
@@ -29,6 +29,14 @@ test('landmarks filter actions without inventing rewards or bypassing server ava
   assert.deepEqual(actionsAt({ x: -24, z: -15 }, allowed), ['GATHER', 'EAT']);
   assert.deepEqual(actionsAt({ x: 0, z: 62 }, allowed), ['BUILD_BOAT', 'EAT', 'ESCAPE']);
   assert.deepEqual(actionsAt({ x: 0, z: 0 }, ['ATTACK', 'DEFEND', 'FLEE']), ['ATTACK', 'DEFEND', 'FLEE']);
+});
+
+test('fishing and hunting require the bank or a nearby roaming animal', () => {
+  assert.deepEqual(actionsAt({ x: -13, z: 70 }, ['FISH']), ['FISH']);
+  assert.deepEqual(actionsAt({ x: 0, z: 0 }, ['FISH']), []);
+  const hog = { x: -34, z: 24 };
+  assert.deepEqual(actionsAt({ x: -30, z: 24 }, ['HUNT'], [hog]), ['HUNT']);
+  assert.deepEqual(actionsAt({ x: -28, z: 24 }, ['HUNT'], [hog]), []);
 });
 
 test('the follow camera projects the survivor in front of the viewer', () => {
@@ -168,11 +176,11 @@ test('a failed pulse removes remote avatars instead of displaying disconnected p
   world.setState(worldState);
   fixture.frame(0);
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(fixture.documentRoot.getElementById('surviveWorldLabels').children.length, 6);
+  assert.equal(fixture.documentRoot.getElementById('surviveWorldLabels').children.length, LANDMARKS.length + 1);
   now += 1000;
   fixture.frame(1000);
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(fixture.documentRoot.getElementById('surviveWorldLabels').children.length, 5);
+  assert.equal(fixture.documentRoot.getElementById('surviveWorldLabels').children.length, LANDMARKS.length);
   world.dispose();
 });
 

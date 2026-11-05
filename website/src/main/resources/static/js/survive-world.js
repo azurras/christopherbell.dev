@@ -7,7 +7,7 @@ import { createWorldRenderer } from './survive-world-renderer.js';
 import { createWorldFeedback } from './survive-world-feedback.js';
 
 /** Missing/unsupported canvas leaves the existing accessible adventure fully operational. */
-export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererFactory = createWorldRenderer) {
+export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererFactory = createWorldRenderer, onAggro = () => {}) {
   const canvas = documentRoot.getElementById('surviveWorldCanvas');
   if (!canvas || typeof canvas.getContext !== 'function') return { setState() {}, dispose() {} };
   const shell = documentRoot.getElementById('surviveWorld');
@@ -60,6 +60,10 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   let yaw = 0;
   let goal = null;
   let others = [];
+  let wildlife = [];
+  let encounter = null;
+  let approachStartedAt = null;
+  let gesture = null;
   let pulsePromise = null;
   let controller = null;
   let nextPulseAt = 0;
@@ -81,11 +85,13 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   function stopWalking() { pressed.clear(); goal = null; }
   function syncNameLabels() {
     const entries = [...LANDMARKS.map(landmark => ({ ...landmark, id: landmark.name, landmark: true })),
-      ...others.map(other => ({ ...other, id: other.survivorId }))];
+      ...others.map(other => ({ ...other, id: other.survivorId })),
+      ...wildlife.map(animal => ({ ...animal, name: `${animal.kind.toLowerCase()} · ${animal.aggroMetres ? 'hostile' : 'passive'}` }))];
     const oldById = new Map(desiredNameLabels.map(label => [label.id, label]));
     desiredNameLabels = entries.map(entry => {
       const label = oldById.get(entry.id)?.element || documentRoot.createElement('span');
-      label.className = entry.landmark ? 'survive-world-label is-landmark' : 'survive-world-label';
+      const labelType = entry.landmark ? ' is-landmark' : entry.kind ? (entry.aggroMetres ? ' is-hostile' : ' is-passive') : '';
+      label.className = `survive-world-label${labelType}`;
       label.textContent = entry.name;
       return { ...entry, element: label };
     });
@@ -118,6 +124,17 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
           drawX: previousOthers.get(other.survivorId)?.drawX ?? other.x,
           drawZ: previousOthers.get(other.survivorId)?.drawZ ?? other.z,
         }));
+        const previousWildlife = new Map(wildlife.map(animal => [animal.id, animal]));
+        wildlife = (snapshot.wildlife || []).map(animal => ({ ...animal,
+          drawX: previousWildlife.get(animal.id)?.drawX ?? animal.x,
+          drawZ: previousWildlife.get(animal.id)?.drawZ ?? animal.z,
+        }));
+        if (snapshot.encounter?.id !== encounter?.id) approachStartedAt = null;
+        encounter = snapshot.encounter || null;
+        if (snapshot.self.status === 'COMBAT' && state?.status === 'EXPLORING') {
+          stopWalking();
+          onAggro();
+        }
         syncNameLabels();
         pulseInterval = Math.max(500, pulseInterval * 0.9);
         feedback.textContent = `Live island · ${others.length + 1} online`;
@@ -126,6 +143,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         connected = false;
         position = { ...confirmed };
         others = [];
+        wildlife = [];
         syncNameLabels();
         stopWalking();
         pulseInterval = Math.min(15000, Math.max(1500, pulseInterval * 2));
@@ -176,17 +194,17 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       }
       return;
     }
-    if (!connected || busy || !state || !actionsAt(position, state.actions).includes(action)) return;
+    if (!connected || busy || !state || !actionsAt(position, state.actions, wildlife).includes(action)) return;
     stopWalking();
     // Acknowledge the current landmark before sending its durable command; never retry commands.
     await pulsePromise;
     await sendPulse();
-    if (!disposed && connected && actionsAt(confirmed, state.actions).includes(action)) onAction(action);
+    if (!disposed && connected && actionsAt(confirmed, state.actions, wildlife).includes(action)) onAction(action);
   }
 
   function updateActions() {
     const available = state?.status === 'COMBAT' ? targetActionsFor(state, targetSelected)
-      : state ? actionsAt(position, state.actions) : [];
+      : state ? actionsAt(position, state.actions, wildlife) : [];
     const blocked = state?.status === 'COMBAT' ? busy : busy || !connected;
     const signature = available.join(',');
     if (signature === lastActionSignature) {
@@ -352,7 +370,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
           position = advancePosition(position, right, forward, yaw, seconds);
         }
       }
-      for (const other of others) {
+      for (const other of [...others, ...wildlife]) {
         other.drawX ??= other.x;
         other.drawZ ??= other.z;
         const dx = other.x - other.drawX;
@@ -362,13 +380,19 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         other.drawZ += dz * Math.min(1, seconds * 8);
       }
       const moving = !motionPreference?.matches && Math.hypot(position.x - previousPosition.x, position.z - previousPosition.z) > 0.001;
-      const rendered = renderer.draw({ ...position, moving }, yaw, state,
-        others.map(other => ({ ...other, x: other.drawX, z: other.drawZ })), timestamp / 1000);
-      worldFeedback.draw(rendered.project, combatPosition(position, yaw));
+      const enemy = encounterPosition(position, yaw, timestamp);
+      const pose = gesture && !motionPreference?.matches ? { action: gesture.action, ageSeconds: (Date.now() - gesture.at) / 1000 } : null;
+      const rendered = renderer.draw({ ...position, moving, animate: !motionPreference?.matches }, yaw, state,
+        others.map(other => ({ ...other, x: other.drawX, z: other.drawZ })), timestamp / 1000,
+        wildlife.map(animal => ({ ...animal, x: animal.drawX, z: animal.drawZ })), enemy, pose);
+      worldFeedback.draw(rendered.project, enemy);
       for (const label of desiredNameLabels) {
-        const y = groundHeight(label.x, label.z) + (label.landmark ? 4 : 3);
-        const projected = rendered.project([label.x, y, label.z]);
-        label.element.hidden = !projected.visible;
+        const animal = wildlife.find(candidate => candidate.id === label.id);
+        const x = animal?.drawX ?? label.x;
+        const z = animal?.drawZ ?? label.z;
+        const y = groundHeight(x, z) + (label.landmark ? 4 : animal?.kind === 'BEAR' ? 3 : animal ? 2 : 3);
+        const projected = rendered.project([x, y, z]);
+        label.element.hidden = !projected.visible || (animal && Math.hypot(position.x - x, position.z - z) > 32);
         label.element.style.left = `${(projected.x + 1) * 50}%`;
         label.element.style.top = `${(1 - projected.y) * 50}%`;
       }
@@ -378,6 +402,19 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       if (Date.now() >= nextPulseAt) void sendPulse();
     }
     frameId = view.requestAnimationFrame(animate);
+  }
+
+  function encounterPosition(player, cameraYaw, timestamp) {
+    if (!encounter) return combatPosition(player, cameraYaw);
+    if (state.nextStrikeAt) approachStartedAt ??= timestamp;
+    const dx = player.x - encounter.x;
+    const dz = player.z - encounter.z;
+    const distance = Math.hypot(dx, dz);
+    if (approachStartedAt === null || distance <= 2.1) return encounter;
+    const progress = Math.min(1, (timestamp - approachStartedAt) / 1700);
+    const fraction = (1 - 2.1 / distance) * progress;
+    return { ...encounter, x: encounter.x + dx * fraction, z: encounter.z + dz * fraction,
+      moving: progress < 1 && !motionPreference?.matches };
   }
   frameId = view.requestAnimationFrame(animate);
   function dispose() {
@@ -395,6 +432,11 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     setState(nextState, isBusy = false) {
       if (disposed) return;
       worldFeedback.acceptState(nextState);
+      if (nextState && state?.survivorId === nextState.survivorId && state.nextStrikeAt
+          && nextState.revision > state.revision && nextState.enemyHealth < state.enemyHealth
+          && (nextState.status === 'COMBAT' || nextState.combatOutcome?.startsWith('You defeated '))) {
+        gesture = { action: 'ATTACK', at: Date.now() };
+      }
       if (nextState?.status !== 'COMBAT' || state?.survivorId !== nextState.survivorId || state?.enemy !== nextState.enemy) {
         targetSelected = false;
         target.setAttribute('aria-pressed', 'false');
@@ -411,6 +453,10 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         position = { x: 0, z: 0, heading: 0 };
         confirmed = { ...position };
         others = [];
+        wildlife = [];
+        encounter = null;
+        approachStartedAt = null;
+        gesture = null;
         stopWalking();
         nextPulseAt = 0;
       }
@@ -418,6 +464,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       busy = isBusy;
       if (busy || state?.status !== 'EXPLORING') stopWalking();
     },
+    animateAction(action) { gesture = { action, at: Date.now() }; },
     dispose,
   };
 }

@@ -196,15 +196,23 @@ final class SurviveWorld {
   }
 
   void perform(SurviveAction action, SurvivePlayer player, Instant now, IntSupplier rollPercent) {
+    perform(action, player, now, rollPercent, false, null);
+  }
+
+  void perform(SurviveAction action, SurvivePlayer player, Instant now, IntSupplier rollPercent,
+               boolean onIsland, SurviveEnemy huntedAnimal) {
     var phase = SurviveClock.phaseAt(now);
     boolean wasFighting = player.status == Status.COMBAT;
     String hungerOutcome = spendEffort(action, player);
     String outcome = player.status == Status.DEAD
         ? "You starved before you could act."
         : switch (action) {
-          case GATHER -> ventureOut(player, phase, rollPercent, () -> gatherWood(player, rollPercent));
-          case GATHER_STONE -> ventureOut(player, phase, rollPercent, () -> gather(player, rollPercent, 40, SurviveResource.STONE));
-          case HUNT -> ventureOut(player, phase, rollPercent, () -> hunt(player, phase, rollPercent));
+          case GATHER -> ventureOut(player, phase, rollPercent, onIsland, () -> gatherWood(player, rollPercent));
+          case GATHER_STONE -> ventureOut(player, phase, rollPercent, onIsland,
+              () -> gather(player, rollPercent, 40, SurviveResource.STONE));
+          case HUNT -> ventureOut(player, phase, rollPercent, onIsland,
+              () -> huntedAnimal == null ? hunt(player, phase, rollPercent) : revealAnimal(player, huntedAnimal));
+          case FISH -> fish(player, rollPercent);
           case BUILD_SHELTER -> buildShelter(player);
           case BUILD_BOAT -> buildBoat(player);
           case CRAFT_CLUB -> craft(player, SurviveWeapon.CLUB);
@@ -262,7 +270,7 @@ final class SurviveWorld {
   }
 
   private List<SurviveAction> campActionsFor(SurvivePlayer player, Phase phase) {
-    var actions = new ArrayList<>(List.of(SurviveAction.GATHER, SurviveAction.GATHER_STONE, SurviveAction.HUNT));
+    var actions = new ArrayList<>(List.of(SurviveAction.GATHER, SurviveAction.GATHER_STONE, SurviveAction.HUNT, SurviveAction.FISH));
     if (player.wood >= 5 && shelters < MAX_STRUCTURES) {
       actions.add(SurviveAction.BUILD_SHELTER);
     }
@@ -306,7 +314,7 @@ final class SurviveWorld {
    */
   private static String spendEffort(SurviveAction action, SurvivePlayer player) {
     boolean isEffort = switch (action) {
-      case GATHER, GATHER_STONE, HUNT, ATTACK, WEAPON_SKILL, FLEE, GUARD -> true;
+      case GATHER, GATHER_STONE, HUNT, FISH, ATTACK, WEAPON_SKILL, FLEE, GUARD -> true;
       case DEFEND -> player.nextStrikeAt == null;
       case BUILD_SHELTER, BUILD_BOAT, CRAFT_CLUB, CRAFT_AXE, CRAFT_SPEAR, ENGAGE, DISENGAGE, EAT, REST, SLEEP, WAKE, ESCAPE -> false;
     };
@@ -322,8 +330,12 @@ final class SurviveWorld {
   }
 
   /** Leaving camp ends guard duty and risks an ambush that replaces the intended action. */
-  private String ventureOut(SurvivePlayer player, Phase phase, IntSupplier rollPercent, Supplier<String> intendedAction) {
+  private String ventureOut(SurvivePlayer player, Phase phase, IntSupplier rollPercent, boolean onIsland,
+                            Supplier<String> intendedAction) {
     player.guarding = false;
+    if (onIsland) {
+      return intendedAction.get();
+    }
     int ambushChancePercent = switch (phase) {
       case DAY -> 5;
       case DUSK -> 12;
@@ -406,9 +418,31 @@ final class SurviveWorld {
       case DUSK -> rollPercent.getAsInt() <= 50 ? SurviveEnemy.HOG : SurviveEnemy.WOLF;
       case NIGHT -> nightAnimalFor(rollPercent.getAsInt());
     };
+    return revealAnimal(player, animal);
+  }
+
+  private static String revealAnimal(SurvivePlayer player, SurviveEnemy animal) {
     player.startFighting(animal);
     return "A wild " + animal.displayName() + " appears! It has " + animal.health()
         + " health. Select it to check or engage, or flee to camp.";
+  }
+
+  private static String fish(SurvivePlayer player, IntSupplier rollPercent) {
+    player.guarding = false;
+    if (!player.hasInventorySpace()) {
+      return "Your inventory is full. Make room before fishing.";
+    }
+    if (rollPercent.getAsInt() > 60) {
+      return "You cast your line, but the fish got away.";
+    }
+    player.food++;
+    return "You reel in a fish. You gained 1 food.";
+  }
+
+  void aggro(SurvivePlayer player, SurviveEnemy animal, Instant now) {
+    player.startFighting(animal);
+    engage(player, now);
+    recordAction(player, "The " + animal.displayName() + " spots you and attacks!", false);
   }
 
   private static SurviveEnemy nightAnimalFor(int rollPercent) {

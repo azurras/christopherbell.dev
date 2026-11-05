@@ -106,8 +106,15 @@ export function islandMesh() {
     mesh.beam([x, y, z], [x, y + 1.8, z], 0.14, 0.11, BARK, 5);
     mesh.box(x, y + 1.64, z, 1.05, 0.37, 0.14, [0.57, 0.44, 0.26]);
   }
-  mesh.animal(-37, 26, 'HOG', 0.9);
-  mesh.animal(-42, 21, 'HOG', 0.72);
+  for (let index = 0; index < 42; index++) {
+    const angle = index * 2.39996;
+    const radius = 6 + Math.sqrt(index) * 9;
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    const size = 0.14 + (index % 5) * 0.09;
+    mesh.ellipsoid(x, groundHeight(x, z) + size * 0.25, z, size, size * 0.54, size * 0.82,
+      tint(STONE, 0.82 + index % 4 * 0.07), 6, 3, angle);
+  }
   for (let index = 0; index < 9; index++) {
     const angle = index / 9 * TAU;
     mesh.ellipsoid(4 + Math.cos(angle) * 1.1, 0.14, Math.sin(angle) * 1.1, 0.33, 0.25, 0.27, STONE, 6, 3);
@@ -233,14 +240,15 @@ export function meshBuilder() {
         [x + dx * 0.78, y + height * (1 - blade * 0.12), z + dz * 0.78], tint([0.36, 0.42, 0.21], 0.82 + blade * 0.12));
     }
   }
-  function avatar(x, z, heading, cloth, status, stride = 0, weapon) {
+  function avatar(x, z, heading, cloth, status, stride = 0, weapon, action = null) {
     const y = groundHeight(x, z);
-    const resting = status === 'SLEEPING' || status === 'DEAD' || status === 'ESCAPED';
+    const resting = status === 'SLEEPING' || status === 'DEAD' || (status === 'ESCAPED' && action?.kind !== 'row');
     const cos = Math.cos(heading);
     const sin = Math.sin(heading);
+    const crouch = action?.kind === 'rest' ? action.weight * 0.38 : 0;
     const pose = (across, height, forward = 0) => resting
       ? [x + across * cos + height * sin, y + 0.31 + forward, z - across * sin + height * cos]
-      : [x + across * cos + forward * sin, y + height, z - across * sin + forward * cos];
+      : [x + across * cos + forward * sin, y + height - crouch * Math.min(1, height), z - across * sin + forward * cos];
     const leather = [0.28, 0.20, 0.14];
     const trousers = [0.25, 0.27, 0.22];
     const skin = [0.72, 0.55, 0.42];
@@ -250,7 +258,7 @@ export function meshBuilder() {
     const shadowHeight = y + 0.045;
     disk(x, shadowHeight, z, 0.68, [0.18, 0.21, 0.13], 10);
     const hip = pose(0, 1.1);
-    const shoulders = pose(0, 1.88);
+    const shoulders = pose(0, 1.88, action?.kind === 'sleep' ? action.weight * 0.045 : 0);
     beam(hip, shoulders, 0.32, 0.47, cloth, 7);
     part(pose(0, 1.29), 0.38, 0.11, 0.28, leather);
     part(pose(0, 1.29, 0.28), 0.095, 0.07, 0.05, hardware);
@@ -259,6 +267,7 @@ export function meshBuilder() {
     part(pose(0, 2.32, 0.02), 0.23, 0.29, 0.22, skin);
     part(pose(0, 2.46, -0.06), 0.245, 0.20, 0.23, [0.21, 0.16, 0.12]);
     part(pose(0, 2.29, 0.225), 0.071, 0.065, 0.05, skin);
+    let toolHand;
     for (const side of [-1, 1]) {
       const swing = resting ? 0 : stride * side;
       const knee = pose(side * 0.19, 0.61 + Math.max(0, swing) * 0.19, swing * 0.34);
@@ -266,14 +275,36 @@ export function meshBuilder() {
       beam(pose(side * 0.19, 1.15), knee, 0.18, 0.14, trousers);
       beam(knee, ankle, 0.15, 0.12, leather);
       part(pose(side * 0.20, 0.13 + Math.max(0, swing) * 0.16, swing * 0.58 + 0.10), 0.15, 0.13, 0.23, leather);
-      const elbow = pose(side * 0.51, 1.48, -swing * 0.29);
-      const wrist = pose(side * 0.55, 1.14, 0.09 - swing * 0.42);
+      const reach = resting ? null : actionReach(action, side);
+      const elbow = pose(side * 0.51, 1.48 + (reach?.lift ?? 0) * 0.48,
+        -swing * 0.29 + (reach?.forward ?? 0) * 0.45);
+      const wrist = pose(side * 0.55 - (reach?.inward ?? 0) * side, 1.14 + (reach?.lift ?? 0),
+        0.09 - swing * 0.42 + (reach?.forward ?? 0));
       part(pose(side * 0.41, 1.83), 0.22, 0.20, 0.21, tint(cloth, 1.20));
       beam(pose(side * 0.44, 1.84), elbow, 0.16, 0.12, cloth);
       beam(elbow, wrist, 0.12, 0.09, leather);
       part(wrist, 0.105, 0.135, 0.10, skin);
+      if (side === 1) toolHand = wrist;
     }
-    if (weapon) {
+    const tool = resting ? null : action?.kind;
+    if (['chop', 'mine', 'hammer', 'fish', 'strike', 'row'].includes(tool)) {
+      const length = tool === 'fish' ? 2.1 : tool === 'row' || (tool === 'strike' && weapon === 'SPEAR') ? 1.5 : 0.82;
+      const arc = Math.sin(action.progress * Math.PI * (tool === 'fish' ? 2 : 4));
+      const tip = [toolHand[0] + sin * length * 0.73, toolHand[1] + length * (0.38 + 0.55 * arc),
+        toolHand[2] + cos * length * 0.73];
+      beam(toolHand, tip, 0.043, 0.023, [0.49, 0.34, 0.20], 5);
+      if (tool === 'fish') {
+        const float = [x + sin * 13, -0.59, z + cos * 13];
+        beam(tip, float, 0.016, 0.013, [0.70, 0.68, 0.51], 3);
+        ellipsoid(...float, 0.095, 0.13, 0.095, [0.77, 0.27, 0.16], 6, 3);
+      } else {
+        const blade = tool === 'mine' ? 0.31 : 0.20;
+        ellipsoid(...tip, blade, tool === 'chop' ? 0.18 : 0.10, 0.085, hardware, 6, 3, heading);
+      }
+    } else if (tool === 'eat' || tool === 'give') {
+      ellipsoid(...toolHand, 0.13, 0.09, 0.13, [0.65, 0.45, 0.23], 6, 3);
+    }
+    if (weapon && tool !== 'strike') {
       const length = weapon === 'SPEAR' ? 2.8 : 1.65;
       const haft = pose(0.32, 0.58, -0.36);
       const tip = pose(-0.35, 0.58 + length, -0.37);
@@ -281,20 +312,24 @@ export function meshBuilder() {
       if (weapon !== 'CLUB') part(tip, 0.14, 0.20, 0.07, hardware);
     }
   }
-  function animal(x, z, kind, scale = 1) {
+  function animal(x, z, kind, scale = 1, heading = 0, stride = 0, recoil = 0) {
     const y = groundHeight(x, z);
     const wolf = kind === 'WOLF';
     const bear = kind === 'BEAR';
     const fur = wolf ? [0.43, 0.45, 0.44] : bear ? [0.36, 0.25, 0.18] : [0.42, 0.31, 0.25];
-    const p = (dx, dy, dz) => [x + dx * scale, y + dy * scale, z + dz * scale];
+    const sin = Math.sin(heading);
+    const cos = Math.cos(heading);
+    const p = (dx, dy, dz) => [x + ((dx - recoil * 0.24) * sin + dz * cos) * scale,
+      y + dy * scale, z + ((dx - recoil * 0.24) * cos - dz * sin) * scale];
     const body = (dx, dy, dz, w, h, d, color) =>
-      ellipsoid(...p(dx, dy, dz), w * scale, h * scale, d * scale, color, 8, 4);
+      ellipsoid(...p(dx, dy, dz), w * scale, h * scale, d * scale, color, 8, 4, heading - Math.PI / 2);
     body(0, 0.85, 0, 0.99, bear ? 0.73 : 0.48, 0.48, fur);
     body(0.75, bear ? 0.98 : 0.81, 0, 0.44, 0.39, 0.36, tint(fur, 1.08));
     body(wolf ? 1.12 : 1.04, 0.71, 0, 0.35, 0.20, 0.22, tint(fur, 1.21));
     for (const side of [-1, 1]) {
       for (const offset of [-0.62, 0.55]) {
-        beam(p(offset, 0.76, side * 0.29), p(offset - 0.09, 0.09, side * 0.31),
+        const swing = stride * side * Math.sign(offset);
+        beam(p(offset, 0.76, side * 0.29), p(offset - 0.09 + swing * 0.26, 0.09 + Math.max(0, swing) * 0.13, side * 0.31),
           (bear ? 0.20 : 0.13) * scale, 0.085 * scale, fur);
       }
       if (wolf) beam(p(0.65, 0.96, side * 0.22), p(0.52, 1.37, side * 0.28), 0.17 * scale, 0, fur, 5);
@@ -304,4 +339,21 @@ export function meshBuilder() {
     if (wolf) beam(p(-0.82, 0.89, 0), p(-1.45, 0.48, 0), 0.17 * scale, 0.04 * scale, fur);
   }
   return { vertices, triangle, box, beam, cone, disk, ellipsoid, tree, grass, avatar, animal };
+}
+
+function actionReach(action, side) {
+  if (!action) return null;
+  const { kind, progress, weight } = action;
+  const swing = Math.sin(progress * Math.PI * 4) * weight;
+  if (['chop', 'mine', 'hammer', 'strike', 'row'].includes(kind)) {
+    return { lift: 0.38 * weight + 0.75 * swing, forward: 0.49 * weight - 0.27 * swing, inward: 0.19 * weight };
+  }
+  if (kind === 'fish') return { lift: (0.42 + 0.28 * Math.sin(progress * Math.PI * 2)) * weight, forward: 0.66 * weight };
+  if (kind === 'wake') return { lift: weight * 1.37, forward: weight * 0.19 };
+  if (kind === 'eat' && side === 1) return { lift: weight * 1.03, forward: weight * 0.23, inward: weight * 0.38 };
+  if (kind === 'aim' || kind === 'brace' || kind === 'give') {
+    return { lift: weight * 0.47, forward: weight * 0.44, inward: weight * 0.19 };
+  }
+  if (kind === 'lower') return { lift: weight * 0.22, forward: weight * 0.12 };
+  return null;
 }

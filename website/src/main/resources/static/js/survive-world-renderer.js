@@ -1,6 +1,7 @@
 /** Native WebGL renderer for the island terrain, adventurers and landmarks. */
 import { groundHeight, islandMesh, meshBuilder } from './survive-world-art.js';
-import { cameraMatrix, combatPosition, projectPoint } from './survive-world-model.js';
+import { actionPose } from './survive-action-pose.js';
+import { cameraMatrix, projectPoint } from './survive-world-model.js';
 
 const VERTEX_SHADER = `
 attribute vec3 position;
@@ -22,12 +23,19 @@ varying vec3 surface;
 varying float depth;
 uniform float daylight;
 uniform vec3 sky;
+uniform float time;
 float grain(vec3 cell) {
   return fract(sin(dot(mod(cell, 79.0), vec3(13.7, 27.1, 9.3))) * 137.2);
 }
 void main() {
   float textureDetail = grain(floor(surface * 9.0)) * 0.14 + grain(floor(surface * 2.5)) * 0.13;
   vec3 lit = tint * (0.88 + textureDetail) * daylight;
+  if (surface.y < -0.64) {
+    float ripple = sin(surface.x * 1.6 + surface.z * 0.7 + time * 2.4)
+      * sin(surface.z * 1.2 - surface.x * 0.4 - time * 1.8);
+    float foam = (1.0 - smoothstep(0.1, 1.6, abs(length(surface.xz) - 78.0))) * (0.4 + ripple * 0.3);
+    lit = mix(lit * (1.0 + ripple * 0.12), vec3(0.62, 0.70, 0.68) * daylight, foam);
+  }
   gl_FragColor = vec4(mix(lit, sky, smoothstep(36.0, 144.0, depth)), 1.0);
 }`;
 
@@ -65,6 +73,7 @@ export function createWorldRenderer(canvas) {
     const cameraUniform = gl.getUniformLocation(program, 'camera');
     const daylightUniform = gl.getUniformLocation(program, 'daylight');
     const skyUniform = gl.getUniformLocation(program, 'sky');
+    const timeUniform = gl.getUniformLocation(program, 'time');
     gl.enable(gl.DEPTH_TEST);
     function drawBuffer(buffer, count) {
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -75,7 +84,7 @@ export function createWorldRenderer(canvas) {
       gl.drawArrays(gl.TRIANGLES, 0, count);
     }
     return {
-      draw(position, yaw, state, others, animationSeconds = 0) {
+      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture) {
         const pixelRatio = Math.min(1.5, globalThis.devicePixelRatio || 1);
         const width = Math.max(1, Math.round(canvas.clientWidth * pixelRatio));
         const height = Math.max(1, Math.round(canvas.clientHeight * pixelRatio));
@@ -90,10 +99,16 @@ export function createWorldRenderer(canvas) {
         gl.uniformMatrix4fv(cameraUniform, false, matrix);
         gl.uniform1f(daylightUniform, state.phase === 'NIGHT' ? 0.57 : state.phase === 'DUSK' ? 0.79 : 1.13);
         gl.uniform3fv(skyUniform, sky);
+        gl.uniform1f(timeUniform, animationSeconds % 120);
         drawBuffer(staticBuffer, scenery.vertices.length / 6);
         const actors = meshBuilder();
         const stride = avatar => avatar.moving ? Math.sin(animationSeconds * 11) : 0;
-        actors.avatar(position.x, position.z, position.heading, [0.55, 0.41, 0.27], state.status, stride(position), state.weapon);
+        const pose = actionPose(gesture) || (state.status === 'SLEEPING' && position.animate
+          ? { kind: 'sleep', weight: Math.sin(animationSeconds * 2.6) } : null);
+        const heading = pose?.kind === 'fish' ? Math.atan2(position.x, position.z)
+          : state.status === 'COMBAT' ? Math.atan2(enemy.x - position.x, enemy.z - position.z) : position.heading;
+        actors.avatar(position.x, position.z, heading, [0.55, 0.41, 0.27], state.status,
+          pose?.kind === 'run' ? Math.sin(animationSeconds * 19) : stride(position), state.weapon, pose);
         // Bound dynamic geometry in a crowded camp while drawing nearby players first.
         const nearestPlayers = others.map(other => ({ other, distance: Math.hypot(other.x - position.x, other.z - position.z) }))
           .filter(player => player.distance <= 60).sort((a, b) => a.distance - b.distance).slice(0, 24);
@@ -111,12 +126,16 @@ export function createWorldRenderer(canvas) {
           actors.box(5 + index * 4, 0.3, 80, 2.3, 0.9, 4.5, [0.39, 0.23, 0.11]);
           actors.box(5 + index * 4, 0.9, 80, 1.5, 0.2, 3.5, [0.75, 0.52, 0.28]);
         }
+        for (const animal of wildlife) {
+          actors.animal(animal.x, animal.z, animal.kind, animal.kind === 'BEAR' ? 1.6 : 1, animal.heading,
+            stride(animal));
+        }
         if (state.status === 'COMBAT') {
           const scale = state.enemy === 'BEAR' ? 1.6 : 1;
-          const enemy = combatPosition(position, yaw);
           const y = groundHeight(enemy.x, enemy.z);
           actors.disk(enemy.x, y + 0.12, enemy.z, 1.5, state.nextStrikeAt ? [0.56, 0.16, 0.10] : [0.58, 0.43, 0.17], 16);
-          actors.animal(enemy.x, enemy.z, state.enemy, scale);
+          const facing = Math.atan2(position.x - enemy.x, position.z - enemy.z);
+          actors.animal(enemy.x, enemy.z, state.enemy, scale, facing, stride(enemy), pose?.kind === 'strike' ? pose.weight : 0);
         }
         gl.bindBuffer(gl.ARRAY_BUFFER, actorBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(actors.vertices), gl.DYNAMIC_DRAW);

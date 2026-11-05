@@ -3,11 +3,12 @@ export const LANDMARKS = [
   { name: 'Camp', x: 0, z: 0, radius: 15, actions: ['BUILD_SHELTER', 'REST', 'GUARD', 'SLEEP', 'CRAFT_CLUB', 'CRAFT_AXE', 'CRAFT_SPEAR'] },
   { name: 'Pine forest', x: -24, z: -15, radius: 13, actions: ['GATHER'] },
   { name: 'Stone ridge', x: 30, z: -12, radius: 12, actions: ['GATHER_STONE'] },
-  { name: 'Hunting grounds', x: -36, z: 25, radius: 13, actions: ['HUNT'] },
+  { name: 'Hunting grounds', x: -36, z: 25, radius: 13, actions: [] },
   { name: 'Boat shore', x: 0, z: 62, radius: 13, actions: ['BUILD_BOAT', 'ESCAPE'] },
+  { name: 'Fishing bank', x: -13, z: 70, radius: 7, actions: ['FISH'] },
 ];
 export const ACTION_LABELS = {
-  GATHER: 'Gather wood', GATHER_STONE: 'Gather stone', HUNT: 'Hunt', BUILD_SHELTER: 'Build shelter',
+  GATHER: 'Gather wood', GATHER_STONE: 'Gather stone', HUNT: 'Hunt nearby animal', FISH: 'Fish', BUILD_SHELTER: 'Build shelter',
   BUILD_BOAT: 'Build boat', ESCAPE: 'Sail away', REST: 'Rest', SLEEP: 'Sleep', GUARD: 'Stand guard',
   CRAFT_CLUB: 'Craft club', CRAFT_AXE: 'Craft axe', CRAFT_SPEAR: 'Craft spear', EAT: 'Eat food',
   ATTACK: 'Attack', DEFEND: 'Defend', FLEE: 'Flee to camp', WAKE: 'Wake up',
@@ -47,8 +48,9 @@ export function advancePosition(position, right, forward, yaw, seconds) {
 }
 
 /** Only actions already offered by Java may be presented at the matching landmark. */
-export function actionsAt(position, allowedActions) {
-  return allowedActions.filter(action => PORTABLE_ACTIONS.includes(action) || LANDMARKS.some(landmark =>
+export function actionsAt(position, allowedActions, wildlife = []) {
+  return allowedActions.filter(action => action === 'HUNT' ? wildlife.some(animal =>
+    Math.hypot(position.x - animal.x, position.z - animal.z) <= 5) : PORTABLE_ACTIONS.includes(action) || LANDMARKS.some(landmark =>
     landmark.actions.includes(action) && Math.hypot(position.x - landmark.x, position.z - landmark.z) <= landmark.radius));
 }
 

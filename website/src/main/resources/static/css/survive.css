@@ -184,6 +184,8 @@
 .survive-world-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .survive-world-label { position: absolute; transform: translate(-50%, -100%); padding: .2rem .5rem; border-radius: .35rem; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; color: #fff; background: #172c35df; }
 .survive-world-label.is-landmark { color: #ffdda0; background: #18251bd9; }
+.survive-world-label.is-hostile { color: #ffe0ca; background: #592822e8; }
+.survive-world-label.is-passive { color: #f7e4a3; background: #373321e8; }
 .survive-world-label[hidden] { display: none; }
 .survive-world-directions, .survive-world-destinations { display: flex; flex-wrap: wrap; gap: .45rem; padding: .65rem .9rem; }
 .survive-world button { min-height: 44px; border: 1px solid #7c8b65; border-radius: .5rem; padding: .55rem .8rem; color: #f4ead3; background: #304438; font: inherit; cursor: pointer; }

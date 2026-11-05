@@ -10,10 +10,12 @@ import dev.christopherbell.survive.persistence.SurviveWorldRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.OptimisticLockingFailureException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.IntSupplier;
+import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -29,6 +31,7 @@ public class SurviveService {
   private final IntSupplier rollPercent;
   private final int playerCapacity;
   private final SurvivePresence presence = new SurvivePresence();
+  private final SurviveWildlife wildlife = new SurviveWildlife();
 
   @Autowired
   public SurviveService(SurviveWorldRepository repository) {
@@ -122,16 +125,28 @@ public class SurviveService {
     if (!presence.permits(player.survivorId, action, now)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Walk to the action's landmark first.");
     }
+    var pose = presence.activePose(player.survivorId, now);
+    SurviveWildlife.Animal hunted = null;
+    if (action == SurviveAction.HUNT && presence.tracks(player.survivorId)) {
+      releaseFinishedEncounters(now);
+      hunted = wildlife.nearest(pose, now, false);
+      if (hunted == null) {
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Move within five metres of a roaming animal to hunt it.");
+      }
+    }
     player.lastSeen = now;
-    world.perform(action, player, now, rollPercent);
+    world.perform(action, player, now, rollPercent, pose != null, hunted == null ? null : hunted.kind());
     commitWorld();
+    if (hunted != null && player.status == Status.COMBAT) {
+      wildlife.claim(player.survivorId, hunted);
+    }
     if (action == SurviveAction.FLEE) {
       presence.returnToCamp(player.survivorId);
     }
     return snapshotFor(player);
   }
 
-  /** Reads ownership without rewriting saved progress, then acknowledges one bounded transient pose. */
+  /** Acknowledges movement and commits a new hostile encounter only after verified proximity. */
   public synchronized SurvivePresence.View pulseForOwner(String token, String accountId,
       dev.christopherbell.survive.model.SurviveMovement movement) {
     loadSettledWorld();
@@ -140,7 +155,24 @@ public class SurviveService {
     if (player == null || !player.lastSeen.isAfter(now.minus(IDLE_TIMEOUT))) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Your survivor expired. Rejoin the camp.");
     }
-    return presence.pulse(player.survivorId, player.name, player.status, movement, now);
+    var view = presence.pulse(player.survivorId, player.name, player.status, movement, now);
+    releaseFinishedEncounters(now);
+    if (view.accepted() && player.status == Status.EXPLORING) {
+      var attacker = wildlife.nearest(view.self(), now, true);
+      if (attacker != null) {
+        player.lastSeen = now;
+        world.aggro(player, attacker.kind(), now);
+        commitWorld();
+        wildlife.claim(player.survivorId, attacker);
+      }
+    }
+    return view.withWildlife(player.status, wildlife.roaming(now), wildlife.encounter(player.survivorId));
+  }
+
+  private void releaseFinishedEncounters(Instant now) {
+    wildlife.releaseFinished(world.players.values().stream()
+        .filter(player -> player.status == Status.COMBAT)
+        .map(player -> player.survivorId).collect(Collectors.toSet()), now);
   }
 
   /** Releases only this owner's transient pose when the browser falls back to the text adventure. */
