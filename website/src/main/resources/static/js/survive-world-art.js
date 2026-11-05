@@ -8,6 +8,8 @@ export const MESH_VERTEX_FLOATS = 9;
 const STONE_MATERIAL = 2.5;
 const BARK_MATERIAL = 3.5;
 const FOLIAGE_MATERIAL = 4.5;
+const STREAM_MATERIAL = 13.5;
+const BRIDGE_HEIGHT = 0.43;
 const GRASS = [0.30, 0.37, 0.19];
 const EARTH = [0.48, 0.41, 0.28];
 const SAND = [0.63, 0.57, 0.40];
@@ -17,18 +19,33 @@ const mix = (a, b, amount) => a.map((value, index) => value + (b[index] - value)
 const tint = (color, brightness) => color.map(channel => channel * brightness);
 const clampUnit = value => Math.max(0, Math.min(1, value));
 
-/** The same ground height anchors terrain, avatars, labels and the follow camera. */
-export function groundHeight(x, z) {
+function streamCenter(x) {
+  return -26 + Math.sin(x * 0.18) * 0.75;
+}
+
+function terrainHeight(x, z) {
   const radius = Math.hypot(x, z);
   const inland = clampUnit((78 - radius) / 20);
   const outsideCamp = clampUnit((radius - 5) / 17);
   const rollingGround = 2.1 + 1.4 * Math.sin(x * 0.097 + z * 0.075) + 1.15 * Math.cos(z * 0.142 - x * 0.051);
   const ridge = 3.4 * Math.exp(-((x - 34) ** 2 + (z + 19) ** 2) / 220);
-  return (rollingGround + ridge) * inland * outsideCamp - (1 - inland) * 0.52;
+  const base = (rollingGround + ridge) * inland * outsideCamp - (1 - inland) * 0.52;
+  const banks = 3.8 * Math.exp(-((Math.abs(x) - 8) ** 2 / 17 + (z + 13) ** 2 / 35));
+  const channel = clampUnit((15 - Math.abs(x)) / 4) * clampUnit((2.7 - Math.abs(z - streamCenter(x))) / 1.5);
+  return base + banks + (-0.60 - base - banks) * channel;
+}
+
+/** Anchors walking and rendering to the surface, including the bridge deck. */
+export function groundHeight(x, z) {
+  const ground = terrainHeight(x, z);
+  if (Math.abs(x) >= 1.8 || Math.abs(z + 26) >= 5) return ground;
+  const deck = clampUnit((1.8 - Math.abs(x)) / 0.25) * clampUnit((5 - Math.abs(z + 26)) / 1.75);
+  return ground + (Math.max(ground, BRIDGE_HEIGHT) - ground) * deck;
 }
 
 function trailDistance(x, z) {
   let distance = Math.hypot(x, z) * 0.21;
+  if (z < 0 && z > -41) distance = Math.min(distance, Math.abs(x));
   for (const landmark of LANDMARKS.slice(1)) {
     const length = Math.hypot(landmark.x, landmark.z);
     const along = (x * landmark.x + z * landmark.z) / length;
@@ -84,7 +101,7 @@ export function islandMesh() {
   mesh.disk(0, -0.66, 0, 380, [0.19, 0.34, 0.39], 72);
   const sectors = 144;
   const rings = 52;
-  const terrainVertex = (x, z) => ({ point: [x, groundHeight(x, z), z], ...groundSurface(x, z, trees) });
+  const terrainVertex = (x, z) => ({ point: [x, terrainHeight(x, z), z], ...groundSurface(x, z, trees) });
   let innerRing = Array.from({ length: sectors }, () => terrainVertex(0, 0));
   for (let ring = 1; ring <= rings; ring++) {
     const outerRing = Array.from({ length: sectors }, (_, sector) => {
@@ -168,7 +185,50 @@ export function islandMesh() {
   mesh.box(-5.32, workbenchY + 1.14, 3.11, 0.56, 0.09, 0.29, STONE);
   addResourceProps(mesh, groundHeight);
   buildRuinedGate(mesh);
+  buildGateCrossing(mesh);
   return mesh;
+}
+
+/** The old gate leads to a timber crossing and a stone waystation. */
+function buildGateCrossing(mesh) {
+  for (let x = -13; x < 13; x++) {
+    const river = (across, bank) => [across, -0.33, streamCenter(across) + bank * 2.1];
+    const a = river(x, -1);
+    const b = river(x + 1, -1);
+    const c = river(x + 1, 1);
+    const d = river(x, 1);
+    mesh.triangle(a, b, c, [0.19, 0.37, 0.36], STREAM_MATERIAL);
+    mesh.triangle(a, c, d, [0.19, 0.37, 0.36], STREAM_MATERIAL);
+  }
+  for (let board = 0; board < 15; board++) {
+    const z = -30.55 + board * 0.65;
+    mesh.box(0, groundHeight(0, z) - 0.08, z, 3.35, 0.15, 0.61,
+      tint(BARK, 1.30 + board % 4 * 0.16), BARK_MATERIAL);
+  }
+  for (const side of [-1, 1]) {
+    const x = side * 1.62;
+    for (const z of [-28.7, -26, -23.3]) {
+      mesh.beam([x, -0.54, z], [x, BRIDGE_HEIGHT + 0.75, z], 0.13, 0.12, BARK, 5, BARK_MATERIAL);
+    }
+    mesh.beam([x, BRIDGE_HEIGHT + 0.68, -29.1], [x, BRIDGE_HEIGHT + 0.68, -22.9],
+      0.08, 0.08, BARK, 5, BARK_MATERIAL);
+  }
+  const waystationX = 3.5;
+  const waystationZ = -38;
+  const base = terrainHeight(waystationX, waystationZ);
+  const stone = [0.48, 0.48, 0.42];
+  mesh.box(waystationX, base + 1.16, waystationZ, 4.1, 2.8, 3.4, stone, STONE_MATERIAL);
+  mesh.box(waystationX, base + 0.74, waystationZ + 1.72, 1.03, 1.84, 0.08, BARK, BARK_MATERIAL);
+  const roof = [0.40, 0.22, 0.15];
+  const a = [waystationX - 2.35, base + 2.52, waystationZ - 2.05];
+  const b = [waystationX - 2.35, base + 2.52, waystationZ + 2.05];
+  const c = [waystationX, base + 4.12, waystationZ + 2.05];
+  const d = [waystationX, base + 4.12, waystationZ - 2.05];
+  const e = [waystationX + 2.35, base + 2.52, waystationZ + 2.05];
+  const f = [waystationX + 2.35, base + 2.52, waystationZ - 2.05];
+  for (const [p, q, r] of [[a, b, c], [a, c, d], [c, e, f], [c, f, d], [b, e, c], [a, d, f]]) {
+    mesh.triangle(p, q, r, roof, BARK_MATERIAL);
+  }
 }
 
 /** Weathered masonry landmark north of camp. The central arch leaves the approach open. */

@@ -161,7 +161,12 @@ when storage allows. World refreshes keep menus in the player's chosen state.
 The browser renders original adventurer meshes, textured forest and terrain,
 a weathered stone gate and shore details
 with native WebGL and a third-person
-camera. WASD/arrows walk, dragging rotates the camera, and Q/R turn it. Enter or E
+camera. WASD/arrows walk, dragging rotates the camera, and Q/R turn it. Page Up,
+Page Down and the mouse wheel zoom. Home resets the camera and L or keypad *
+locks it onto the current combat target. The controller right stick turns and
+zooms. Clicking the left stick locks the target and the right stick resets the
+camera. The gate north of camp leads through raised banks and over a stream to
+the waystation, shown on the island map. Enter or E
 opens the contextual Commands window, minus opens the Main Menu, and Escape
 closes a window or stops walking. The map displays the current position and
 landmarks without moving the player. The viewport shows the island calendar and

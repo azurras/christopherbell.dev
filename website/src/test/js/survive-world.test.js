@@ -48,6 +48,20 @@ test('the follow camera projects the survivor in front of the viewer', () => {
   assert.equal(projectPoint(matrix, [0, 0, 100]).visible, false);
 });
 
+test('desktop framing lowers the distant ground and zoom keeps the character in view', () => {
+  const position = { x: 0, z: 0 };
+  const defaultView = cameraMatrix(position, 0, 16 / 9);
+  assert.ok(projectPoint(defaultView, [0, 0, -35]).y < 0.24);
+  const closer = cameraMatrix(position, 0, 16 / 9, 0, 0.72);
+  const farther = cameraMatrix(position, 0, 16 / 9, 0, 1.45);
+  const head = [0, 2.58, 0];
+  const feet = [0, 0, 0];
+  assert.equal(projectPoint(closer, head).visible, true);
+  assert.equal(projectPoint(closer, feet).visible, true);
+  assert.ok(projectPoint(closer, head).y - projectPoint(closer, feet).y
+    > projectPoint(farther, head).y - projectPoint(farther, feet).y);
+});
+
 function worldFixture() {
   const frames = new Map();
   let frameNumber = 0;
@@ -77,7 +91,10 @@ function worldFixture() {
   documentRoot.getElementById('surviveJoin').hidden = true;
   const rendered = [];
   let disposals = 0;
-  const renderer = { draw(position) { rendered.push({ ...position }); return { project: () => ({ visible: false, x: 0, y: 0 }) }; },
+  const renderer = { draw(position, yaw, _state, _others, _time, _wildlife, _enemy, _gesture, zoom) {
+    rendered.push({ ...position, yaw, zoom });
+    return { project: () => ({ visible: false, x: 0, y: 0 }) };
+  },
     dispose() { disposals++; } };
   return { documentRoot, view, frames, rendered, renderer, disposals: () => disposals,
     frame(timestamp) {
@@ -88,6 +105,31 @@ function worldFixture() {
   };
 }
 const worldState = { survivorId: 'alice', name: 'Alice', phase: 'DAY', status: 'EXPLORING', shelters: 0, boats: 0, actions: [] };
+
+test('zoom resets and a locked camera tracks the acknowledged enemy without orbit input', async () => {
+  const fixture = worldFixture();
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({
+    self: { survivorId: 'alice', x: 0, z: 0, heading: 0, sequence: 1, status: 'COMBAT' },
+    others: [], accepted: true, encounter: { id: 'wolf', x: -4, z: -4 },
+  }), () => {}, () => fixture.renderer);
+  const canvas = fixture.documentRoot.getElementById('surviveWorldCanvas');
+  const press = code => canvas.emit('keydown', { code, preventDefault() {} });
+  try {
+    world.setState({ ...worldState, status: 'COMBAT', enemy: 'WOLF', enemyHealth: 8 });
+    fixture.frame(0);
+    await new Promise(resolve => setImmediate(resolve));
+    press('PageUp');
+    press('NumpadMultiply');
+    press('KeyR');
+    fixture.frame(16);
+    assert.equal(fixture.rendered.at(-1).zoom, 0.87);
+    assert.equal(fixture.rendered.at(-1).yaw, Math.PI / 4);
+    press('Home');
+    fixture.frame(32);
+    assert.equal(fixture.rendered.at(-1).zoom, 1);
+    assert.equal(fixture.rendered.at(-1).yaw, 0);
+  } finally { world.dispose(); }
+});
 
 test('selecting an animal opens commands and Escape returns to the island', () => {
   const { documentRoot, renderer } = worldFixture();

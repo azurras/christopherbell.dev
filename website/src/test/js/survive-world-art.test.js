@@ -63,6 +63,14 @@ test('terrain, ruin masonry, bark and cutout foliage are represented in the same
   assert.ok(materials.has(4.5));
 });
 
+test('the gate route has raised banks and a walkable bridge over rendered water', () => {
+  const { vertices } = islandMesh();
+  assert.ok(groundHeight(-8, -13) > groundHeight(0, -13) + 2.2);
+  assert.ok(groundHeight(0, -26) > groundHeight(4, -26) + 0.8);
+  const materials = vertices.filter((_, index) => index % MESH_VERTEX_FLOATS === 6);
+  assert.ok(materials.includes(13.5));
+});
+
 test('animated adventurers and each animal use bounded local texture coordinates', () => {
   const meshes = ['HOG', 'WOLF', 'BEAR'].map(kind => {
     const mesh = meshBuilder();

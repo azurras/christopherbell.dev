@@ -39,7 +39,7 @@
         <div id="surviveWorld" class="survive-world">
           <div class="survive-world-toolbar"><strong id="surviveWorldLocation">Shared island</strong><span id="surviveWorldConnection" role="status">Connecting to the island…</span></div>
           <div class="survive-world-viewport">
-            <canvas id="surviveWorldCanvas" tabindex="0" aria-label="Third-person island. WASD or arrows to walk; drag to turn the camera. Q and R rotate. Enter opens Commands. Minus opens the Main Menu." aria-describedby="surviveWorldHelp"></canvas>
+            <canvas id="surviveWorldCanvas" tabindex="0" aria-label="Third-person island. WASD or arrows to walk. Drag or press Q and R to turn the camera. Page Up and Page Down zoom. Enter opens Commands. Minus opens the Main Menu." aria-describedby="surviveWorldHelp"></canvas>
             <div id="surviveClock" class="survive-clock" data-phase="DAY" role="group" aria-label="World date and time">
               <time id="surviveCalendar"></time>
               <span id="surviveStatus" class="survive-badge"></span>
@@ -104,12 +104,15 @@
                     <circle r="78" fill="#c8b785"/>
                     <circle r="69" fill="#738759"/>
                     <path d="M0 0L-24 -15M0 0L30 -12M0 0L-36 25M0 0L0 62L-13 70" fill="none" stroke="#dec79c" stroke-width="2.5"/>
+                    <path d="M-13 -27Q0 -26 13 -25" fill="none" stroke="#518f99" stroke-width="3"/>
+                    <path d="M0 0V-38" fill="none" stroke="#dec79c" stroke-width="2.5"/>
                     <path d="M-51 -28q10-10 26-5q13 8 7 23q-18 7-37-2z" fill="#4c6843"/>
                     <path d="M21-18l13-18 17 16 5 11-35 5z" fill="#899086"/>
                     <g class="survive-map-landmarks">
                       <text x="67" y="-65" text-anchor="middle">N</text>
                       <path d="M67-61l-3 7 3-2 3 2z" fill="#fff6d6"/>
                       <circle cx="0" cy="0" r="2"/><text x="4" y="-3">Camp</text>
+                      <circle cx="0" cy="-38" r="2"/><text x="4" y="-37">Waystation</text>
                       <circle cx="-24" cy="-15" r="2"/><text x="-29" y="-20" text-anchor="middle">Pine forest</text>
                       <circle cx="30" cy="-12" r="2"/><text x="33" y="-7">Stone ridge</text>
                       <circle cx="-36" cy="25" r="2"/><text x="-38" y="34" text-anchor="middle">Hunting grounds</text>
@@ -155,7 +158,7 @@
               </div>
             </details>
           </div>
-          <p id="surviveWorldHelp" class="survive-muted">Focus the island to walk with WASD or arrows. Drag or use Q / R to turn. Enter opens Commands, minus opens Main Menu, plus opens Chat log, and Escape closes a window. On a controller, use the sticks to walk and turn, the D-pad for menus, A to confirm, B to cancel, X for Main Menu, and Y for Chat log.</p>
+          <p id="surviveWorldHelp" class="survive-muted">Walk with WASD or arrows. Drag or use Q / R to turn the camera, use the wheel or Page Up / Page Down to zoom, and press Home to reset. Press L or keypad * to lock onto a combat target. Enter opens Commands, minus opens Main Menu, plus opens Chat log, and Escape closes a window. On a controller, the left stick walks and the right stick turns and zooms. Click the left stick to lock on and the right stick to reset. Use the D-pad for menus, A to confirm, B to cancel, X for Main Menu, and Y for Chat log.</p>
         </div>
         <svg id="surviveCampScene" class="survive-scene" role="img" aria-label="The camp" viewBox="0 0 960 540"></svg>
         <h2 id="surviveScene">At the edge of the wilderness</h2>

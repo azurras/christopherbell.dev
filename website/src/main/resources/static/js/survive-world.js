@@ -58,6 +58,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   let confirmed = { ...position };
   let sequence = 0;
   let yaw = 0;
+  let cameraZoom = 1;
+  let cameraLocked = false;
   let others = [];
   let wildlife = [];
   let encounter = null;
@@ -69,7 +71,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   let pulseInterval = 500;
   let frameId = 0;
   let previousFrameAt = 0;
-  let controllerAxes = { right: 0, forward: 0, camera: 0 };
+  let controllerAxes = { right: 0, forward: 0, camera: 0, zoom: 0 };
   let lastActionSignature = '';
   let lastActionsBlocked;
   let drag = null;
@@ -84,6 +86,9 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     && !documentRoot.getElementById('surviveGame').inert
     && documentRoot.getElementById('surviveJoin').hidden;
   function stopWalking() { pressed.clear(); }
+  function zoomCamera(change) {
+    cameraZoom = Math.max(0.72, Math.min(1.55, cameraZoom + change));
+  }
   function syncNameLabels() {
     const entries = [...LANDMARKS.map(landmark => ({ ...landmark, id: landmark.name, landmark: true })),
       ...others.map(other => ({ ...other, id: other.survivorId })),
@@ -283,8 +288,22 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     const direction = directionKeys.get(event.code);
     if (direction) { event.preventDefault(); pressed.add(direction); }
-    if (event.code === 'KeyQ') { event.preventDefault(); yaw -= 0.12; }
-    if (event.code === 'KeyR') { event.preventDefault(); yaw += 0.12; }
+    if (event.code === 'KeyQ') { event.preventDefault(); if (!cameraLocked) yaw -= 0.12; }
+    if (event.code === 'KeyR') { event.preventDefault(); if (!cameraLocked) yaw += 0.12; }
+    if (event.code === 'PageUp' || event.code === 'PageDown') {
+      event.preventDefault();
+      zoomCamera(event.code === 'PageUp' ? -0.13 : 0.13);
+    }
+    if (event.code === 'Home') {
+      event.preventDefault();
+      cameraZoom = 1;
+      cameraLocked = false;
+      yaw = position.x === 0 && position.z === 0 ? 0 : position.heading + Math.PI;
+    }
+    if ((event.code === 'NumpadMultiply' || event.code === 'KeyL') && !event.repeat && state?.status === 'COMBAT' && encounter) {
+      event.preventDefault();
+      cameraLocked = !cameraLocked;
+    }
     if ((event.code === 'Enter' || event.code === 'KeyE') && !event.repeat) {
       event.preventDefault();
       if (state?.status === 'COMBAT') selectTarget();
@@ -307,11 +326,16 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   });
   listen(canvas, 'pointermove', event => {
     if (drag?.id !== event.pointerId) return;
-    yaw -= (event.clientX - drag.x) * 0.006;
+    if (!cameraLocked) yaw -= (event.clientX - drag.x) * 0.006;
     drag.x = event.clientX;
   });
   listen(canvas, 'pointerup', () => { drag = null; });
   listen(canvas, 'pointercancel', () => { drag = null; });
+  listen(canvas, 'wheel', event => {
+    if (documentRoot.activeElement !== canvas || event.ctrlKey || event.metaKey) return;
+    event.preventDefault();
+    zoomCamera(Math.sign(event.deltaY) * 0.10);
+  }, { passive: false });
   listen(canvas, 'webglcontextlost', event => {
     event.preventDefault();
     stopWalking();
@@ -333,7 +357,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     previousFrameAt = timestamp;
     if (isVisible()) {
       const previousPosition = position;
-      yaw += controllerAxes.camera * seconds * 2.4;
+      if (!cameraLocked) yaw += controllerAxes.camera * seconds * 2.4;
+      if (controllerAxes.zoom) zoomCamera(controllerAxes.zoom * seconds * 0.8);
       if (connected && !busy && state.status === 'EXPLORING') {
         const right = Number(pressed.has('right')) - Number(pressed.has('left')) + controllerAxes.right;
         const forward = Number(pressed.has('forward')) - Number(pressed.has('back')) + controllerAxes.forward;
@@ -353,10 +378,11 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       }
       const moving = !motionPreference?.matches && Math.hypot(position.x - previousPosition.x, position.z - previousPosition.z) > 0.001;
       const enemy = encounterPosition(position, yaw, timestamp);
+      if (cameraLocked && encounter) yaw = Math.atan2(position.x - enemy.x, position.z - enemy.z);
       const pose = gesture && !motionPreference?.matches ? { action: gesture.action, ageSeconds: (Date.now() - gesture.at) / 1000 } : null;
       const rendered = renderer.draw({ ...position, moving, animate: !motionPreference?.matches }, yaw, state,
         others.map(other => ({ ...other, x: other.drawX, z: other.drawZ })), timestamp / 1000,
-        wildlife.map(animal => ({ ...animal, x: animal.drawX, z: animal.drawZ })), enemy, pose);
+        wildlife.map(animal => ({ ...animal, x: animal.drawX, z: animal.drawZ })), enemy, pose, cameraZoom);
       worldFeedback.draw(rendered.project, enemy);
       for (const label of desiredNameLabels) {
         const animal = wildlife.find(candidate => candidate.id === label.id);
@@ -419,6 +445,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       }
       if (nextState?.status !== 'COMBAT' || state?.survivorId !== nextState.survivorId || state?.enemy !== nextState.enemy) {
         targetSelected = false;
+        cameraLocked = false;
         target.setAttribute('aria-pressed', 'false');
       }
       if (nextState?.nextStrikeAt) {
@@ -435,6 +462,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         others = [];
         wildlife = [];
         encounter = null;
+        cameraZoom = 1;
+        yaw = 0;
         approachStartedAt = null;
         gesture = null;
         stopWalking();
@@ -445,10 +474,10 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       if (busy || state?.status !== 'EXPLORING') stopWalking();
     },
     animateAction(action) { gesture = { action, at: Date.now() }; },
-    setControllerAxes(right, forward, camera) { controllerAxes = { right, forward, camera }; },
+    setControllerAxes(right, forward, camera, zoom = 0) { controllerAxes = { right, forward, camera, zoom }; },
     stopInput() {
       stopWalking();
-      controllerAxes = { right: 0, forward: 0, camera: 0 };
+      controllerAxes = { right: 0, forward: 0, camera: 0, zoom: 0 };
     },
     dispose,
   };
