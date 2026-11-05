@@ -6,6 +6,7 @@ export const LANDMARKS = [
   { name: 'Hunting grounds', x: -36, z: 25, radius: 13, actions: [] },
   { name: 'Boat shore', x: 0, z: 62, radius: 13, actions: ['BUILD_BOAT', 'ESCAPE'] },
   { name: 'Fishing bank', x: -13, z: 70, radius: 7, actions: ['FISH'] },
+  { name: 'Waystation', x: 0, z: -38, radius: 0, actions: [] },
 ];
 export const ACTION_LABELS = {
   GATHER: 'Gather wood', GATHER_STONE: 'Gather stone', HUNT: 'Hunt nearby animal', FISH: 'Fish', BUILD_SHELTER: 'Build shelter',

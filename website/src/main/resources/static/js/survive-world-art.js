@@ -218,7 +218,16 @@ function buildGateCrossing(mesh) {
   const base = terrainHeight(waystationX, waystationZ);
   const stone = [0.48, 0.48, 0.42];
   mesh.box(waystationX, base + 1.16, waystationZ, 4.1, 2.8, 3.4, stone, STONE_MATERIAL);
-  mesh.box(waystationX, base + 0.74, waystationZ + 1.72, 1.03, 1.84, 0.08, BARK, BARK_MATERIAL);
+  const front = waystationZ + 1.72;
+  mesh.box(waystationX, base + 0.74, front, 1.03, 1.84, 0.08, BARK, BARK_MATERIAL);
+  mesh.box(waystationX, base + 1.71, front + 0.04, 1.48, 0.23, 0.28, tint(stone, 1.18), STONE_MATERIAL);
+  mesh.box(waystationX, base - 0.05, front + 0.35, 1.49, 0.21, 0.64, stone, STONE_MATERIAL);
+  for (const side of [-1, 1]) {
+    const windowX = waystationX + side * 1.36;
+    mesh.box(windowX, base + 1.30, front, 0.63, 0.71, 0.09, [0.17, 0.19, 0.14]);
+    mesh.box(windowX, base + 0.94, front + 0.07, 0.77, 0.12, 0.24, stone, STONE_MATERIAL);
+    mesh.box(windowX, base + 1.30, front + 0.06, 0.08, 0.69, 0.06, BARK, BARK_MATERIAL);
+  }
   const roof = [0.40, 0.22, 0.15];
   const a = [waystationX - 2.35, base + 2.52, waystationZ - 2.05];
   const b = [waystationX - 2.35, base + 2.52, waystationZ + 2.05];
@@ -228,6 +237,9 @@ function buildGateCrossing(mesh) {
   const f = [waystationX + 2.35, base + 2.52, waystationZ - 2.05];
   for (const [p, q, r] of [[a, b, c], [a, c, d], [c, e, f], [c, f, d], [b, e, c], [a, d, f]]) {
     mesh.triangle(p, q, r, roof, BARK_MATERIAL);
+  }
+  for (const edge of [[a, b], [b, c], [c, e], [e, f], [f, d], [d, a], [c, d]]) {
+    mesh.beam(...edge, 0.09, 0.09, BARK, 4, BARK_MATERIAL);
   }
 }
 
