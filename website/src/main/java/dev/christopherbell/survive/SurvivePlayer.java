@@ -22,8 +22,9 @@ final class SurvivePlayer {
   int wood;
   int food;
   int stone;
-  /** Fullness from 0 (starving) to 10; effort spends it and eating restores it. */
+  /** Fullness from 0 (starving) to 10. Eating restores it. */
   int hunger = MAX_HUNGER;
+  int activeFullnessMilliseconds;
   /** The animal in the current fight, present exactly while in combat. */
   SurviveEnemy enemy;
   int enemyHealth;
@@ -131,7 +132,6 @@ final class SurvivePlayer {
    */
   int wakeAndRecover(int healthToRecover) {
     boolean starving = hunger == 0;
-    hunger = Math.max(0, hunger - 2);
     sleptAt = null;
     status = Status.EXPLORING;
     if (starving) {

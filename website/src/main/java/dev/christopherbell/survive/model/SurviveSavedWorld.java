@@ -52,7 +52,8 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       int experienceToNextLevel, int wood, int food, int enemyHealth, Status status,
       long revision, String message, Integer stone, Integer hunger, SurviveEnemy enemy,
       SurviveWeapon weapon, Integer weaponDurability, Boolean guarding, Instant sleptAt, Boolean struckFirst,
-      Instant nextStrikeAt, Integer tacticalPoints, Boolean defending, String combatOutcome) {
+      Instant nextStrikeAt, Integer tacticalPoints, Boolean defending, String combatOutcome,
+      Integer activeFullnessMilliseconds) {
     public Player {
       stone = stone == null ? 0 : stone;
       hunger = hunger == null ? 10 : hunger;
@@ -62,6 +63,7 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       struckFirst = struckFirst != null && struckFirst;
       tacticalPoints = tacticalPoints == null ? 0 : tacticalPoints;
       defending = defending != null && defending;
+      activeFullnessMilliseconds = activeFullnessMilliseconds == null ? 0 : activeFullnessMilliseconds;
       UUID.fromString(survivorId);
       if (accountId == null) {
         UUID.fromString(token);
@@ -79,6 +81,7 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
           || experienceToNextLevel != (1 << (strength - 2)) || experience >= experienceToNextLevel
           || wood < 0 || food < 0 || stone < 0 || wood + food + stone > 10
           || hunger < 0 || hunger > 10 || status == null || (status == Status.DEAD) != (health == 0)
+          || activeFullnessMilliseconds < 0 || activeFullnessMilliseconds >= 300_000
           || (status == Status.COMBAT) != (enemy != null) || (status == Status.COMBAT) != (enemyHealth > 0)
           || enemy != null && enemyHealth > enemy.health() || weaponIsInvalid
           || (status == Status.SLEEPING) != (sleptAt != null) || guarding && status != Status.EXPLORING

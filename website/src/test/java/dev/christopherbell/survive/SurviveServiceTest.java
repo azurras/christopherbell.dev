@@ -25,6 +25,29 @@ class SurviveServiceTest {
   private final Clock clock = Clock.fixed(Instant.parse("2026-10-06T01:00:00Z"), ZoneOffset.UTC);
 
   @Test
+  void fullnessUsesActiveTimeAcrossRestartsAndIgnoresTimeAway() {
+    var joinedAt = SurviveClock.WORLD_EPOCH;
+    var mutableClock = mock(Clock.class);
+    when(mutableClock.instant()).thenReturn(joinedAt);
+    var repository = new InMemorySurviveWorldRepository();
+    var service = new SurviveService(mutableClock, () -> 50, 10, repository);
+    var joined = service.join(null, "Scout");
+    assertEquals(10, act(service, joined.token(), SurviveAction.GATHER).hunger());
+    for (int elapsedSeconds = 10; elapsedSeconds < 300; elapsedSeconds += 10) {
+      when(mutableClock.instant()).thenReturn(joinedAt.plusSeconds(elapsedSeconds));
+      assertEquals(10, service.find(joined.token()).orElseThrow().hunger());
+    }
+    var resumedAt = joinedAt.plusSeconds(3600);
+    when(mutableClock.instant()).thenReturn(resumedAt);
+    var restarted = new SurviveService(mutableClock, () -> 50, 10, repository);
+    var resumed = restarted.find(joined.token()).orElseThrow();
+    assertEquals(10, resumed.hunger());
+    assertEquals(10, resumed.health());
+    when(mutableClock.instant()).thenReturn(resumedAt.plusSeconds(10));
+    assertEquals(9, restarted.find(joined.token()).orElseThrow().hunger());
+  }
+
+  @Test
   void givesSuppliesToTheChosenSurvivorWithoutExposingCredentials() {
     var service = new SurviveService(clock, () -> 50, 10, new InMemorySurviveWorldRepository());
     var alice = service.join(null, "Same name");

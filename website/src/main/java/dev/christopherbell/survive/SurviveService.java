@@ -56,7 +56,7 @@ public class SurviveService {
     String ownerKey = ownerKey(previousToken, accountId);
     var existing = world.players.get(ownerKey);
     if (accountId != null && existing != null && existing.status != Status.DEAD && existing.status != Status.ESCAPED) {
-      existing.lastSeen = clock.instant();
+      world.observeActivity(existing, clock.instant());
       commitWorld();
       return new JoinedSurvivor(null, snapshotFor(existing));
     }
@@ -97,7 +97,7 @@ public class SurviveService {
     if (player == null) {
       return Optional.empty();
     }
-    player.lastSeen = clock.instant();
+    world.observeActivity(player, clock.instant());
     commitWorld();
     return Optional.of(snapshotFor(player));
   }
@@ -134,13 +134,15 @@ public class SurviveService {
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Move within five metres of a roaming animal to hunt it.");
       }
     }
-    player.lastSeen = now;
-    world.perform(action, player, now, rollPercent, pose != null, hunted == null ? null : hunted.kind());
+    world.observeActivity(player, now);
+    if (player.status != Status.DEAD) {
+      world.perform(action, player, now, rollPercent, pose != null, hunted == null ? null : hunted.kind());
+    }
     commitWorld();
     if (hunted != null && player.status == Status.COMBAT) {
       wildlife.claim(player.survivorId, hunted);
     }
-    if (action == SurviveAction.FLEE) {
+    if (action == SurviveAction.FLEE && player.status != Status.DEAD) {
       presence.returnToCamp(player.survivorId);
     }
     return snapshotFor(player);
@@ -160,10 +162,14 @@ public class SurviveService {
     if (view.accepted() && player.status == Status.EXPLORING) {
       var attacker = wildlife.nearest(view.self(), now, true);
       if (attacker != null) {
-        player.lastSeen = now;
-        world.aggro(player, attacker.kind(), now);
+        world.observeActivity(player, now);
+        if (player.status == Status.EXPLORING) {
+          world.aggro(player, attacker.kind(), now);
+        }
         commitWorld();
-        wildlife.claim(player.survivorId, attacker);
+        if (player.status == Status.COMBAT) {
+          wildlife.claim(player.survivorId, attacker);
+        }
       }
     }
     return view.withWildlife(player.status, wildlife.roaming(now), wildlife.encounter(player.survivorId));
@@ -225,8 +231,10 @@ public class SurviveService {
     if (recipient.inventoryCount() + quantity > SurviveWorld.INVENTORY_CAPACITY) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That survivor's inventory has no room for this gift.");
     }
-    sender.lastSeen = clock.instant();
-    world.giveSupplies(sender, recipient, resource, quantity);
+    world.observeActivity(sender, clock.instant());
+    if (sender.status != Status.DEAD) {
+      world.giveSupplies(sender, recipient, resource, quantity);
+    }
     commitWorld();
     return snapshotFor(sender);
   }

@@ -261,18 +261,21 @@ class SurviveWorldTest {
   }
 
   @Test
-  void effortDrainsHungerAndStarvationHurts() {
+  void starvationHurtsOnTheTimerAndCanEndTheSurvivor() {
     perform(SurviveAction.GATHER, 50);
-    assertEquals(9, player.hunger);
-    player.wood = 5;
-    perform(SurviveAction.BUILD_SHELTER, 1);
-    assertEquals(9, player.hunger);
+    assertEquals(10, player.hunger);
     player.hunger = 0;
     perform(SurviveAction.GATHER, 50);
+    assertEquals(10, player.health);
+    for (int tick = 0; tick < 30; tick++) {
+      world.observeActivity(player, player.lastSeen.plusSeconds(10));
+    }
     assertEquals(9, player.health);
     assertTrue(player.message.contains("starving"));
     player.health = 1;
-    perform(SurviveAction.GATHER, 50);
+    for (int tick = 0; tick < 30; tick++) {
+      world.observeActivity(player, player.lastSeen.plusSeconds(10));
+    }
     assertEquals(Status.DEAD, player.status);
   }
 
@@ -298,7 +301,7 @@ class SurviveWorldTest {
     perform(SurviveAction.CRAFT_CLUB, 1);
     performAt(SurviveAction.GUARD, DUSK, 1);
     assertTrue(player.guarding);
-    assertEquals(9, player.hunger);
+    assertEquals(10, player.hunger);
     assertFalse(actionsAt(DUSK).contains(SurviveAction.GUARD));
     world.settleUntil(NIGHT);
     assertEquals(1, player.food);
@@ -364,11 +367,11 @@ class SurviveWorldTest {
     performAt(SurviveAction.WAKE, NIGHT.plus(Duration.ofMinutes(4)), 1);
     assertEquals(Status.EXPLORING, player.status);
     assertEquals(5, player.health);
-    assertEquals(8, player.hunger);
+    assertEquals(10, player.hunger);
     world.settleUntil(DAWN);
     assertEquals(Status.EXPLORING, alice.status);
     assertEquals(10, alice.health);
-    assertEquals(8, alice.hunger);
+    assertEquals(10, alice.hunger);
     assertTrue(lastEvent().contains("woke"));
   }
 

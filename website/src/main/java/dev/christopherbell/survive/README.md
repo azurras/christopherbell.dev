@@ -102,10 +102,11 @@ bed is free; a sleeper can only Wake, recovering 1 health per 2 minutes asleep.
 Dawn wakes every sleeper with full health. If a raid burns shelters, the latest
 sleepers beyond the remaining beds wake with 2 damage. Rest still gives +2 health.
 
-**Hunger.** Fullness runs from 10 to 0. Each action outside camp, combat move and
-guard shift costs 1, and each night's sleep costs 2 on waking. At 0 those efforts
-cost 1 health instead and sleep does not heal. Eating gives +5 fullness and
-+2 health.
+**Hunger.** Fullness runs from 10 to 0. Five minutes of awake, active play
+spend one fullness. At zero, each subsequent five-minute interval costs one
+health. The server counts gaps of up to 15 seconds between activity updates,
+pauses the meter during sleep and preserves partial intervals across reconnects.
+Sleep does not heal a starving survivor. Eating gives +5 fullness and +2 health.
 
 Saved survivors from before these mechanics load with full hunger, no stone or
 weapon, a hog for any fight in progress, awake and not guarding. New saved fields
@@ -220,8 +221,8 @@ combat are future MMO work.
 
 ## Fishing
 
-Fish at the Fishing bank using the Commands window. A cast spends one fullness
-and has a 60% chance to add one food if there is inventory space. The chat log
+Fish at the Fishing bank using the Commands window. A cast has a 60% chance
+to add one food if there is inventory space. The chat log
 reports the result. The cast, reel, and other action poses are browser visuals
 played after the command is confirmed. The text fallback offers the same fishing
 command without a position.

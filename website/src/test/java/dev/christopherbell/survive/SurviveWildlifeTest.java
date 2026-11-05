@@ -79,7 +79,7 @@ class SurviveWildlifeTest {
     var joined = service.join(null, "Angler");
     var caught = service.act(joined.token(), SurviveAction.FISH, 0);
     assertEquals(1, caught.food());
-    assertEquals(9, caught.hunger());
+    assertEquals(10, caught.hunger());
     assertTrue(caught.message().contains("reel in a fish"));
     rolls.set(61);
     var missed = service.act(joined.token(), SurviveAction.FISH, caught.revision());
