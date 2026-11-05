@@ -1,6 +1,7 @@
 /** Native WebGL renderer for the island terrain, adventurers and landmarks. */
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from './survive-world-art.js';
 import { createIslandMaterials } from './survive-world-materials.js';
+import { drawBoat, drawCampFlame, drawShelter } from './survive-world-props.js';
 import { actionPose } from './survive-action-pose.js';
 import { cameraMatrix, projectPoint } from './survive-world-model.js';
 
@@ -38,10 +39,20 @@ uniform sampler2D earthTile;
 uniform sampler2D stoneTile;
 uniform sampler2D barkTile;
 uniform sampler2D foliageCard;
+uniform sampler2D actorAtlas;
 float grain(vec3 cell) {
   return fract(sin(dot(mod(cell, 79.0), vec3(13.7, 27.1, 9.3))) * 137.2);
 }
 void main() {
+  if (surfaceMaterial > 10.0) {
+    gl_FragColor = vec4(tint * 1.42, 1.0);
+    return;
+  }
+  if (surfaceMaterial > 9.0) {
+    if (uv.x >= 0.99) discard;
+    gl_FragColor = vec4(tint, (1.0 - uv.x) * 0.48);
+    return;
+  }
   if (length(surface.xz) > 100.0 && surface.y > 0.0 || surface.y > 34.0) {
     float elevation = smoothstep(0.0, 105.0, surface.y);
     vec3 zenith = sky * vec3(0.60, 0.79, 1.08);
@@ -50,7 +61,13 @@ void main() {
   }
   float textureDetail = grain(floor(surface * 9.0)) * 0.14 + grain(floor(surface * 2.5)) * 0.13;
   vec3 albedo = tint * (0.88 + textureDetail);
-  if (surfaceMaterial > 4.0) {
+  if (surfaceMaterial > 5.0) {
+    float index = floor(surfaceMaterial) - 5.0;
+    vec2 offset = vec2(mod(index, 2.0), floor(index / 2.0)) * 0.5;
+    vec3 detail = texture2D(actorAtlas, offset + 0.015 + clamp(uv, 0.0, 1.0) * 0.47).rgb;
+    float grainLight = dot(detail, vec3(0.299, 0.587, 0.114));
+    albedo = albedo * (0.66 + grainLight * 1.12) + detail * 0.13;
+  } else if (surfaceMaterial > 4.0) {
     vec4 leaves = texture2D(foliageCard, uv);
     if (leaves.a < 0.45) discard;
     albedo = leaves.rgb * (0.52 + tint.g * 0.42);
@@ -116,6 +133,8 @@ export function createWorldRenderer(canvas) {
     const skyUniform = gl.getUniformLocation(program, 'sky');
     const timeUniform = gl.getUniformLocation(program, 'time');
     gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     const vertexBytes = MESH_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
     const attributes = [[positionAttribute, 3, 0], [colorAttribute, 3, 12], [materialAttribute, 1, 24], [uvAttribute, 2, 28]];
     function drawBuffer(buffer, count) {
@@ -146,6 +165,7 @@ export function createWorldRenderer(canvas) {
         gl.uniform1f(timeUniform, animationSeconds % 120);
         drawBuffer(staticBuffer, scenery.vertices.length / MESH_VERTEX_FLOATS);
         const actors = meshBuilder();
+        drawCampFlame(actors, position.animate ? animationSeconds : 0);
         const stride = avatar => avatar.moving ? Math.sin(animationSeconds * 11) : 0;
         const pose = actionPose(gesture) || (state.status === 'SLEEPING' && position.animate
           ? { kind: 'sleep', weight: Math.sin(animationSeconds * 2.6) } : null);
@@ -157,28 +177,27 @@ export function createWorldRenderer(canvas) {
         // Bound dynamic geometry in a crowded camp while drawing nearby players first.
         const nearestPlayers = others.map(other => ({ other, distance: Math.hypot(other.x - position.x, other.z - position.z) }))
           .filter(player => player.distance <= 60).sort((a, b) => a.distance - b.distance).slice(0, 24);
-        for (const { other } of nearestPlayers) {
-          actors.avatar(other.x, other.z, other.heading, [0.34, 0.43, 0.45], other.status, stride(other));
+        for (const { other, distance } of nearestPlayers) {
+          actors.avatar(other.x, other.z, other.heading, [0.34, 0.43, 0.45], other.status, stride(other), null, null, distance < 13);
         }
         for (let index = 0; index < Math.min(8, state.shelters); index++) {
           const x = (index % 4) * 5 - 8;
           const z = Math.floor(index / 4) * 6 - 8;
           const y = groundHeight(x, z);
-          actors.box(x, y + 0.8, z, 3.3, 1.2, 3, [0.45, 0.36, 0.25]);
-          actors.cone(x, y + 1.4, z, 2.8, 2.4, [0.60, 0.48, 0.32], 4);
+          drawShelter(actors, x, y, z);
         }
         for (let index = 0; index < Math.min(4, state.boats); index++) {
-          actors.box(5 + index * 4, 0.3, 80, 2.3, 0.9, 4.5, [0.39, 0.23, 0.11]);
-          actors.box(5 + index * 4, 0.9, 80, 1.5, 0.2, 3.5, [0.75, 0.52, 0.28]);
+          drawBoat(actors, 5 + index * 4, 80);
         }
         for (const animal of wildlife) {
           actors.animal(animal.x, animal.z, animal.kind, animal.kind === 'BEAR' ? 1.6 : 1, animal.heading,
-            stride(animal));
+            stride(animal), 0, Math.hypot(animal.x - position.x, animal.z - position.z) < 16);
         }
         if (state.status === 'COMBAT') {
           const scale = state.enemy === 'BEAR' ? 1.6 : 1;
-          const y = groundHeight(enemy.x, enemy.z);
-          actors.disk(enemy.x, y + 0.12, enemy.z, 1.5, state.nextStrikeAt ? [0.56, 0.16, 0.10] : [0.58, 0.43, 0.17], 16);
+          const radius = scale * 0.86;
+          const ringColor = state.nextStrikeAt ? [0.67, 0.23, 0.15] : [0.64, 0.48, 0.21];
+          drawTargetRing(actors, enemy, radius, ringColor);
           const facing = Math.atan2(position.x - enemy.x, position.z - enemy.z);
           actors.animal(enemy.x, enemy.z, state.enemy, scale, facing, stride(enemy), pose?.kind === 'strike' ? pose.weight : 0);
         }
@@ -192,5 +211,24 @@ export function createWorldRenderer(canvas) {
   } catch (error) {
     dispose();
     throw error;
+  }
+}
+
+function drawTargetRing(mesh, enemy, radius, color) {
+  const sides = 28;
+  const point = (distance, angle) => {
+    const x = enemy.x + Math.cos(angle) * distance;
+    const z = enemy.z + Math.sin(angle) * distance;
+    return [x, groundHeight(x, z) + 0.10, z];
+  };
+  for (let segment = 0; segment < sides; segment++) {
+    const angle = segment / sides * Math.PI * 2;
+    const next = (segment + 1) / sides * Math.PI * 2;
+    const a = point(radius, angle);
+    const b = point(radius, next);
+    const c = point(radius - 0.055, next);
+    const d = point(radius - 0.055, angle);
+    mesh.triangle(a, b, c, color);
+    mesh.triangle(a, c, d, color);
   }
 }
