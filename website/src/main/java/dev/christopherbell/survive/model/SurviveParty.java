@@ -4,9 +4,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 /** A two-survivor invitation or accepted membership. The ID distinguishes successive invites. */
-public record SurviveParty(UUID id, String inviterId, String inviteeId, Instant expiresAt) {
+public record SurviveParty(String id, String inviterId, String inviteeId, Instant expiresAt) {
   public SurviveParty {
-    java.util.Objects.requireNonNull(id);
+    UUID.fromString(id);
     UUID.fromString(inviterId);
     UUID.fromString(inviteeId);
     if (inviterId.equals(inviteeId)) {

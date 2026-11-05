@@ -72,11 +72,13 @@ class SurviveWorldMongoCodecTest {
     var guest = new SurviveSavedWorld.Player(null, UUID.randomUUID().toString(),
         UUID.randomUUID().toString(), "Guest", alice.lastSeen(), 10, 2, 10,
         0, 1, 0, 0, 0, Status.EXPLORING, 0, "At camp.", 1, 6, null, SurviveWeapon.CLUB, 5, true, null, false, null, null, null, null, null);
-    var party = new dev.christopherbell.survive.model.SurviveParty(UUID.randomUUID(),
+    var party = new dev.christopherbell.survive.model.SurviveParty(UUID.randomUUID().toString(),
         alice.survivorId(), guest.survivorId(), null);
     var saved = new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of("Shared journal"),
         List.of(alice, guest), 43L, 21L, List.of(party));
     var envelope = codec.encode(saved);
+    assertEquals(party.id(), envelope.get("payload", Document.class)
+        .getList("parties", Document.class).getFirst().getString("id"));
     assertEquals("survive_world", envelope.getString("_kind"));
     assertEquals(saved, codec.decode(envelope));
     assertTrue(DomainCollectionManifest.forKind("survive_world").isEmpty());

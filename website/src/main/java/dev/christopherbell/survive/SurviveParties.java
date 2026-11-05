@@ -38,7 +38,7 @@ final class SurviveParties {
       return null;
     }
     var state = party.accepted() ? State.MEMBER : sentInvite ? State.OUTGOING : State.INCOMING;
-    return new SurviveParty.View(party.id(), partner.name, state);
+    return new SurviveParty.View(UUID.fromString(party.id()), partner.name, state);
   }
 
   void apply(SurvivePlayer survivor, SurviveRequests.Party request, Collection<SurvivePlayer> players, Instant now) {
@@ -51,7 +51,7 @@ final class SurviveParties {
       invite(survivor, find(players, request.targetId().toString()), party, now);
       return;
     }
-    if (party == null || !party.id().equals(request.targetId())) {
+    if (party == null || !party.id().equals(request.targetId().toString())) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "That party invitation or membership is no longer current.");
     }
     boolean isInviter = party.inviterId().equals(survivor.survivorId);
@@ -82,7 +82,8 @@ final class SurviveParties {
     if (existingParty != null || partyFor(invitee.survivorId) != null) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "One survivor already has a party or invitation.");
     }
-    parties.add(new SurviveParty(UUID.randomUUID(), inviter.survivorId, invitee.survivorId, now.plus(INVITATION_LIFETIME)));
+    parties.add(new SurviveParty(UUID.randomUUID().toString(), inviter.survivorId, invitee.survivorId,
+        now.plus(INVITATION_LIFETIME)));
   }
 
   private SurviveParty partyFor(String survivorId) {

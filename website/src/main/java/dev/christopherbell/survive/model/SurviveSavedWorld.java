@@ -30,7 +30,7 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
     }
     var owners = new HashSet<String>();
     var survivorIds = new HashSet<String>();
-    var partyIds = new HashSet<UUID>();
+    var partyIds = new HashSet<String>();
     var partyParticipants = new HashSet<String>();
     if (parties.size() > 500 || parties.stream().anyMatch(party -> !partyIds.add(party.id())
         || !partyParticipants.add(party.inviterId()) || !partyParticipants.add(party.inviteeId()))) {
