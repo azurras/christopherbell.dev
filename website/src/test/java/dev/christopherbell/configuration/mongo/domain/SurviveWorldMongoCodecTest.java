@@ -43,6 +43,7 @@ class SurviveWorldMongoCodecTest {
         .thenAnswer(call -> {
           Query query = call.getArgument(0);
           assertTrue(query.getQueryObject().toJson().contains("payload.version"));
+          assertTrue(query.getQueryObject().toJson().contains("\"_id\": {\"kind\": \"survive_world\", \"legacyId\": \"shared\"}"));
           return query.getQueryObject().toJson().contains("\"payload.version\": " + storedVersion.get());
         });
 

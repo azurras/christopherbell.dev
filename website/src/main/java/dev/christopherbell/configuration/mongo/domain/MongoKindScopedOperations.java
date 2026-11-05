@@ -88,6 +88,13 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   }
 
   @Override
+  public boolean existsAtVersion(Object legacyId, Number version) {
+    var versionField = codec.versionFieldName().orElseThrow(IllegalStateException::new);
+    var query = fieldMapper.versionQuery(mappedLegacyId(legacyId), versionField, Objects.requireNonNull(version));
+    return mongo.exists(query, Document.class, kind.collection());
+  }
+
+  @Override
   public T insert(T value) {
     var prepared = prepareForSave(value);
     return insertEnvelope(prepared, codec.initializeVersion(prepared.envelope()));

@@ -5,8 +5,6 @@ import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.survive.model.SurviveSavedWorld;
 import java.util.Optional;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** One versioned Mongo replacement preserves atomic gifts without multi-document transactions. */
@@ -31,8 +29,7 @@ public class MongoSurviveWorldRepository implements SurviveWorldRepository {
   @Override
   public Optional<SurviveSavedWorld> loadForMovement() {
     var cached = lastRead;
-    if (cached != null && cached.version() != null && worlds.exists(
-        Query.query(Criteria.where("id").is(WORLD_ID).and("version").is(cached.version())))) {
+    if (cached != null && cached.version() != null && worlds.existsAtVersion(WORLD_ID, cached.version())) {
       return Optional.of(cached);
     }
     return load();

@@ -21,6 +21,9 @@ public interface KindScopedMongoOperations<T> {
 
   boolean exists(Query domainQuery);
 
+  /** Checks an exact indexed ID and optimistic version without reading the payload. */
+  boolean existsAtVersion(Object legacyId, Number version);
+
   T insert(T value);
 
   T save(T value);
