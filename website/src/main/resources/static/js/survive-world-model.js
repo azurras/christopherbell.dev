@@ -53,9 +53,9 @@ export function actionsAt(position, allowedActions) {
 }
 
 /** Column-major perspective/view matrix for the third-person follow camera. */
-export function cameraMatrix(position, yaw, aspectRatio) {
-  const eye = [position.x + Math.sin(yaw) * 16, 11, position.z + Math.cos(yaw) * 16];
-  const back = normalize([eye[0] - position.x, 10, eye[2] - position.z]);
+export function cameraMatrix(position, yaw, aspectRatio, elevation = 0) {
+  const eye = [position.x + Math.sin(yaw) * 12, elevation + 6.7, position.z + Math.cos(yaw) * 12];
+  const back = normalize([eye[0] - position.x, 5.4, eye[2] - position.z]);
   const right = normalize([back[2], 0, -back[0]]);
   const up = [back[1] * right[2], back[2] * right[0] - back[0] * right[2], -back[1] * right[0]];
   const dotEye = axis => -(axis[0] * eye[0] + axis[1] * eye[1] + axis[2] * eye[2]);

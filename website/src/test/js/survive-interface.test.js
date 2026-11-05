@@ -9,4 +9,5 @@ test('the island places the main menu, commands, and log inside the viewport', (
     assert.ok(viewport.includes(`id="${id}"`), `${id} belongs inside the viewport`);
   }
   assert.doesNotMatch(template, /<aside\b/);
+  assert.doesNotMatch(template, /surviveWorldNotice|surviveWorldNumbers|id="surviveMessage"/);
 });

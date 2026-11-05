@@ -226,20 +226,17 @@ bounded coverage, dashboard-only results and deferred billing/email delivery.
 ### Survive island
 
 `survive-world-model.js` owns display-only landmark filtering, camera projection and
-movement prediction. `survive-world-renderer.js` owns generated WebGL geometry and
-GPU disposal. `survive-world.js` owns scoped keyboard/touch input, destination walking,
+movement prediction. `survive-world-art.js` generates terrain, foliage and actor
+meshes. `survive-world-renderer.js` owns WebGL buffers, lighting, fog and disposal.
+`survive-world.js` owns scoped keyboard/touch input, destination walking,
 sequenced presence pulses, timeout/backoff, player labels and frame/listener cleanup.
 `survive.js` still serializes durable survival commands. New presence uses the API
 constants in `lib/api.js`; it never computes survival rewards. The SVG scene remains
 the fallback for unavailable/lost WebGL. Labels use text nodes, never HTML.
 
-`survive-world-feedback.js` compares confirmed survivor revisions to show action
-outcomes and floating gains/costs/damage inside the viewport, without replaying
-polls or treating a resumed inventory as a reward. Its transient notices expire
-on the existing render loop; combat name/health and viewport actions remain
-visible for the fight. Enemies render in front of the follow camera, with a
-red ground marker. Reward sparks and floating-number animation respect reduced
-motion. Failed requests show in-world notices without predicting rewards.
+`survive-world-feedback.js` renders the current enemy name, health and marker.
+The Chat log is the only surface for command results. Enemies render in front
+of the follow camera. Walking poses respect reduced motion.
 
 The world target menu shows Check and the server-allowed combat commands for the
 selected animal. The page refreshes at the next reported attack deadline during
