@@ -4,7 +4,7 @@ Owns site styling for server-rendered pages and frontend components.
 
 ## What Lives Here
 
-- `survive.css` owns the responsive shared-world adventure, survivor stats, camp and journal.
+- `survive.css` owns the responsive shared-world adventure, survivor stats, camp and chat log.
 
 - `main.css` is the primary shared stylesheet for the current site, Void feed,
   tools, auth, profile, messages, post cards, and responsive layout.
@@ -112,7 +112,7 @@ Update this README when stylesheet ownership, responsive layout strategy, shared
 class contracts, or legacy stylesheet usage changes.
 
 The Survive stylesheet also owns the responsive third-person WebGL viewport, projected
-player/landmark labels, contextual actions, destination walking and touch controls.
+player and landmark labels, contextual actions, the read-only map, and the game calendar.
 The canvas is focusable with visible focus; keyboard input is scoped to that canvas.
 The viewport shows the enemy health display, a selectable target marker and the
 contextual combat buttons. Command outcomes appear in the Chat log. Text controls

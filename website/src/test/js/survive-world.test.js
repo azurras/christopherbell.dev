@@ -131,7 +131,7 @@ test('disposal aborts a stalled pulse, cancels animation and releases input and 
   assert.equal(fixture.documentRoot.getElementById('surviveWorldLabels').children.length, 0);
 });
 
-test('ordinary snapshot refresh keeps destination walking active and no input applies before connection', async () => {
+test('ordinary snapshots preserve held keyboard movement and update the map marker', async () => {
   const fixture = worldFixture();
   const world = mountSurviveWorld(fixture.documentRoot, async () => ({
     self: { survivorId: 'alice', x: 0, z: 0, heading: 0, sequence: 4 }, others: [], accepted: true,
@@ -139,15 +139,14 @@ test('ordinary snapshot refresh keeps destination walking active and no input ap
   world.setState(worldState);
   fixture.frame(0);
   await new Promise(resolve => setImmediate(resolve));
-  fixture.documentRoot.getElementById('surviveWorld').emit('click', {
-    target: { closest: selector => selector === '[data-destination]' ? { dataset: { destination: '1' } } : null },
-  });
+  fixture.documentRoot.getElementById('surviveWorldCanvas').emit('keydown', { code: 'KeyA', preventDefault() {} });
   fixture.frame(100);
   const first = fixture.rendered.at(-1).x;
   assert.ok(first < 0);
   world.setState({ ...worldState, revision: 2 });
   fixture.frame(200);
   assert.ok(fixture.rendered.at(-1).x < first);
+  assert.match(fixture.documentRoot.getElementById('surviveMapPlayer').getAttribute('transform'), /translate\(-/);
   world.dispose();
 });
 

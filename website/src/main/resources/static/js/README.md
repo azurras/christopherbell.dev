@@ -233,7 +233,7 @@ bark and foliage images from `static/images/survive` into WebGL textures.
 and bear silhouettes using cloth, leather, and fur materials. `survive-world-props.js`
 builds the shelters, boats and resource-site props used by the same renderer.
 `survive-world-renderer.js` owns WebGL buffers, lighting, fog and disposal.
-`survive-world.js` owns scoped keyboard/touch input, destination walking,
+`survive-world.js` owns scoped keyboard and controller movement, camera input,
 sequenced presence pulses, timeout/backoff, player labels and frame/listener cleanup.
 `survive.js` still serializes durable survival commands. New presence uses the API
 constants in `lib/api.js`; it never computes survival rewards. The SVG scene remains
@@ -251,8 +251,8 @@ engagement and on return to a visible tab. The server owns attacks, TP, and outc
 
 Survive's Main Menu opens with minus on the focused island or with its on-screen
 control. Enter opens the contextual Commands window. Arrow keys move between
-entries and Escape returns focus to the island. The game log opens the full
-journal inside the Main Menu. Map destinations still use the shared walking path.
+entries and Escape returns focus to the island. The read-only map shows landmarks
+and the survivor's position. The date and time appear inside the viewport.
 
 `survive-log.js` appends the shared world journal oldest first to the in-world
 Chat log, using the server's event revision so repeated polls add nothing and

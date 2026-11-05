@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mountPanelSections, noteJournalEvents, summarizeCamp } from '../../main/resources/static/js/survive-panel.js';
+import { mountPanelSections, summarizeCamp } from '../../main/resources/static/js/survive-panel.js';
 import { createFakeDocument } from './support/fake-dom.js';
 
 function panelFixture() {
@@ -10,13 +10,7 @@ function panelFixture() {
     details.open = false;
     return details;
   };
-  const fullJournal = h('a', { href: '#surviveSectionJournal', id: 'surviveFullJournal' }, 'Full journal');
-  const journal = section('Journal');
-  journal.children[0].appendChild(h('span', { id: 'surviveJournalUnread' }));
-  const mainMenu = h('details', { id: 'surviveMainMenu' }, section('Camp'), journal, section('Guide'));
-  for (const element of [fullJournal, mainMenu]) {
-    documentRoot.body.appendChild(element);
-  }
+  documentRoot.body.appendChild(h('details', { id: 'surviveMainMenu' }, section('Camp'), section('Guide')));
   const memory = new Map();
   const storage = { read: key => memory.get(key) ?? null, write: (key, value) => memory.set(key, value) };
   const byId = id => documentRoot.getElementById(id);
@@ -47,7 +41,6 @@ test('sections start closed and remember being opened or closed', () => {
   mountPanelSections(returning.documentRoot, returning.storage).dispose();
   assert.equal(returning.byId('surviveSectionCamp').open, true);
   assert.equal(returning.byId('surviveSectionGuide').open, false);
-  assert.equal(returning.byId('surviveSectionJournal').open, false);
 });
 
 test('blocked storage leaves every section closed and still lets players open them', () => {
@@ -58,58 +51,6 @@ test('blocked storage leaves every section closed and still lets players open th
     assert.equal(byId('surviveSectionCamp').open, false);
     toggle('Camp', true);
     assert.equal(byId('surviveSectionCamp').open, true);
-  } finally { panel.dispose(); }
-});
-
-test('the Full journal link opens the journal section', () => {
-  const { documentRoot, storage, memory, byId } = panelFixture();
-  const panel = mountPanelSections(documentRoot, storage);
-  try {
-    const click = byId('surviveFullJournal').dispatch('click');
-    assert.equal(click.defaultPrevented, true);
-    assert.equal(byId('surviveMainMenu').open, true);
-    assert.equal(byId('surviveSectionJournal').open, true);
-    assert.equal(memory.get('survive.section.journal'), 'open');
-  } finally { panel.dispose(); }
-  byId('surviveSectionJournal').open = false;
-  byId('surviveFullJournal').dispatch('click');
-  assert.equal(byId('surviveSectionJournal').open, false);
-});
-
-test('a journal inside a closed main menu stays unread until the menu opens', () => {
-  const { documentRoot, storage, byId } = panelFixture();
-  const panel = mountPanelSections(documentRoot, storage);
-  try {
-    const mainMenu = byId('surviveMainMenu');
-    noteJournalEvents(documentRoot, 10);
-    byId('surviveSectionJournal').open = true;
-    mainMenu.open = false;
-    noteJournalEvents(documentRoot, 11);
-    assert.equal(byId('surviveJournalUnread').hidden, false);
-    mainMenu.open = true;
-    mainMenu.dispatch('toggle');
-    assert.equal(byId('surviveJournalUnread').hidden, true);
-  } finally { panel.dispose(); }
-});
-
-test('new events mark the closed journal until it is opened', () => {
-  const { documentRoot, storage, byId, toggle } = panelFixture();
-  const panel = mountPanelSections(documentRoot, storage);
-  try {
-    const unread = byId('surviveJournalUnread');
-    noteJournalEvents(documentRoot, 10);
-    assert.equal(unread.hidden, true);
-    noteJournalEvents(documentRoot, 11);
-    assert.equal(unread.hidden, false);
-    toggle('Journal', true);
-    assert.equal(unread.hidden, true);
-    noteJournalEvents(documentRoot, 12);
-    assert.equal(unread.hidden, true);
-    toggle('Journal', false);
-    noteJournalEvents(documentRoot, 12);
-    assert.equal(unread.hidden, true);
-    noteJournalEvents(documentRoot, 13);
-    assert.equal(unread.hidden, false);
   } finally { panel.dispose(); }
 });
 

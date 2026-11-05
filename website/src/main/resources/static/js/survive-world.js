@@ -16,7 +16,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   const commandButton = documentRoot.getElementById('surviveCommandButton');
   const mainMenu = documentRoot.getElementById('surviveMainMenu');
   const labels = documentRoot.getElementById('surviveWorldLabels');
-  const directions = documentRoot.getElementById('surviveWorldDirections');
+  const mapPlayer = documentRoot.getElementById('surviveMapPlayer');
   const locationLabel = documentRoot.getElementById('surviveWorldLocation');
   const target = documentRoot.getElementById('surviveWorldEnemyMarker');
   let renderer;
@@ -30,7 +30,6 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   catch (error) {
     feedback.textContent = `${error.message} Use the camp illustration and action menus below.`;
     canvas.hidden = true;
-    directions.hidden = true;
     let fallbackSurvivorId;
     return {
       setState(nextState) {
@@ -58,7 +57,6 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   let confirmed = { ...position };
   let sequence = 0;
   let yaw = 0;
-  let goal = null;
   let others = [];
   let wildlife = [];
   let encounter = null;
@@ -84,7 +82,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   const isVisible = () => state && !documentRoot.hidden && !documentRoot.getElementById('surviveGame').hidden
     && !documentRoot.getElementById('surviveGame').inert
     && documentRoot.getElementById('surviveJoin').hidden;
-  function stopWalking() { pressed.clear(); goal = null; }
+  function stopWalking() { pressed.clear(); }
   function syncNameLabels() {
     const entries = [...LANDMARKS.map(landmark => ({ ...landmark, id: landmark.name, landmark: true })),
       ...others.map(other => ({ ...other, id: other.survivorId })),
@@ -250,16 +248,6 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       closeCommands();
     }
   });
-  listen(shell, 'click', event => {
-    const destination = event.target.closest('[data-destination]');
-    if (destination && connected && state?.status === 'EXPLORING') {
-      goal = LANDMARKS[Number(destination.dataset.destination)];
-      mainMenu.open = false;
-      canvas.focus({ preventScroll: true });
-    }
-    const rotate = event.target.closest('[data-camera-turn]');
-    if (rotate) yaw += Number(rotate.dataset.cameraTurn) * Math.PI / 6;
-  });
   listen(shell, 'keydown', event => {
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey
         || event.target.closest('input, select, textarea')) return;
@@ -291,7 +279,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   listen(canvas, 'keydown', event => {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     const direction = directionKeys.get(event.code);
-    if (direction) { event.preventDefault(); pressed.add(direction); goal = null; }
+    if (direction) { event.preventDefault(); pressed.add(direction); }
     if (event.code === 'KeyQ') { event.preventDefault(); yaw -= 0.12; }
     if (event.code === 'KeyR') { event.preventDefault(); yaw += 0.12; }
     if ((event.code === 'Enter' || event.code === 'KeyE') && !event.repeat) {
@@ -321,17 +309,6 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   });
   listen(canvas, 'pointerup', () => { drag = null; });
   listen(canvas, 'pointercancel', () => { drag = null; });
-  listen(directions, 'pointerdown', event => {
-    const button = event.target.closest('[data-walk]');
-    if (!button) return;
-    event.preventDefault();
-    goal = null;
-    pressed.add(button.dataset.walk);
-    button.setPointerCapture(event.pointerId);
-  });
-  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-    listen(directions, type, () => pressed.clear());
-  }
   listen(canvas, 'webglcontextlost', event => {
     event.preventDefault();
     stopWalking();
@@ -344,7 +321,6 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     commandButton.hidden = true;
     void releasePresence();
     canvas.hidden = true;
-    directions.hidden = true;
     documentRoot.getElementById('surviveCampScene').removeAttribute('hidden');
   });
 
@@ -356,19 +332,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       const previousPosition = position;
       yaw += controllerAxes.camera * seconds * 2.4;
       if (connected && !busy && state.status === 'EXPLORING') {
-        let right = Number(pressed.has('right')) - Number(pressed.has('left')) + controllerAxes.right;
-        let forward = Number(pressed.has('forward')) - Number(pressed.has('back')) + controllerAxes.forward;
-        if (controllerAxes.right || controllerAxes.forward) goal = null;
-        if (goal) {
-          const dx = goal.x - position.x;
-          const dz = goal.z - position.z;
-          if (Math.hypot(dx, dz) < 1) goal = null;
-          else {
-            const distance = Math.hypot(dx, dz);
-            right = (dx * Math.cos(yaw) - dz * Math.sin(yaw)) / distance;
-            forward = (-dx * Math.sin(yaw) - dz * Math.cos(yaw)) / distance;
-          }
-        }
+        const right = Number(pressed.has('right')) - Number(pressed.has('left')) + controllerAxes.right;
+        const forward = Number(pressed.has('forward')) - Number(pressed.has('back')) + controllerAxes.forward;
         // Stop prediction beyond a small unacknowledged window, including a stalled request.
         if (Math.hypot(position.x - confirmed.x, position.z - confirmed.z) < 5) {
           position = advancePosition(position, right, forward, yaw, seconds);
@@ -400,6 +365,11 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         label.element.style.left = `${(projected.x + 1) * 50}%`;
         label.element.style.top = `${(1 - projected.y) * 50}%`;
       }
+      if (connected) {
+        mapPlayer.removeAttribute('hidden');
+        mapPlayer.setAttribute('transform',
+          `translate(${position.x.toFixed(1)} ${position.z.toFixed(1)}) rotate(${-position.heading * 180 / Math.PI})`);
+      }
       const nearest = [...LANDMARKS].sort((a, b) => Math.hypot(a.x - position.x, a.z - position.z) - Math.hypot(b.x - position.x, b.z - position.z))[0];
       locationLabel.textContent = `${nearest.name} · ${Math.round(Math.hypot(nearest.x - position.x, nearest.z - position.z))} m`;
       updateActions();
@@ -429,6 +399,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     view.cancelAnimationFrame(frameId);
     for (const remove of listeners) remove();
     renderer.dispose();
+    mapPlayer.setAttribute('hidden', '');
     worldFeedback.dispose();
     labels.replaceChildren();
   }
