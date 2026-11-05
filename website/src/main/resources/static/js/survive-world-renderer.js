@@ -4,6 +4,7 @@ import { createIslandMaterials } from './survive-world-materials.js';
 import { drawBoat, drawCampFlame, drawShelter } from './survive-world-props.js';
 import { actionPose } from './survive-action-pose.js';
 import { prepareActorArt } from './survive-authored-actors.js';
+import { createDynamicMesh } from './survive-dynamic-mesh.js';
 import { cameraMatrix, projectPoint } from './survive-world-model.js';
 import { fetchJson } from './lib/util.js';
 
@@ -150,6 +151,9 @@ export function createWorldRenderer(canvas) {
     const scenery = islandMesh();
     const staticBuffer = gl.createBuffer();
     const actorBuffer = gl.createBuffer();
+    const dynamicMesh = createDynamicMesh(gl, actorBuffer);
+    const fallbackActors = meshBuilder(undefined, dynamicMesh.append);
+    const authoredActors = meshBuilder(actorArt, dynamicMesh.append);
     buffers.push(staticBuffer, actorBuffer);
     gl.bindBuffer(gl.ARRAY_BUFFER, staticBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(scenery.vertices), gl.STATIC_DRAW);
@@ -193,7 +197,8 @@ export function createWorldRenderer(canvas) {
         gl.uniform3fv(skyUniform, sky);
         gl.uniform1f(timeUniform, animationSeconds % 120);
         drawBuffer(staticBuffer, scenery.vertices.length / MESH_VERTEX_FLOATS);
-        const actors = meshBuilder(materials.authoredActorsReady ? actorArt : undefined);
+        dynamicMesh.reset();
+        const actors = materials.authoredActorsReady ? authoredActors : fallbackActors;
         drawCampFlame(actors, position.animate ? animationSeconds : 0);
         const stride = avatar => avatar.moving ? Math.sin(animationSeconds * 11) : 0;
         const pose = actionPose(gesture) || (state.status === 'SLEEPING' && position.animate
@@ -242,9 +247,7 @@ export function createWorldRenderer(canvas) {
               true, animationSeconds);
           }
         }
-        gl.bindBuffer(gl.ARRAY_BUFFER, actorBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(actors.vertices), gl.DYNAMIC_DRAW);
-        drawBuffer(actorBuffer, actors.vertices.length / MESH_VERTEX_FLOATS);
+        drawBuffer(actorBuffer, dynamicMesh.upload() / MESH_VERTEX_FLOATS);
         return { project: point => projectPoint(matrix, point) };
       },
       dispose,

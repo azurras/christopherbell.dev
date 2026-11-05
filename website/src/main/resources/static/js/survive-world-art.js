@@ -296,7 +296,7 @@ function cross(a, b) {
 }
 
 /** Store interleaved world-space positions and baked directional color for WebGL. */
-export function meshBuilder(actorArt) {
+export function meshBuilder(actorArt, appendVertex) {
   const vertices = [];
   function triangle(a, b, c, color, material = 0, coordinates = null) {
     const normal = cross(b.map((value, index) => value - a[index]), c.map((value, index) => value - a[index]));
@@ -308,7 +308,9 @@ export function meshBuilder(actorArt) {
     [a, b, c].forEach((point, index) => {
       const [x, y, z] = point;
       const uv = coordinates?.[index] || (weights[index] < 2 || (ny >= nx && ny >= nz) ? [x, z] : nx > nz ? [z, y] : [x, y]);
-      vertices.push(...point, ...tint(colors[index], shade), weights[index], ...uv);
+      const [red, green, blue] = colors[index];
+      if (appendVertex) appendVertex(x, y, z, red * shade, green * shade, blue * shade, weights[index], uv[0], uv[1]);
+      else vertices.push(x, y, z, red * shade, green * shade, blue * shade, weights[index], uv[0], uv[1]);
     });
   }
   function box(x, y, z, width, height, depth, color, material = 0) {
