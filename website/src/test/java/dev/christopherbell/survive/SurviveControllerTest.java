@@ -101,6 +101,18 @@ class SurviveControllerTest {
   }
 
   @Test
+  void publicPartyCommandsStillNeedCsrfAndAnOwner() throws Exception {
+    String invite = "{\"command\":\"INVITE\",\"targetId\":\"00000000-0000-0000-0000-000000000001\"}";
+    mvc.perform(post("/api/survive/v1/party").contentType("application/json").content(invite))
+        .andExpect(status().isForbidden());
+    mvc.perform(post("/api/survive/v1/party").with(csrf()).contentType("application/json").content(invite))
+        .andExpect(status().isNotFound());
+    mvc.perform(post("/api/survive/v1/party").with(csrf()).contentType("application/json")
+        .content("{\"command\":\"INVITE\",\"targetId\":\"invalid\"}"))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
   void anonymousGiftsKeepCsrfAndValidateTheRequestBeforeMutation() throws Exception {
     String gift = "{\"recipientId\":\"missing\",\"resource\":\"WOOD\",\"quantity\":1,\"revision\":0}";
     mvc.perform(post("/api/survive/v1/gifts").contentType("application/json").content(gift))

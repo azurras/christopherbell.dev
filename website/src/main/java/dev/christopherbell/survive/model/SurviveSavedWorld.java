@@ -15,7 +15,7 @@ import dev.christopherbell.survive.model.SurviveSnapshot.Status;
  */
 public record SurviveSavedWorld(@Id String id, @Version Long version, long revision,
     int shelters, int boats, List<String> events, List<Player> players, Long settledBoundaries,
-    Long activeRaidNight) {
+    Long activeRaidNight, List<SurviveParty> parties) {
   public SurviveSavedWorld {
     if (!"shared".equals(id) || version != null && version < 0 || revision < 0
         || shelters < 0 || shelters > 1000 || boats < 0 || boats > 1000) {
@@ -23,12 +23,19 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
     }
     events = List.copyOf(events);
     players = List.copyOf(players);
+    parties = parties == null ? List.of() : List.copyOf(parties);
     if (events.size() > 30 || players.size() > 1000
         || events.stream().anyMatch(event -> event.length() > 1024)) {
       throw new IllegalArgumentException("Saved world exceeds its bounds.");
     }
     var owners = new HashSet<String>();
     var survivorIds = new HashSet<String>();
+    var partyIds = new HashSet<UUID>();
+    var partyParticipants = new HashSet<String>();
+    if (parties.size() > 500 || parties.stream().anyMatch(party -> !partyIds.add(party.id())
+        || !partyParticipants.add(party.inviterId()) || !partyParticipants.add(party.inviteeId()))) {
+      throw new IllegalArgumentException("Saved parties exceed their bounds or overlap.");
+    }
     for (var player : players) {
       String owner = player.accountId() == null ? "guest:" + player.token() : "account:" + player.accountId();
       if (!owners.add(owner) || !survivorIds.add(player.survivorId())) {
@@ -45,7 +52,7 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
 
   /** New worlds have no durable version until their first successful insert. */
   public static SurviveSavedWorld empty() {
-    return new SurviveSavedWorld("shared", null, 0, 0, 0, List.of(), List.of(), null, null);
+    return new SurviveSavedWorld("shared", null, 0, 0, 0, List.of(), List.of(), null, null, List.of());
   }
 
   /**

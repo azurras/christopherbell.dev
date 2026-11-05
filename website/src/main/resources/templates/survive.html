@@ -83,6 +83,21 @@
                   <div class="survive-card-footer"><span id="survivePublicId" class="survive-muted"></span><span class="survive-secondary"><button id="surviveRefresh" type="button">Refresh world</button><button id="surviveRestart" type="button">New survivor</button></span></div>
                 </details>
                 <details class="survive-panel survive-section">
+                  <summary>Party</summary>
+                  <form id="survivePartyForm">
+                    <label for="survivePartyRecipient">Invite survivor</label>
+                    <select id="survivePartyRecipient" name="recipient"></select>
+                    <button type="submit">Invite</button>
+                  </form>
+                  <div id="survivePartyControls" hidden>
+                    <p id="survivePartyStatus"></p>
+                    <button type="button" data-party-command="ACCEPT" hidden>Accept</button>
+                    <button type="button" data-party-command="DECLINE" hidden>Decline</button>
+                    <button type="button" data-party-command="CANCEL" hidden>Cancel invite</button>
+                    <button type="button" data-party-command="LEAVE" hidden>Leave party</button>
+                  </div>
+                </details>
+                <details class="survive-panel survive-section">
                   <summary>Items</summary>
                   <dl class="survive-inventory" aria-label="Inventory">
                     <div><dt>Wood</dt><dd id="surviveWood"></dd></div>

@@ -14,4 +14,5 @@ public final class SurviveRequests {
   public record Act(@NotNull SurviveAction action, @NotNull @Min(0) Long revision, @Size(max = 48) String targetId) {}
   public record Gift(@NotBlank @Size(max = 36) String recipientId, @NotNull SurviveResource resource,
       @NotNull @Min(1) @Max(10) Integer quantity, @NotNull @Min(0) Long revision) {}
+  public record Party(@NotNull SurviveParty.Command command, @NotNull java.util.UUID targetId) {}
 }

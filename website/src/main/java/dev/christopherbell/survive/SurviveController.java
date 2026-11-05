@@ -80,6 +80,15 @@ public class SurviveController {
         .body(survivors.giveSuppliesForOwner(token, accountId(), request.recipientId(), request.resource(),
             request.quantity(), request.revision()));
   }
+  /** Mutates only the requesting survivor's party relationship. */
+  @PostMapping("/party")
+  public ResponseEntity<SurviveSnapshot> changeParty(
+      @CookieValue(name = COOKIE_NAME, required = false) String token,
+      @Valid @RequestBody SurviveRequests.Party request) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+        .body(survivors.changePartyForOwner(token, accountId(), request));
+  }
+
   /** A pulse authenticates movement and returns the current shared wildlife view. */
   @PostMapping("/movement")
   public ResponseEntity<SurvivePresence.View> move(

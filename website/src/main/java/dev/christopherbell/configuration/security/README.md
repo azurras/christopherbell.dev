@@ -5,7 +5,7 @@ Owns Spring Security wiring and request authentication infrastructure.
 ## What Lives Here
 
 - `SecurityConfig` defines public routes, method security, the filter chain, and security-related beans.
-- Survive exposes only GET `/survive` and `/survive/`, GET/POST `/api/survive/v1/game`, POST `/api/survive/v1/actions`, `/api/survive/v1/gifts`, `/api/survive/v1/movement` and `/api/survive/v1/movement/leave`, and its MIT license GET. Mutations retain CSRF protection; private survivor cookies authorize commands within the shared world without website login. Public recipient IDs do not authorize control of their survivors. Movement resolves the same owner without writing saved progress; the leave route releases only that owner's transient pose for the text fallback.
+- Survive exposes only GET `/survive` and `/survive/`, GET/POST `/api/survive/v1/game`, POST `/api/survive/v1/actions`, `/api/survive/v1/gifts`, `/api/survive/v1/party`, `/api/survive/v1/movement` and `/api/survive/v1/movement/leave`, and its MIT license GET. Mutations retain CSRF protection; private survivor cookies authorize commands within the shared world without website login. Public recipient IDs do not authorize control of their survivors. Movement resolves the same owner without writing saved progress; the leave route releases only that owner's transient pose for the text fallback.
 - `JwtAuthenticationFilter` reads bearer tokens, validates them, and populates the Spring Security context.
 - Browser-session activity is coalesced to at most one conditional Mongo update per five-minute
   window. An activity-update race loser reloads the session and current account once and
