@@ -28,10 +28,12 @@ function axis(value) {
   return Math.abs(value) >= DEAD_ZONE ? value : 0;
 }
 
-/** Gate phone play at the browser and translate controller input into the existing game controls. */
-export function mountPhonePlay(documentRoot, world, onResume) {
+/** Share controller controls across devices and gate gameplay only on phones. */
+export function mountSurviveController(documentRoot, world, onResume) {
   const view = documentRoot.defaultView;
-  if (!isPhoneBrowser(view?.navigator)) return { dispose() {} };
+  const phone = isPhoneBrowser(view?.navigator);
+  const gamepadSupported = typeof view?.navigator?.getGamepads === 'function';
+  if (!phone && !gamepadSupported) return { dispose() {} };
 
   const shell = documentRoot.getElementById('survivePlayShell');
   const game = documentRoot.getElementById('surviveGame');
@@ -47,14 +49,14 @@ export function mountPhonePlay(documentRoot, world, onResume) {
   const startOver = documentRoot.getElementById('surviveStartOver');
   const cancelJoin = documentRoot.getElementById('surviveCancel');
   let frame;
-  let ready = false;
+  let idlePoll;
+  let ready = !phone;
   let lastButtons = [];
   let controllerIndex;
   let wasGameVisible = false;
   let fullscreenFailed = false;
   const fullscreenSupported = typeof shell.requestFullscreen === 'function' && documentRoot.fullscreenEnabled !== false;
-  const gamepadSupported = typeof view.navigator.getGamepads === 'function';
-  shell.dataset.phone = 'true';
+  if (phone) shell.dataset.phone = 'true';
 
   function key(target, code, value = code) {
     target.dispatchEvent(new view.KeyboardEvent('keydown', { code, key: value, bubbles: true, cancelable: true }));
@@ -117,12 +119,9 @@ export function mountPhonePlay(documentRoot, world, onResume) {
     }
   }
 
-  function update() {
-    const controller = readStandardGamepad(view.navigator);
-    const isFullscreen = documentRoot.fullscreenElement === shell;
-    const allowed = isFullscreen && controller !== null && !canvas.hidden;
-    const changed = allowed !== ready;
-    ready = allowed;
+  function syncPhoneGate(isFullscreen, controller) {
+    const wasReady = ready;
+    ready = isFullscreen && controller !== null && !canvas.hidden;
     if (shell.dataset.locked !== String(!ready)) {
       gate.hidden = ready;
       game.inert = !ready;
@@ -140,7 +139,7 @@ export function mountPhonePlay(documentRoot, world, onResume) {
       : 'Connect a supported controller and press a button to begin.';
     if (status.textContent !== message) status.textContent = message;
 
-    if (changed) {
+    if (ready !== wasReady) {
       world.stopInput?.();
       if (ready) {
         (game.hidden ? join.querySelector('input') : canvas)?.focus({ preventScroll: true });
@@ -149,11 +148,20 @@ export function mountPhonePlay(documentRoot, world, onResume) {
         fullscreen.focus({ preventScroll: true });
       }
     }
-    if (ready && !documentRoot.hidden) {
+  }
+
+  function update() {
+    const controller = readStandardGamepad(view.navigator);
+    if (phone) syncPhoneGate(documentRoot.fullscreenElement === shell, controller);
+    if (ready && controller && !documentRoot.hidden) {
       const gameVisible = !game.hidden && join.hidden;
-      if (gameVisible && !wasGameVisible) canvas.focus({ preventScroll: true });
+      if (phone && gameVisible && !wasGameVisible) canvas.focus({ preventScroll: true });
       wasGameVisible = gameVisible;
       if (controller.index === controllerIndex) useButtons(controller.buttons);
+      const wantsToMove = controller.axes.slice(0, 3).some(value => axis(value));
+      const focus = documentRoot.activeElement;
+      if (!phone && wantsToMove && gameVisible && !currentMenu()
+          && (focus === documentRoot.body || !focus)) canvas.focus({ preventScroll: true });
       const moving = gameVisible && documentRoot.activeElement === canvas && !currentMenu();
       world.setControllerAxes?.(moving ? axis(controller.axes[0]) : 0,
         moving ? -axis(controller.axes[1]) : 0, moving ? axis(controller.axes[2]) : 0);
@@ -163,7 +171,8 @@ export function mountPhonePlay(documentRoot, world, onResume) {
       wasGameVisible = false;
       lastButtons = [];
     }
-    controllerIndex = ready ? controller.index : undefined;
+    controllerIndex = ready ? controller?.index : undefined;
+    return controller !== null;
   }
 
   async function enterFullscreen() {
@@ -185,18 +194,21 @@ export function mountPhonePlay(documentRoot, world, onResume) {
   }
 
   function poll() {
-    update();
-    frame = view.requestAnimationFrame(poll);
+    if (update() || phone) frame = view.requestAnimationFrame(poll);
+    else idlePoll = view.setTimeout(poll, 250);
   }
 
-  fullscreen.addEventListener('click', enterFullscreen);
-  documentRoot.addEventListener('fullscreenchange', update);
+  if (phone) {
+    fullscreen.addEventListener('click', enterFullscreen);
+    documentRoot.addEventListener('fullscreenchange', update);
+    game.addEventListener('keydown', ignoreHardwareKeys, true);
+  }
   view.addEventListener('gamepaddisconnected', update);
-  game.addEventListener('keydown', ignoreHardwareKeys, true);
   poll();
   return {
     dispose() {
       view.cancelAnimationFrame(frame);
+      view.clearTimeout?.(idlePoll);
       view.removeEventListener('gamepaddisconnected', update);
       documentRoot.removeEventListener('fullscreenchange', update);
       fullscreen.removeEventListener('click', enterFullscreen);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isPhoneBrowser, mountPhonePlay, readStandardGamepad } from '../../main/resources/static/js/survive-phone-play.js';
+import { isPhoneBrowser, mountSurviveController, readStandardGamepad } from '../../main/resources/static/js/survive-controller.js';
 
 test('a narrow desktop and touch laptop do not require phone play mode', () => {
   assert.equal(isPhoneBrowser({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', maxTouchPoints: 10 }), false);
@@ -56,7 +56,7 @@ test('phone gameplay unlocks only with real fullscreen and an available gamepad'
     stopInput() { stopped++; },
     setControllerAxes(...values) { axes.push(values); },
   };
-  const phonePlay = mountPhonePlay(documentRoot, world, () => resumed++);
+  const phonePlay = mountSurviveController(documentRoot, world, () => resumed++);
   try {
     assert.equal(byId('surviveGame').inert, true);
     gamepad = { index: 0, mapping: 'standard', connected: true, axes: [0.4, -0.8, 0.5, 0],
@@ -90,4 +90,42 @@ test('phone gameplay unlocks only with real fullscreen and an available gamepad'
     nextFrame();
     assert.equal(byId('surviveGame').inert, true);
   } finally { phonePlay.dispose(); }
+});
+
+test('a desktop controller works in a normal window and never locks mouse or keyboard play', () => {
+  let nextFrame;
+  let delayedPoll;
+  let gamepad = { index: 0, mapping: 'standard', connected: true, axes: [0.55, 0, -0.7, 0],
+    buttons: Array.from({ length: 16 }, () => ({ pressed: false })) };
+  const axes = [];
+  const nodes = new Map();
+  const body = {};
+  const documentRoot = {
+    body, activeElement: body, fullscreenElement: null,
+    removeEventListener() {},
+    getElementById(id) {
+      if (!nodes.has(id)) nodes.set(id, {
+        dataset: {}, hidden: ['surviveJoin', 'surviveWorldActions', 'survivePhoneGate'].includes(id),
+        focus() { documentRoot.activeElement = this; }, removeEventListener() {},
+      });
+      return nodes.get(id);
+    },
+    defaultView: {
+      navigator: { userAgent: 'Windows NT', getGamepads: () => [gamepad] },
+      addEventListener() {}, removeEventListener() {}, cancelAnimationFrame() {}, clearTimeout() {},
+      requestAnimationFrame(callback) { nextFrame = callback; },
+      setTimeout(callback) { delayedPoll = callback; },
+    },
+  };
+  const controller = mountSurviveController(documentRoot, { setControllerAxes(...values) { axes.push(values); } }, () => {});
+  try {
+    assert.equal(documentRoot.getElementById('surviveGame').inert, undefined);
+    assert.equal(documentRoot.getElementById('survivePhoneGate').hidden, true);
+    assert.deepEqual(axes.at(-1), [0.55, -0, -0.7]);
+    gamepad = null;
+    nextFrame();
+    assert.deepEqual(axes.at(-1), [0, 0, 0]);
+    assert.equal(typeof delayedPoll, 'function');
+    assert.equal(documentRoot.getElementById('surviveGame').inert, undefined);
+  } finally { controller.dispose(); }
 });

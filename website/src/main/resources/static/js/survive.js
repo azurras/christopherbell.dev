@@ -2,7 +2,7 @@
 import { API } from './lib/api.js';
 import { fetchJson } from './lib/util.js';
 import { appendSurviveLogMessage, syncSurviveLog } from './survive-log.js';
-import { mountPhonePlay } from './survive-phone-play.js';
+import { mountSurviveController } from './survive-controller.js';
 import { keepFocusInActionBar, mountActionMenus, syncActionMenus } from './survive-menus.js';
 import { mountPanelSections, noteJournalEvents, summarizeCamp } from './survive-panel.js';
 import { renderSurviveScene } from './survive-scene.js';
@@ -164,7 +164,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const logToggle = documentRoot.getElementById('surviveLogToggle');
   const logScrollback = documentRoot.getElementById('surviveLogScrollback');
   const world = mountSurviveWorld(documentRoot, requestJson, performAction, undefined, () => readWorld());
-  const phonePlay = mountPhonePlay(documentRoot, world, () => { if (state) readWorld(); });
+  const controller = mountSurviveController(documentRoot, world, () => { if (state) readWorld(); });
 
   function setLogExpanded(expanded) {
     const followsLatest = logScrollback.scrollHeight - logScrollback.clientHeight - logScrollback.scrollTop <= 4;
@@ -334,7 +334,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       startOver.removeEventListener('click', showJoin);
       menus.dispose();
       panel.dispose();
-      phonePlay.dispose();
+      controller.dispose();
       world.dispose();
       documentRoot.getElementById('surviveCampScene').removeEventListener('click', act);
       restart.removeEventListener('click', showJoin);
