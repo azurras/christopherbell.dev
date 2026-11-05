@@ -199,8 +199,8 @@ test('serializes actions with the server revision and reconciles failure without
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(requests.length, 3);
     assert.equal(requests[2].url, '/api/survive/v1/game');
-    assert.equal(documentRoot.getElementById('surviveError').hidden, false);
-    assert.match(documentRoot.getElementById('surviveError').textContent, /Lost response/);
+    assert.equal(documentRoot.getElementById('surviveError').hidden, true);
+    assert.match(documentRoot.getElementById('surviveRecentEvents').children.at(-1).textContent, /Lost response/);
     assert.equal(gather.disabled, false);
   } finally { mounted.dispose(); }
 });

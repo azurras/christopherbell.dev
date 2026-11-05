@@ -18,7 +18,6 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   const directions = documentRoot.getElementById('surviveWorldDirections');
   const locationLabel = documentRoot.getElementById('surviveWorldLocation');
   const target = documentRoot.getElementById('surviveWorldEnemyMarker');
-  const targetDetails = documentRoot.getElementById('surviveWorldTargetDetails');
   let renderer;
   function releasePresence() {
     return requestJson(API.survive.leaveIsland, { method: 'POST', body: '{}', redirectOnUnauthorized: false,
@@ -46,7 +45,6 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   const worldFeedback = createWorldFeedback(documentRoot);
   shell.dataset.active = 'true';
   const view = documentRoot.defaultView;
-  const motionPreference = view.matchMedia?.('(prefers-reduced-motion: reduce)');
   const pressed = new Set();
   const listeners = [];
   let state = null;
@@ -144,7 +142,6 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (!targetSelected) {
       targetSelected = true;
       target.setAttribute('aria-pressed', 'true');
-      targetDetails.textContent = 'Engaged fights continue while you are away.';
     }
     openCommands();
   }
@@ -171,8 +168,6 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       } else if (action === 'CHECK_TARGET' && targetSelected) {
         const danger = { HOG: 'Low threat', WOLF: 'Dangerous', BEAR: 'Severe threat' };
         const threat = danger[state.enemy] || 'Unknown threat';
-        const assessment = `${threat}. ${state.enemyHealth} health.`;
-        targetDetails.textContent = `${assessment} Engaged fights continue while away.`;
         appendSurviveLogMessage(documentRoot, `${target.textContent} · ${threat}.`);
       } else if (!busy && targetActionsFor(state, targetSelected).includes(action) && state.actions.includes(action)) {
         onAction(action);
@@ -360,8 +355,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         other.drawX += (other.x - other.drawX) * Math.min(1, seconds * 8);
         other.drawZ += (other.z - other.drawZ) * Math.min(1, seconds * 8);
       }
-      const rendered = renderer.draw(position, yaw, state, others.map(other => ({ ...other, x: other.drawX, z: other.drawZ })), motionPreference?.matches ? null : worldFeedback.effect());
-      worldFeedback.draw(rendered.project, position, combatPosition(position, yaw));
+      const rendered = renderer.draw(position, yaw, state, others.map(other => ({ ...other, x: other.drawX, z: other.drawZ })));
+      worldFeedback.draw(rendered.project, combatPosition(position, yaw));
       for (const label of desiredNameLabels) {
         const projected = rendered.project([label.x, label.landmark ? 4 : 3, label.z]);
         label.element.hidden = !projected.visible;
@@ -390,19 +385,14 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   return {
     setState(nextState, isBusy = false) {
       if (disposed) return;
-      worldFeedback.acceptState(nextState, isBusy);
+      worldFeedback.acceptState(nextState);
       if (nextState?.status !== 'COMBAT' || state?.survivorId !== nextState.survivorId || state?.enemy !== nextState.enemy) {
         targetSelected = false;
         target.setAttribute('aria-pressed', 'false');
-        targetDetails.textContent = '';
       }
       if (nextState?.nextStrikeAt) {
         targetSelected = true;
         target.setAttribute('aria-pressed', 'true');
-        const details = nextState.defending ? 'Guard ready for the next exchange.' : 'Auto-attacking · Weapon skills cost 100 TP.';
-        if (targetDetails.textContent !== details) targetDetails.textContent = details;
-      } else if (targetSelected && state?.nextStrikeAt) {
-        targetDetails.textContent = 'Automatic attacks stopped. Engage to resume.';
       }
       if (state?.survivorId !== nextState?.survivorId) {
         requestGeneration++;
@@ -419,8 +409,6 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       busy = isBusy;
       if (busy || state?.status !== 'EXPLORING') stopWalking();
     },
-    beginAction(action) { if (!disposed) worldFeedback.beginAction(action); },
-    showError(message) { if (!disposed) worldFeedback.showError(message); },
     dispose,
   };
 }

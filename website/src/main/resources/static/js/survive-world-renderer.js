@@ -67,7 +67,7 @@ export function createWorldRenderer(canvas) {
       gl.drawArrays(gl.TRIANGLES, 0, count);
     }
     return {
-      draw(position, yaw, state, others, feedback = null) {
+      draw(position, yaw, state, others) {
         const pixelRatio = Math.min(1.5, globalThis.devicePixelRatio || 1);
         const width = Math.max(1, Math.round(canvas.clientWidth * pixelRatio));
         const height = Math.max(1, Math.round(canvas.clientHeight * pixelRatio));
@@ -101,14 +101,6 @@ export function createWorldRenderer(canvas) {
           const enemy = combatPosition(position, yaw);
           actors.disk(enemy.x, 0.08, enemy.z, 2, [0.7, 0.14, 0.09], 16);
           actors.animal(enemy.x, enemy.z, scale);
-        }
-        if (feedback?.kind === 'gain' && feedback.ageSeconds < 1.5) {
-          for (let index = 0; index < 8; index++) {
-            const angle = index * Math.PI / 4;
-            const radius = 0.5 + feedback.ageSeconds;
-            actors.cone(position.x + Math.cos(angle) * radius, 1.7 + feedback.ageSeconds * 1.2,
-              position.z + Math.sin(angle) * radius, 0.12, 0.3, [1, 0.86, 0.35], 4);
-          }
         }
         gl.bindBuffer(gl.ARRAY_BUFFER, actorBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(actors.vertices), gl.DYNAMIC_DRAW);

@@ -49,10 +49,6 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveDay', `Day ${state.day}`);
   setText('surviveNextPhase', NEXT_PHASE_LABELS[state.phase] || 'Next phase in');
   setText('surviveCountdown', formatCountdown(state.secondsToNextPhase));
-  const message = documentRoot.getElementById('surviveMessage');
-  if (message.textContent !== state.message) {
-    message.textContent = state.message;
-  }
   setText('surviveHealthText', `${state.health} / 10`);
   setText('surviveHudName', state.name);
   setText('surviveHudHealth', `HP ${state.health}/10`);
@@ -232,11 +228,12 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
         try { acceptState(await requestJson(API.survive.game, { redirectOnUnauthorized: false })); }
         catch (_) { /* Keep the last confirmed view and show the original failure. */ }
       }
-      errorBox.textContent = `${error.message || 'The server could not be reached.'} Refresh the world before trying another move.`;
-      errorBox.hidden = false;
-      if (options.method === 'POST') {
-        world.showError?.(errorBox.textContent);
-        if (state) appendSurviveLogMessage(documentRoot, errorBox.textContent);
+      const message = `${error.message || 'The server could not be reached.'} Refresh the world before trying another move.`;
+      if (state && joinForm.hidden) {
+        appendSurviveLogMessage(documentRoot, message);
+      } else {
+        errorBox.textContent = message;
+        errorBox.hidden = false;
       }
     } finally {
       setPending(false);
@@ -259,7 +256,6 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   };
   function performAction(action) {
     if (!state || pending || !state.actions.includes(action)) return;
-    world.beginAction?.(action);
     void sendRequest(API.survive.actions, {
       method: 'POST', body: JSON.stringify({ action, revision: state.revision }),
     });

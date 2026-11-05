@@ -10,7 +10,6 @@
 .survive-panel h3 span { float: right; font-family: monospace; }
 .survive-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .survive-badge { border: 1px solid #607659; color: #c7d9b4; font-size: .7rem; padding: 5px 9px; border-radius: 30px; }
-.survive-message { color: #ebd6bf; min-height: 88px; font-size: 1.1rem; line-height: 1.7; border-left: 2px solid #d39d6c; padding-left: 18px; }
 .survive-action-bar { margin-top: 18px; }
 .survive-menus { position: relative; display: flex; flex-wrap: wrap; gap: 10px; }
 .survive-menus[hidden], .survive-menu-list[hidden] { display: none; }
@@ -254,30 +253,13 @@
 .survive-world:not([data-active]) :is(.survive-command-window, .survive-game-vitals) { display: none; }
 .survive-world:not([data-active]) :is(.survive-main-menu, .survive-game-log) { margin: .6rem; }
 .survive-world-combat { position: absolute; top: .65rem; left: .65rem; width: min(310px, calc(100% - 8rem)); display: grid; gap: .15rem; padding: .45rem .6rem; color: #fff5e9; background: #651e1aef; border: 2px solid #f39a7a; border-radius: .35rem; z-index: 3; pointer-events: none; font-size: .8rem; }
-#surviveWorldPlayerHealth, #surviveWorldTacticalPoints { display: none; }
-.survive-world-combat meter, #surviveWorldTargetDetails { grid-column: 1 / -1; }
 .survive-world-combat meter { width: 100%; height: .8rem; accent-color: #f16a52; }
-.survive-world-notice { position: absolute; top: .75rem; right: .75rem; margin: 0; max-width: min(400px, calc(100% - 1.5rem)); padding: .7rem .95rem; border: 2px solid #c9d1a4; border-radius: .6rem; color: #fffbe9; background: #183126f2; font-size: .95rem; line-height: 1.4; font-weight: 600; z-index: 5; pointer-events: none; box-shadow: 0 3px 15px #0006; }
-.survive-world-combat:not([hidden]) ~ .survive-world-notice:not([data-kind="error"]) { display: none; }
-.survive-world-combat:not([hidden]) ~ .survive-world-notice[data-kind="error"] { top: 5.5rem; }
-.survive-world-notice[data-kind="gain"] { border-color: #ffe28a; color: #fff2b0; }
-.survive-world-notice[data-kind="damage"], .survive-world-notice[data-kind="combat"], .survive-world-notice[data-kind="error"] { background: #5b211af2; border-color: #ffa38b; }
-.survive-world-notice[data-kind="pending"] { color: #d8eaff; background: #203847f2; }
 .survive-world-enemy-marker { position: absolute; transform: translate(-50%, -100%); padding: .3rem .55rem; color: #fff; background: #9b241cf2; border: 2px solid #ffc1a9; border-radius: .4rem; font-size: .85rem; font-weight: 800; white-space: nowrap; z-index: 2; pointer-events: none; }
 .survive-world button.survive-world-enemy-marker { background: #9b241cf2; border: 2px solid #ffc1a9; pointer-events: auto; }
 .survive-world-enemy-marker[aria-pressed="true"] { outline: 2px solid #ffe28a; outline-offset: 2px; }
 .survive-world-actions [aria-disabled="true"] { opacity: .65; cursor: wait; }
 .survive-world[data-active] ~ #surviveActionBar :is(#surviveMenus, [data-action]),
-.survive-world[data-active] ~ :is(#surviveScene, #surviveMessage, #surviveEnemy) { display: none; }
+.survive-world[data-active] ~ :is(#surviveScene, #surviveEnemy) { display: none; }
 .survive-adventure:has(.survive-world[data-active]) { padding: .65rem; }
-.survive-world-numbers { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 3; }
-.survive-world-number { position: absolute; transform: translate(-50%, -100%); padding: .15rem .4rem; border-radius: .3rem; color: #ffed98; background: #17251bdb; text-shadow: 0 2px 2px #000; font-size: 1rem; font-weight: 800; white-space: nowrap; animation: survive-number-rise 6s ease-out both; }
-.survive-world-number.is-damage { color: #ffb2a1; background: #5c201ce6; }
-.survive-world-number.is-cost { color: #e1e8df; }
-.survive-world[data-feedback="damage"] .survive-world-viewport::after, .survive-world[data-feedback="gain"] .survive-world-viewport::after { content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none; }
-.survive-world[data-feedback="damage"] .survive-world-viewport::after { box-shadow: inset 0 0 0 5px #d55a42; }
-.survive-world[data-feedback="gain"] .survive-world-viewport::after { box-shadow: inset 0 0 0 3px #e7c66b; }
-@keyframes survive-number-rise { 0% { opacity: 1; translate: 0 .7rem; } 70% { opacity: 1; } 100% { opacity: 0; translate: 0 -1rem; } }
-@media (prefers-reduced-motion: reduce) { .survive-world-number { animation: none; } }
 @media (min-width: 1050px) { .survive-page .survive-main { max-width: 1500px; } }
 @media (max-width: 600px) { #surviveWorldCanvas { height: 400px; } .survive-world-directions { justify-content: center; } }
