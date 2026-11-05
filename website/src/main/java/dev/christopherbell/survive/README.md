@@ -146,8 +146,8 @@ The world HUD shows HP and TP alongside the Chat log. The log shows shared world
 events in the order they happened, plus local Check results and command errors.
 Expand the log to review earlier lines without losing your place when new ones
 arrive. Open the Main Menu to
-inspect Status, Items, Equipment, Map, Camp & sharing, Journal or Guide.
-`survive-panel.js` remembers the camp, journal and guide disclosures per browser
+inspect Status, Items, Equipment, Map, Camp & sharing, or Guide.
+`survive-panel.js` remembers the camp and guide disclosures per browser
 when storage allows. World refreshes keep menus in the player's chosen state.
 
 ## Shared 3D island
@@ -157,8 +157,9 @@ a weathered stone gate and shore details
 with native WebGL and a third-person
 camera. WASD/arrows walk, dragging rotates the camera, and Q/R turn it. Enter or E
 opens the contextual Commands window, minus opens the Main Menu, and Escape
-closes a window or stops walking. Touch direction buttons and Map destinations
-also walk through the same world. Pine forest (-24,-15), stone ridge (30,-12),
+closes a window or stops walking. The map displays the current position and
+landmarks without moving the player. The viewport shows the island calendar and
+time of day. Pine forest (-24,-15), stone ridge (30,-12),
 hunting grounds (-36,25), camp (0,0), boat shore (0,62) and the fishing bank
 (-13,70) are landmarks. Hunting in the 3D world follows nearby wildlife.
 Existing hunger, combat, weapons, day/night, raids, gifts and durable progress remain

@@ -4,7 +4,7 @@ import { fetchJson } from './lib/util.js';
 import { appendSurviveLogMessage, syncSurviveLog } from './survive-log.js';
 import { mountSurviveController } from './survive-controller.js';
 import { keepFocusInActionBar, mountActionMenus, syncActionMenus } from './survive-menus.js';
-import { mountPanelSections, noteJournalEvents, summarizeCamp } from './survive-panel.js';
+import { mountPanelSections, summarizeCamp } from './survive-panel.js';
 import { renderSurviveScene } from './survive-scene.js';
 import { mountSurviveWorld } from './survive-world.js';
 
@@ -18,14 +18,23 @@ const SCENE_LABELS = {
 const COMBAT_SCENES = { HOG: 'A wild hog blocks your path', WOLF: 'A wolf circles you', BEAR: 'A bear rears up before you' };
 const ENEMY_LABELS = { HOG: 'Wild hog', WOLF: 'Grey wolf', BEAR: 'Brown bear' };
 const WEAPON_LABELS = { CLUB: 'Club', STONE_AXE: 'Stone axe', SPEAR: 'Spear' };
-const PHASE_LABELS = { DAY: 'Day', DUSK: 'Dusk', NIGHT: 'Night' };
-const NEXT_PHASE_LABELS = { DAY: 'Dusk in', DUSK: 'Nightfall in', NIGHT: 'Dawn in' };
+const WORLD_DAWN_EPOCH = Date.UTC(1000, 0, 1, 6);
+const PHASE_END_MINUTES = { DAY: 840, DUSK: 1080, NIGHT: 1440 };
 const HUNGER_WARNING_LEVEL = 3;
 
-/** Minutes and seconds until the next phase, for example 4:05. */
-export function formatCountdown(secondsLeft) {
-  const wholeSeconds = Math.max(0, Math.floor(secondsLeft));
-  return `${Math.floor(wholeSeconds / 60)}:${String(wholeSeconds % 60).padStart(2, '0')}`;
+/** The server's 24 real minutes per cycle equal 24 hours on the island calendar. */
+export function formatWorldCalendar(day, phase, secondsToNextPhase) {
+  const minutes = PHASE_END_MINUTES[phase] - Math.max(0, Math.ceil(secondsToNextPhase));
+  const time = new Date(WORLD_DAWN_EPOCH + ((day - 1) * 1440 + minutes) * 60000);
+  const iso = time.toISOString();
+  return { label: `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)} · ${iso.slice(11, 16)}`, iso };
+}
+
+function renderWorldCalendar(documentRoot, state, secondsLeft) {
+  const display = documentRoot.getElementById('surviveCalendar');
+  const date = formatWorldCalendar(state.day, state.phase, secondsLeft);
+  display.textContent = date.label;
+  display.setAttribute('datetime', date.iso);
 }
 
 /** Render server-supplied text as text nodes, including names and public journal entries. */
@@ -46,10 +55,7 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
     : SCENE_LABELS[state.status] || 'The wilderness');
   renderSurviveScene(documentRoot, documentRoot.getElementById('surviveCampScene'), state, pending);
   documentRoot.getElementById('surviveClock').dataset.phase = state.phase;
-  setText('survivePhase', PHASE_LABELS[state.phase] || state.phase);
-  setText('surviveDay', `Day ${state.day}`);
-  setText('surviveNextPhase', NEXT_PHASE_LABELS[state.phase] || 'Next phase in');
-  setText('surviveCountdown', formatCountdown(state.secondsToNextPhase));
+  renderWorldCalendar(documentRoot, state, state.secondsToNextPhase);
   setText('surviveHealthText', `${state.health} / 10`);
   setText('surviveHudName', state.name);
   setText('surviveHudHealth', `HP ${state.health}/10`);
@@ -95,21 +101,13 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   if (focusWasInActionBar) {
     keepFocusInActionBar(documentRoot, actionBar);
   }
-  noteJournalEvents(documentRoot, state.worldRevision);
   setText('surviveCampSummary', summarizeCamp(state));
-  const newestEvents = [...state.events].reverse();
-  const listedEntries = [
-    ['survivePlayers', state.survivors], ['surviveEvents', newestEvents],
-  ];
-  for (const [id, entries] of listedEntries) {
-    const list = documentRoot.getElementById(id);
-    const items = entries.map(text => {
-      const item = documentRoot.createElement('li');
-      item.textContent = text;
-      return item;
-    });
-    list.replaceChildren(...items);
-  }
+  const players = state.survivors.map(name => {
+    const item = documentRoot.createElement('li');
+    item.textContent = name;
+    return item;
+  });
+  documentRoot.getElementById('survivePlayers').replaceChildren(...players);
   syncSurviveLog(documentRoot, state);
   const recipientPicker = documentRoot.getElementById('surviveRecipient');
   const previousRecipient = recipientPicker.value;
@@ -317,7 +315,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       return;
     }
     const secondsLeft = Math.max(0, Math.ceil((phaseEndsAtMilliseconds - Date.now()) / 1000));
-    documentRoot.getElementById('surviveCountdown').textContent = formatCountdown(secondsLeft);
+    renderWorldCalendar(documentRoot, state, secondsLeft);
     if (secondsLeft === 0 && isWatchingWorld()) {
       readWorld();
     }

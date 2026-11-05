@@ -1,8 +1,4 @@
-/**
- * Main Menu section behavior for Survive: remembered collapsible sections, the journal's
- * new-events marker and the camp summary. Display only; renders never open or close sections.
- */
-const SECTION_NAMES = ['camp', 'journal', 'guide'];
+const SECTION_NAMES = ['camp', 'guide'];
 const SECTION_STORAGE_PREFIX = 'survive.section.';
 
 /** Restores each section's remembered open state and remembers changes. Returns its disposer. */
@@ -14,65 +10,23 @@ export function mountPanelSections(documentRoot, storage = browserStorage()) {
   const togglers = sections.map(({ name, element }) => {
     const onToggle = () => {
       writeSafely(storage, SECTION_STORAGE_PREFIX + name, element.open ? 'open' : 'closed');
-      if (name === 'journal' && element.open) {
-        markJournalRead(documentRoot);
-      }
     };
     element.addEventListener('toggle', onToggle);
     return { element, onToggle };
   });
-  const fullJournalLink = documentRoot.getElementById('surviveFullJournal');
-  const mainMenu = documentRoot.getElementById('surviveMainMenu');
-  const readVisibleJournal = () => {
-    if (mainMenu.open && sectionElement(documentRoot, 'journal').open) markJournalRead(documentRoot);
-  };
-  const openJournal = event => {
-    event.preventDefault();
-    const journal = sectionElement(documentRoot, 'journal');
-    mainMenu.open = true;
-    journal.open = true;
-    writeSafely(storage, SECTION_STORAGE_PREFIX + 'journal', 'open');
-    markJournalRead(documentRoot);
-    journal.querySelector?.('summary')?.focus?.({ preventScroll: true });
-    journal.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
-  };
-  fullJournalLink.addEventListener('click', openJournal);
-  mainMenu.addEventListener('toggle', readVisibleJournal);
   return {
     dispose() {
       for (const { element, onToggle } of togglers) {
         element.removeEventListener('toggle', onToggle);
       }
-      fullJournalLink.removeEventListener('click', openJournal);
-      mainMenu.removeEventListener('toggle', readVisibleJournal);
     },
   };
-}
-
-/** Marks the journal heading when the world changed since the journal was last open. */
-export function noteJournalEvents(documentRoot, worldRevision) {
-  const journal = sectionElement(documentRoot, 'journal');
-  const revision = String(worldRevision);
-  journal.dataset.latestRevision = revision;
-  if ((journal.open && documentRoot.getElementById('surviveMainMenu').open !== false)
-      || journal.dataset.seenRevision === undefined) {
-    journal.dataset.seenRevision = revision;
-  }
-  documentRoot.getElementById('surviveJournalUnread').hidden = journal.dataset.seenRevision === revision;
 }
 
 /** One line describing the shared camp, for the closed Camp heading. */
 export function summarizeCamp(state) {
   return [countOf(state.shelters, 'shelter'), countOf(state.boats, 'boat'), countOf(state.survivors.length, 'survivor')]
     .join(' · ');
-}
-
-function markJournalRead(documentRoot) {
-  const journal = sectionElement(documentRoot, 'journal');
-  if (journal.dataset.latestRevision !== undefined) {
-    journal.dataset.seenRevision = journal.dataset.latestRevision;
-  }
-  documentRoot.getElementById('surviveJournalUnread').hidden = true;
 }
 
 function sectionElement(documentRoot, name) {

@@ -36,17 +36,14 @@
 
     <div id="surviveGame" hidden>
       <section class="survive-panel survive-adventure" aria-labelledby="surviveScene">
-        <div class="survive-section-heading">
-          <div id="surviveClock" class="survive-clock" data-phase="DAY" role="group" aria-label="World time">
-            <strong id="survivePhase">Day</strong><span id="surviveDay"></span>
-            <span class="survive-countdown"><span id="surviveNextPhase">Dusk in</span> <strong id="surviveCountdown"></strong></span>
-          </div>
-          <span id="surviveStatus" class="survive-badge"></span>
-        </div>
         <div id="surviveWorld" class="survive-world">
           <div class="survive-world-toolbar"><strong id="surviveWorldLocation">Shared island</strong><span id="surviveWorldConnection" role="status">Connecting to the island…</span></div>
           <div class="survive-world-viewport">
             <canvas id="surviveWorldCanvas" tabindex="0" aria-label="Third-person island. WASD or arrows to walk; drag to turn the camera. Q and R rotate. Enter opens Commands. Minus opens the Main Menu." aria-describedby="surviveWorldHelp"></canvas>
+            <div id="surviveClock" class="survive-clock" data-phase="DAY" role="group" aria-label="World date and time">
+              <time id="surviveCalendar"></time>
+              <span id="surviveStatus" class="survive-badge"></span>
+            </div>
             <div id="surviveWorldLabels" class="survive-world-labels" aria-hidden="true"></div>
             <div id="surviveWorldCombat" class="survive-world-combat" role="status" hidden>
               <strong id="surviveWorldCombatTitle">Animal nearby</strong>
@@ -65,7 +62,6 @@
             <div id="surviveGameLog" class="survive-game-log">
               <div class="survive-recent-heading">
                 <h3 id="surviveLogTitle">Chat log</h3>
-                <a href="#surviveSectionJournal" id="surviveFullJournal">Full journal</a>
                 <button type="button" id="surviveLogToggle" aria-controls="surviveLogScrollback" aria-expanded="false" aria-keyshortcuts="+">Expand</button>
               </div>
               <div id="surviveLogScrollback" class="survive-log-scrollback" role="log" aria-labelledby="surviveLogTitle" tabindex="0">
@@ -99,11 +95,29 @@
                   <summary>Equipment</summary>
                   <p class="survive-card-line"><span class="survive-muted">Weapon</span> <strong id="surviveWeapon"></strong></p>
                 </details>
-                <details class="survive-panel survive-section">
+                <details id="surviveMapSection" class="survive-panel survive-section survive-map-section">
                   <summary>Map</summary>
-                  <nav class="survive-world-destinations" aria-label="Walk to a landmark">
-                    <button type="button" data-destination="0">Camp</button><button type="button" data-destination="1">Pine forest</button><button type="button" data-destination="2">Stone ridge</button><button type="button" data-destination="3">Hunting grounds</button><button type="button" data-destination="4">Boat shore</button><button type="button" data-destination="5">Fishing bank</button>
-                  </nav>
+                  <svg class="survive-island-map" role="img" aria-labelledby="surviveMapTitle surviveMapDescription" viewBox="-82 -82 164 164">
+                    <title id="surviveMapTitle">Island map</title>
+                    <desc id="surviveMapDescription">North is up. The blue marker shows your location.</desc>
+                    <rect x="-82" y="-82" width="164" height="164" fill="#31545b"/>
+                    <circle r="78" fill="#c8b785"/>
+                    <circle r="69" fill="#738759"/>
+                    <path d="M0 0L-24 -15M0 0L30 -12M0 0L-36 25M0 0L0 62L-13 70" fill="none" stroke="#dec79c" stroke-width="2.5"/>
+                    <path d="M-51 -28q10-10 26-5q13 8 7 23q-18 7-37-2z" fill="#4c6843"/>
+                    <path d="M21-18l13-18 17 16 5 11-35 5z" fill="#899086"/>
+                    <g class="survive-map-landmarks">
+                      <text x="67" y="-65" text-anchor="middle">N</text>
+                      <path d="M67-61l-3 7 3-2 3 2z" fill="#fff6d6"/>
+                      <circle cx="0" cy="0" r="2"/><text x="4" y="-3">Camp</text>
+                      <circle cx="-24" cy="-15" r="2"/><text x="-29" y="-20" text-anchor="middle">Pine forest</text>
+                      <circle cx="30" cy="-12" r="2"/><text x="33" y="-7">Stone ridge</text>
+                      <circle cx="-36" cy="25" r="2"/><text x="-38" y="34" text-anchor="middle">Hunting grounds</text>
+                      <circle cx="0" cy="62" r="2"/><text x="5" y="63">Boat shore</text>
+                      <circle cx="-13" cy="70" r="2"/><text x="-17" y="75" text-anchor="end">Fishing bank</text>
+                    </g>
+                    <path id="surviveMapPlayer" d="M0 4L-3-3 0-1 3-3z" fill="#65d6ff" stroke="#102737" stroke-width="0.8" hidden/>
+                  </svg>
                 </details>
                 <details id="surviveSectionCamp" class="survive-panel survive-section">
                   <summary><span class="survive-section-title">Camp &amp; sharing</span> <span id="surviveCampSummary" class="survive-muted"></span></summary>
@@ -123,10 +137,6 @@
                     </form>
                     <p class="survive-muted">Camp updates every 5 seconds while this page is visible.</p>
                 </details>
-                <details id="surviveSectionJournal" class="survive-panel survive-section">
-                  <summary><span class="survive-section-title">Journal</span> <span id="surviveJournalUnread" class="survive-unread" hidden><span class="survive-visually-hidden">(new events)</span></span> <span class="survive-muted">Last 30 events, newest first</span></summary>
-                  <ol id="surviveEvents" reversed></ol>
-                </details>
                 <details id="surviveSectionGuide" class="survive-panel survive-section survive-guide">
                   <summary><span class="survive-section-title">Guide</span> <span class="survive-muted">How to play, costs and odds</span></summary>
                   <p>The camp picture shows the shared world as it is now. Click the trees to gather wood, the rocks for stone, the dark forest edge to hunt, the fire to stand guard or rest, a tent to sleep or wake, a boat to sail away, and an animal to attack it. Glowing places are the moves you can make now; every move is also in the menus below the picture.</p>
@@ -136,7 +146,7 @@
                   <p>Gather stone (40% chance) to craft weapons. A club costs 2 wood (+1 damage, 8 uses), a stone axe 2 wood and 2 stone (+2 damage, 12 uses, wood gathering rises to 70%), a spear 3 wood and 3 stone (+3 damage, 12 uses, and its reach spares you the first bite of each fight). Each attack wears your weapon down until it breaks; crafting replaces the one you hold.</p>
                   <p>Every effort outside camp, every combat move and every guard shift costs 1 fullness, and a night's sleep costs 2. Food restores 5 fullness and 2 health. At 0 fullness every effort costs 1 health and sleep does not heal.</p>
                   <p>Each shelter has two beds. Sleep at dusk or night to recover 1 health for every 2 minutes asleep, or fully if you sleep until dawn. If raiders burn your shelter while you sleep, you wake with 2 damage.</p>
-                  <p>Share supplies chooses another survivor by name and camp ID. Give 1–10 wood, food or stone while both of you are at camp. Gifts move items directly into their inventory, which must have room; both survivors and the camp journal receive an update.</p>
+                  <p>Share supplies chooses another survivor by name and camp ID. Give 1–10 wood, food or stone while both of you are at camp. Gifts move items directly into their inventory, which must have room; both survivors and the chat log receive an update.</p>
                   <p>Gather wood to improve strength and stamina. Your inventory holds 10 items. Five wood builds a shelter everyone can rest in; ten wood builds a boat any survivor can use to escape.</p>
                   <p>Your attack deals 1 + strength + weapon damage, and the animal bites back on every attack, even the final blow. Defend blocks one bite. Defeating a hog or wolf gives 1 food and a bear up to 3, as your inventory allows. A shared shelter restores 2 health per rest.</p>
                   <p>Sail away to survive, or start again after death. New survivor replaces only your character. Saved account characters can start again after death or escape; joining again resumes a living character. Shelters, boats, and other players remain in the shared world. Names and recent actions are visible to other players; use a nickname.</p>
@@ -144,14 +154,6 @@
                 </details>
               </div>
             </details>
-          </div>
-          <div id="surviveWorldDirections" class="survive-world-directions" role="group" aria-label="Walking and camera controls">
-            <button type="button" data-walk="forward" aria-label="Walk forward">↑</button>
-            <button type="button" data-walk="left" aria-label="Walk left">←</button>
-            <button type="button" data-walk="back" aria-label="Walk backward">↓</button>
-            <button type="button" data-walk="right" aria-label="Walk right">→</button>
-            <button type="button" data-camera-turn="-1" aria-label="Turn camera left">↶</button>
-            <button type="button" data-camera-turn="1" aria-label="Turn camera right">↷</button>
           </div>
           <p id="surviveWorldHelp" class="survive-muted">Focus the island to walk with WASD or arrows. Drag or use Q / R to turn. Enter opens Commands, minus opens Main Menu, plus opens Chat log, and Escape closes a window. On a controller, use the sticks to walk and turn, the D-pad for menus, A to confirm, B to cancel, X for Main Menu, and Y for Chat log.</p>
         </div>

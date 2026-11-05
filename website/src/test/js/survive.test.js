@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { disposeSurviveOnPageHide, formatCountdown, mountSurvive, renderSurviveState } from '../../main/resources/static/js/survive.js';
+import { disposeSurviveOnPageHide, formatWorldCalendar, mountSurvive, renderSurviveState } from '../../main/resources/static/js/survive.js';
 
 const snapshot = {
   name: '<img src=x onerror=alert(1)>', health: 8, strength: 3, stamina: 11,
@@ -160,7 +160,7 @@ test('renders survivor and shared camp using text nodes and server allowed actio
   assert.equal(documentRoot.getElementById('surviveHealth').value, 8);
   assert.equal(documentRoot.getElementById('surviveInventoryCount').textContent, '7 / 10');
   assert.equal(documentRoot.getElementById('surviveShelters').textContent, '1');
-  assert.equal(documentRoot.getElementById('surviveEvents').children[0].textContent, '<script>bad</script>');
+  assert.equal(documentRoot.getElementById('surviveRecentEvents').children.at(-1).textContent, '<script>bad</script>');
   assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'BUILD_BOAT').disabled, true);
   assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'GATHER').disabled, false);
   assert.equal(documentRoot.buttons.find(button => button.dataset.action === 'ATTACK').hidden, true);
@@ -241,10 +241,7 @@ test('shows the shared clock, hunger, stone, weapon and beds from the server sna
   const documentRoot = documentFixture();
   renderSurviveState(documentRoot, snapshot);
   assert.equal(documentRoot.getElementById('surviveClock').dataset.phase, 'DUSK');
-  assert.equal(documentRoot.getElementById('survivePhase').textContent, 'Dusk');
-  assert.equal(documentRoot.getElementById('surviveDay').textContent, 'Day 3');
-  assert.equal(documentRoot.getElementById('surviveNextPhase').textContent, 'Nightfall in');
-  assert.equal(documentRoot.getElementById('surviveCountdown').textContent, '2:05');
+  assert.equal(documentRoot.getElementById('surviveCalendar').textContent, '01/03/1000 · 21:55');
   assert.equal(documentRoot.getElementById('surviveHungerText').textContent, '6 / 10');
   assert.equal(documentRoot.getElementById('surviveHungerWarning').hidden, true);
   assert.equal(documentRoot.getElementById('surviveStone').textContent, '2');
@@ -296,11 +293,11 @@ test('a pending request marks the action bar busy without disabling the focused 
   assert.equal(documentRoot.getElementById('surviveActionBar').getAttribute('aria-busy'), 'false');
 });
 
-test('countdowns read as minutes and padded seconds and never go negative', () => {
-  assert.equal(formatCountdown(0), '0:00');
-  assert.equal(formatCountdown(59), '0:59');
-  assert.equal(formatCountdown(840), '14:00');
-  assert.equal(formatCountdown(-3), '0:00');
+test('world calendar crosses midnight and rolls into a new month', () => {
+  assert.equal(formatWorldCalendar(1, 'DAY', 840).label, '01/01/1000 · 06:00');
+  assert.equal(formatWorldCalendar(1, 'DUSK', 1).label, '01/01/1000 · 23:59');
+  assert.equal(formatWorldCalendar(1, 'NIGHT', 360).label, '01/02/1000 · 00:00');
+  assert.equal(formatWorldCalendar(31, 'NIGHT', 359).label, '02/01/1000 · 00:01');
 });
 
 function sceneHotspot(documentRoot, action) {
@@ -359,7 +356,6 @@ test('the status menu shows equipment and the chat log keeps all available world
   renderSurviveState(documentRoot, { ...snapshot, events });
   const recent = documentRoot.getElementById('surviveRecentEvents').children.map(item => item.textContent);
   assert.deepEqual(recent, events);
-  assert.equal(documentRoot.getElementById('surviveEvents').children.length, 5);
   assert.equal(documentRoot.getElementById('surviveWood').textContent, '4');
   assert.equal(documentRoot.getElementById('surviveStone').textContent, '2');
   assert.equal(documentRoot.getElementById('surviveInventoryCount').textContent, '7 / 10');
@@ -390,12 +386,8 @@ test('the world log appends repeated outcomes once per world revision and preser
 test('rendering never opens or closes the side panel sections', () => {
   const documentRoot = documentFixture();
   const camp = documentRoot.getElementById('surviveSectionCamp');
-  const journal = documentRoot.getElementById('surviveSectionJournal');
   camp.open = true;
-  journal.open = false;
   renderSurviveState(documentRoot, snapshot);
   renderSurviveState(documentRoot, { ...snapshot, worldRevision: 11, events: [...snapshot.events, 'Later'] });
   assert.equal(camp.open, true);
-  assert.equal(journal.open, false);
-  assert.equal(documentRoot.getElementById('surviveJournalUnread').hidden, false);
 });
