@@ -1,24 +1,63 @@
 package dev.christopherbell.configuration.mongo.domain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 import dev.christopherbell.survive.model.SurviveSavedWorld;
 import dev.christopherbell.survive.model.SurviveEnemy;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveWeapon;
+import dev.christopherbell.survive.persistence.MongoSurviveWorldRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Query;
 
 class SurviveWorldMongoCodecTest {
   private final MongoTemplate mongo = mock(MongoTemplate.class);
+
+  @Test void movementReadsOnlyTheVersionUntilAnExternalWriteChangesIt() {
+    var repository = new MongoSurviveWorldRepository(DomainMongoOperationsTestFactory.create(mongo));
+    var kind = DomainDocumentKindRegistry.of(Map.of("survive_world", "application_runtime"))
+        .require("survive_world", 1, SurviveSavedWorld.class);
+    var codec = new DomainDocumentCodec<>(kind, mongo.getConverter());
+    var initial = new SurviveSavedWorld("shared", 1L, 0, 0, 0, List.of(), List.of(), null, null);
+    var updated = new SurviveSavedWorld("shared", 2L, 1, 1, 0, List.of(), List.of(), null, null);
+    when(mongo.findOne(any(Query.class), eq(Document.class), eq("application_runtime")))
+        .thenReturn(codec.encode(initial), codec.encode(updated), null);
+    var storedVersion = new AtomicLong(1);
+    when(mongo.exists(any(Query.class), eq(Document.class), eq("application_runtime")))
+        .thenAnswer(call -> {
+          Query query = call.getArgument(0);
+          assertTrue(query.getQueryObject().toJson().contains("payload.version"));
+          assertTrue(query.getQueryObject().toJson().contains("\"_id\": {\"kind\": \"survive_world\", \"legacyId\": \"shared\"}"));
+          return query.getQueryObject().toJson().contains("\"payload.version\": " + storedVersion.get());
+        });
+
+    var cached = repository.loadForMovement().orElseThrow();
+    for (int pulse = 0; pulse < 100; pulse++) {
+      assertSame(cached, repository.loadForMovement().orElseThrow());
+    }
+    verify(mongo, times(1)).findOne(any(Query.class), eq(Document.class), eq("application_runtime"));
+    storedVersion.set(2);
+    assertEquals(updated, repository.loadForMovement().orElseThrow());
+    assertEquals(updated, repository.loadForMovement().orElseThrow());
+    storedVersion.set(-1);
+    assertTrue(repository.loadForMovement().isEmpty());
+  }
 
   @Test void approvedWorldRoundTripRetainsOwnershipCombatInventoriesAndCampWithoutChangingManifest() {
     var factory = DomainMongoOperationsTestFactory.create(mongo);

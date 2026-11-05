@@ -7,8 +7,10 @@ license, which is served at `/licenses/survive-MIT.txt`. No Python process is us
 
 ## One authoritative world
 
-`SurviveService` loads one shared durable world for every operation and commits a
-versioned replacement after successful commands. Mongo stores the bounded world
+`SurviveService` restores one shared durable world for every operation and commits
+a versioned replacement after successful commands. Movement pulses can reuse
+the last immutable snapshot after Mongo confirms the document still has that
+version. Commands and status reads load the full document. Mongo stores the bounded world
 as the additive `survive_world` kind in `application_runtime`, separate from the
 historical cutover manifest. One replacement atomically saves both gift
 inventories, all character progress, camp structures and the last 30 events.
