@@ -29,6 +29,9 @@ test('the combat HUD shows current target state and clears when the encounter en
   assert.equal(documentRoot.getElementById('surviveWorldEnemyMeter').value, 3);
   feedback.draw(() => ({ x: 0, y: 0, visible: true }), { x: 0, z: -3 });
   assert.equal(marker.style.left, '50%');
+  feedback.acceptState({ status: 'COMBAT', enemy: 'RAIDER', enemyHealth: 4, nextStrikeAt: 'scheduled' });
+  assert.equal(marker.textContent, 'Camp raider · 4 health');
+  assert.equal(documentRoot.getElementById('surviveWorldEnemyMeter').max, 6);
   feedback.acceptState({ status: 'EXPLORING' });
   assert.equal(combat.hidden, true);
   assert.equal(marker.hidden, true);

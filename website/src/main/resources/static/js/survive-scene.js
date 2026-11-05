@@ -8,8 +8,8 @@ const PHASE_NAMES = { DAY: 'Day', DUSK: 'Dusk', NIGHT: 'Night' };
 /** Phase lengths in seconds, used only to place the sun or moon along its arc. */
 const PHASE_SECONDS = { DAY: 840, DUSK: 240, NIGHT: 360 };
 /** Full health of each animal, used only to scale the health bar. */
-const ENEMY_FULL_HEALTH = { HOG: 5, WOLF: 8, BEAR: 14 };
-const ENEMY_NAMES = { HOG: 'hog', WOLF: 'wolf', BEAR: 'bear' };
+const ENEMY_FULL_HEALTH = { HOG: 5, WOLF: 8, BEAR: 14, RAIDER: 6 };
+const ENEMY_NAMES = { HOG: 'hog', WOLF: 'wolf', BEAR: 'bear', RAIDER: 'camp raider' };
 const WEAPON_NAMES = { CLUB: 'club', STONE_AXE: 'stone axe', SPEAR: 'spear' };
 const MAX_TENTS = 6;
 const MAX_BOATS = 3;
@@ -340,7 +340,8 @@ function drawSurvivors(draw, view) {
 }
 
 const EYE_POSITIONS = {
-  hog: { cx: 430, cy: 470 }, wolf: { cx: 434, cy: 455 }, bear: { cx: 440, cy: 441 }, unknown: { cx: 420, cy: 470 },
+  hog: { cx: 430, cy: 470 }, wolf: { cx: 434, cy: 455 }, bear: { cx: 440, cy: 441 },
+  raider: { cx: 398, cy: 425 }, unknown: { cx: 420, cy: 470 },
 };
 
 function drawEnemy({ shape }, view) {
@@ -354,6 +355,9 @@ function drawEnemy({ shape }, view) {
       shape('path', { d: 'M355 480 L352 505 M372 482 L370 505 M398 482 L400 505 M415 478 L418 505', class: 'scene-legs' })],
     bear: [shape('ellipse', { cx: 385, cy: 465, rx: 50, ry: 32 }), shape('circle', { cx: 432, cy: 445, r: 20 }),
       shape('circle', { cx: 440, cy: 426, r: 7 })],
+    raider: [shape('circle', { cx: 390, cy: 428, r: 13 }),
+      shape('path', { d: 'M377 442 L404 441 L415 475 L402 475 L407 509 L395 509 L390 480 L383 509 L371 509 L377 475 L365 474 Z' }),
+      shape('path', { d: 'M407 454 L431 423 L438 429 L415 461 Z' })],
     unknown: [shape('ellipse', { cx: 390, cy: 475, rx: 40, ry: 22 })],
   };
   return [

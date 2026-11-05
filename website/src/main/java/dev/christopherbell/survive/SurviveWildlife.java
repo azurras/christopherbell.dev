@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /** Shared, process-local routes and encounter reservations. Mutated only under the service lock. */
 final class SurviveWildlife {
@@ -22,17 +23,26 @@ final class SurviveWildlife {
   private final Map<String, Instant> respawnAt = new HashMap<>();
 
   List<Animal> roaming(Instant now) {
-    return ROUTES.stream()
+    return roaming(now, null);
+  }
+
+  List<Animal> roaming(Instant now, Animal raider) {
+    var roamingAnimals = ROUTES.stream()
         .filter(route -> !now.isBefore(respawnAt.getOrDefault(route.id(), Instant.MIN)))
         .filter(route -> encounters.values().stream().noneMatch(animal -> animal.id().equals(route.id())))
-        .map(route -> route.pose(now)).toList();
+        .map(route -> route.pose(now));
+    return Stream.concat(roamingAnimals, Stream.ofNullable(raider)).toList();
   }
 
   Animal nearest(SurvivePresence.Pose player, Instant now, boolean hostileOnly) {
+    return nearest(player, now, hostileOnly, null);
+  }
+
+  Animal nearest(SurvivePresence.Pose player, Instant now, boolean hostileOnly, Animal raider) {
     if (player == null) {
       return null;
     }
-    return roaming(now).stream()
+    return roaming(now, raider).stream()
         .filter(animal -> animal.distanceFrom(player) <= (hostileOnly ? animal.aggroMetres() : HUNT_RANGE_METRES))
         .filter(animal -> !hostileOnly || animal.aggroMetres() > 0)
         .min(Comparator.comparingDouble(animal -> animal.distanceFrom(player))).orElse(null);
@@ -51,7 +61,9 @@ final class SurviveWildlife {
       if (fightingSurvivors.contains(entry.getKey())) {
         return false;
       }
-      respawnAt.put(entry.getValue().id(), now.plusSeconds(RESPAWN_SECONDS));
+      if (entry.getValue().kind() != SurviveEnemy.RAIDER) {
+        respawnAt.put(entry.getValue().id(), now.plusSeconds(RESPAWN_SECONDS));
+      }
       return true;
     });
   }

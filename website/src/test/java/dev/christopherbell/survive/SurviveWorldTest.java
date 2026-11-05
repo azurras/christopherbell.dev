@@ -261,18 +261,21 @@ class SurviveWorldTest {
   }
 
   @Test
-  void effortDrainsHungerAndStarvationHurts() {
+  void starvationHurtsOnTheTimerAndCanEndTheSurvivor() {
     perform(SurviveAction.GATHER, 50);
-    assertEquals(9, player.hunger);
-    player.wood = 5;
-    perform(SurviveAction.BUILD_SHELTER, 1);
-    assertEquals(9, player.hunger);
+    assertEquals(10, player.hunger);
     player.hunger = 0;
     perform(SurviveAction.GATHER, 50);
+    assertEquals(10, player.health);
+    for (int tick = 0; tick < 30; tick++) {
+      world.observeActivity(player, player.lastSeen.plusSeconds(10));
+    }
     assertEquals(9, player.health);
     assertTrue(player.message.contains("starving"));
     player.health = 1;
-    perform(SurviveAction.GATHER, 50);
+    for (int tick = 0; tick < 30; tick++) {
+      world.observeActivity(player, player.lastSeen.plusSeconds(10));
+    }
     assertEquals(Status.DEAD, player.status);
   }
 
@@ -298,7 +301,7 @@ class SurviveWorldTest {
     perform(SurviveAction.CRAFT_CLUB, 1);
     performAt(SurviveAction.GUARD, DUSK, 1);
     assertTrue(player.guarding);
-    assertEquals(9, player.hunger);
+    assertEquals(10, player.hunger);
     assertFalse(actionsAt(DUSK).contains(SurviveAction.GUARD));
     world.settleUntil(NIGHT);
     assertEquals(1, player.food);
@@ -317,6 +320,8 @@ class SurviveWorldTest {
     player.wood = 10;
     perform(SurviveAction.BUILD_BOAT, 1);
     world.settleUntil(NIGHTFALL);
+    assertEquals(2, world.snapshotFor(player, NIGHTFALL, Instant.MIN).shelters());
+    world.settleUntil(NIGHT);
     var camp = world.snapshotFor(player, NIGHT, Instant.MIN);
     assertEquals(0, camp.shelters());
     assertEquals(1, camp.boats());
@@ -364,11 +369,11 @@ class SurviveWorldTest {
     performAt(SurviveAction.WAKE, NIGHT.plus(Duration.ofMinutes(4)), 1);
     assertEquals(Status.EXPLORING, player.status);
     assertEquals(5, player.health);
-    assertEquals(8, player.hunger);
+    assertEquals(10, player.hunger);
     world.settleUntil(DAWN);
     assertEquals(Status.EXPLORING, alice.status);
     assertEquals(10, alice.health);
-    assertEquals(8, alice.hunger);
+    assertEquals(10, alice.hunger);
     assertTrue(lastEvent().contains("woke"));
   }
 
@@ -403,7 +408,7 @@ class SurviveWorldTest {
     world.perform(SurviveAction.SLEEP, alice, DUSK, () -> 1);
     world.perform(SurviveAction.SLEEP, bob, DUSK.plusSeconds(60), () -> 1);
     performAt(SurviveAction.SLEEP, DUSK.plusSeconds(120), 1);
-    world.settleUntil(NIGHTFALL);
+    world.settleUntil(NIGHT);
     assertEquals(1, world.snapshotFor(player, NIGHT, Instant.MIN).shelters());
     assertEquals(Status.EXPLORING, player.status);
     assertEquals(8, player.health);
@@ -418,10 +423,10 @@ class SurviveWorldTest {
     assertTrue(world.snapshotFor(player, DAY, Instant.MIN).events().isEmpty());
     world.settleUntil(DAY.plus(Duration.ofMinutes(480)));
     var events = world.snapshotFor(player, DAY, Instant.MIN).events();
-    assertEquals(4, events.size());
+    assertEquals(7, events.size());
     assertTrue(events.getFirst().contains("quietly"));
     world.settleUntil(DAY.plus(Duration.ofMinutes(480)));
-    assertEquals(4, world.snapshotFor(player, DAY, Instant.MIN).events().size());
+    assertEquals(events, world.snapshotFor(player, DAY, Instant.MIN).events());
   }
 
   @Test

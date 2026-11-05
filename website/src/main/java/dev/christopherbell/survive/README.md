@@ -77,13 +77,18 @@ settles again next time with the same result.
 
 ## Mechanics
 
-**Raids.** At each nightfall, raiders of strength 4 rising by 2 each night of a
-seven-night week (to 16, then back to 4) meet the camp's defense: the sum of
+**Raids.** At nightfall, one armed raider approaches camp over 30 seconds. The
+raid is announced in chat. The raider starts combat within seven metres. Defeat
+the raider to repel the raid before the one-minute deadline. An active raid and
+its combat progress survive a server restart.
+
+If the raider survives the deadline, raid strength starts at 4 and rises by 2
+each night of a seven-night week (to 16, then back to 4). Camp defense is the sum of
 `1 + strength + weapon bonus` for every survivor who chose **Guard** at dusk. A
 repelled raid rewards each guard with 1 food, or experience when full. Otherwise
 raiders destroy one structure plus one per 3 points of shortfall, taking boats
 first only while they outnumber shelters. Guard duty ends at dawn or on leaving camp.
-Absent survivors are never harmed; only shared structures are at risk.
+Survivors can take damage in combat. Unoccupied camp structures remain at risk.
 
 **Enemies and ambushes.** Hogs (5 health, bite 1, 1 food), wolves (8, 2, 1) and
 bears (14, 3, 3) exist. Hunting keeps its 61% discovery; by day it finds hogs, at
@@ -102,10 +107,11 @@ bed is free; a sleeper can only Wake, recovering 1 health per 2 minutes asleep.
 Dawn wakes every sleeper with full health. If a raid burns shelters, the latest
 sleepers beyond the remaining beds wake with 2 damage. Rest still gives +2 health.
 
-**Hunger.** Fullness runs from 10 to 0. Each action outside camp, combat move and
-guard shift costs 1, and each night's sleep costs 2 on waking. At 0 those efforts
-cost 1 health instead and sleep does not heal. Eating gives +5 fullness and
-+2 health.
+**Hunger.** Fullness runs from 10 to 0. Five minutes of awake, active play
+spend one fullness. At zero, each subsequent five-minute interval costs one
+health. The server counts gaps of up to 15 seconds between activity updates,
+pauses the meter during sleep and preserves partial intervals across reconnects.
+Sleep does not heal a starving survivor. Eating gives +5 fullness and +2 health.
 
 Saved survivors from before these mechanics load with full hunger, no stone or
 weapon, a hog for any fight in progress, awake and not guarding. New saved fields
@@ -220,8 +226,8 @@ combat are future MMO work.
 
 ## Fishing
 
-Fish at the Fishing bank using the Commands window. A cast spends one fullness
-and has a 60% chance to add one food if there is inventory space. The chat log
+Fish at the Fishing bank using the Commands window. A cast has a 60% chance
+to add one food if there is inventory space. The chat log
 reports the result. The cast, reel, and other action poses are browser visuals
 played after the command is confirmed. The text fallback offers the same fishing
 command without a position.

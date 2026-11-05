@@ -15,8 +15,9 @@ const SCENE_LABELS = {
   EXPLORING: 'At the edge of the wilderness', SLEEPING: 'Asleep in a shelter bed',
   DEAD: 'The wilderness claimed you', ESCAPED: 'A new horizon awaits',
 };
-const COMBAT_SCENES = { HOG: 'A wild hog blocks your path', WOLF: 'A wolf circles you', BEAR: 'A bear rears up before you' };
-const ENEMY_LABELS = { HOG: 'Wild hog', WOLF: 'Grey wolf', BEAR: 'Brown bear' };
+const COMBAT_SCENES = { HOG: 'A wild hog blocks your path', WOLF: 'A wolf circles you', BEAR: 'A bear rears up before you',
+  RAIDER: 'A raider attacks the camp' };
+const ENEMY_LABELS = { HOG: 'Wild hog', WOLF: 'Grey wolf', BEAR: 'Brown bear', RAIDER: 'Camp raider' };
 const WEAPON_LABELS = { CLUB: 'Club', STONE_AXE: 'Stone axe', SPEAR: 'Spear' };
 const WORLD_DAWN_EPOCH = Date.UTC(1000, 0, 1, 6);
 const PHASE_END_MINUTES = { DAY: 840, DUSK: 1080, NIGHT: 1440 };

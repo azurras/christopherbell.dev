@@ -14,7 +14,8 @@ import dev.christopherbell.survive.model.SurviveSnapshot.Status;
  * first settlement, including in worlds saved before the day-night clock existed.
  */
 public record SurviveSavedWorld(@Id String id, @Version Long version, long revision,
-    int shelters, int boats, List<String> events, List<Player> players, Long settledBoundaries) {
+    int shelters, int boats, List<String> events, List<Player> players, Long settledBoundaries,
+    Long activeRaidNight) {
   public SurviveSavedWorld {
     if (!"shared".equals(id) || version != null && version < 0 || revision < 0
         || shelters < 0 || shelters > 1000 || boats < 0 || boats > 1000) {
@@ -34,11 +35,17 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
         throw new IllegalArgumentException("Saved world contains duplicate survivors.");
       }
     }
+    long fighters = players.stream().filter(player -> player.enemy() == SurviveEnemy.RAIDER).count();
+    if (fighters > 1 || activeRaidNight == null && fighters != 0
+        || activeRaidNight != null && (settledBoundaries == null || Math.floorMod(settledBoundaries, 2) != 1
+            || activeRaidNight != Math.floorDiv(settledBoundaries, 2))) {
+      throw new IllegalArgumentException("Saved raid progress is invalid.");
+    }
   }
 
   /** New worlds have no durable version until their first successful insert. */
   public static SurviveSavedWorld empty() {
-    return new SurviveSavedWorld("shared", null, 0, 0, 0, List.of(), List.of(), null);
+    return new SurviveSavedWorld("shared", null, 0, 0, 0, List.of(), List.of(), null, null);
   }
 
   /**
@@ -52,7 +59,8 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       int experienceToNextLevel, int wood, int food, int enemyHealth, Status status,
       long revision, String message, Integer stone, Integer hunger, SurviveEnemy enemy,
       SurviveWeapon weapon, Integer weaponDurability, Boolean guarding, Instant sleptAt, Boolean struckFirst,
-      Instant nextStrikeAt, Integer tacticalPoints, Boolean defending, String combatOutcome) {
+      Instant nextStrikeAt, Integer tacticalPoints, Boolean defending, String combatOutcome,
+      Integer activeFullnessMilliseconds) {
     public Player {
       stone = stone == null ? 0 : stone;
       hunger = hunger == null ? 10 : hunger;
@@ -62,6 +70,7 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       struckFirst = struckFirst != null && struckFirst;
       tacticalPoints = tacticalPoints == null ? 0 : tacticalPoints;
       defending = defending != null && defending;
+      activeFullnessMilliseconds = activeFullnessMilliseconds == null ? 0 : activeFullnessMilliseconds;
       UUID.fromString(survivorId);
       if (accountId == null) {
         UUID.fromString(token);
@@ -79,6 +88,7 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
           || experienceToNextLevel != (1 << (strength - 2)) || experience >= experienceToNextLevel
           || wood < 0 || food < 0 || stone < 0 || wood + food + stone > 10
           || hunger < 0 || hunger > 10 || status == null || (status == Status.DEAD) != (health == 0)
+          || activeFullnessMilliseconds < 0 || activeFullnessMilliseconds >= 300_000
           || (status == Status.COMBAT) != (enemy != null) || (status == Status.COMBAT) != (enemyHealth > 0)
           || enemy != null && enemyHealth > enemy.health() || weaponIsInvalid
           || (status == Status.SLEEPING) != (sleptAt != null) || guarding && status != Status.EXPLORING
