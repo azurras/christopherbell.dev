@@ -68,7 +68,7 @@ public class SurviveController {
       @CookieValue(name = COOKIE_NAME, required = false) String token,
       @Valid @RequestBody SurviveRequests.Act request) {
     return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-        .body(survivors.actForOwner(token, accountId(), request.action(), request.revision()));
+        .body(survivors.actForOwner(token, accountId(), request.action(), request.revision(), request.targetId()));
   }
 
   /** Transfers supplies between survivors in the same authoritative world. */

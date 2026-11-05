@@ -172,7 +172,12 @@ closes a window or stops walking. The map displays the current position and
 landmarks without moving the player. The viewport shows the island calendar and
 time of day. Pine forest (-24,-15), stone ridge (30,-12),
 hunting grounds (-36,25), camp (0,0), boat shore (0,62) and the fishing bank
-(-13,70) are landmarks. Hunting in the 3D world follows nearby wildlife.
+(-13,70) are landmarks. Click a roaming creature's label or cycle visible
+creatures with Tab, keypad 0, or the controller's left and right D-pad buttons.
+Check reports its threat in chat. Engage within five metres to start timed
+combat with the chosen creature. If it moves away or another player claims it,
+the command fails without switching targets. Untargeted Hunt remains available
+through the existing action path.
 Existing hunger, combat, weapons, day/night, raids, gifts and durable progress remain
 Java-owned. Rendering does not award supplies. Saved characters and inventory retain
 the existing Mongo representation; no position schema is added.

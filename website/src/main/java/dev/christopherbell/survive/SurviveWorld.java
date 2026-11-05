@@ -485,6 +485,11 @@ final class SurviveWorld {
     recordAction(player, "The " + animal.displayName() + " spots you and attacks!", false);
   }
 
+  void engageFieldTarget(SurvivePlayer player, SurviveEnemy target, Instant now) {
+    player.startFighting(target);
+    recordAction(player, engage(player, now), false);
+  }
+
   private static SurviveEnemy nightAnimalFor(int rollPercent) {
     if (rollPercent <= 50) {
       return SurviveEnemy.HOG;

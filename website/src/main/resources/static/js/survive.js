@@ -256,10 +256,11 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     }
     performAction(control.dataset.action);
   };
-  function performAction(action) {
-    if (!state || pending || !state.actions.includes(action)) return;
+  function performAction(action, targetId) {
+    const fieldEngage = action === 'ENGAGE' && targetId && state?.status === 'EXPLORING';
+    if (!state || pending || !fieldEngage && !state.actions.includes(action)) return;
     void sendRequest(API.survive.actions, {
-      method: 'POST', body: JSON.stringify({ action, revision: state.revision }),
+      method: 'POST', body: JSON.stringify({ action, revision: state.revision, targetId }),
     }, action);
   }
   const showJoin = () => {
