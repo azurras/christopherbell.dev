@@ -145,3 +145,31 @@ test('a failed pulse removes remote avatars instead of displaying disconnected p
   assert.equal(fixture.documentRoot.getElementById('surviveWorldLabels').children.length, 5);
   world.dispose();
 });
+
+test('graphics loss cannot resurrect combat overlays or action notices after disposal', () => {
+  const fixture = worldFixture();
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({}), () => {}, () => fixture.renderer);
+  world.setState({ ...worldState, revision: 1 });
+  fixture.documentRoot.getElementById('surviveWorldCanvas').emit('webglcontextlost', { preventDefault() {} });
+  world.setState({ ...worldState, revision: 2, status: 'COMBAT', enemy: 'HOG', enemyHealth: 5, health: 10 });
+  world.beginAction('ATTACK');
+  world.showError('The request failed.');
+  assert.equal(fixture.documentRoot.getElementById('surviveWorldCombat').hidden, true);
+  assert.equal(fixture.documentRoot.getElementById('surviveWorldNotice').hidden, true);
+  assert.equal(fixture.frames.size, 0);
+});
+
+test('reduced motion suppresses reward particles while keeping confirmed gain text', () => {
+  const fixture = worldFixture();
+  fixture.view.matchMedia = () => ({ matches: true });
+  let renderedEffect = 'not rendered';
+  const originalDraw = fixture.renderer.draw;
+  fixture.renderer.draw = (...args) => { renderedEffect = args[4]; return originalDraw(...args); };
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({}), () => {}, () => fixture.renderer);
+  world.setState({ ...worldState, revision: 1, wood: 0 });
+  world.setState({ ...worldState, revision: 2, wood: 1, message: 'Gathered wood.' });
+  fixture.frame(0);
+  assert.equal(renderedEffect, null);
+  assert.equal(fixture.documentRoot.getElementById('surviveWorldNotice').textContent, 'Gathered wood.');
+  world.dispose();
+});

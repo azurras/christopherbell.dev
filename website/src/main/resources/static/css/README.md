@@ -114,3 +114,6 @@ class contracts, or legacy stylesheet usage changes.
 The Survive stylesheet also owns the responsive third-person WebGL viewport, projected
 player/landmark labels, contextual actions, destination walking and touch controls.
 The canvas is focusable with visible focus; keyboard input is scoped to that canvas.
+World feedback styles include high-contrast action notices, projected resource and
+damage numbers, persistent combat health, and action buttons inside the viewport.
+Numbers stop moving when reduced motion is requested; warnings still remain visible.
