@@ -29,6 +29,11 @@ final class SurvivePlayer {
   int enemyHealth;
   /** Whether this fight's first attack has been made, which ends the spear's reach. */
   boolean struckFirst;
+  /** The next server-clock exchange, or null until the player explicitly engages. */
+  Instant nextStrikeAt;
+  int tacticalPoints;
+  boolean defending;
+  String combatOutcome;
   SurviveWeapon weapon;
   int weaponDurability;
   /** Standing watch at camp for the coming nightfall raid. */
@@ -81,6 +86,8 @@ final class SurvivePlayer {
     enemy = foundEnemy;
     enemyHealth = foundEnemy.health();
     struckFirst = false;
+    disengage();
+    combatOutcome = null;
     guarding = false;
     status = Status.COMBAT;
   }
@@ -89,7 +96,13 @@ final class SurvivePlayer {
     enemy = null;
     enemyHealth = 0;
     struckFirst = false;
+    disengage();
     status = Status.EXPLORING;
+  }
+
+  void disengage() {
+    nextStrikeAt = null;
+    defending = false;
   }
 
   /** Spends one use of the held weapon and reports whether that use broke it. */
@@ -136,6 +149,8 @@ final class SurvivePlayer {
       enemy = null;
       enemyHealth = 0;
       struckFirst = false;
+      disengage();
+      tacticalPoints = 0;
       guarding = false;
       sleptAt = null;
     }

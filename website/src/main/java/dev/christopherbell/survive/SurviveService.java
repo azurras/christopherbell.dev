@@ -213,14 +213,17 @@ public class SurviveService {
 
   /**
    * Loads the durable world and applies any nightfalls and dawns that passed since it was saved.
-   * The settlement reaches storage with the caller's next successful commit; a request that
-   * commits nothing settles again next time, with the same result.
+   * Due combat rounds are committed here so even a stale command cannot discard elapsed attacks.
    */
   private void loadSettledWorld() {
     var saved = repository.load().orElseGet(SurviveSavedWorld::empty);
     world = SurviveWorld.restore(saved);
     storageVersion = saved.version();
-    world.settleUntil(clock.instant());
+    var now = clock.instant();
+    world.settleUntil(now);
+    if (world.settleCombatUntil(now)) {
+      commitWorld();
+    }
   }
 
   private void commitWorld() {

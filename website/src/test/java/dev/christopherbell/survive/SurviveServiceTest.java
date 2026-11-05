@@ -1,6 +1,7 @@
 package dev.christopherbell.survive;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -245,5 +246,65 @@ class SurviveServiceTest {
 
   private SurviveSnapshot act(SurviveService service, String token, SurviveAction action) {
     return service.act(token, action, service.find(token).orElseThrow().revision());
+  }
+
+  @Test
+  void anEngagedFightCatchesUpAfterThePlayerLeavesAndRejectsAnOldCommand() {
+    var now = SurviveClock.WORLD_EPOCH;
+    var mutableClock = mock(Clock.class);
+    when(mutableClock.instant()).thenReturn(now);
+    var repository = new InMemorySurviveWorldRepository();
+    var service = new SurviveService(mutableClock, () -> 50, 10, repository);
+    var joined = service.join(null, "Scout");
+    var target = act(service, joined.token(), SurviveAction.HUNT);
+    assertEquals(null, target.nextStrikeAt());
+    var engaged = service.act(joined.token(), SurviveAction.ENGAGE, target.revision());
+    assertEquals(now.plusSeconds(3), engaged.nextStrikeAt());
+
+    when(mutableClock.instant()).thenReturn(now.plusSeconds(6));
+    var restarted = new SurviveService(mutableClock, () -> 50, 10, repository);
+    assertEquals(409, assertThrows(ResponseStatusException.class,
+        () -> restarted.act(joined.token(), SurviveAction.DISENGAGE, engaged.revision())).getStatusCode().value());
+    assertEquals(1, repository.load().orElseThrow().players().getFirst().enemyHealth());
+    var resumed = restarted.find(joined.token()).orElseThrow();
+    assertEquals(1, resumed.enemyHealth());
+    assertEquals(8, resumed.health());
+    assertEquals(100, resumed.tacticalPoints());
+    assertEquals(now.plusSeconds(9), resumed.nextStrikeAt());
+
+    var won = restarted.act(joined.token(), SurviveAction.WEAPON_SKILL, resumed.revision());
+    assertEquals(0, won.enemyHealth());
+    assertEquals(0, won.tacticalPoints());
+    assertEquals(null, won.nextStrikeAt());
+    assertTrue(won.combatOutcome().contains("defeated"));
+    assertEquals(409, assertThrows(ResponseStatusException.class,
+        () -> restarted.act(joined.token(), SurviveAction.WEAPON_SKILL, resumed.revision())).getStatusCode().value());
+    assertEquals(won.food(), restarted.find(joined.token()).orElseThrow().food());
+  }
+
+  @Test
+  void defendingBlocksOneTimedBiteAndDisengagingStopsFurtherRounds() {
+    var now = SurviveClock.WORLD_EPOCH;
+    var mutableClock = mock(Clock.class);
+    when(mutableClock.instant()).thenReturn(now);
+    var service = new SurviveService(mutableClock, () -> 50, 10, new InMemorySurviveWorldRepository());
+    var joined = service.join(null, "Scout");
+    act(service, joined.token(), SurviveAction.HUNT);
+    act(service, joined.token(), SurviveAction.ENGAGE);
+    var defending = act(service, joined.token(), SurviveAction.DEFEND);
+    assertTrue(defending.defending());
+    assertFalse(defending.actions().contains(SurviveAction.DEFEND));
+
+    when(mutableClock.instant()).thenReturn(now.plusSeconds(3));
+    var struck = service.find(joined.token()).orElseThrow();
+    assertEquals(10, struck.health());
+    assertFalse(struck.defending());
+    assertEquals(50, struck.tacticalPoints());
+    act(service, joined.token(), SurviveAction.DISENGAGE);
+    when(mutableClock.instant()).thenReturn(now.plusSeconds(30));
+    var waiting = service.find(joined.token()).orElseThrow();
+    assertEquals(3, waiting.enemyHealth());
+    assertEquals(10, waiting.health());
+    assertEquals(null, waiting.nextStrikeAt());
   }
 }
