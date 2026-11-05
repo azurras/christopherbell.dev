@@ -6,6 +6,7 @@ export const LANDMARKS = [
   { name: 'Hunting grounds', x: -36, z: 25, radius: 13, actions: [] },
   { name: 'Boat shore', x: 0, z: 62, radius: 13, actions: ['BUILD_BOAT', 'ESCAPE'] },
   { name: 'Fishing bank', x: -13, z: 70, radius: 7, actions: ['FISH'] },
+  { name: 'Waystation', x: 0, z: -38, radius: 0, actions: [] },
 ];
 export const ACTION_LABELS = {
   GATHER: 'Gather wood', GATHER_STONE: 'Gather stone', HUNT: 'Hunt nearby animal', FISH: 'Fish', BUILD_SHELTER: 'Build shelter',
@@ -55,12 +56,15 @@ export function actionsAt(position, allowedActions, wildlife = []) {
 }
 
 /** Column-major perspective/view matrix for the third-person follow camera. */
-export function cameraMatrix(position, yaw, aspectRatio, elevation = 0) {
+export function cameraMatrix(position, yaw, aspectRatio, elevation = 0, zoom = 1, terrainHeight) {
   const wideView = aspectRatio >= 1.3;
-  const distance = wideView ? 6.5 : 12;
-  const height = wideView ? 3.5 : 6.7;
-  const eye = [position.x + Math.sin(yaw) * distance, elevation + height, position.z + Math.cos(yaw) * distance];
-  const back = normalize([eye[0] - position.x, height - (wideView ? 1.65 : 1.38), eye[2] - position.z]);
+  const distance = (wideView ? 5.7 : 12) * zoom;
+  const height = wideView ? 1.8 + distance * 0.15 : 1.38 + distance * 0.44;
+  const cameraX = position.x + Math.sin(yaw) * distance;
+  const cameraZ = position.z + Math.cos(yaw) * distance;
+  const cameraGround = terrainHeight?.(cameraX, cameraZ) ?? elevation;
+  const eye = [cameraX, Math.max(elevation + height, cameraGround + 0.5), cameraZ];
+  const back = normalize([eye[0] - position.x, eye[1] - elevation - (wideView ? 1.65 : 1.38), eye[2] - position.z]);
   const right = normalize([back[2], 0, -back[0]]);
   const up = [back[1] * right[2], back[2] * right[0] - back[0] * right[2], -back[1] * right[0]];
   const dotEye = axis => -(axis[0] * eye[0] + axis[1] * eye[1] + axis[2] * eye[2]);

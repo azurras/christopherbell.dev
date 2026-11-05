@@ -49,6 +49,13 @@ uniform sampler2D authoredActorAtlas;
 float grain(vec3 cell) {
   return fract(sin(dot(mod(cell, 79.0), vec3(13.7, 27.1, 9.3))) * 137.2);
 }
+float cloudNoise(vec2 point) {
+  vec2 cell = floor(point);
+  vec2 blend = smoothstep(0.0, 1.0, fract(point));
+  float rowA = mix(grain(vec3(cell, 4.0)), grain(vec3(cell + vec2(1.0, 0.0), 4.0)), blend.x);
+  float rowB = mix(grain(vec3(cell + vec2(0.0, 1.0), 4.0)), grain(vec3(cell + vec2(1.0), 4.0)), blend.x);
+  return mix(rowA, rowB, blend.y);
+}
 void main() {
   if (surfaceMaterial > 10.0 && surfaceMaterial < 11.0) {
     gl_FragColor = vec4(tint * 1.42, 1.0);
@@ -62,12 +69,18 @@ void main() {
   if (length(surface.xz) > 100.0 && surface.y > 0.0 || surface.y > 34.0) {
     float elevation = smoothstep(0.0, 105.0, surface.y);
     vec3 zenith = sky * vec3(0.60, 0.79, 1.08);
-    gl_FragColor = vec4(mix(sky, zenith, elevation), 1.0);
+    vec2 cloudPosition = surface.xz * 0.025 + vec2(0.008, -0.004) * time;
+    float cloudShape = cloudNoise(cloudPosition) * 0.73 + cloudNoise(cloudPosition * 2.3) * 0.27;
+    float cloud = smoothstep(0.52, 0.74, cloudShape) * smoothstep(0.0, 28.0, surface.y);
+    vec3 cloudColor = mix(sky, vec3(0.91, 0.93, 0.94), smoothstep(0.62, 1.06, daylight));
+    gl_FragColor = vec4(mix(mix(sky, zenith, elevation), cloudColor, cloud * 0.85), 1.0);
     return;
   }
   float textureDetail = grain(floor(surface * 9.0)) * 0.14 + grain(floor(surface * 2.5)) * 0.13;
   vec3 albedo = tint * (0.88 + textureDetail);
-  if (surfaceMaterial > 11.0) {
+  if (surfaceMaterial > 13.0) {
+    albedo = vec3(0.14, 0.31, 0.30);
+  } else if (surfaceMaterial > 11.0) {
     albedo = tint * texture2D(authoredActorAtlas, uv).rgb;
   } else if (surfaceMaterial > 5.0) {
     float index = floor(surfaceMaterial) - 5.0;
@@ -91,7 +104,7 @@ void main() {
     albedo = mix(albedo, ground, 0.67);
   }
   vec3 lit = albedo * daylight;
-  if (surface.y < -0.64) {
+  if (surface.y < -0.64 || surfaceMaterial > 13.0) {
     float ripple = sin(surface.x * 1.6 + surface.z * 0.7 + time * 2.4)
       * sin(surface.z * 1.2 - surface.x * 0.4 - time * 1.8);
     float foam = (1.0 - smoothstep(0.1, 1.6, abs(length(surface.xz) - 78.0))) * (0.4 + ripple * 0.3);
@@ -162,14 +175,14 @@ export function createWorldRenderer(canvas) {
       gl.drawArrays(gl.TRIANGLES, 0, count);
     }
     return {
-      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture) {
+      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture, cameraZoom) {
         const pixelBudgetRatio = Math.sqrt(2200000 / Math.max(1, canvas.clientWidth * canvas.clientHeight));
         const pixelRatio = Math.min(2, pixelBudgetRatio, globalThis.devicePixelRatio || 1);
         const width = Math.max(1, Math.round(canvas.clientWidth * pixelRatio));
         const height = Math.max(1, Math.round(canvas.clientHeight * pixelRatio));
         if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
         gl.viewport(0, 0, width, height);
-        const matrix = cameraMatrix(position, yaw, width / height, groundHeight(position.x, position.z));
+        const matrix = cameraMatrix(position, yaw, width / height, groundHeight(position.x, position.z), cameraZoom, groundHeight);
         const sky = state.phase === 'NIGHT' ? [0.09, 0.13, 0.20]
           : state.phase === 'DUSK' ? [0.61, 0.46, 0.39] : [0.58, 0.70, 0.83];
         gl.clearColor(...sky, 1);

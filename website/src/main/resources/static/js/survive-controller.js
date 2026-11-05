@@ -18,6 +18,8 @@ const CONFIRM = 0;
 const CANCEL = 1;
 const MAIN_MENU = 2;
 const CHAT_LOG = 3;
+const LOCK_TARGET = 10;
+const RESET_CAMERA = 11;
 const UP = 12;
 const DOWN = 13;
 const LEFT = 14;
@@ -112,6 +114,10 @@ export function mountSurviveController(documentRoot, world, onResume) {
     if (game.hidden) return;
     if (pressed(MAIN_MENU)) key(canvas, 'Minus', '-');
     if (pressed(CHAT_LOG)) key(canvas, 'Equal', '+');
+    if (!currentMenu() && (focused === canvas || focused === documentRoot.body)) {
+      if (pressed(LOCK_TARGET)) key(canvas, 'NumpadMultiply', '*');
+      if (pressed(RESET_CAMERA)) key(canvas, 'Home');
+    }
     if (pressed(CANCEL)) {
       if (game.contains(focused) && focused !== canvas) key(focused, 'Escape');
       else key(canvas, 'Escape');
@@ -158,16 +164,17 @@ export function mountSurviveController(documentRoot, world, onResume) {
       if (phone && gameVisible && !wasGameVisible) canvas.focus({ preventScroll: true });
       wasGameVisible = gameVisible;
       if (controller.index === controllerIndex) useButtons(controller.buttons);
-      const wantsToMove = controller.axes.slice(0, 3).some(value => axis(value));
+      const wantsToMove = controller.axes.slice(0, 4).some(value => axis(value));
       const focus = documentRoot.activeElement;
       if (!phone && wantsToMove && gameVisible && !currentMenu()
           && (focus === documentRoot.body || !focus)) canvas.focus({ preventScroll: true });
       const moving = gameVisible && documentRoot.activeElement === canvas && !currentMenu();
       world.setControllerAxes?.(moving ? axis(controller.axes[0]) : 0,
-        moving ? -axis(controller.axes[1]) : 0, moving ? axis(controller.axes[2]) : 0);
+        moving ? -axis(controller.axes[1]) : 0, moving ? axis(controller.axes[2]) : 0,
+        moving ? axis(controller.axes[3]) : 0);
       lastButtons = controller.buttons.map(button => Boolean(button?.pressed));
     } else {
-      world.setControllerAxes?.(0, 0, 0);
+      world.setControllerAxes?.(0, 0, 0, 0);
       wasGameVisible = false;
       lastButtons = [];
     }

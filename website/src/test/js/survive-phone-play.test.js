@@ -59,7 +59,7 @@ test('phone gameplay unlocks only with real fullscreen and an available gamepad'
   const phonePlay = mountSurviveController(documentRoot, world, () => resumed++);
   try {
     assert.equal(byId('surviveGame').inert, true);
-    gamepad = { index: 0, mapping: 'standard', connected: true, axes: [0.4, -0.8, 0.5, 0],
+    gamepad = { index: 0, mapping: 'standard', connected: true, axes: [0.4, -0.8, 0.5, -0.35],
       buttons: Array.from({ length: 16 }, () => ({ pressed: false })) };
     nextFrame();
     assert.equal(byId('surviveGame').inert, true);
@@ -68,7 +68,7 @@ test('phone gameplay unlocks only with real fullscreen and an available gamepad'
     assert.equal(byId('surviveGame').inert, false);
     assert.equal(byId('survivePhoneGate').hidden, true);
     assert.equal(resumed, 1);
-    assert.deepEqual(axes.at(-1), [0.4, 0.8, 0.5]);
+    assert.deepEqual(axes.at(-1), [0.4, 0.8, 0.5, -0.35]);
     gamepad.buttons[2].pressed = true;
     nextFrame();
     nextFrame();
@@ -76,7 +76,7 @@ test('phone gameplay unlocks only with real fullscreen and an available gamepad'
     gamepad = null;
     nextFrame();
     assert.equal(byId('surviveGame').inert, true);
-    assert.deepEqual(axes.at(-1), [0, 0, 0]);
+    assert.deepEqual(axes.at(-1), [0, 0, 0, 0]);
     assert.equal(stopped, 2);
     gamepad = { index: 1, mapping: 'standard', connected: true, axes: [0, 0, 0, 0],
       buttons: Array.from({ length: 16 }, () => ({ pressed: false })) };
@@ -121,10 +121,10 @@ test('a desktop controller works in a normal window and never locks mouse or key
   try {
     assert.equal(documentRoot.getElementById('surviveGame').inert, undefined);
     assert.equal(documentRoot.getElementById('survivePhoneGate').hidden, true);
-    assert.deepEqual(axes.at(-1), [0.55, -0, -0.7]);
+    assert.deepEqual(axes.at(-1), [0.55, -0, -0.7, 0]);
     gamepad = null;
     nextFrame();
-    assert.deepEqual(axes.at(-1), [0, 0, 0]);
+    assert.deepEqual(axes.at(-1), [0, 0, 0, 0]);
     assert.equal(typeof delayedPoll, 'function');
     assert.equal(documentRoot.getElementById('surviveGame').inert, undefined);
   } finally { controller.dispose(); }
