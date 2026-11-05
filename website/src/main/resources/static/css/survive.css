@@ -265,3 +265,14 @@
 .survive-adventure:has(.survive-world[data-active]) { padding: .65rem; }
 @media (min-width: 1050px) { .survive-page .survive-main { max-width: 1500px; } }
 @media (max-width: 600px) { #surviveWorldCanvas { height: 400px; } .survive-world-directions { justify-content: center; } }
+
+.survive-play-shell[data-locked="true"] :is(#surviveGame, #surviveJoin, #surviveError) { display: none; }
+.survive-play-shell[data-phone="true"] #surviveGame,
+.survive-play-shell[data-phone="true"] #surviveGame * { pointer-events: none !important; }
+.survive-play-shell:fullscreen { background: #101914; color: #e9ebe4; overflow: auto; }
+.survive-play-shell:fullscreen .survive-phone-gate,
+.survive-play-shell:fullscreen .survive-join { margin: 1rem auto; width: min(36rem, calc(100% - 2rem)); }
+.survive-play-shell:fullscreen :is(.survive-section-heading, .survive-world-directions, #surviveWorldHelp, .survive-attribution) { display: none; }
+.survive-play-shell:fullscreen .survive-adventure,
+.survive-play-shell:fullscreen .survive-world { padding: 0; margin: 0; border: 0; border-radius: 0; }
+.survive-play-shell:fullscreen #surviveWorldCanvas { height: calc(100dvh - 3rem); }
