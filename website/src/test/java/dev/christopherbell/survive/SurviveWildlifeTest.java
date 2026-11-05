@@ -36,7 +36,9 @@ class SurviveWildlifeTest {
       double dx = hog.x() - view.self().x();
       double dz = hog.z() - view.self().z();
       double distance = Math.hypot(dx, dz);
-      if (distance < 3) break;
+      if (distance < 3) {
+        break;
+      }
       clock.now = clock.now.plusSeconds(1);
       double fraction = Math.min(1, 5.5 / distance);
       view = service.pulseForOwner(joined.token(), null,
