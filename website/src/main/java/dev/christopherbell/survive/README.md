@@ -142,7 +142,10 @@ The page groups moves into Explore, Build (with a Craft submenu) and Camp menus
 that list only moves the latest snapshot allows; in a fight, asleep or after the
 game ends the action bar shows only that situation's moves. `survive-menus.js`
 owns the menu-button keyboard behavior and keeps open menus valid across polls.
-The world HUD shows HP, TP and the three newest events. Open the Main Menu to
+The world HUD shows HP and TP alongside the Chat log. The log shows shared world
+events in the order they happened, plus local Check results and command errors.
+Expand the log to review earlier lines without losing your place when new ones
+arrive. Open the Main Menu to
 inspect Status, Items, Equipment, Map, Camp & sharing, Journal or Guide.
 `survive-panel.js` remembers the camp, journal and guide disclosures per browser
 when storage allows. World refreshes keep menus in the player's chosen state.

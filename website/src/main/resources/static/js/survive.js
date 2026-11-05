@@ -1,6 +1,7 @@
 /** Display and transport only: the Java world owns all rules and allowed actions. */
 import { API } from './lib/api.js';
 import { fetchJson } from './lib/util.js';
+import { appendSurviveLogMessage, syncSurviveLog } from './survive-log.js';
 import { keepFocusInActionBar, mountActionMenus, syncActionMenus } from './survive-menus.js';
 import { mountPanelSections, noteJournalEvents, summarizeCamp } from './survive-panel.js';
 import { renderSurviveScene } from './survive-scene.js';
@@ -101,7 +102,7 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveCampSummary', summarizeCamp(state));
   const newestEvents = [...state.events].reverse();
   const listedEntries = [
-    ['survivePlayers', state.survivors], ['surviveEvents', newestEvents], ['surviveRecentEvents', newestEvents.slice(0, 3)],
+    ['survivePlayers', state.survivors], ['surviveEvents', newestEvents],
   ];
   for (const [id, entries] of listedEntries) {
     const list = documentRoot.getElementById(id);
@@ -112,6 +113,7 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
     });
     list.replaceChildren(...items);
   }
+  syncSurviveLog(documentRoot, state);
   const recipientPicker = documentRoot.getElementById('surviveRecipient');
   const previousRecipient = recipientPicker.value;
   const recipientSignature = JSON.stringify(state.recipients);
@@ -160,7 +162,33 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const refresh = documentRoot.getElementById('surviveRefresh');
   const cancel = documentRoot.getElementById('surviveCancel');
   const giftForm = documentRoot.getElementById('surviveGift');
+  const game = documentRoot.getElementById('surviveGame');
+  const log = documentRoot.getElementById('surviveGameLog');
+  const logToggle = documentRoot.getElementById('surviveLogToggle');
+  const logScrollback = documentRoot.getElementById('surviveLogScrollback');
   const world = mountSurviveWorld(documentRoot, requestJson, performAction);
+
+  function setLogExpanded(expanded) {
+    const followsLatest = logScrollback.scrollHeight - logScrollback.clientHeight - logScrollback.scrollTop <= 4;
+    logToggle.setAttribute('aria-expanded', String(expanded));
+    logToggle.textContent = expanded ? 'Collapse' : 'Expand';
+    log.dataset.expanded = String(expanded);
+    if (followsLatest) logScrollback.scrollTop = logScrollback.scrollHeight;
+    (expanded ? logScrollback : logToggle).focus({ preventScroll: true });
+  }
+
+  const toggleLog = () => setLogExpanded(log.dataset.expanded !== 'true');
+  const useLogShortcut = event => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey
+        || event.target.closest('input, select, textarea')) return;
+    if (event.key === '+' && !event.repeat) {
+      event.preventDefault();
+      toggleLog();
+    } else if (event.key === 'Escape' && log.dataset.expanded === 'true' && log.contains(event.target)) {
+      event.preventDefault();
+      setLogExpanded(false);
+    }
+  };
 
   function setPending(isPending, isMutation = false) {
     pending = isPending;
@@ -206,7 +234,10 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       }
       errorBox.textContent = `${error.message || 'The server could not be reached.'} Refresh the world before trying another move.`;
       errorBox.hidden = false;
-      if (options.method === 'POST') world.showError?.(errorBox.textContent);
+      if (options.method === 'POST') {
+        world.showError?.(errorBox.textContent);
+        if (state) appendSurviveLogMessage(documentRoot, errorBox.textContent);
+      }
     } finally {
       setPending(false);
     }
@@ -269,6 +300,8 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   restart.addEventListener('click', showJoin);
   cancel.addEventListener('click', cancelJoin);
   refresh.addEventListener('click', readWorld);
+  logToggle.addEventListener('click', toggleLog);
+  game.addEventListener('keydown', useLogShortcut);
   const isWatchingWorld = () => state && !pending && joinForm.hidden && !documentRoot.hidden;
   // Refresh shortly after a confirmed deadline while fighting. The server owns elapsed rounds.
   const timer = setInterval(() => {
@@ -307,6 +340,8 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       restart.removeEventListener('click', showJoin);
       cancel.removeEventListener('click', cancelJoin);
       refresh.removeEventListener('click', readWorld);
+      logToggle.removeEventListener('click', toggleLog);
+      game.removeEventListener('keydown', useLogShortcut);
       giftForm.removeEventListener('submit', give);
       documentRoot.getElementById('surviveRecipient').removeEventListener('change', chooseRecipient);
     },

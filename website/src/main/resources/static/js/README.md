@@ -249,3 +249,9 @@ Survive's Main Menu opens with minus on the focused island or with its on-screen
 control. Enter opens the contextual Commands window. Arrow keys move between
 entries and Escape returns focus to the island. The game log opens the full
 journal inside the Main Menu. Map destinations still use the shared walking path.
+
+`survive-log.js` appends the shared world journal oldest first to the in-world
+Chat log, using the server's event revision so repeated polls add nothing and
+identical outcomes still appear separately. Check and command errors add local
+lines. The log holds up to 60 lines and follows new entries only when already at
+the bottom. Plus or Expand opens a taller scrollback window.

@@ -353,18 +353,38 @@ test('scene hotspots the server does not allow send nothing', async () => {
   assert.equal(documentRoot.getElementById('surviveCampScene').listeners.has('click'), false);
 });
 
-test('the status card shows inventory, weapon, stats and the three newest events', () => {
+test('the status menu shows equipment and the chat log keeps all available world events in order', () => {
   const documentRoot = documentFixture();
   const events = ['First', 'Second', 'Third', 'Fourth', '<b>Newest</b>'];
   renderSurviveState(documentRoot, { ...snapshot, events });
   const recent = documentRoot.getElementById('surviveRecentEvents').children.map(item => item.textContent);
-  assert.deepEqual(recent, ['<b>Newest</b>', 'Fourth', 'Third']);
+  assert.deepEqual(recent, events);
   assert.equal(documentRoot.getElementById('surviveEvents').children.length, 5);
   assert.equal(documentRoot.getElementById('surviveWood').textContent, '4');
   assert.equal(documentRoot.getElementById('surviveStone').textContent, '2');
   assert.equal(documentRoot.getElementById('surviveInventoryCount').textContent, '7 / 10');
   assert.equal(documentRoot.getElementById('surviveWeapon').textContent, 'Spear · 9 uses left');
   assert.equal(documentRoot.getElementById('surviveCampSummary').textContent, '1 shelter · 0 boats · 2 survivors');
+});
+
+test('the world log appends repeated outcomes once per world revision and preserves scrollback', () => {
+  const documentRoot = documentFixture();
+  const list = documentRoot.getElementById('surviveRecentEvents');
+  const scrollback = documentRoot.getElementById('surviveLogScrollback');
+  scrollback.clientHeight = 50;
+  scrollback.scrollHeight = 200;
+  scrollback.scrollTop = 0;
+  const first = { ...snapshot, worldRevision: 10, events: ['A raid began.', 'Miss.'] };
+  renderSurviveState(documentRoot, first);
+  assert.equal(scrollback.scrollTop, 200);
+  const originalLine = list.children[0];
+  scrollback.scrollTop = 25;
+  const next = { ...first, worldRevision: 11, events: [...first.events, 'Miss.'] };
+  renderSurviveState(documentRoot, next);
+  renderSurviveState(documentRoot, next);
+  assert.equal(scrollback.scrollTop, 25);
+  assert.equal(list.children[0], originalLine);
+  assert.deepEqual(list.children.map(line => line.textContent), next.events);
 });
 
 test('rendering never opens or closes the side panel sections', () => {
