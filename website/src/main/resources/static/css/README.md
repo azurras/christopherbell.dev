@@ -119,3 +119,6 @@ damage numbers, persistent combat health, and action buttons inside the viewport
 Numbers stop moving when reduced motion is requested; warnings still remain visible.
 The combat overlay also owns the selectable enemy marker, target details, TP, and
 the contextual combat buttons. Text controls remain available when WebGL is inactive.
+The world uses one column. The Main Menu, vertical Commands window, event log,
+and HP/TP display sit over the canvas. The Main Menu and log flow normally in
+the text fallback.

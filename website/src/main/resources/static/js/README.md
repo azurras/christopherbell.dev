@@ -244,3 +244,8 @@ motion. Failed requests show in-world notices without predicting rewards.
 The world target menu shows Check and the server-allowed combat commands for the
 selected animal. The page refreshes at the next reported attack deadline during
 engagement and on return to a visible tab. The server owns attacks, TP, and outcomes.
+
+Survive's Main Menu opens with minus on the focused island or with its on-screen
+control. Enter opens the contextual Commands window. Arrow keys move between
+entries and Escape returns focus to the island. The game log opens the full
+journal inside the Main Menu. Map destinations still use the shared walking path.

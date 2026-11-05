@@ -13,7 +13,8 @@ function panelFixture() {
   const fullJournal = h('a', { href: '#surviveSectionJournal', id: 'surviveFullJournal' }, 'Full journal');
   const journal = section('Journal');
   journal.children[0].appendChild(h('span', { id: 'surviveJournalUnread' }));
-  for (const element of [fullJournal, section('Camp'), journal, section('Guide')]) {
+  const mainMenu = h('details', { id: 'surviveMainMenu' }, section('Camp'), journal, section('Guide'));
+  for (const element of [fullJournal, mainMenu]) {
     documentRoot.body.appendChild(element);
   }
   const memory = new Map();
@@ -66,12 +67,29 @@ test('the Full journal link opens the journal section', () => {
   try {
     const click = byId('surviveFullJournal').dispatch('click');
     assert.equal(click.defaultPrevented, true);
+    assert.equal(byId('surviveMainMenu').open, true);
     assert.equal(byId('surviveSectionJournal').open, true);
     assert.equal(memory.get('survive.section.journal'), 'open');
   } finally { panel.dispose(); }
   byId('surviveSectionJournal').open = false;
   byId('surviveFullJournal').dispatch('click');
   assert.equal(byId('surviveSectionJournal').open, false);
+});
+
+test('a journal inside a closed main menu stays unread until the menu opens', () => {
+  const { documentRoot, storage, byId } = panelFixture();
+  const panel = mountPanelSections(documentRoot, storage);
+  try {
+    const mainMenu = byId('surviveMainMenu');
+    noteJournalEvents(documentRoot, 10);
+    byId('surviveSectionJournal').open = true;
+    mainMenu.open = false;
+    noteJournalEvents(documentRoot, 11);
+    assert.equal(byId('surviveJournalUnread').hidden, false);
+    mainMenu.open = true;
+    mainMenu.dispatch('toggle');
+    assert.equal(byId('surviveJournalUnread').hidden, true);
+  } finally { panel.dispose(); }
 });
 
 test('new events mark the closed journal until it is opened', () => {

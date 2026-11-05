@@ -81,6 +81,25 @@ function worldFixture() {
 }
 const worldState = { survivorId: 'alice', name: 'Alice', phase: 'DAY', status: 'EXPLORING', shelters: 0, boats: 0, actions: [] };
 
+test('selecting an animal opens commands and Escape returns to the island', () => {
+  const { documentRoot, renderer } = worldFixture();
+  const actions = [];
+  const world = mountSurviveWorld(documentRoot, async () => {}, action => actions.push(action), () => renderer);
+  const byId = id => documentRoot.getElementById(id);
+  try {
+    byId('surviveWorldActions').hidden = true;
+    world.setState({ ...worldState, status: 'COMBAT', enemy: 'HOG', enemyHealth: 5, actions: ['ENGAGE', 'FLEE'] });
+    byId('surviveWorldCanvas').emit('keydown', { code: 'Enter', preventDefault() {} });
+    assert.equal(byId('surviveWorldEnemyMarker').getAttribute('aria-pressed'), 'true');
+    assert.equal(byId('surviveCommandButton').getAttribute('aria-expanded'), 'true');
+    assert.deepEqual(byId('surviveWorldActions').children.map(button => button.textContent), ['Check', 'Engage', 'Flee to camp']);
+    assert.deepEqual(actions, []);
+    byId('surviveWorld').emit('keydown', { code: 'Escape', target: { closest: () => null }, preventDefault() {} });
+    assert.equal(byId('surviveWorldActions').hidden, true);
+    assert.equal(byId('surviveCommandButton').getAttribute('aria-expanded'), 'false');
+  } finally { world.dispose(); }
+});
+
 test('disposal aborts a stalled pulse, cancels animation and releases input and GPU resources', async () => {
   const fixture = worldFixture();
   let requestOptions;
