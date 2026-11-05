@@ -2,10 +2,34 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { prepareActorArt } from '../../main/resources/static/js/survive-authored-actors.js';
+import { createDynamicMesh } from '../../main/resources/static/js/survive-dynamic-mesh.js';
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
 import { cameraMatrix, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
 import { actionPose } from '../../main/resources/static/js/survive-action-pose.js';
 import { drawBoat, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
+
+test('dynamic frames upload the same vertices while reusing their allocated capacity', () => {
+  const allocations = [];
+  const uploads = [];
+  const gl = {
+    bindBuffer() {},
+    bufferData(_target, bytes) { allocations.push(bytes); },
+    bufferSubData(_target, _offset, vertices) { uploads.push(Array.from(vertices)); },
+  };
+  const dynamic = createDynamicMesh(gl, {});
+  const streamed = meshBuilder(undefined, dynamic.append);
+  const ordinary = meshBuilder();
+  const draw = mesh => mesh.triangle([0, 0, 0], [0, 1, 0], [1, 0, 0], [0.3, 0.5, 0.7]);
+  draw(ordinary);
+  for (let frame = 0; frame < 2; frame++) {
+    dynamic.reset();
+    draw(streamed);
+    assert.equal(dynamic.upload(), ordinary.vertices.length);
+  }
+  assert.equal(allocations.length, 1);
+  const expected = Array.from(new Float32Array(ordinary.vertices));
+  assert.deepEqual(uploads, [expected, expected]);
+});
 
 test('authored actors draw bounded texture coordinates and animate with the equipped tool', () => {
   const asset = kind => JSON.parse(readFileSync(new URL(`../../main/resources/static/images/survive/${kind}.json`, import.meta.url), 'utf8'));

@@ -13,7 +13,9 @@ export function prepareActorArt(data) {
       uv,
     });
   }
-  return { triangles, poses: data.poses, hands: data.hands };
+  const compactFrames = clips => Object.fromEntries(Object.entries(clips).map(([clip, frames]) =>
+    [clip, frames.map(frame => Int16Array.from(frame))]));
+  return { triangles, poses: compactFrames(data.poses), hands: compactFrames(data.hands) };
 }
 
 export function drawActorArt(triangle, model, pose, clip, progress, loop = false, color = WHITE) {
@@ -33,5 +35,6 @@ export function drawActorArt(triangle, model, pose, clip, progress, loop = false
     triangle(points[a], points[b], points[c], color, 12, uv);
   }
   const hands = model.hands[clip];
-  if (hands) return pose(...hands[index].map((_, offset) => sample(hands[index], hands[next], offset)));
+  if (hands) return pose(sample(hands[index], hands[next], 0), sample(hands[index], hands[next], 1),
+    sample(hands[index], hands[next], 2));
 }
