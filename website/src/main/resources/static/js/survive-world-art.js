@@ -37,57 +37,70 @@ function trailDistance(x, z) {
   return distance;
 }
 
-function groundSurface(x, z) {
+function groundSurface(x, z, trees) {
   const distance = Math.hypot(x, z);
   const vegetation = 0.48 + 0.25 * Math.sin(x * 0.12 + z * 0.04) + 0.18 * Math.cos(z * 0.21);
   const grass = mix(GRASS, [0.39, 0.43, 0.22], vegetation);
   const trail = clampUnit((3.1 - trailDistance(x, z)) / 2.4);
   const shore = clampUnit((distance - 63 - Math.sin(x * 0.18) * 2) / 11);
-  return { color: mix(mix(grass, EARTH, trail), SAND, shore), material: 1 + Math.max(trail, shore) * 0.9 };
+  let shade = 0;
+  for (const tree of trees) {
+    const dx = x - tree.x;
+    const dz = z - tree.z;
+    if (Math.abs(dx) > 6 || Math.abs(dz) > 7) continue;
+    const distanceFromCanopy = Math.hypot(dx - tree.height * 0.20, dz + tree.height * 0.25);
+    shade = Math.max(shade, clampUnit((tree.height * 0.38 - distanceFromCanopy) / 1.7));
+  }
+  return { color: tint(mix(mix(grass, EARTH, trail), SAND, shore), 1 - shade * 0.46), material: 1 + Math.max(trail, shore) * 0.9 };
 }
 
-/** Build the static landscape once. All variation is deterministic across clients. */
-export function islandMesh() {
-  const mesh = meshBuilder();
-  mesh.ellipsoid(0, 0, 0, 174, 135, 174, [1, 1, 1], 28, 10);
-  mesh.disk(0, -0.66, 0, 380, [0.19, 0.34, 0.39], 72);
-  const sectors = 144;
-  const rings = 52;
-  let innerRing = Array.from({ length: sectors }, () => [0, 0, 0]);
-  for (let ring = 1; ring <= rings; ring++) {
-    const outerRing = Array.from({ length: sectors }, (_, sector) => {
-      const angle = sector / sectors * TAU;
-      const radius = ring * 1.5;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      return [x, groundHeight(x, z), z];
-    });
-    for (let sector = 0; sector < sectors; sector++) {
-      const next = (sector + 1) % sectors;
-      const points = [innerRing[sector], outerRing[sector], outerRing[next], innerRing[next]];
-      const materials = points.map(([x, , z]) => groundSurface(x, z));
-      const paint = indices => mesh.triangle(...indices.map(index => points[index]),
-        indices.map(index => materials[index].color), indices.map(index => materials[index].material));
-      paint([0, 1, 2]);
-      if (ring > 1) paint([0, 2, 3]);
-    }
-    innerRing = outerRing;
-  }
+function woodland() {
+  const trees = [];
   for (let index = 0; index < 142; index++) {
     const angle = index * 2.39996;
     const radius = 18 + (index * 19 % 51);
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
     if (trailDistance(x, z) < 4 || Math.hypot(x - 31, z + 14) < 12 || Math.hypot(x + 36, z - 25) < 9) continue;
-    mesh.tree(x, z, 5.1 + (index * 13 % 28) * 0.19, angle, index % 4 === 0);
+    trees.push({ x, z, height: 5.1 + (index * 13 % 28) * 0.19, angle, broadleaf: index % 4 === 0 });
   }
   for (let index = 0; index < 28; index++) {
     const angle = index * 2.39996;
     const radius = 4 + Math.sqrt(index) * 2;
     const x = -24 + Math.cos(angle) * radius;
     const z = -15 + Math.sin(angle) * radius;
-    if (trailDistance(x, z) > 3) mesh.tree(x, z, 6.4 + (index % 7) * 0.54, angle, index % 5 === 0);
+    if (trailDistance(x, z) > 3) trees.push({ x, z, height: 6.4 + (index % 7) * 0.54, angle, broadleaf: index % 5 === 0 });
   }
+  return trees;
+}
+
+/** Build the static landscape once. All variation is deterministic across clients. */
+export function islandMesh() {
+  const mesh = meshBuilder();
+  const trees = woodland();
+  mesh.ellipsoid(0, 0, 0, 174, 135, 174, [1, 1, 1], 28, 10);
+  mesh.disk(0, -0.66, 0, 380, [0.19, 0.34, 0.39], 72);
+  const sectors = 144;
+  const rings = 52;
+  const terrainVertex = (x, z) => ({ point: [x, groundHeight(x, z), z], ...groundSurface(x, z, trees) });
+  let innerRing = Array.from({ length: sectors }, () => terrainVertex(0, 0));
+  for (let ring = 1; ring <= rings; ring++) {
+    const outerRing = Array.from({ length: sectors }, (_, sector) => {
+      const angle = sector / sectors * TAU;
+      const radius = ring * 1.5;
+      return terrainVertex(Math.cos(angle) * radius, Math.sin(angle) * radius);
+    });
+    for (let sector = 0; sector < sectors; sector++) {
+      const next = (sector + 1) % sectors;
+      const face = [innerRing[sector], outerRing[sector], outerRing[next], innerRing[next]];
+      const paint = indices => mesh.triangle(...indices.map(index => face[index].point),
+        indices.map(index => face[index].color), indices.map(index => face[index].material));
+      paint([0, 1, 2]);
+      if (ring > 1) paint([0, 2, 3]);
+    }
+    innerRing = outerRing;
+  }
+  for (const tree of trees) mesh.tree(tree.x, tree.z, tree.height, tree.angle, tree.broadleaf);
   for (let index = 0; index < 37; index++) {
     const angle = index * 2.39996;
     const radius = 2 + Math.sqrt(index) * 1.6;
@@ -96,7 +109,7 @@ export function islandMesh() {
     if (trailDistance(x, z) > 2.5) {
       const size = 0.9 + (index * 7 % 13) * 0.21;
       mesh.ellipsoid(x, groundHeight(x, z) + size * 0.21, z, size, size * 0.62, size * 0.8,
-        tint(STONE, 0.81 + index % 6 * 0.055), 7, 4, angle, STONE_MATERIAL);
+        tint(STONE, 0.81 + index % 6 * 0.055), 7, 4, angle);
     }
   }
   for (let index = 0; index < 300; index++) {
@@ -288,8 +301,8 @@ export function meshBuilder() {
   }
   function tree(x, z, height, angle, broadleaf) {
     const y = groundHeight(x, z);
-    const leanX = Math.cos(angle) * height * 0.10;
-    const leanZ = Math.sin(angle) * height * 0.10;
+    const leanX = Math.cos(angle) * height * 0.055;
+    const leanZ = Math.sin(angle) * height * 0.055;
     beam([x, y, z], [x + leanX, y + height * 0.92, z + leanZ], height * 0.058, 0.045, BARK, 9, BARK_MATERIAL);
     for (let branch = 0; branch < 6; branch++) {
       const branchAngle = angle + branch * 2.39996;

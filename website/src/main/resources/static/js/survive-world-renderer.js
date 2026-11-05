@@ -62,6 +62,7 @@ void main() {
     vec3 grass = texture2D(grassTile, uv / 3.3).rgb;
     vec3 path = texture2D(earthTile, uv / 4.1).rgb;
     vec3 ground = mix(grass, path, clamp((surfaceMaterial - 1.0) / 0.9, 0.0, 1.0));
+    ground *= clamp(tint.g * 2.6 + 0.15, 0.50, 1.13);
     albedo = mix(albedo, ground, 0.67);
   }
   vec3 lit = albedo * daylight;
@@ -148,8 +149,9 @@ export function createWorldRenderer(canvas) {
         const stride = avatar => avatar.moving ? Math.sin(animationSeconds * 11) : 0;
         const pose = actionPose(gesture) || (state.status === 'SLEEPING' && position.animate
           ? { kind: 'sleep', weight: Math.sin(animationSeconds * 2.6) } : null);
+        const restingHeading = position.x === 0 && position.z === 0 ? Math.PI : position.heading;
         const heading = pose?.kind === 'fish' ? Math.atan2(position.x, position.z)
-          : state.status === 'COMBAT' ? Math.atan2(enemy.x - position.x, enemy.z - position.z) : position.heading;
+          : state.status === 'COMBAT' ? Math.atan2(enemy.x - position.x, enemy.z - position.z) : restingHeading;
         actors.avatar(position.x, position.z, heading, [0.24, 0.31, 0.42], state.status,
           pose?.kind === 'run' ? Math.sin(animationSeconds * 19) : stride(position), state.weapon, pose);
         // Bound dynamic geometry in a crowded camp while drawing nearby players first.

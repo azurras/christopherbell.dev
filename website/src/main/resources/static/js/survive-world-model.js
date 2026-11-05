@@ -57,10 +57,10 @@ export function actionsAt(position, allowedActions, wildlife = []) {
 /** Column-major perspective/view matrix for the third-person follow camera. */
 export function cameraMatrix(position, yaw, aspectRatio, elevation = 0) {
   const wideView = aspectRatio >= 1.3;
-  const distance = wideView ? 8.7 : 12;
-  const height = wideView ? 4.5 : 6.7;
+  const distance = wideView ? 6.5 : 12;
+  const height = wideView ? 3.5 : 6.7;
   const eye = [position.x + Math.sin(yaw) * distance, elevation + height, position.z + Math.cos(yaw) * distance];
-  const back = normalize([eye[0] - position.x, height - 1.38, eye[2] - position.z]);
+  const back = normalize([eye[0] - position.x, height - (wideView ? 1.65 : 1.38), eye[2] - position.z]);
   const right = normalize([back[2], 0, -back[0]]);
   const up = [back[1] * right[2], back[2] * right[0] - back[0] * right[2], -back[1] * right[0]];
   const dotEye = axis => -(axis[0] * eye[0] + axis[1] * eye[1] + axis[2] * eye[2]);
