@@ -2,6 +2,7 @@
 export function createIslandMaterials(gl, documentRoot, program) {
   const definitions = [
     ['grassTile', [0, 0]], ['earthTile', [1, 0]], ['stoneTile', [0, 1]], ['barkTile', [1, 1]], ['foliageCard', null],
+    ['actorAtlas', null],
   ];
   const textures = [];
   const images = [];
@@ -21,7 +22,7 @@ export function createIslandMaterials(gl, documentRoot, program) {
     definitions.forEach(([name, tile], index) => {
       textures.push(gl.createTexture());
       bindTexture(index);
-      const pixel = tile ? [115, 109, 86, 255] : [0, 0, 0, 0];
+      const pixel = name === 'foliageCard' ? [0, 0, 0, 0] : [115, 109, 86, 255];
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(pixel));
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, tile ? gl.REPEAT : gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, tile ? gl.REPEAT : gl.CLAMP_TO_EDGE);
@@ -30,9 +31,8 @@ export function createIslandMaterials(gl, documentRoot, program) {
       gl.uniform1i(gl.getUniformLocation(program, name), index);
     });
 
-    function upload(image, index, tile) {
+    function upload(image, index, tile, tileSize = tile ? 512 : 256) {
       const canvas = documentRoot.createElement('canvas');
-      const tileSize = tile ? 512 : 256;
       canvas.width = tileSize;
       canvas.height = tileSize;
       const paint = canvas.getContext('2d');
@@ -61,6 +61,7 @@ export function createIslandMaterials(gl, documentRoot, program) {
       definitions.forEach(([, tile], index) => { if (tile) upload(image, index, tile); });
     });
     load('/images/survive/foliage.png', image => upload(image, 4, null));
+    load('/images/survive/actor-materials.jpg', image => upload(image, 5, null, 1024));
     return { dispose };
   } catch (error) {
     dispose();

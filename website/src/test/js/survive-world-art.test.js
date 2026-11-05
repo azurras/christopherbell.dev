@@ -3,6 +3,7 @@ import test from 'node:test';
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
 import { cameraMatrix, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
 import { actionPose } from '../../main/resources/static/js/survive-action-pose.js';
+import { drawBoat, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
 
 test('the rendered island has finite geometry within its static triangle budget', () => {
   const { vertices } = islandMesh();
@@ -23,6 +24,41 @@ test('terrain, ruin masonry, bark and cutout foliage are represented in the same
   assert.ok(materials.has(2.5));
   assert.ok(materials.has(3.5));
   assert.ok(materials.has(4.5));
+});
+
+test('animated adventurers and each animal use bounded local texture coordinates', () => {
+  const meshes = ['HOG', 'WOLF', 'BEAR'].map(kind => {
+    const mesh = meshBuilder();
+    mesh.animal(20, -15, kind, 1, 0.7, 0.4);
+    return mesh.vertices;
+  });
+  assert.notDeepEqual(meshes[0], meshes[1]);
+  assert.notDeepEqual(meshes[1], meshes[2]);
+  const avatar = meshBuilder();
+  avatar.avatar(8, 9, 0.4, [0.24, 0.31, 0.42], 'COMBAT', 0, 'SPEAR', actionPose({ action: 'ATTACK', ageSeconds: 0.4 }));
+  meshes.push(avatar.vertices);
+  const materials = new Set();
+  for (const mesh of meshes) {
+    assert.ok(mesh.length / (MESH_VERTEX_FLOATS * 3) < 2500);
+    for (let index = 6; index < mesh.length; index += MESH_VERTEX_FLOATS) {
+      if (mesh[index] < 5) continue;
+      materials.add(mesh[index]);
+      assert.ok(mesh[index + 1] >= 0 && mesh[index + 1] <= 1);
+      assert.ok(mesh[index + 2] >= 0 && mesh[index + 2] <= 1);
+    }
+  }
+  assert.deepEqual([...materials].sort(), [5.5, 6.5, 7.5, 8.5]);
+});
+
+test('constructed shelters and boats emit finite, textured geometry', () => {
+  const shelter = meshBuilder();
+  const boat = meshBuilder();
+  drawShelter(shelter, 0, 1, 0);
+  drawBoat(boat, 0, 80);
+  for (const { vertices } of [shelter, boat]) {
+    assert.ok(vertices.length > MESH_VERTEX_FLOATS * 100);
+    assert.ok(vertices.every(Number.isFinite));
+  }
 });
 
 test('confirmed harvest, fishing and combat actions create distinct animated meshes', () => {
