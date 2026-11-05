@@ -78,7 +78,7 @@ class SurviveWorldMongoCodecTest {
         List.of(alice, guest), 43L, 21L, List.of(party));
     var envelope = codec.encode(saved);
     assertEquals(party.id(), envelope.get("payload", Document.class)
-        .getList("parties", Document.class).getFirst().getString("id"));
+        .getList("parties", Document.class).getFirst().getString("_id"));
     assertEquals("survive_world", envelope.getString("_kind"));
     assertEquals(saved, codec.decode(envelope));
     assertTrue(DomainCollectionManifest.forKind("survive_world").isEmpty());
