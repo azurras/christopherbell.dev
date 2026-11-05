@@ -17,6 +17,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   const mainMenu = documentRoot.getElementById('surviveMainMenu');
   const labels = documentRoot.getElementById('surviveWorldLabels');
   const mapPlayer = documentRoot.getElementById('surviveMapPlayer');
+  const mapSection = documentRoot.getElementById('surviveMapSection');
   const locationLabel = documentRoot.getElementById('surviveWorldLocation');
   const target = documentRoot.getElementById('surviveWorldEnemyMarker');
   let renderer;
@@ -246,6 +247,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (mainMenu.open) {
       stopWalking();
       closeCommands();
+    } else {
+      mapSection.open = false;
     }
   });
   listen(shell, 'keydown', event => {
@@ -365,10 +368,12 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         label.element.style.left = `${(projected.x + 1) * 50}%`;
         label.element.style.top = `${(1 - projected.y) * 50}%`;
       }
-      if (connected) {
+      if (connected && mapSection.open) {
         mapPlayer.removeAttribute('hidden');
         mapPlayer.setAttribute('transform',
           `translate(${position.x.toFixed(1)} ${position.z.toFixed(1)}) rotate(${-position.heading * 180 / Math.PI})`);
+      } else if (!connected) {
+        mapPlayer.setAttribute('hidden', '');
       }
       const nearest = [...LANDMARKS].sort((a, b) => Math.hypot(a.x - position.x, a.z - position.z) - Math.hypot(b.x - position.x, b.z - position.z))[0];
       locationLabel.textContent = `${nearest.name} · ${Math.round(Math.hypot(nearest.x - position.x, nearest.z - position.z))} m`;

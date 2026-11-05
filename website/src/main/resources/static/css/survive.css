@@ -53,7 +53,7 @@
 .survive-clock { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; padding: .35rem .5rem; border: 2px ridge #c4c9d6; border-radius: .35rem; color: #f2f3ff; background: linear-gradient(150deg, #27396a, #111936 72%); font-size: .79rem; font-variant-numeric: tabular-nums; }
 .survive-world[data-active] .survive-clock { position: absolute; top: .6rem; left: 50%; transform: translateX(-50%); z-index: 4; pointer-events: none; }
 .survive-world:not([data-active]) .survive-clock { margin: .6rem; }
-.survive-island-map { display: block; width: calc(100% - 1.2rem); height: auto; border: 1px solid #8496a5; border-radius: .25rem; }
+.survive-island-map { display: block; width: calc(100% - 1.2rem); height: auto; max-height: min(37vh, 18rem); border: 1px solid #8496a5; border-radius: .25rem; }
 .survive-map-landmarks { fill: #fff6d6; font-size: 5px; font-weight: 700; paint-order: stroke fill; stroke: #28302a; stroke-width: .75px; }
 .survive-clock[data-phase="DUSK"] { border-color: #a8774f; color: #f1cfa4; }
 .survive-clock[data-phase="NIGHT"] { border-color: #6c6aa0; color: #c9c7f2; background: rgba(28, 26, 58, .45); }
@@ -206,6 +206,7 @@
 }
 .survive-main-menu > summary { width: max-content; margin-left: auto; padding: .55rem .7rem; cursor: pointer; }
 .survive-main-menu-list { margin-top: .25rem; max-height: min(49vh, 360px); overflow: auto; padding: .25rem; }
+.survive-main-menu-list:has(.survive-map-section[open]) > details:not(.survive-map-section) { display: none; }
 .survive-main-menu-list .survive-section { background: none; border: 0; border-radius: 0; }
 .survive-main-menu-list .survive-section > summary { padding: .45rem .6rem; color: #f2f3ff; }
 .survive-main-menu-list .survive-section > summary::before, .survive-world-actions button::before {

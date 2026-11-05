@@ -144,6 +144,7 @@ test('ordinary snapshots preserve held keyboard movement and update the map mark
   const first = fixture.rendered.at(-1).x;
   assert.ok(first < 0);
   world.setState({ ...worldState, revision: 2 });
+  fixture.documentRoot.getElementById('surviveMapSection').open = true;
   fixture.frame(200);
   assert.ok(fixture.rendered.at(-1).x < first);
   assert.match(fixture.documentRoot.getElementById('surviveMapPlayer').getAttribute('transform'), /translate\(-/);
