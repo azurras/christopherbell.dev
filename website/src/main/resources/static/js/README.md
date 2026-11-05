@@ -235,6 +235,7 @@ clips and attaches tools to the sampled hand. `survive-world-actors.js` supplies
 the fallback models. `survive-world-props.js`
 builds the shelters, boats and resource-site props used by the same renderer.
 `survive-world-renderer.js` owns WebGL buffers, lighting, fog and disposal.
+`survive-dynamic-mesh.js` reuses typed vertex and GPU buffer capacity across frames.
 `survive-world.js` owns scoped keyboard and controller movement, camera input,
 sequenced presence pulses, timeout/backoff, player labels and frame/listener cleanup.
 `survive.js` still serializes durable survival commands. New presence uses the API
