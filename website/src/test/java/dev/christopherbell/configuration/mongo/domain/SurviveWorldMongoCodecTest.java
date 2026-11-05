@@ -33,15 +33,15 @@ class SurviveWorldMongoCodecTest {
     var guest = new SurviveSavedWorld.Player(null, UUID.randomUUID().toString(),
         UUID.randomUUID().toString(), "Guest", alice.lastSeen(), 10, 2, 10,
         0, 1, 0, 0, 0, Status.EXPLORING, 0, "At camp.", 1, 6, null, SurviveWeapon.CLUB, 5, true, null, false, null, null, null, null, null);
-    var saved = new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of("Shared journal"), List.of(alice, guest), 42L);
+    var saved = new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of("Shared journal"), List.of(alice, guest), 43L, 21L);
     var envelope = codec.encode(saved);
     assertEquals("survive_world", envelope.getString("_kind"));
     assertEquals(saved, codec.decode(envelope));
     assertTrue(DomainCollectionManifest.forKind("survive_world").isEmpty());
     assertThrows(IllegalArgumentException.class, () -> new SurviveSavedWorld("shared", 0L, 0, 0, 0,
-        List.of(), List.of(alice, alice), null));
+        List.of(), List.of(alice, alice), null, null));
     assertThrows(IllegalArgumentException.class, () -> new SurviveSavedWorld("shared", 0L, 0, 1001, 0,
-        List.of(), List.of(alice), null));
+        List.of(), List.of(alice), null, null));
   }
 
   @Test void worldSavedBeforeTheClockLoadsWithDefaultsForEveryNewField() {
@@ -52,10 +52,11 @@ class SurviveWorldMongoCodecTest {
     var fighter = new SurviveSavedWorld.Player("account-a", null, UUID.randomUUID().toString(),
         "Alice", Instant.parse("2026-10-06T12:00:00Z"), 8, 3, 11, 1, 2, 2, 1, 5,
         Status.COMBAT, 19, "A hog blocks your path.", null, null, null, null, null, null, null, null, null, null, null, null, null);
-    var envelope = codec.encode(new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of(), List.of(fighter), null));
+    var envelope = codec.encode(new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of(), List.of(fighter), null, null));
     var newFields = List.of("stone", "hunger", "enemy", "weapon", "weaponDurability", "guarding", "sleptAt", "struckFirst", "nextStrikeAt", "tacticalPoints", "defending", "combatOutcome", "activeFullnessMilliseconds");
     var payload = envelope.get("payload", Document.class);
     payload.remove("settledBoundaries");
+    payload.remove("activeRaidNight");
     for (var storedPlayer : payload.getList("players", Document.class)) {
       newFields.forEach(storedPlayer::remove);
     }

@@ -129,7 +129,7 @@ public class SurviveService {
     SurviveWildlife.Animal hunted = null;
     if (action == SurviveAction.HUNT && presence.tracks(player.survivorId)) {
       releaseFinishedEncounters(now);
-      hunted = wildlife.nearest(pose, now, false);
+      hunted = wildlife.nearest(pose, now, false, world.raiderApproaching(now));
       if (hunted == null) {
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Move within five metres of a roaming animal to hunt it.");
       }
@@ -160,7 +160,7 @@ public class SurviveService {
     var view = presence.pulse(player.survivorId, player.name, player.status, movement, now);
     releaseFinishedEncounters(now);
     if (view.accepted() && player.status == Status.EXPLORING) {
-      var attacker = wildlife.nearest(view.self(), now, true);
+      var attacker = wildlife.nearest(view.self(), now, true, world.raiderApproaching(now));
       if (attacker != null) {
         world.observeActivity(player, now);
         if (player.status == Status.EXPLORING) {
@@ -172,7 +172,8 @@ public class SurviveService {
         }
       }
     }
-    return view.withWildlife(player.status, wildlife.roaming(now), wildlife.encounter(player.survivorId));
+    return view.withWildlife(player.status, wildlife.roaming(now, world.raiderApproaching(now)),
+        wildlife.encounter(player.survivorId));
   }
 
   private void releaseFinishedEncounters(Instant now) {
@@ -260,8 +261,9 @@ public class SurviveService {
     world = SurviveWorld.restore(saved);
     storageVersion = saved.version();
     var now = clock.instant();
-    world.settleUntil(now);
-    if (world.settleCombatUntil(now)) {
+    boolean worldAdvanced = world.settleUntil(now);
+    boolean combatAdvanced = world.settleCombatUntil(now);
+    if (worldAdvanced || combatAdvanced) {
       commitWorld();
     }
   }

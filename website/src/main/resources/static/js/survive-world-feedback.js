@@ -1,8 +1,8 @@
 /** The target HUD reflects current combat state. Command results belong in the chat log. */
 import { groundHeight } from './survive-world-art.js';
 
-const ENEMIES = { HOG: 'Wild hog', WOLF: 'Grey wolf', BEAR: 'Brown bear' };
-const ENEMY_HEALTH = { HOG: 5, WOLF: 8, BEAR: 14 };
+const ENEMIES = { HOG: 'Wild hog', WOLF: 'Grey wolf', BEAR: 'Brown bear', RAIDER: 'Camp raider' };
+const ENEMY_HEALTH = { HOG: 5, WOLF: 8, BEAR: 14, RAIDER: 6 };
 
 export function createWorldFeedback(documentRoot) {
   const combat = documentRoot.getElementById('surviveWorldCombat');
@@ -25,8 +25,8 @@ export function createWorldFeedback(documentRoot) {
       }
       combat.hidden = false;
       marker.hidden = false;
-      const heading = state.nextStrikeAt ? 'In combat' : 'Animal nearby';
-      targetHeight = state.enemy === 'BEAR' ? 3.1 : 2;
+      const heading = state.nextStrikeAt ? 'In combat' : state.enemy === 'RAIDER' ? 'Raider nearby' : 'Animal nearby';
+      targetHeight = state.enemy === 'BEAR' ? 3.1 : state.enemy === 'RAIDER' ? 2.8 : 2;
       const label = `${ENEMIES[state.enemy] || 'Wild animal'} · ${state.enemyHealth} health`;
       if (title.textContent !== heading) title.textContent = heading;
       if (enemyName.textContent !== label) enemyName.textContent = label;

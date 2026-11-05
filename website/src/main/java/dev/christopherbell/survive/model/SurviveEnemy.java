@@ -1,10 +1,11 @@
 package dev.christopherbell.survive.model;
 
-/** Wild animals a survivor can fight; the stronger ones only roam after dark. */
+/** Creatures and raiders a survivor can fight. */
 public enum SurviveEnemy {
   HOG("hog", 5, 1, 1),
   WOLF("wolf", 8, 2, 1),
-  BEAR("bear", 14, 3, 3);
+  BEAR("bear", 14, 3, 3),
+  RAIDER("camp raider", 6, 1, 0);
 
   private final String displayName;
   private final int health;

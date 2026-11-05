@@ -14,7 +14,8 @@ import dev.christopherbell.survive.model.SurviveSnapshot.Status;
  * first settlement, including in worlds saved before the day-night clock existed.
  */
 public record SurviveSavedWorld(@Id String id, @Version Long version, long revision,
-    int shelters, int boats, List<String> events, List<Player> players, Long settledBoundaries) {
+    int shelters, int boats, List<String> events, List<Player> players, Long settledBoundaries,
+    Long activeRaidNight) {
   public SurviveSavedWorld {
     if (!"shared".equals(id) || version != null && version < 0 || revision < 0
         || shelters < 0 || shelters > 1000 || boats < 0 || boats > 1000) {
@@ -34,11 +35,17 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
         throw new IllegalArgumentException("Saved world contains duplicate survivors.");
       }
     }
+    long fighters = players.stream().filter(player -> player.enemy() == SurviveEnemy.RAIDER).count();
+    if (fighters > 1 || activeRaidNight == null && fighters != 0
+        || activeRaidNight != null && (settledBoundaries == null || Math.floorMod(settledBoundaries, 2) != 1
+            || activeRaidNight != Math.floorDiv(settledBoundaries, 2))) {
+      throw new IllegalArgumentException("Saved raid progress is invalid.");
+    }
   }
 
   /** New worlds have no durable version until their first successful insert. */
   public static SurviveSavedWorld empty() {
-    return new SurviveSavedWorld("shared", null, 0, 0, 0, List.of(), List.of(), null);
+    return new SurviveSavedWorld("shared", null, 0, 0, 0, List.of(), List.of(), null, null);
   }
 
   /**

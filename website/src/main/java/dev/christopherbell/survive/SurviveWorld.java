@@ -43,6 +43,7 @@ final class SurviveWorld {
   private static final int MAX_ELAPSED_ROUNDS = 16;
   private static final int FULLNESS_INTERVAL_MILLISECONDS = 300_000;
   private static final Duration MAX_ACTIVE_GAP = Duration.ofSeconds(15);
+  private static final Duration RAID_WINDOW = Duration.ofSeconds(60);
   final Map<String, SurvivePlayer> players = new LinkedHashMap<>();
   private final ArrayDeque<String> events = new ArrayDeque<>();
   private int shelters;
@@ -50,6 +51,7 @@ final class SurviveWorld {
   private long revision;
   /** Nightfalls and dawns already applied; null until the first settlement starts the count. */
   private Long settledBoundaries;
+  private Long activeRaidNight;
 
   void recordEvent(String event) {
     if (events.size() == MAX_EVENTS) {
@@ -65,6 +67,7 @@ final class SurviveWorld {
     world.boats = saved.boats();
     world.revision = saved.revision();
     world.settledBoundaries = saved.settledBoundaries();
+    world.activeRaidNight = saved.activeRaidNight();
     world.events.addAll(saved.events());
     for (var stored : saved.players()) {
       var player = new SurvivePlayer(stored.name(), stored.lastSeen(), stored.accountId(), stored.survivorId());
@@ -109,7 +112,7 @@ final class SurviveWorld {
           player.activeFullnessMilliseconds);
     }).toList();
     return new SurviveSavedWorld("shared", storageVersion, revision, shelters, boats, List.copyOf(events),
-        storedPlayers, settledBoundaries);
+        storedPlayers, settledBoundaries, activeRaidNight);
   }
 
   SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline) {
@@ -149,29 +152,64 @@ final class SurviveWorld {
    * settlement only starts the count, so deploying the clock never replays the past. After a long
    * quiet spell only the latest nights are applied.
    */
-  void settleUntil(Instant now) {
+  boolean settleUntil(Instant now) {
+    long previousRevision = revision;
     long boundariesPassed = SurviveClock.boundariesPassedBy(now);
     if (settledBoundaries == null) {
       settledBoundaries = boundariesPassed;
-      return;
-    }
-    if (boundariesPassed <= settledBoundaries) {
-      return;
+      return false;
     }
     long firstBoundaryToApply = Math.max(settledBoundaries, boundariesPassed - 2L * MAX_NIGHTS_SETTLED_AT_ONCE);
     if (firstBoundaryToApply > settledBoundaries) {
       recordEvent("Several nights passed quietly while the camp slept.");
     }
     for (long boundary = firstBoundaryToApply; boundary < boundariesPassed; boundary++) {
+      settleRaidUntil(SurviveClock.boundaryInstant(boundary));
       long night = SurviveClock.nightOf(boundary);
       if (SurviveClock.isNightfall(boundary)) {
-        raidAtNightfall(night);
+        activeRaidNight = night;
+        recordEvent("Night " + (night + 1) + ": a raider approaches camp. Intercept the raider within one minute.");
       }
       else {
         wakeEveryoneAtDawn(night);
       }
     }
-    settledBoundaries = boundariesPassed;
+    settledBoundaries = Math.max(settledBoundaries, boundariesPassed);
+    settleRaidUntil(now);
+    return previousRevision != revision;
+  }
+
+  /** Projects the active raid's approach for both the world view and proximity checks. */
+  SurviveWildlife.Animal raiderApproaching(Instant now) {
+    if (activeRaidNight == null || players.values().stream().anyMatch(player -> player.enemy == SurviveEnemy.RAIDER)) {
+      return null;
+    }
+    double seconds = Duration.between(SurviveClock.boundaryInstant(activeRaidNight * 2), now).toMillis() / 1000.0;
+    double progress = Math.clamp(seconds / 30, 0, 1);
+    return new SurviveWildlife.Animal("camp-raider", SurviveEnemy.RAIDER, -22 + 19 * progress, -16 + 14 * progress,
+        Math.atan2(19, 14), 7);
+  }
+
+  private void settleRaidUntil(Instant now) {
+    if (activeRaidNight == null) {
+      return;
+    }
+    var deadline = SurviveClock.boundaryInstant(activeRaidNight * 2).plus(RAID_WINDOW);
+    if (now.isBefore(deadline)) {
+      return;
+    }
+    settleCombatUntil(deadline);
+    if (activeRaidNight != null) {
+      long night = activeRaidNight;
+      activeRaidNight = null;
+      for (var player : players.values()) {
+        if (player.enemy == SurviveEnemy.RAIDER) {
+          player.stopFighting();
+          recordAction(player, "The raider broke away to raid the camp.", true);
+        }
+      }
+      raidAtNightfall(night);
+    }
   }
 
   /** Applies a previously validated gift while the service holds the world's monitor. */
@@ -466,11 +504,12 @@ final class SurviveWorld {
   }
 
   private static String defend(SurvivePlayer player) {
+    String attack = player.enemy == SurviveEnemy.RAIDER ? "strike" : "bite";
     if (player.nextStrikeAt == null) {
-      return "You brace against the " + player.enemy.displayName() + " and block its bite. Attack or flee next.";
+      return "You brace against the " + player.enemy.displayName() + " and block the " + attack + ". Attack or flee next.";
     }
     player.defending = true;
-    return "You brace to block the next bite.";
+    return "You brace to block the next " + attack + ".";
   }
 
   private String useWeaponSkill(SurvivePlayer player, Instant now) {
@@ -492,16 +531,22 @@ final class SurviveWorld {
     var heldWeapon = player.weapon;
     player.struckFirst = true;
     player.enemyHealth = Math.max(0, player.enemyHealth - damage);
+    if (enemy == SurviveEnemy.RAIDER && player.enemyHealth == 0) {
+      activeRaidNight = null;
+      recordEvent(player.name + " repelled the raid.");
+    }
     String weaponNote = player.wearWeaponAndReportBreak() ? " Your " + heldWeapon.displayName() + " broke." : "";
     // Preserve the original simultaneous exchange, including the finishing blow's bite.
     int bite = reachSparesBite || defended ? 0 : enemy.bite();
     player.takeDamage(bite);
+    String attack = enemy == SurviveEnemy.RAIDER ? "strike" : "bite";
+    String hitVerb = enemy == SurviveEnemy.RAIDER ? "struck" : "bit";
     if (player.status == Status.DEAD) {
-      return "You attacked the " + enemy.displayName() + ", but its bite was fatal." + weaponNote;
+      return "You attacked the " + enemy.displayName() + ", but the " + attack + " was fatal." + weaponNote;
     }
-    String biteNote = defended ? " Your guard blocked its bite." : bite == 0
+    String biteNote = defended ? " Your guard blocked the " + attack + "." : bite == 0
         ? " Your spear kept it at bay."
-        : " The " + enemy.displayName() + " bit you for " + bite + " damage.";
+        : " The " + enemy.displayName() + " " + hitVerb + " you for " + bite + " damage.";
     if (player.enemyHealth > 0) {
       String hit = skill == null ? "You dealt " : skill + " dealt ";
       return hit + damage + " damage." + biteNote + weaponNote;
@@ -509,7 +554,7 @@ final class SurviveWorld {
     player.stopFighting();
     int foodGained = Math.min(enemy.foodReward(), INVENTORY_CAPACITY - player.inventoryCount());
     player.food += foodGained;
-    String reward = foodGained == 0
+    String reward = enemy == SurviveEnemy.RAIDER ? "" : foodGained == 0
         ? " Your full inventory could not hold its food."
         : " You gathered " + foodGained + " food.";
     String skillNote = skill == null ? "" : " " + skill + " landed.";

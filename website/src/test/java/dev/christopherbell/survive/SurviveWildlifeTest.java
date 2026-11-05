@@ -25,6 +25,34 @@ class SurviveWildlifeTest {
   private static final Instant START = Instant.parse("2026-11-05T14:00:00Z");
 
   @Test
+  void nightRaidApproachesCampAndCanBeDefeatedAfterRestart() {
+    var clock = new TravelClock();
+    var nightfall = SurviveClock.WORLD_EPOCH.plusSeconds(18 * 60);
+    clock.now = nightfall.minusSeconds(1);
+    var repository = new InMemorySurviveWorldRepository();
+    var service = new SurviveService(clock, () -> 1, 10, repository);
+    var joined = service.join(null, "Scout");
+    clock.now = nightfall;
+    var approach = service.pulseForOwner(joined.token(), null, new SurviveMovement(0, 0, 0, 0));
+    assertTrue(approach.wildlife().stream().anyMatch(animal -> animal.kind() == SurviveEnemy.RAIDER));
+    assertNull(approach.encounter());
+    clock.now = nightfall.plusSeconds(30);
+    var fight = service.pulseForOwner(joined.token(), null, new SurviveMovement(0, 0, 0, 1));
+    assertEquals(SurviveEnemy.RAIDER, fight.encounter().kind());
+    assertEquals(Status.COMBAT, fight.self().status());
+
+    clock.now = nightfall.plusSeconds(42);
+    var restarted = new SurviveService(clock, () -> 1, 10, repository);
+    var won = restarted.find(joined.token()).orElseThrow();
+    assertEquals(Status.EXPLORING, won.status());
+    assertTrue(won.combatOutcome().contains("defeated"));
+    assertTrue(won.events().stream().anyMatch(event -> event.contains("repelled the raid")));
+    clock.now = nightfall.plusSeconds(61);
+    var settled = restarted.find(joined.token()).orElseThrow();
+    assertFalse(settled.events().stream().anyMatch(event -> event.contains("overran")));
+  }
+
+  @Test
   void animalsMoveOnlyHostilesAggroAndClaimedAnimalsRespawnAfterCooldown() {
     var wildlife = new SurviveWildlife();
     var hog = wildlife.roaming(START).stream().filter(animal -> animal.kind() == SurviveEnemy.HOG).findFirst().orElseThrow();

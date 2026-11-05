@@ -86,7 +86,7 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
     }
   }
 
-  function avatar(x, z, heading, cloth, status, stride = 0, weapon, action = null, detailed = true, seconds = 0) {
+  function avatar(x, z, heading, cloth, status, stride = 0, weapon, action = null, detailed = true, seconds = 0, color) {
     const y = groundHeight(x, z);
     const resting = status === 'SLEEPING' || status === 'DEAD' || (status === 'ESCAPED' && action?.kind !== 'row');
     const cos = Math.cos(heading);
@@ -109,7 +109,7 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
       const motion = action?.kind === 'run' ? 'run' : 'walk';
       const clip = gesture ? action.kind : (stride !== 0 ? motion : 'idle');
       const progress = gesture ? action.progress : seconds * { idle: 0.44, walk: 1.7, run: 2.6 }[clip];
-      const hand = drawActorArt(triangle, authored, pose, clip, progress, !gesture);
+      const hand = drawActorArt(triangle, authored, pose, clip, progress, !gesture, color);
       drawEquipment(hand);
       return;
     }

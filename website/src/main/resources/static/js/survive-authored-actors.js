@@ -16,7 +16,7 @@ export function prepareActorArt(data) {
   return { triangles, poses: data.poses, hands: data.hands };
 }
 
-export function drawActorArt(triangle, model, pose, clip, progress, loop = false) {
+export function drawActorArt(triangle, model, pose, clip, progress, loop = false, color = WHITE) {
   const frames = model.poses[clip];
   const cursor = loop ? (progress % 1) * frames.length : progress * (frames.length - 1);
   const index = Math.floor(cursor);
@@ -30,7 +30,7 @@ export function drawActorArt(triangle, model, pose, clip, progress, loop = false
     points.push(pose(sample(first, second, offset), sample(first, second, offset + 1), sample(first, second, offset + 2)));
   }
   for (const { indices: [a, b, c], uv } of model.triangles) {
-    triangle(points[a], points[b], points[c], WHITE, 12, uv);
+    triangle(points[a], points[b], points[c], color, 12, uv);
   }
   const hands = model.hands[clip];
   if (hands) return pose(...hands[index].map((_, offset) => sample(hands[index], hands[next], offset)));

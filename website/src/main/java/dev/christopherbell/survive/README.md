@@ -77,13 +77,18 @@ settles again next time with the same result.
 
 ## Mechanics
 
-**Raids.** At each nightfall, raiders of strength 4 rising by 2 each night of a
-seven-night week (to 16, then back to 4) meet the camp's defense: the sum of
+**Raids.** At nightfall, one armed raider approaches camp over 30 seconds. The
+raid is announced in chat. The raider starts combat within seven metres. Defeat
+the raider to repel the raid before the one-minute deadline. An active raid and
+its combat progress survive a server restart.
+
+If the raider survives the deadline, raid strength starts at 4 and rises by 2
+each night of a seven-night week (to 16, then back to 4). Camp defense is the sum of
 `1 + strength + weapon bonus` for every survivor who chose **Guard** at dusk. A
 repelled raid rewards each guard with 1 food, or experience when full. Otherwise
 raiders destroy one structure plus one per 3 points of shortfall, taking boats
 first only while they outnumber shelters. Guard duty ends at dawn or on leaving camp.
-Absent survivors are never harmed; only shared structures are at risk.
+Survivors can take damage in combat. Unoccupied camp structures remain at risk.
 
 **Enemies and ambushes.** Hogs (5 health, bite 1, 1 food), wolves (8, 2, 1) and
 bears (14, 3, 3) exist. Hunting keeps its 61% discovery; by day it finds hogs, at

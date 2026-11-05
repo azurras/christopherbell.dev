@@ -320,6 +320,8 @@ class SurviveWorldTest {
     player.wood = 10;
     perform(SurviveAction.BUILD_BOAT, 1);
     world.settleUntil(NIGHTFALL);
+    assertEquals(2, world.snapshotFor(player, NIGHTFALL, Instant.MIN).shelters());
+    world.settleUntil(NIGHT);
     var camp = world.snapshotFor(player, NIGHT, Instant.MIN);
     assertEquals(0, camp.shelters());
     assertEquals(1, camp.boats());
@@ -406,7 +408,7 @@ class SurviveWorldTest {
     world.perform(SurviveAction.SLEEP, alice, DUSK, () -> 1);
     world.perform(SurviveAction.SLEEP, bob, DUSK.plusSeconds(60), () -> 1);
     performAt(SurviveAction.SLEEP, DUSK.plusSeconds(120), 1);
-    world.settleUntil(NIGHTFALL);
+    world.settleUntil(NIGHT);
     assertEquals(1, world.snapshotFor(player, NIGHT, Instant.MIN).shelters());
     assertEquals(Status.EXPLORING, player.status);
     assertEquals(8, player.health);
@@ -421,10 +423,10 @@ class SurviveWorldTest {
     assertTrue(world.snapshotFor(player, DAY, Instant.MIN).events().isEmpty());
     world.settleUntil(DAY.plus(Duration.ofMinutes(480)));
     var events = world.snapshotFor(player, DAY, Instant.MIN).events();
-    assertEquals(4, events.size());
+    assertEquals(7, events.size());
     assertTrue(events.getFirst().contains("quietly"));
     world.settleUntil(DAY.plus(Duration.ofMinutes(480)));
-    assertEquals(4, world.snapshotFor(player, DAY, Instant.MIN).events().size());
+    assertEquals(events, world.snapshotFor(player, DAY, Instant.MIN).events());
   }
 
   @Test

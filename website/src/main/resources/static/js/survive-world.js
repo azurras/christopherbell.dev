@@ -187,7 +187,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       if (action === 'SELECT_TARGET') {
         selectTarget();
       } else if (action === 'CHECK_TARGET' && targetSelected) {
-        const danger = { HOG: 'Low threat', WOLF: 'Dangerous', BEAR: 'Severe threat' };
+        const danger = { HOG: 'Low threat', WOLF: 'Dangerous', BEAR: 'Severe threat', RAIDER: 'Camp attacker' };
         const threat = danger[state.enemy] || 'Unknown threat';
         appendSurviveLogMessage(documentRoot, `${target.textContent} · ${threat}.`);
       } else if (!busy && targetActionsFor(state, targetSelected).includes(action) && state.actions.includes(action)) {
@@ -362,7 +362,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         const animal = wildlife.find(candidate => candidate.id === label.id);
         const x = animal?.drawX ?? label.x;
         const z = animal?.drawZ ?? label.z;
-        const y = groundHeight(x, z) + (label.landmark ? 4 : animal?.kind === 'BEAR' ? 3 : animal ? 2 : 3);
+        const y = groundHeight(x, z) + (label.landmark ? 4 : ['BEAR', 'RAIDER'].includes(animal?.kind) ? 3 : animal ? 2 : 3);
         const projected = rendered.project([x, y, z]);
         label.element.hidden = !projected.visible || (animal && Math.hypot(position.x - x, position.z - z) > 32);
         label.element.style.left = `${(projected.x + 1) * 50}%`;

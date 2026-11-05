@@ -26,6 +26,9 @@ void main() {
   surfaceMaterial = material;
   uv = texCoord;
 }`;
+
+const RAIDER_CLOTH = [0.47, 0.16, 0.12];
+const RAIDER_ARMOR_TINT = [1.20, 0.67, 0.57];
 const FRAGMENT_SHADER = `
 precision mediump float;
 varying vec3 tint;
@@ -204,8 +207,13 @@ export function createWorldRenderer(canvas) {
           drawBoat(actors, 5 + index * 4, 80);
         }
         for (const animal of wildlife) {
-          actors.animal(animal.x, animal.z, animal.kind, animal.kind === 'BEAR' ? 1.6 : 1, animal.heading,
-            stride(animal), 0, Math.hypot(animal.x - position.x, animal.z - position.z) < 16, animationSeconds);
+          if (animal.kind === 'RAIDER') {
+            actors.avatar(animal.x, animal.z, animal.heading, RAIDER_CLOTH, 'EXPLORING', stride(animal),
+              'CLUB', null, true, animationSeconds, RAIDER_ARMOR_TINT);
+          } else {
+            actors.animal(animal.x, animal.z, animal.kind, animal.kind === 'BEAR' ? 1.6 : 1, animal.heading,
+              stride(animal), 0, Math.hypot(animal.x - position.x, animal.z - position.z) < 16, animationSeconds);
+          }
         }
         if (state.status === 'COMBAT') {
           const scale = state.enemy === 'BEAR' ? 1.6 : 1;
@@ -213,8 +221,13 @@ export function createWorldRenderer(canvas) {
           const ringColor = state.nextStrikeAt ? [0.67, 0.23, 0.15] : [0.64, 0.48, 0.21];
           drawTargetRing(actors, enemy, radius, ringColor);
           const facing = Math.atan2(position.x - enemy.x, position.z - enemy.z);
-          actors.animal(enemy.x, enemy.z, state.enemy, scale, facing, stride(enemy), pose?.kind === 'strike' ? pose.weight : 0,
-            true, animationSeconds);
+          if (state.enemy === 'RAIDER') {
+            actors.avatar(enemy.x, enemy.z, facing, RAIDER_CLOTH, 'COMBAT', stride(enemy), 'CLUB',
+              pose?.kind === 'strike' ? pose : null, true, animationSeconds, RAIDER_ARMOR_TINT);
+          } else {
+            actors.animal(enemy.x, enemy.z, state.enemy, scale, facing, stride(enemy), pose?.kind === 'strike' ? pose.weight : 0,
+              true, animationSeconds);
+          }
         }
         gl.bindBuffer(gl.ARRAY_BUFFER, actorBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(actors.vertices), gl.DYNAMIC_DRAW);
