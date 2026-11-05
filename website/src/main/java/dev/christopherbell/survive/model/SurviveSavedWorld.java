@@ -51,7 +51,8 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       Instant lastSeen, int health, int strength, int stamina, int experience,
       int experienceToNextLevel, int wood, int food, int enemyHealth, Status status,
       long revision, String message, Integer stone, Integer hunger, SurviveEnemy enemy,
-      SurviveWeapon weapon, Integer weaponDurability, Boolean guarding, Instant sleptAt, Boolean struckFirst) {
+      SurviveWeapon weapon, Integer weaponDurability, Boolean guarding, Instant sleptAt, Boolean struckFirst,
+      Instant nextStrikeAt, Integer tacticalPoints, Boolean defending, String combatOutcome) {
     public Player {
       stone = stone == null ? 0 : stone;
       hunger = hunger == null ? 10 : hunger;
@@ -59,6 +60,8 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       weaponDurability = weaponDurability == null ? 0 : weaponDurability;
       guarding = guarding != null && guarding;
       struckFirst = struckFirst != null && struckFirst;
+      tacticalPoints = tacticalPoints == null ? 0 : tacticalPoints;
+      defending = defending != null && defending;
       UUID.fromString(survivorId);
       if (accountId == null) {
         UUID.fromString(token);
@@ -79,6 +82,8 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
           || (status == Status.COMBAT) != (enemy != null) || (status == Status.COMBAT) != (enemyHealth > 0)
           || enemy != null && enemyHealth > enemy.health() || weaponIsInvalid
           || (status == Status.SLEEPING) != (sleptAt != null) || guarding && status != Status.EXPLORING
+          || nextStrikeAt != null && status != Status.COMBAT || defending && nextStrikeAt == null
+          || tacticalPoints < 0 || tacticalPoints > 300 || combatOutcome != null && combatOutcome.length() > 1024
           || revision < 0 || message == null || message.length() > 1024) {
         throw new IllegalArgumentException("Saved survivor progress is invalid.");
       }

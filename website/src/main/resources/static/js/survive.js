@@ -74,7 +74,7 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('survivePlayerCount', state.survivors.length);
   documentRoot.getElementById('surviveEnemy').hidden = state.status !== 'COMBAT';
   setText('surviveEnemyName', ENEMY_LABELS[state.enemy] || 'Wild animal');
-  setText('surviveEnemyHealth', `${state.enemyHealth} health`);
+  setText('surviveEnemyHealth', `${state.enemyHealth} health · ${state.tacticalPoints ?? 0} TP`);
   // Menus and the direct group list only moves the server allows now; menus appear while exploring.
   const actionBar = documentRoot.getElementById('surviveActionBar');
   const focusWasInActionBar = actionBar.contains(documentRoot.activeElement);
@@ -147,6 +147,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   let pending = false;
   let mutationPending = false;
   let phaseEndsAtMilliseconds = 0;
+  let nextWorldPollAt = 0;
   const errorBox = documentRoot.getElementById('surviveError');
   const restart = documentRoot.getElementById('surviveRestart');
   const startOver = documentRoot.getElementById('surviveStartOver');
@@ -179,6 +180,8 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     cancel.hidden = !state;
     if (state) {
       phaseEndsAtMilliseconds = Date.now() + state.secondsToNextPhase * 1000;
+      const delay = state.nextStrikeAt ? Math.max(100, (state.millisecondsUntilStrike ?? 0) + 50) : 5000;
+      nextWorldPollAt = Date.now() + delay;
       renderSurviveState(documentRoot, state, pending, mutationPending);
     }
     world.setState(state, mutationPending);
@@ -264,12 +267,15 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   cancel.addEventListener('click', cancelJoin);
   refresh.addEventListener('click', readWorld);
   const isWatchingWorld = () => state && !pending && joinForm.hidden && !documentRoot.hidden;
-  // Poll only when actively viewing a joined survivor; the server settles world time on each read.
+  // Refresh shortly after a confirmed deadline while fighting. The server owns elapsed rounds.
   const timer = setInterval(() => {
-    if (isWatchingWorld()) {
+    if (isWatchingWorld() && Date.now() >= nextWorldPollAt) {
+      nextWorldPollAt = Date.now() + 5000;
       readWorld();
     }
-  }, 5000);
+  }, 250);
+  const refreshOnReturn = () => { if (isWatchingWorld()) readWorld(); };
+  documentRoot.addEventListener?.('visibilitychange', refreshOnReturn);
   // Count down locally between polls and read the world as soon as the phase changes.
   const clockTimer = setInterval(() => {
     if (!state) {
@@ -287,6 +293,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     dispose() {
       clearInterval(timer);
       clearInterval(clockTimer);
+      documentRoot.removeEventListener?.('visibilitychange', refreshOnReturn);
       joinForm.removeEventListener('submit', join);
       actionBar.removeEventListener('click', act);
       startOver.removeEventListener('click', showJoin);

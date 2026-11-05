@@ -180,3 +180,21 @@ timeout; hidden tabs pause, errors stop prediction and show adaptive backoff, an
 remote positions interpolate. The existing 300 mutations/minute/IP limit remains:
 large shared-IP groups may see connection pauses. Render geometry/pixel density are
 bounded. WebGL failure exposes the prior illustration and action menus.
+
+## Targeted combat
+
+Hunt or an ambush reveals an animal. Select it in the world or press E on the
+focused canvas, then Check its threat or Engage. Engaging starts a server-timed
+exchange every three seconds. Each automatic attack builds 50 TP up to 300.
+Weapon skills spend 100 TP and restart the attack interval. Defend guards the
+next exchange. Disengage stops automatic attacks and leaves the animal in place.
+Flee ends the encounter at the existing cost. The text controls expose the same
+server commands.
+
+The saved attack deadline advances even when the player is away. The next
+Survive world read or action resolves elapsed exchanges from their original
+deadlines and saves the result before checking command revisions. The snapshot
+reports time until the next strike, TP, guard state and the last combat outcome.
+Legacy encounters load without an attack deadline and require Engage to start
+the timer. Encounter health is currently per survivor. Shared enemies and party
+combat are future MMO work.

@@ -37,6 +37,10 @@ final class SurviveWorld {
   private static final int NIGHTS_PER_RAID_WEEK = 7;
   private static final int RAID_INJURY_TO_SLEEPERS = 2;
   private static final Duration SLEEP_PER_HEALTH = Duration.ofMinutes(2);
+  private static final Duration STRIKE_INTERVAL = Duration.ofSeconds(3);
+  private static final int SKILL_COST = 100;
+  private static final int MAX_TACTICAL_POINTS = 300;
+  private static final int MAX_ELAPSED_ROUNDS = 16;
   final Map<String, SurvivePlayer> players = new LinkedHashMap<>();
   private final ArrayDeque<String> events = new ArrayDeque<>();
   private int shelters;
@@ -74,6 +78,10 @@ final class SurviveWorld {
       player.enemy = stored.enemy();
       player.enemyHealth = stored.enemyHealth();
       player.struckFirst = stored.struckFirst();
+      player.nextStrikeAt = stored.nextStrikeAt();
+      player.tacticalPoints = stored.tacticalPoints();
+      player.defending = stored.defending();
+      player.combatOutcome = stored.combatOutcome();
       player.weapon = stored.weapon();
       player.weaponDurability = stored.weaponDurability();
       player.guarding = stored.guarding();
@@ -93,7 +101,8 @@ final class SurviveWorld {
           player.survivorId, player.name, player.lastSeen, player.health, player.strength, player.stamina,
           player.experience, player.experienceToNextLevel, player.wood, player.food, player.enemyHealth,
           player.status, player.revision, player.message, player.stone, player.hunger, player.enemy,
-          player.weapon, player.weaponDurability, player.guarding, player.sleptAt, player.struckFirst);
+          player.weapon, player.weaponDurability, player.guarding, player.sleptAt, player.struckFirst,
+          player.nextStrikeAt, player.tacticalPoints, player.defending, player.combatOutcome);
     }).toList();
     return new SurviveSavedWorld("shared", storageVersion, revision, shelters, boats, List.copyOf(events),
         storedPlayers, settledBoundaries);
@@ -110,7 +119,29 @@ final class SurviveWorld {
             .map(recipient -> new Recipient(recipient.survivorId, recipient.name)).toList() : List.of(), player.accountId != null,
         SurviveClock.phaseAt(now), SurviveClock.dayAt(now), SurviveClock.secondsToNextPhaseAt(now),
         player.hunger, player.stone, player.weapon, player.weaponDurability, player.enemy,
-        bedsInUse(), shelters * BEDS_PER_SHELTER, player.guarding);
+        bedsInUse(), shelters * BEDS_PER_SHELTER, player.guarding,
+        player.nextStrikeAt, player.nextStrikeAt == null ? 0 : Math.max(0, Duration.between(now, player.nextStrikeAt).toMillis()),
+        player.tacticalPoints, player.defending, player.combatOutcome);
+  }
+
+  /** Settles elapsed personal fights even when their owners did not send any requests. */
+  boolean settleCombatUntil(Instant now) {
+    boolean changed = false;
+    for (var player : players.values()) {
+      for (int round = 0; round < MAX_ELAPSED_ROUNDS && player.nextStrikeAt != null
+          && !player.nextStrikeAt.isAfter(now); round++) {
+        player.nextStrikeAt = player.nextStrikeAt.plus(STRIKE_INTERVAL);
+        String hungerOutcome = spendEffort(SurviveAction.ATTACK, player);
+        String outcome = "You starved before you could strike.";
+        if (player.status == Status.COMBAT) {
+          player.tacticalPoints = Math.min(MAX_TACTICAL_POINTS, player.tacticalPoints + 50);
+          outcome = attack(player, (player.attackDamage() + 1) / 2, null);
+        }
+        recordAction(player, outcome + hungerOutcome, true);
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   /**
@@ -166,6 +197,7 @@ final class SurviveWorld {
 
   void perform(SurviveAction action, SurvivePlayer player, Instant now, IntSupplier rollPercent) {
     var phase = SurviveClock.phaseAt(now);
+    boolean wasFighting = player.status == Status.COMBAT;
     String hungerOutcome = spendEffort(action, player);
     String outcome = player.status == Status.DEAD
         ? "You starved before you could act."
@@ -178,8 +210,11 @@ final class SurviveWorld {
           case CRAFT_CLUB -> craft(player, SurviveWeapon.CLUB);
           case CRAFT_AXE -> craft(player, SurviveWeapon.STONE_AXE);
           case CRAFT_SPEAR -> craft(player, SurviveWeapon.SPEAR);
-          case ATTACK -> attack(player);
-          case DEFEND -> "You brace against the " + player.enemy.displayName() + " and block its bite. Attack or flee next.";
+          case ATTACK -> attack(player, player.attackDamage(), null);
+          case ENGAGE -> engage(player, now);
+          case DISENGAGE -> disengage(player);
+          case WEAPON_SKILL -> useWeaponSkill(player, now);
+          case DEFEND -> defend(player);
           case FLEE -> flee(player);
           case EAT -> eat(player);
           case REST -> rest(player);
@@ -188,8 +223,15 @@ final class SurviveWorld {
           case WAKE -> wakeEarly(player, now);
           case ESCAPE -> escape(player);
         } + hungerOutcome;
+    recordAction(player, outcome, wasFighting);
+  }
+
+  private void recordAction(SurvivePlayer player, String outcome, boolean wasFighting) {
     if (player.status == Status.DEAD) {
       outcome += " You have died. Start a new survivor to try again.";
+    }
+    if (wasFighting && player.status != Status.COMBAT) {
+      player.combatOutcome = outcome;
     }
     player.message = outcome;
     player.revision++;
@@ -200,9 +242,23 @@ final class SurviveWorld {
     return switch (player.status) {
       case DEAD, ESCAPED -> List.of();
       case SLEEPING -> List.of(SurviveAction.WAKE);
-      case COMBAT -> List.of(SurviveAction.ATTACK, SurviveAction.DEFEND, SurviveAction.FLEE);
+      case COMBAT -> combatActionsFor(player);
       case EXPLORING -> campActionsFor(player, SurviveClock.phaseAt(now));
     };
+  }
+
+  private static List<SurviveAction> combatActionsFor(SurvivePlayer player) {
+    if (player.nextStrikeAt == null) {
+      return List.of(SurviveAction.ENGAGE, SurviveAction.ATTACK, SurviveAction.DEFEND, SurviveAction.FLEE);
+    }
+    var actions = new ArrayList<>(List.of(SurviveAction.DISENGAGE, SurviveAction.FLEE));
+    if (!player.defending) {
+      actions.add(SurviveAction.DEFEND);
+    }
+    if (player.tacticalPoints >= SKILL_COST) {
+      actions.add(SurviveAction.WEAPON_SKILL);
+    }
+    return List.copyOf(actions);
   }
 
   private List<SurviveAction> campActionsFor(SurvivePlayer player, Phase phase) {
@@ -250,8 +306,9 @@ final class SurviveWorld {
    */
   private static String spendEffort(SurviveAction action, SurvivePlayer player) {
     boolean isEffort = switch (action) {
-      case GATHER, GATHER_STONE, HUNT, ATTACK, DEFEND, FLEE, GUARD -> true;
-      case BUILD_SHELTER, BUILD_BOAT, CRAFT_CLUB, CRAFT_AXE, CRAFT_SPEAR, EAT, REST, SLEEP, WAKE, ESCAPE -> false;
+      case GATHER, GATHER_STONE, HUNT, ATTACK, WEAPON_SKILL, FLEE, GUARD -> true;
+      case DEFEND -> player.nextStrikeAt == null;
+      case BUILD_SHELTER, BUILD_BOAT, CRAFT_CLUB, CRAFT_AXE, CRAFT_SPEAR, ENGAGE, DISENGAGE, EAT, REST, SLEEP, WAKE, ESCAPE -> false;
     };
     if (!isEffort) {
       return "";
@@ -282,7 +339,7 @@ final class SurviveWorld {
     };
     player.startFighting(ambusher);
     return "A " + ambusher.displayName() + " ambushes you! It has " + ambusher.health()
-        + " health. Choose attack, defend, or flee.";
+        + " health. Select it to check or engage, or flee to camp.";
   }
 
   private String gatherWood(SurvivePlayer player, IntSupplier rollPercent) {
@@ -351,7 +408,7 @@ final class SurviveWorld {
     };
     player.startFighting(animal);
     return "A wild " + animal.displayName() + " appears! It has " + animal.health()
-        + " health. Choose attack, defend, or flee.";
+        + " health. Select it to check or engage, or flee to camp.";
   }
 
   private static SurviveEnemy nightAnimalFor(int rollPercent) {
@@ -361,25 +418,57 @@ final class SurviveWorld {
     return rollPercent <= 85 ? SurviveEnemy.WOLF : SurviveEnemy.BEAR;
   }
 
-  private String attack(SurvivePlayer player) {
+  private static String engage(SurvivePlayer player, Instant now) {
+    player.nextStrikeAt = now.plus(STRIKE_INTERVAL);
+    player.combatOutcome = null;
+    return "You engage the " + player.enemy.displayName() + ". Attacks continue while you are away.";
+  }
+
+  private static String disengage(SurvivePlayer player) {
+    player.disengage();
+    return "You disengage. Automatic attacks have stopped.";
+  }
+
+  private static String defend(SurvivePlayer player) {
+    if (player.nextStrikeAt == null) {
+      return "You brace against the " + player.enemy.displayName() + " and block its bite. Attack or flee next.";
+    }
+    player.defending = true;
+    return "You brace to block the next bite.";
+  }
+
+  private String useWeaponSkill(SurvivePlayer player, Instant now) {
+    String skill = player.weapon == null ? "Heavy Strike" : switch (player.weapon) {
+      case CLUB -> "Crushing Blow";
+      case STONE_AXE -> "Cleave";
+      case SPEAR -> "Piercing Thrust";
+    };
+    player.tacticalPoints -= SKILL_COST;
+    player.nextStrikeAt = now.plus(STRIKE_INTERVAL);
+    return attack(player, player.attackDamage() + 2, skill);
+  }
+
+  private String attack(SurvivePlayer player, int damage, String skill) {
     var enemy = player.enemy;
-    int damage = player.attackDamage();
     boolean reachSparesBite = !player.struckFirst && player.weapon != null && player.weapon.keepsFirstBiteAway();
+    boolean defended = player.defending;
+    player.defending = false;
     var heldWeapon = player.weapon;
     player.struckFirst = true;
     player.enemyHealth = Math.max(0, player.enemyHealth - damage);
     String weaponNote = player.wearWeaponAndReportBreak() ? " Your " + heldWeapon.displayName() + " broke." : "";
     // Preserve the original simultaneous exchange, including the finishing blow's bite.
-    int bite = reachSparesBite ? 0 : enemy.bite();
+    int bite = reachSparesBite || defended ? 0 : enemy.bite();
     player.takeDamage(bite);
     if (player.status == Status.DEAD) {
       return "You attacked the " + enemy.displayName() + ", but its bite was fatal." + weaponNote;
     }
-    String biteNote = bite == 0
+    String biteNote = defended ? " Your guard blocked its bite." : bite == 0
         ? " Your spear kept it at bay."
         : " The " + enemy.displayName() + " bit you for " + bite + " damage.";
     if (player.enemyHealth > 0) {
-      return "You dealt " + damage + " damage." + biteNote + weaponNote;
+      String hit = skill == null ? "You dealt " : skill + " dealt ";
+      return hit + damage + " damage." + biteNote + weaponNote;
     }
     player.stopFighting();
     int foodGained = Math.min(enemy.foodReward(), INVENTORY_CAPACITY - player.inventoryCount());
@@ -387,7 +476,8 @@ final class SurviveWorld {
     String reward = foodGained == 0
         ? " Your full inventory could not hold its food."
         : " You gathered " + foodGained + " food.";
-    return "You defeated the " + enemy.displayName() + "." + reward + biteNote + weaponNote;
+    String skillNote = skill == null ? "" : " " + skill + " landed.";
+    return "You defeated the " + enemy.displayName() + "." + skillNote + reward + biteNote + weaponNote;
   }
 
   private String flee(SurvivePlayer player) {

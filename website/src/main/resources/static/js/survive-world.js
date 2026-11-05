@@ -1,6 +1,6 @@
 /** Owns 3D input, prediction, acknowledged live presence, labels and cleanup for one page. */
 import { API } from './lib/api.js';
-import { advancePosition, actionsAt, ACTION_LABELS, LANDMARKS, combatPosition } from './survive-world-model.js';
+import { advancePosition, actionsAt, ACTION_LABELS, LANDMARKS, combatPosition, targetActionsFor } from './survive-world-model.js';
 import { createWorldRenderer } from './survive-world-renderer.js';
 import { createWorldFeedback } from './survive-world-feedback.js';
 
@@ -14,6 +14,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   const labels = documentRoot.getElementById('surviveWorldLabels');
   const directions = documentRoot.getElementById('surviveWorldDirections');
   const locationLabel = documentRoot.getElementById('surviveWorldLocation');
+  const target = documentRoot.getElementById('surviveWorldEnemyMarker');
+  const targetDetails = documentRoot.getElementById('surviveWorldTargetDetails');
   let renderer;
   function releasePresence() {
     return requestJson(API.survive.leaveIsland, { method: 'POST', body: '{}', redirectOnUnauthorized: false,
@@ -45,6 +47,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   const pressed = new Set();
   const listeners = [];
   let state = null;
+  let targetSelected = false;
   let busy = false;
   let disposed = false;
   let connected = false;
@@ -61,6 +64,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   let frameId = 0;
   let previousFrameAt = 0;
   let lastActionSignature = '';
+  let lastActionsBlocked;
   let drag = null;
   let requestGeneration = 0;
   let desiredNameLabels = [];
@@ -132,7 +136,25 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     return pulsePromise;
   }
 
+  function selectTarget() {
+    if (state?.status !== 'COMBAT' || targetSelected) return;
+    targetSelected = true;
+    target.setAttribute('aria-pressed', 'true');
+    targetDetails.textContent = 'Engaged fights continue while you are away.';
+  }
+
   async function interact(action) {
+    if (state?.status === 'COMBAT') {
+      if (action === 'SELECT_TARGET') {
+        selectTarget();
+      } else if (action === 'CHECK_TARGET' && targetSelected) {
+        const danger = { HOG: 'Low threat', WOLF: 'Dangerous', BEAR: 'Severe threat' };
+        targetDetails.textContent = `${danger[state.enemy] || 'Unknown threat'}. ${state.enemyHealth} health. Engaged fights continue while away.`;
+      } else if (!busy && targetActionsFor(state, targetSelected).includes(action) && state.actions.includes(action)) {
+        onAction(action);
+      }
+      return;
+    }
     if (!connected || busy || !state || !actionsAt(position, state.actions).includes(action)) return;
     stopWalking();
     // Acknowledge the current landmark before sending its durable command; never retry commands.
@@ -142,25 +164,39 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   }
 
   function updateActions() {
-    const available = state ? actionsAt(position, state.actions) : [];
-    const signature = `${available.join(',')}:${busy}:${connected}`;
-    if (signature === lastActionSignature) return;
+    const available = state?.status === 'COMBAT' ? targetActionsFor(state, targetSelected)
+      : state ? actionsAt(position, state.actions) : [];
+    const blocked = state?.status === 'COMBAT' ? busy : busy || !connected;
+    const signature = available.join(',');
+    if (signature === lastActionSignature) {
+      if (blocked !== lastActionsBlocked) {
+        for (const button of actionList.children) button.setAttribute('aria-disabled', String(blocked));
+        lastActionsBlocked = blocked;
+      }
+      return;
+    }
     lastActionSignature = signature;
+    lastActionsBlocked = blocked;
+    const focusedAction = documentRoot.activeElement?.dataset?.worldAction;
     const buttons = available.map(action => {
       const button = documentRoot.createElement('button');
       button.type = 'button';
       button.textContent = ACTION_LABELS[action] || action;
       button.dataset.worldAction = action;
-      button.disabled = busy || !connected;
+      button.setAttribute('aria-disabled', String(blocked));
       return button;
     });
     actionList.replaceChildren(...buttons);
+    if (focusedAction) {
+      (buttons.find(button => button.dataset.worldAction === focusedAction) || target).focus({ preventScroll: true });
+    }
   }
 
   listen(actionList, 'click', event => {
     const button = event.target.closest('[data-world-action]');
     if (button) void interact(button.dataset.worldAction);
   });
+  listen(target, 'click', selectTarget);
   listen(shell, 'click', event => {
     const destination = event.target.closest('[data-destination]');
     if (destination && connected && state?.status === 'EXPLORING') {
@@ -173,12 +209,18 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   const directionKeys = new Map([['KeyW', 'forward'], ['ArrowUp', 'forward'], ['KeyS', 'back'], ['ArrowDown', 'back'],
     ['KeyA', 'left'], ['ArrowLeft', 'left'], ['KeyD', 'right'], ['ArrowRight', 'right']]);
   listen(canvas, 'keydown', event => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     const direction = directionKeys.get(event.code);
     if (direction) { event.preventDefault(); pressed.add(direction); goal = null; }
     if (event.code === 'KeyQ') { event.preventDefault(); yaw -= 0.12; }
     if (event.code === 'KeyR') { event.preventDefault(); yaw += 0.12; }
     if (event.code === 'KeyE' && !event.repeat) {
       event.preventDefault();
+      if (state?.status === 'COMBAT') {
+        selectTarget();
+        target.focus({ preventScroll: true });
+        return;
+      }
       const first = actionsAt(position, state?.actions || [])[0];
       if (first) void interact(first);
     }
@@ -221,6 +263,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     connected = false;
     feedback.textContent = '3D graphics stopped. Reload to restore the island; the action menus remain available.';
     dispose();
+    delete shell.dataset.active;
+    actionList.replaceChildren();
     void releasePresence();
     canvas.hidden = true;
     directions.hidden = true;
@@ -287,6 +331,19 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     setState(nextState, isBusy = false) {
       if (disposed) return;
       worldFeedback.acceptState(nextState, isBusy);
+      if (nextState?.status !== 'COMBAT' || state?.survivorId !== nextState.survivorId || state?.enemy !== nextState.enemy) {
+        targetSelected = false;
+        target.setAttribute('aria-pressed', 'false');
+        targetDetails.textContent = '';
+      }
+      if (nextState?.nextStrikeAt) {
+        targetSelected = true;
+        target.setAttribute('aria-pressed', 'true');
+        const details = nextState.defending ? 'Guard ready for the next exchange.' : 'Auto-attacking · Weapon skills cost 100 TP.';
+        if (targetDetails.textContent !== details) targetDetails.textContent = details;
+      } else if (targetSelected && state?.nextStrikeAt) {
+        targetDetails.textContent = 'Automatic attacks stopped. Engage to resume.';
+      }
       if (state?.survivorId !== nextState?.survivorId) {
         requestGeneration++;
         controller?.abort();

@@ -204,7 +204,7 @@
 .survive-world-actions { position: absolute; bottom: .6rem; left: .5rem; right: .5rem; justify-content: center; padding: .3rem; z-index: 4; pointer-events: none; }
 .survive-world-actions button { pointer-events: auto; background: #172e22f2; border: 2px solid #e6ce93; box-shadow: 0 2px 8px #0008; font-weight: 700; }
 .survive-world-combat { position: absolute; top: .65rem; left: .65rem; width: min(310px, calc(100% - 1.3rem)); display: grid; grid-template-columns: auto 1fr; gap: .15rem .65rem; padding: .45rem .6rem; color: #fff5e9; background: #651e1aef; border: 2px solid #f39a7a; border-radius: .65rem; z-index: 3; pointer-events: none; font-size: .8rem; }
-.survive-world-combat meter, #surviveWorldPlayerHealth { grid-column: 1 / -1; }
+.survive-world-combat meter, #surviveWorldTargetDetails { grid-column: 1 / -1; }
 .survive-world-combat meter { width: 100%; height: .8rem; accent-color: #f16a52; }
 .survive-world-notice { position: absolute; top: .75rem; right: .75rem; margin: 0; max-width: min(400px, calc(100% - 1.5rem)); padding: .7rem .95rem; border: 2px solid #c9d1a4; border-radius: .6rem; color: #fffbe9; background: #183126f2; font-size: .95rem; line-height: 1.4; font-weight: 600; z-index: 5; pointer-events: none; box-shadow: 0 3px 15px #0006; }
 .survive-world-combat:not([hidden]) ~ .survive-world-notice:not([data-kind="error"]) { display: none; }
@@ -213,6 +213,11 @@
 .survive-world-notice[data-kind="damage"], .survive-world-notice[data-kind="combat"], .survive-world-notice[data-kind="error"] { background: #5b211af2; border-color: #ffa38b; }
 .survive-world-notice[data-kind="pending"] { color: #d8eaff; background: #203847f2; }
 .survive-world-enemy-marker { position: absolute; transform: translate(-50%, -100%); padding: .3rem .55rem; color: #fff; background: #9b241cf2; border: 2px solid #ffc1a9; border-radius: .4rem; font-size: .85rem; font-weight: 800; white-space: nowrap; z-index: 2; pointer-events: none; }
+.survive-world button.survive-world-enemy-marker { background: #9b241cf2; border: 2px solid #ffc1a9; pointer-events: auto; }
+.survive-world-enemy-marker[aria-pressed="true"] { outline: 2px solid #ffe28a; outline-offset: 2px; }
+.survive-world-actions [aria-disabled="true"] { opacity: .65; cursor: wait; }
+.survive-world[data-active="true"] ~ #surviveActionBar #surviveDirectActions
+  :is([data-action="ENGAGE"], [data-action="DISENGAGE"], [data-action="WEAPON_SKILL"], [data-action="ATTACK"], [data-action="DEFEND"], [data-action="FLEE"]) { display: none; }
 .survive-world-numbers { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 3; }
 .survive-world-number { position: absolute; transform: translate(-50%, -100%); padding: .15rem .4rem; border-radius: .3rem; color: #ffed98; background: #17251bdb; text-shadow: 0 2px 2px #000; font-size: 1rem; font-weight: 800; white-space: nowrap; animation: survive-number-rise 6s ease-out both; }
 .survive-world-number.is-damage { color: #ffb2a1; background: #5c201ce6; }

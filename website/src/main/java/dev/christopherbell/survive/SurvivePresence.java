@@ -68,7 +68,7 @@ final class SurvivePresence {
       case HUNT -> near(x, z, -36, 25, 13);
       case BUILD_BOAT, ESCAPE -> near(x, z, 0, 62, 13);
       case BUILD_SHELTER, REST, GUARD, SLEEP, CRAFT_CLUB, CRAFT_AXE, CRAFT_SPEAR -> near(x, z, 0, 0, 15);
-      case EAT, ATTACK, DEFEND, FLEE, WAKE -> true;
+      case EAT, ATTACK, ENGAGE, DISENGAGE, WEAPON_SKILL, DEFEND, FLEE, WAKE -> true;
     };
   }
 

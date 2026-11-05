@@ -240,3 +240,7 @@ on the existing render loop; combat name/health and viewport actions remain
 visible for the fight. Enemies render in front of the follow camera, with a
 red ground marker. Reward sparks and floating-number animation respect reduced
 motion. Failed requests show in-world notices without predicting rewards.
+
+The world target menu shows Check and the server-allowed combat commands for the
+selected animal. The page refreshes at the next reported attack deadline during
+engagement and on return to a visible tab. The server owns attacks, TP, and outcomes.
