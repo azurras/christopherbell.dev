@@ -158,17 +158,20 @@ camera. WASD/arrows walk, dragging rotates the camera, and Q/R turn it. Enter or
 opens the contextual Commands window, minus opens the Main Menu, and Escape
 closes a window or stops walking. Touch direction buttons and Map destinations
 also walk through the same world. Pine forest (-24,-15), stone ridge (30,-12),
-hunting grounds (-36,25), camp (0,0) and boat shore (0,62) gate their respective actions.
+hunting grounds (-36,25), camp (0,0), boat shore (0,62) and the fishing bank
+(-13,70) are landmarks. Hunting in the 3D world follows nearby wildlife.
 Existing hunger, combat, weapons, day/night, raids, gifts and durable progress remain
 Java-owned. Rendering does not award supplies. Saved characters and inventory retain
 the existing Mongo representation; no position schema is added.
 
 `POST /api/survive/v1/movement` accepts `{ "x": 0, "z": 0, "heading": 0, "sequence": 1 }`.
 Cookie/account ownership resolves the survivor; IDs and names cannot select another
-character. It returns `self`, `others` and `accepted`. Coordinates are finite, inside
+character. It returns `self`, `others`, `accepted`, `wildlife` and `encounter`.
+Coordinates are finite, inside
 78 metres, with heading in radians and a nonnegative sequence. The server bounds
-speed, rejects stale sequences and prevents movement outside EXPLORING. Pulses load
-ownership without writing the saved world or changing survival revisions. Locations
+speed, rejects stale sequences and prevents movement outside EXPLORING. Pulses
+normally avoid writes. A newly triggered encounter commits through the durable
+world before claiming the animal. Locations
 are process-local: the first pulse, reconnection after 30 idle seconds and application
 restart spawn at camp. At most 1000 poses are kept, with two-hour expiry; other
 players disappear after 30 seconds without a pulse. This first release assumes one
@@ -188,8 +191,12 @@ bounded. WebGL failure exposes the prior illustration and action menus.
 
 ## Targeted combat
 
-Hunt or an ambush reveals an animal. Select it in the world or press E on the
-focused canvas, then Check its threat or Engage. Engaging starts a server-timed
+In 3D, hogs roam passively and wolves and bears start combat within seven and
+ten metres, respectively. The server evaluates only acknowledged poses against
+shared routes. Hunt can reveal the nearest unclaimed animal within five metres.
+The animal stays claimed until the encounter ends and then respawns after 35
+seconds. Routes and claims are process-local. The older text adventure still
+uses its hunt and ambush rolls. Select the target, Check it, or Engage. Engaging starts a server-timed
 exchange every three seconds. Each automatic attack builds 50 TP up to 300.
 Weapon skills spend 100 TP and restart the attack interval. Defend guards the
 next exchange. Disengage stops automatic attacks and leaves the animal in place.
@@ -203,3 +210,11 @@ reports time until the next strike, TP, guard state and the last combat outcome.
 Legacy encounters load without an attack deadline and require Engage to start
 the timer. Encounter health is currently per survivor. Shared enemies and party
 combat are future MMO work.
+
+## Fishing
+
+Fish at the Fishing bank using the Commands window. A cast spends one fullness
+and has a 60% chance to add one food if there is inventory space. The chat log
+reports the result. The cast, reel, and other action poses are browser visuals
+played after the command is confirmed. The text fallback offers the same fishing
+command without a position.

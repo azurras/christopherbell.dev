@@ -162,7 +162,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const log = documentRoot.getElementById('surviveGameLog');
   const logToggle = documentRoot.getElementById('surviveLogToggle');
   const logScrollback = documentRoot.getElementById('surviveLogScrollback');
-  const world = mountSurviveWorld(documentRoot, requestJson, performAction);
+  const world = mountSurviveWorld(documentRoot, requestJson, performAction, undefined, () => readWorld());
 
   function setLogExpanded(expanded) {
     const followsLatest = logScrollback.scrollHeight - logScrollback.clientHeight - logScrollback.scrollTop <= 4;
@@ -214,7 +214,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     world.setState(state, mutationPending);
   }
 
-  async function sendRequest(url, options = {}) {
+  async function sendRequest(url, options = {}, action) {
     if (pending) {
       return;
     }
@@ -222,6 +222,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     errorBox.hidden = true;
     try {
       acceptState(await requestJson(url, { redirectOnUnauthorized: false, ...options }));
+      if (action) world.animateAction?.(action);
     } catch (error) {
       // Reconcile once with Java after any uncertain mutation outcome; never replay the command.
       if (options.method === 'POST') {
@@ -258,7 +259,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     if (!state || pending || !state.actions.includes(action)) return;
     void sendRequest(API.survive.actions, {
       method: 'POST', body: JSON.stringify({ action, revision: state.revision }),
-    });
+    }, action);
   }
   const showJoin = () => {
     joinForm.hidden = false;
@@ -285,7 +286,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
         quantity: Number(documentRoot.getElementById('surviveGiftQuantity').value),
         revision: state.revision,
       }),
-    });
+    }, 'GIVE');
   };
   giftForm.addEventListener('submit', give);
   documentRoot.getElementById('surviveRecipient').addEventListener('change', chooseRecipient);

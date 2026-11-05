@@ -235,8 +235,10 @@ constants in `lib/api.js`; it never computes survival rewards. The SVG scene rem
 the fallback for unavailable/lost WebGL. Labels use text nodes, never HTML.
 
 `survive-world-feedback.js` renders the current enemy name, health and marker.
-The Chat log is the only surface for command results. Enemies render in front
-of the follow camera. Walking poses respect reduced motion.
+The Chat log is the only surface for command results. Roaming animals interpolate
+between server poses and approach the player visually on engagement.
+`survive-action-pose.js` maps confirmed commands to timed body and tool poses.
+Walking and action poses respect reduced motion.
 
 The world target menu shows Check and the server-allowed combat commands for the
 selected animal. The page refreshes at the next reported attack deadline during

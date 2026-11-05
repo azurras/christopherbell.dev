@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { groundHeight, islandMesh, meshBuilder } from '../../main/resources/static/js/survive-world-art.js';
 import { cameraMatrix, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
+import { actionPose } from '../../main/resources/static/js/survive-action-pose.js';
 
 test('the rendered island has finite geometry within its static triangle budget', () => {
   const { vertices } = islandMesh();
@@ -10,6 +11,17 @@ test('the rendered island has finite geometry within its static triangle budget'
   assert.ok(vertices.every(Number.isFinite));
   assert.ok(groundHeight(34, -19) > groundHeight(0, 0) + 2);
   assert.ok(groundHeight(78, 0) < groundHeight(62, 0));
+});
+
+test('confirmed harvest, fishing and combat actions create distinct animated meshes', () => {
+  const meshes = ['GATHER', 'GATHER_STONE', 'FISH', 'ATTACK', 'CRAFT_AXE', 'WAKE'].map(action => {
+    const mesh = meshBuilder();
+    mesh.avatar(0, 0, 0, [0.55, 0.41, 0.27], 'EXPLORING', 0, null, actionPose({ action, ageSeconds: 0.45 }));
+    assert.ok(mesh.vertices.every(Number.isFinite));
+    return mesh.vertices;
+  });
+  for (let index = 1; index < meshes.length; index++) assert.notDeepEqual(meshes[index - 1], meshes[index]);
+  assert.equal(actionPose({ action: 'FISH', ageSeconds: 3 }), null);
 });
 
 test('adventurer gait changes geometry and the follow camera anchors to each landmark height', () => {

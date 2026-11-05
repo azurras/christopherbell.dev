@@ -122,3 +122,4 @@ and HP/TP display sit over the canvas. The Main Menu and log flow normally in
 the text fallback.
 The Chat log keeps its header in view while the event lines scroll. Its expanded
 mode opens over the viewport and uses the same event list as the compact window.
+Wildlife labels distinguish hostile and passive animals by wording and color.

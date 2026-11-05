@@ -49,7 +49,16 @@ final class SurvivePresence {
         .filter(pose -> !pose.pose().survivorId().equals(survivorId)
             && pose.seenAt().isAfter(now.minus(VISIBLE_TIMEOUT)))
         .map(TrackedPose::pose).toList();
-    return new View(current.pose(), others, accepted);
+    return new View(current.pose(), others, accepted, List.of(), null);
+  }
+
+  Pose activePose(String survivorId, Instant now) {
+    var tracked = poses.get(survivorId);
+    return tracked != null && tracked.seenAt().isAfter(now.minus(VISIBLE_TIMEOUT)) ? tracked.pose() : null;
+  }
+
+  boolean tracks(String survivorId) {
+    return poses.containsKey(survivorId);
   }
 
   /** Older text clients retain their rules; spatial sessions execute at their last verified landmark. */
@@ -65,7 +74,8 @@ final class SurvivePresence {
     return switch (action) {
       case GATHER -> near(x, z, -24, -15, 13);
       case GATHER_STONE -> near(x, z, 30, -12, 12);
-      case HUNT -> near(x, z, -36, 25, 13);
+      case HUNT -> true;
+      case FISH -> near(x, z, -13, 70, 7);
       case BUILD_BOAT, ESCAPE -> near(x, z, 0, 62, 13);
       case BUILD_SHELTER, REST, GUARD, SLEEP, CRAFT_CLUB, CRAFT_AXE, CRAFT_SPEAR -> near(x, z, 0, 0, 15);
       case EAT, ATTACK, ENGAGE, DISENGAGE, WEAPON_SKILL, DEFEND, FLEE, WAKE -> true;
@@ -93,9 +103,16 @@ final class SurvivePresence {
   public record Pose(String survivorId, String name, double x, double z, double heading, long sequence, Status status) {}
 
   /** The sender's acknowledged pose and currently visible other players. */
-  public record View(Pose self, List<Pose> others, boolean accepted) {
+  public record View(Pose self, List<Pose> others, boolean accepted, List<SurviveWildlife.Animal> wildlife,
+                     SurviveWildlife.Animal encounter) {
     public View {
       others = List.copyOf(others);
+      wildlife = List.copyOf(wildlife);
+    }
+
+    View withWildlife(Status status, List<SurviveWildlife.Animal> animals, SurviveWildlife.Animal target) {
+      return new View(new Pose(self.survivorId(), self.name(), self.x(), self.z(), self.heading(), self.sequence(), status),
+          others, accepted, animals, target);
     }
   }
 

@@ -80,7 +80,7 @@ public class SurviveController {
         .body(survivors.giveSuppliesForOwner(token, accountId(), request.recipientId(), request.resource(),
             request.quantity(), request.revision()));
   }
-  /** A pulse authenticates from the same owner as commands; it never changes durable progress. */
+  /** A pulse authenticates movement and returns the current shared wildlife view. */
   @PostMapping("/movement")
   public ResponseEntity<SurvivePresence.View> move(
       @CookieValue(name = COOKIE_NAME, required = false) String token,
