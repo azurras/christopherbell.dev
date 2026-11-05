@@ -221,7 +221,7 @@ function cross(a, b) {
 }
 
 /** Store interleaved world-space positions and baked directional color for WebGL. */
-export function meshBuilder() {
+export function meshBuilder(actorArt) {
   const vertices = [];
   function triangle(a, b, c, color, material = 0, coordinates = null) {
     const normal = cross(b.map((value, index) => value - a[index]), c.map((value, index) => value - a[index]));
@@ -349,6 +349,6 @@ export function meshBuilder() {
         [x + dx * 0.78, y + height * (1 - blade * 0.12), z + dz * 0.78], tint([0.36, 0.42, 0.21], 0.82 + blade * 0.12));
     }
   }
-  const actors = createActorModels({ triangle, beam, ellipsoid, groundHeight });
+  const actors = createActorModels({ triangle, beam, ellipsoid, groundHeight, actorArt });
   return { vertices, triangle, box, beam, cone, disk, ellipsoid, tree, grass, ...actors };
 }

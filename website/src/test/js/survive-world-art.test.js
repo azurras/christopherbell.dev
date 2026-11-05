@@ -1,9 +1,42 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { prepareActorArt } from '../../main/resources/static/js/survive-authored-actors.js';
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
 import { cameraMatrix, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
 import { actionPose } from '../../main/resources/static/js/survive-action-pose.js';
 import { drawBoat, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
+
+test('authored actors draw bounded texture coordinates and animate with the equipped tool', () => {
+  const asset = kind => JSON.parse(readFileSync(new URL(`../../main/resources/static/images/survive/${kind}.json`, import.meta.url), 'utf8'));
+  const actorArt = {
+    adventurer: prepareActorArt(asset('adventurer')),
+    boar: prepareActorArt(asset('boar')),
+  };
+  for (const model of Object.values(actorArt)) {
+    assert.notDeepEqual(model.poses.walk[0], model.poses.walk[3]);
+  }
+  assert.notDeepEqual(actorArt.adventurer.poses.strike[0], actorArt.adventurer.poses.strike[5]);
+  const scene = (seconds, action) => {
+    const mesh = meshBuilder(actorArt);
+    mesh.avatar(8, 9, 0.4, [0.24, 0.31, 0.42], 'EXPLORING', 1, 'AXE', action, true, seconds);
+    mesh.animal(20, -15, 'HOG', 1, 0.7, 1, 0, false, seconds);
+    return mesh.vertices;
+  };
+  const walking = scene(0.2);
+  const mining = scene(0.2, actionPose({ action: 'GATHER_STONE', ageSeconds: 0.6 }));
+  assert.notDeepEqual(walking, scene(0.36));
+  assert.notDeepEqual(walking, mining);
+  assert.ok(mining.every(Number.isFinite));
+  let texturedCorners = 0;
+  for (let index = 6; index < mining.length; index += MESH_VERTEX_FLOATS) {
+    if (mining[index] !== 12) continue;
+    texturedCorners++;
+    assert.ok(mining[index + 1] >= 0 && mining[index + 1] <= 1);
+    assert.ok(mining[index + 2] >= 0 && mining[index + 2] <= 1);
+  }
+  assert.equal(texturedCorners, (2151 + 1144) * 3);
+});
 
 test('the rendered island has finite geometry within its static triangle budget', () => {
   const { vertices } = islandMesh();
