@@ -45,6 +45,7 @@ function surfaceColor(x, z) {
 /** Build the static landscape once. All variation is deterministic across clients. */
 export function islandMesh() {
   const mesh = meshBuilder();
+  mesh.ellipsoid(0, 0, 0, 174, 135, 174, [1, 1, 1], 28, 10);
   mesh.disk(0, -0.66, 0, 380, [0.19, 0.34, 0.39], 72);
   const sectors = 144;
   const rings = 52;
@@ -126,6 +127,24 @@ export function islandMesh() {
   for (let plank = 0; plank < 19; plank++) {
     mesh.box(0, 0.72, 68 + plank * 0.63, 3.35, 0.18, 0.59, tint([0.44, 0.32, 0.21], 0.88 + plank % 4 * 0.08));
   }
+  // The bank has a short weathered deck, with pilings visible where the land falls away.
+  for (let plank = 0; plank < 12; plank++) {
+    const z = 71 + plank * 0.54;
+    mesh.box(-13, 0.42, z, 2.45, 0.15, 0.49, tint(BARK, 1.22 + plank % 3 * 0.12));
+  }
+  for (const side of [-1, 1]) {
+    for (const z of [71, 74, 77]) {
+      const x = -13 + side * 1.05;
+      mesh.beam([x, -0.65, z], [x, 0.71, z], 0.14, 0.12, BARK, 6);
+    }
+  }
+  const workbenchY = groundHeight(-5, 3);
+  mesh.box(-5, workbenchY + 0.98, 3, 2, 0.22, 1.05, [0.43, 0.33, 0.24]);
+  for (const side of [-1, 1]) {
+    mesh.beam([-5 + side * 0.84, workbenchY, 2.66], [-5 + side * 0.77, workbenchY + 0.9, 2.77], 0.14, 0.11, BARK, 5);
+    mesh.beam([-5 + side * 0.84, workbenchY, 3.34], [-5 + side * 0.77, workbenchY + 0.9, 3.23], 0.14, 0.11, BARK, 5);
+  }
+  mesh.box(-5.32, workbenchY + 1.14, 3.11, 0.56, 0.09, 0.29, STONE);
   return mesh;
 }
 
