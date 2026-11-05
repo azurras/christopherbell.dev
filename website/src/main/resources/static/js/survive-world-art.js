@@ -113,12 +113,15 @@ export function islandMesh() {
       drawQuarryRock(mesh, x, groundHeight(x, z), z, size, angle, index % 4 === 0);
     }
   }
-  for (let index = 0; index < 300; index++) {
+  for (let index = 0; index < 780; index++) {
     const angle = index * 2.39996;
-    const radius = 4 + Math.sqrt(index) * 3.6;
+    const radius = 4 + Math.sqrt(index) * 2.2;
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
-    if (trailDistance(x, z) > 2.2) mesh.grass(x, z, angle, 0.16 + index % 5 * 0.055);
+    if (trailDistance(x, z) > 2.0) {
+      mesh.grass(x, z, angle, 0.16 + index % 5 * 0.055);
+      if (index % 9 === 0 && radius < 54) mesh.underbrush(x, z, angle);
+    }
   }
   for (const landmark of LANDMARKS.slice(1)) {
     const x = landmark.x + 2.7;
@@ -305,39 +308,52 @@ export function meshBuilder(actorArt) {
   }
   function tree(x, z, height, angle, broadleaf) {
     const y = groundHeight(x, z);
-    const leanX = Math.cos(angle) * height * 0.055;
-    const leanZ = Math.sin(angle) * height * 0.055;
-    beam([x, y, z], [x + leanX, y + height * 0.92, z + leanZ], height * 0.058, 0.045, BARK, 9, BARK_MATERIAL);
+    const leanX = Math.cos(angle) * height * 0.085;
+    const leanZ = Math.sin(angle) * height * 0.085;
+    const trunkAt = level => [x + leanX * level ** 1.5, y + height * level, z + leanZ * level ** 1.5];
+    beam(trunkAt(0), trunkAt(0.28), height * 0.072, height * 0.043, BARK, 9, BARK_MATERIAL);
+    beam(trunkAt(0.28), trunkAt(0.64), height * 0.043, height * 0.022, BARK, 8, BARK_MATERIAL);
+    beam(trunkAt(0.64), trunkAt(1), height * 0.022, 0.025, BARK, 6, BARK_MATERIAL);
     for (let branch = 0; branch < 6; branch++) {
       const branchAngle = angle + branch * 2.39996;
       const level = 0.40 + branch * 0.068;
-      const spread = height * (0.26 - branch * 0.026);
-      const trunk = [x + leanX * level, y + height * level, z + leanZ * level];
-      const tip = [trunk[0] + Math.cos(branchAngle) * spread, trunk[1] + height * 0.055, trunk[2] + Math.sin(branchAngle) * spread];
-      beam(trunk, tip, 0.11, 0.025, BARK, 5, BARK_MATERIAL);
-      const foliage = tint(broadleaf ? [0.33, 0.42, 0.23] : [0.22, 0.34, 0.23], 0.83 + branch * 0.071);
-      if (broadleaf) {
-        ellipsoid(tip[0], tip[1] + height * 0.11, tip[2], height * 0.14, height * 0.11, height * 0.13, foliage, 7, 3, branchAngle);
-      } else {
-        const stem = [trunk[0] + (tip[0] - trunk[0]) * 0.44, tip[1], trunk[2] + (tip[2] - trunk[2]) * 0.44];
-        beam(stem, [tip[0], tip[1] + height * 0.16, tip[2]], height * (0.15 - branch * 0.009), 0, foliage, 7);
-        beam(stem, [trunk[0], tip[1] + height * 0.22, trunk[2]], height * 0.14, 0, tint(foliage, 1.09), 7);
-      }
-      foliageCard(tip, height * (broadleaf ? 0.52 : 0.30), branchAngle, tint(foliage, 2.6));
-      foliageCard(tip, height * (broadleaf ? 0.45 : 0.26), branchAngle + Math.PI / 2, tint(foliage, 2.85));
+      const spread = height * (broadleaf ? 0.34 - branch * 0.024 : 0.29 - branch * 0.028);
+      const trunk = trunkAt(level);
+      const radial = (length, rise, direction) => [trunk[0] + Math.cos(direction) * spread * length,
+        trunk[1] + height * rise, trunk[2] + Math.sin(direction) * spread * length];
+      const fork = radial(0.52, 0.08, branchAngle);
+      const tip = radial(1, 0.14, branchAngle);
+      const twig = radial(0.84, 0.13, branchAngle + 0.55);
+      beam(trunk, fork, height * 0.017, height * 0.009, BARK, 4, BARK_MATERIAL);
+      beam(fork, tip, height * 0.009, 0.013, BARK, 3, BARK_MATERIAL);
+      const foliage = tint(broadleaf ? [0.70, 0.91, 0.60] : [0.56, 0.76, 0.61], 0.76 + branch * 0.045);
+      const clusterSize = height * (broadleaf ? 0.46 : 0.38);
+      foliageCard(fork, clusterSize, branchAngle + 0.52, foliage, 0.32);
+      foliageCard(tip, clusterSize, branchAngle - 0.70, tint(foliage, 1.12), 0.40);
+      foliageCard(tip, clusterSize * 0.90, branchAngle + 0.86, foliage, -0.35);
+      foliageCard(twig, clusterSize * 0.88, branchAngle + 0.45, tint(foliage, 1.23), 0.25);
+      foliageCard(twig, clusterSize * 0.76, branchAngle + 1.90, foliage);
     }
-    ellipsoid(x + leanX, y + height * 0.89, z + leanZ, height * 0.14, height * 0.20, height * 0.14,
-      broadleaf ? [0.35, 0.43, 0.24] : [0.28, 0.39, 0.24], 7, 3, angle);
+    const crown = trunkAt(0.83);
+    for (let spray = 0; spray < 5; spray++) {
+      foliageCard(crown, height * (0.29 + spray * 0.015), angle + spray * 2.39996, [0.67, 0.86, 0.59], 0.23);
+    }
   }
-  function foliageCard([x, y, z], size, angle, color) {
+  function foliageCard([x, y, z], size, angle, color, tilt = 0) {
     const dx = Math.cos(angle) * size * 0.5;
     const dz = Math.sin(angle) * size * 0.5;
     const a = [x - dx, y - size * 0.15, z - dz];
     const b = [x + dx, y - size * 0.15, z + dz];
-    const c = [x + dx * 0.78, y + size * 0.65, z + dz * 0.78];
-    const d = [x - dx * 0.78, y + size * 0.65, z - dz * 0.78];
+    const c = [x + dx * 0.78 - dz * tilt, y + size * 0.65, z + dz * 0.78 + dx * tilt];
+    const d = [x - dx * 0.78 - dz * tilt, y + size * 0.65, z - dz * 0.78 + dx * tilt];
     triangle(a, b, c, color, FOLIAGE_MATERIAL, [[0, 1], [1, 1], [1, 0]]);
     triangle(a, c, d, color, FOLIAGE_MATERIAL, [[0, 1], [1, 0], [0, 0]]);
+  }
+  function underbrush(x, z, angle) {
+    const base = [x, groundHeight(x, z) + 0.14, z];
+    for (let stem = 0; stem < 4; stem++) {
+      foliageCard(base, 0.85 + stem * 0.11, angle + stem * 1.4, [0.51, 0.74, 0.47], 0.7);
+    }
   }
   function grass(x, z, angle, height) {
     const y = groundHeight(x, z);
@@ -350,5 +366,5 @@ export function meshBuilder(actorArt) {
     }
   }
   const actors = createActorModels({ triangle, beam, ellipsoid, groundHeight, actorArt });
-  return { vertices, triangle, box, beam, cone, disk, ellipsoid, tree, grass, ...actors };
+  return { vertices, triangle, box, beam, cone, disk, ellipsoid, tree, grass, underbrush, ...actors };
 }

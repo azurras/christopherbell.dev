@@ -191,7 +191,7 @@ remote positions interpolate. The existing 300 mutations/minute/IP limit remains
 large shared-IP groups may see connection pauses. Render geometry/pixel density are
 bounded. WebGL failure exposes the prior illustration and action menus.
 
-The adventurer and boar use authored models and a painted atlas. Asset requests
+The adventurer and wildlife use authored models and a painted atlas. Asset requests
 run independently of joining and movement. The renderer can draw procedural
 actors when an asset is unavailable. See the island art credits for source and
 conversion details.
