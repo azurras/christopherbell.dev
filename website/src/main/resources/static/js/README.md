@@ -229,8 +229,9 @@ bounded coverage, dashboard-only results and deferred billing/email delivery.
 movement prediction. `survive-world-art.js` generates terrain, foliage and actor
 meshes. `survive-world-materials.js` loads original grass, path, mossy stone,
 bark and foliage images from `static/images/survive` into WebGL textures.
-`survive-world-actors.js` builds articulated adventurers and separate hog, wolf,
-and bear silhouettes using cloth, leather, and fur materials. `survive-world-props.js`
+`survive-authored-actors.js` samples textured adventurer and boar animation clips
+and attaches tools to the sampled hand. `survive-world-actors.js` supplies the
+fallback models and the wolf and bear silhouettes. `survive-world-props.js`
 builds the shelters, boats and resource-site props used by the same renderer.
 `survive-world-renderer.js` owns WebGL buffers, lighting, fog and disposal.
 `survive-world.js` owns scoped keyboard and controller movement, camera input,

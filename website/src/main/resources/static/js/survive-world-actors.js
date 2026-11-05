@@ -1,4 +1,6 @@
 /** Articulated adventurers and species-specific animal silhouettes for the world renderer. */
+import { drawActorArt } from './survive-authored-actors.js';
+
 const CLOTH = 5.5;
 const LEATHER = 6.5;
 const WOLF_FUR = 7.5;
@@ -37,7 +39,7 @@ const ANIMALS = {
   },
 };
 
-export function createActorModels({ triangle, beam, ellipsoid, groundHeight }) {
+export function createActorModels({ triangle, beam, ellipsoid, groundHeight, actorArt }) {
   function groundShadow(x, z, length, width) {
     const sides = 18;
     const point = (radius, angle) => {
@@ -84,7 +86,7 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight }) {
     }
   }
 
-  function avatar(x, z, heading, cloth, status, stride = 0, weapon, action = null, detailed = true) {
+  function avatar(x, z, heading, cloth, status, stride = 0, weapon, action = null, detailed = true, seconds = 0) {
     const y = groundHeight(x, z);
     const resting = status === 'SLEEPING' || status === 'DEAD' || (status === 'ESCAPED' && action?.kind !== 'row');
     const cos = Math.cos(heading);
@@ -101,6 +103,15 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight }) {
     const part = (at, width, height, depth, color, material = 0) =>
       ellipsoid(...at, width, resting ? depth : height, resting ? height : depth, color, detailed ? 10 : 6, 4, heading, material);
     groundShadow(x, z, 1.08, 0.48);
+    const authored = actorArt?.adventurer;
+    if (authored) {
+      const gesture = !resting && authored.poses[action?.kind];
+      const clip = gesture ? action.kind : (stride !== 0 ? 'walk' : 'idle');
+      const progress = gesture ? action.progress : seconds * (clip === 'walk' ? (action?.kind === 'run' ? 2.6 : 1.7) : 0.44);
+      const hand = drawActorArt(triangle, authored, pose, clip, progress, !gesture);
+      drawEquipment(hand);
+      return;
+    }
     const breath = action?.kind === 'sleep' ? action.weight * 0.035 : 0;
     profile(pose, [[1.11, 0.32, 0.23], [1.34, 0.30, 0.22], [1.58, 0.40, 0.24],
       [1.79, 0.46, 0.26, breath], [1.91, 0.38, 0.23], [2.02, 0.18, 0.15]], cloth, CLOTH, detailed ? 16 : 8);
@@ -150,32 +161,36 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight }) {
       }
       if (side === 1) toolHand = wrist;
     }
-    const tool = resting ? null : action?.kind;
-    if (['chop', 'mine', 'hammer', 'fish', 'row'].includes(tool) || (tool === 'strike' && weapon)) {
-      const length = tool === 'fish' ? 2.1 : tool === 'row' || (tool === 'strike' && weapon === 'SPEAR') ? 1.5 : 0.82;
-      const arc = Math.sin(action.progress * Math.PI * (tool === 'fish' ? 2 : 4));
-      const tip = [toolHand[0] + sin * length * 0.73, toolHand[1] + length * (0.38 + 0.55 * arc),
-        toolHand[2] + cos * length * 0.73];
-      beam(toolHand, tip, 0.043, 0.023, [0.49, 0.34, 0.20], 5);
-      if (tool === 'fish') {
-        const float = [x + sin * 13, -0.59, z + cos * 13];
-        beam(tip, float, 0.016, 0.013, [0.70, 0.68, 0.51], 3);
-        ellipsoid(...float, 0.095, 0.13, 0.095, [0.77, 0.27, 0.16], 6, 3);
-      } else {
-        drawToolHead(triangle, beam, tip, heading, tool, weapon, hardware);
+    drawEquipment(toolHand);
+
+    function drawEquipment(toolHand) {
+      const tool = resting ? null : action?.kind;
+      if (['chop', 'mine', 'hammer', 'fish', 'row'].includes(tool) || (tool === 'strike' && weapon)) {
+        const length = tool === 'fish' ? 2.1 : tool === 'row' || (tool === 'strike' && weapon === 'SPEAR') ? 1.5 : 0.82;
+        const arc = Math.sin(action.progress * Math.PI * (tool === 'fish' ? 2 : 4));
+        const tip = [toolHand[0] + sin * length * 0.73, toolHand[1] + length * (0.38 + 0.55 * arc),
+          toolHand[2] + cos * length * 0.73];
+        beam(toolHand, tip, 0.043, 0.023, [0.49, 0.34, 0.20], 5);
+        if (tool === 'fish') {
+          const float = [x + sin * 13, -0.59, z + cos * 13];
+          beam(tip, float, 0.016, 0.013, [0.70, 0.68, 0.51], 3);
+          ellipsoid(...float, 0.095, 0.13, 0.095, [0.77, 0.27, 0.16], 6, 3);
+        } else {
+          drawToolHead(triangle, beam, tip, heading, tool, weapon, hardware);
+        }
+      } else if (tool === 'eat' || tool === 'give') {
+        ellipsoid(...toolHand, 0.13, 0.09, 0.13, [0.65, 0.45, 0.23], 6, 3);
       }
-    } else if (tool === 'eat' || tool === 'give') {
-      ellipsoid(...toolHand, 0.13, 0.09, 0.13, [0.65, 0.45, 0.23], 6, 3);
-    }
-    if (weapon && tool !== 'strike') {
-      const length = weapon === 'SPEAR' ? 2.8 : 1.65;
-      const haft = pose(0.32, 0.58, -0.36);
-      const tip = pose(-0.35, 0.58 + length, -0.37);
-      beam(haft, tip, 0.055, 0.044, [0.43, 0.30, 0.17], 5);
-      drawToolHead(triangle, beam, tip, heading, 'strike', weapon, hardware);
+      if (weapon && tool !== 'strike') {
+        const length = weapon === 'SPEAR' ? 2.8 : 1.65;
+        const haft = pose(0.32, 0.58, -0.36);
+        const tip = pose(-0.35, 0.58 + length, -0.37);
+        beam(haft, tip, 0.055, 0.044, [0.43, 0.30, 0.17], 5);
+        drawToolHead(triangle, beam, tip, heading, 'strike', weapon, hardware);
+      }
     }
   }
-  function animal(x, z, kind, scale = 1, heading = 0, stride = 0, recoil = 0, detailed = true) {
+  function animal(x, z, kind, scale = 1, heading = 0, stride = 0, recoil = 0, detailed = true, seconds = 0) {
     const y = groundHeight(x, z);
     const model = ANIMALS[kind] || ANIMALS.HOG;
     const sin = Math.sin(heading);
@@ -190,6 +205,12 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight }) {
     const part = (point, width, height, depth, color, texture = 0) =>
       ellipsoid(...p(...point), width * scale, height * scale, depth * scale, color, detailed ? 9 : 6, 4, heading, texture);
     groundShadow(x, z, 0.92 * scale, 0.46 * scale);
+    if (kind === 'HOG' && actorArt?.boar) {
+      const clip = stride !== 0 ? 'walk' : 'idle';
+      drawActorArt(triangle, actorArt.boar, (across, height, forward) => p(forward, height, across),
+        clip, seconds * 1.55, true);
+      return;
+    }
     profile(axis, model.body, fur, material, sides);
     profile(axis, model.head, tint(fur, 1.13), material, sides);
     for (const side of [-1, 1]) {

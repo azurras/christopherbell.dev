@@ -2,7 +2,7 @@
 export function createIslandMaterials(gl, documentRoot, program) {
   const definitions = [
     ['grassTile', [0, 0]], ['earthTile', [1, 0]], ['stoneTile', [0, 1]], ['barkTile', [1, 1]], ['foliageCard', null],
-    ['actorAtlas', null],
+    ['actorAtlas', null], ['authoredActorAtlas', null],
   ];
   const textures = [];
   const images = [];
@@ -62,7 +62,12 @@ export function createIslandMaterials(gl, documentRoot, program) {
     });
     load('/images/survive/foliage.png', image => upload(image, 4, null));
     load('/images/survive/actor-materials.jpg', image => upload(image, 5, null, 1024));
-    return { dispose };
+    let authoredActorsReady = false;
+    load('/images/survive/authored-actors.jpg', image => {
+      upload(image, 6, null, 1024);
+      authoredActorsReady = true;
+    });
+    return { dispose, get authoredActorsReady() { return authoredActorsReady; } };
   } catch (error) {
     dispose();
     throw error;

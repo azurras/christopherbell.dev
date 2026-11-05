@@ -3,7 +3,9 @@ import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from './sur
 import { createIslandMaterials } from './survive-world-materials.js';
 import { drawBoat, drawCampFlame, drawShelter } from './survive-world-props.js';
 import { actionPose } from './survive-action-pose.js';
+import { prepareActorArt } from './survive-authored-actors.js';
 import { cameraMatrix, projectPoint } from './survive-world-model.js';
+import { fetchJson } from './lib/util.js';
 
 const VERTEX_SHADER = `
 attribute vec3 position;
@@ -40,15 +42,16 @@ uniform sampler2D stoneTile;
 uniform sampler2D barkTile;
 uniform sampler2D foliageCard;
 uniform sampler2D actorAtlas;
+uniform sampler2D authoredActorAtlas;
 float grain(vec3 cell) {
   return fract(sin(dot(mod(cell, 79.0), vec3(13.7, 27.1, 9.3))) * 137.2);
 }
 void main() {
-  if (surfaceMaterial > 10.0) {
+  if (surfaceMaterial > 10.0 && surfaceMaterial < 11.0) {
     gl_FragColor = vec4(tint * 1.42, 1.0);
     return;
   }
-  if (surfaceMaterial > 9.0) {
+  if (surfaceMaterial > 9.0 && surfaceMaterial < 10.0) {
     if (uv.x >= 0.99) discard;
     gl_FragColor = vec4(tint, (1.0 - uv.x) * 0.48);
     return;
@@ -61,7 +64,9 @@ void main() {
   }
   float textureDetail = grain(floor(surface * 9.0)) * 0.14 + grain(floor(surface * 2.5)) * 0.13;
   vec3 albedo = tint * (0.88 + textureDetail);
-  if (surfaceMaterial > 5.0) {
+  if (surfaceMaterial > 11.0) {
+    albedo = tint * texture2D(authoredActorAtlas, uv).rgb;
+  } else if (surfaceMaterial > 5.0) {
     float index = floor(surfaceMaterial) - 5.0;
     vec2 offset = vec2(mod(index, 2.0), floor(index / 2.0)) * 0.5;
     vec3 detail = texture2D(actorAtlas, offset + 0.015 + clamp(uv, 0.0, 1.0) * 0.47).rgb;
@@ -98,9 +103,12 @@ export function createWorldRenderer(canvas) {
   if (!gl) throw new Error('3D graphics are unavailable on this device.');
   const shaders = [];
   const buffers = [];
+  const actorRequests = new AbortController();
+  const actorArt = {};
   const program = gl.createProgram();
   let materials;
   function dispose() {
+    actorRequests.abort();
     materials?.dispose();
     for (const buffer of buffers) gl.deleteBuffer(buffer);
     for (const shader of shaders) gl.deleteShader(shader);
@@ -118,6 +126,11 @@ export function createWorldRenderer(canvas) {
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error('The island renderer could not start.');
     materials = createIslandMaterials(gl, canvas.ownerDocument, program);
+    for (const kind of ['adventurer', 'boar']) {
+      fetchJson(`/images/survive/${kind}.json`, { signal: actorRequests.signal })
+        .then(data => { actorArt[kind] = prepareActorArt(data, kind === 'adventurer'); })
+        .catch(() => { /* The procedural model remains available. */ });
+    }
     const scenery = islandMesh();
     const staticBuffer = gl.createBuffer();
     const actorBuffer = gl.createBuffer();
@@ -164,7 +177,7 @@ export function createWorldRenderer(canvas) {
         gl.uniform3fv(skyUniform, sky);
         gl.uniform1f(timeUniform, animationSeconds % 120);
         drawBuffer(staticBuffer, scenery.vertices.length / MESH_VERTEX_FLOATS);
-        const actors = meshBuilder();
+        const actors = meshBuilder(materials.authoredActorsReady ? actorArt : undefined);
         drawCampFlame(actors, position.animate ? animationSeconds : 0);
         const stride = avatar => avatar.moving ? Math.sin(animationSeconds * 11) : 0;
         const pose = actionPose(gesture) || (state.status === 'SLEEPING' && position.animate
@@ -173,12 +186,13 @@ export function createWorldRenderer(canvas) {
         const heading = pose?.kind === 'fish' ? Math.atan2(position.x, position.z)
           : state.status === 'COMBAT' ? Math.atan2(enemy.x - position.x, enemy.z - position.z) : restingHeading;
         actors.avatar(position.x, position.z, heading, [0.24, 0.31, 0.42], state.status,
-          pose?.kind === 'run' ? Math.sin(animationSeconds * 19) : stride(position), state.weapon, pose);
+          pose?.kind === 'run' ? Math.sin(animationSeconds * 19) : stride(position), state.weapon, pose, true, animationSeconds);
         // Bound dynamic geometry in a crowded camp while drawing nearby players first.
         const nearestPlayers = others.map(other => ({ other, distance: Math.hypot(other.x - position.x, other.z - position.z) }))
           .filter(player => player.distance <= 60).sort((a, b) => a.distance - b.distance).slice(0, 24);
         for (const { other, distance } of nearestPlayers) {
-          actors.avatar(other.x, other.z, other.heading, [0.34, 0.43, 0.45], other.status, stride(other), null, null, distance < 13);
+          actors.avatar(other.x, other.z, other.heading, [0.34, 0.43, 0.45], other.status, stride(other), null, null,
+            distance < 13, animationSeconds);
         }
         for (let index = 0; index < Math.min(8, state.shelters); index++) {
           const x = (index % 4) * 5 - 8;
@@ -191,7 +205,7 @@ export function createWorldRenderer(canvas) {
         }
         for (const animal of wildlife) {
           actors.animal(animal.x, animal.z, animal.kind, animal.kind === 'BEAR' ? 1.6 : 1, animal.heading,
-            stride(animal), 0, Math.hypot(animal.x - position.x, animal.z - position.z) < 16);
+            stride(animal), 0, Math.hypot(animal.x - position.x, animal.z - position.z) < 16, animationSeconds);
         }
         if (state.status === 'COMBAT') {
           const scale = state.enemy === 'BEAR' ? 1.6 : 1;
@@ -199,7 +213,8 @@ export function createWorldRenderer(canvas) {
           const ringColor = state.nextStrikeAt ? [0.67, 0.23, 0.15] : [0.64, 0.48, 0.21];
           drawTargetRing(actors, enemy, radius, ringColor);
           const facing = Math.atan2(position.x - enemy.x, position.z - enemy.z);
-          actors.animal(enemy.x, enemy.z, state.enemy, scale, facing, stride(enemy), pose?.kind === 'strike' ? pose.weight : 0);
+          actors.animal(enemy.x, enemy.z, state.enemy, scale, facing, stride(enemy), pose?.kind === 'strike' ? pose.weight : 0,
+            true, animationSeconds);
         }
         gl.bindBuffer(gl.ARRAY_BUFFER, actorBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(actors.vertices), gl.DYNAMIC_DRAW);
