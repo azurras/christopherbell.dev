@@ -183,6 +183,8 @@
 .survive-world-label.is-landmark { color: #ffdda0; background: #18251bd9; }
 .survive-world-label.is-hostile { color: #ffe0ca; background: #592822e8; }
 .survive-world-label.is-passive { color: #f7e4a3; background: #373321e8; }
+.survive-world-label[data-field-target] { pointer-events: auto; cursor: pointer; }
+.survive-world-label[data-selected="true"] { outline: 2px solid #ffe39e; outline-offset: 2px; }
 .survive-world-label[hidden] { display: none; }
 .survive-world button { min-height: 44px; border: 1px solid #7c8b65; border-radius: .5rem; padding: .55rem .8rem; color: #f4ead3; background: #304438; font: inherit; cursor: pointer; }
 .survive-world button:hover { background: #465d47; }

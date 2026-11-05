@@ -48,6 +48,15 @@ final class SurviveWildlife {
         .min(Comparator.comparingDouble(animal -> animal.distanceFrom(player))).orElse(null);
   }
 
+  Animal targetInReach(SurvivePresence.Pose player, Instant now, String targetId, Animal raider) {
+    if (player == null) {
+      return null;
+    }
+    return roaming(now, raider).stream()
+        .filter(animal -> animal.id().equals(targetId) && animal.distanceFrom(player) <= HUNT_RANGE_METRES)
+        .findFirst().orElse(null);
+  }
+
   void claim(String survivorId, Animal animal) {
     encounters.put(survivorId, animal);
   }

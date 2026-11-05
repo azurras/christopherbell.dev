@@ -109,6 +109,12 @@ public class SurviveService {
 
   /** Authenticated account ownership takes precedence over every guest cookie. */
   public synchronized SurviveSnapshot actForOwner(String token, String accountId, SurviveAction action, long expectedRevision) {
+    return actForOwner(token, accountId, action, expectedRevision, null);
+  }
+
+  /** Engages a named roaming target only at the survivor's acknowledged location. */
+  public synchronized SurviveSnapshot actForOwner(String token, String accountId, SurviveAction action,
+      long expectedRevision, String targetId) {
     loadSettledWorld();
     expireInactivePlayers();
     var player = world.players.get(ownerKey(token, accountId));
@@ -119,7 +125,9 @@ public class SurviveService {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "Your survivor changed. Refresh the game before acting again.");
     }
     var now = clock.instant();
-    if (action == null || !world.actionsFor(player, now).contains(action)) {
+    boolean fieldEngage = targetId != null && action == SurviveAction.ENGAGE && player.status == Status.EXPLORING;
+    if (action == null || targetId != null && !fieldEngage
+        || !fieldEngage && !world.actionsFor(player, now).contains(action)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That action is unavailable in the current state.");
     }
     if (!presence.permits(player.survivorId, action, now)) {
@@ -127,16 +135,23 @@ public class SurviveService {
     }
     var pose = presence.activePose(player.survivorId, now);
     SurviveWildlife.Animal hunted = null;
-    if (action == SurviveAction.HUNT && presence.tracks(player.survivorId)) {
+    if (fieldEngage || action == SurviveAction.HUNT && presence.tracks(player.survivorId)) {
       releaseFinishedEncounters(now);
-      hunted = wildlife.nearest(pose, now, false, world.raiderApproaching(now));
+      var raider = world.raiderApproaching(now);
+      hunted = fieldEngage ? wildlife.targetInReach(pose, now, targetId, raider) : wildlife.nearest(pose, now, false, raider);
       if (hunted == null) {
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Move within five metres of a roaming animal to hunt it.");
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, fieldEngage
+            ? "That target is no longer available within five metres."
+            : "Move within five metres of a roaming animal to hunt it.");
       }
     }
     world.observeActivity(player, now);
     if (player.status != Status.DEAD) {
-      world.perform(action, player, now, rollPercent, pose != null, hunted == null ? null : hunted.kind());
+      if (fieldEngage) {
+        world.engageFieldTarget(player, hunted.kind(), now);
+      } else {
+        world.perform(action, player, now, rollPercent, pose != null, hunted == null ? null : hunted.kind());
+      }
     }
     commitWorld();
     if (hunted != null && player.status == Status.COMBAT) {

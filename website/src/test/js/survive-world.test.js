@@ -131,6 +131,39 @@ test('zoom resets and a locked camera tracks the acknowledged enemy without orbi
   } finally { world.dispose(); }
 });
 
+test('field targeting sends the selected creature ID after a fresh movement pulse', async () => {
+  const fixture = worldFixture();
+  const sent = [];
+  const wildlife = [
+    { id: 'nearest-hog', kind: 'HOG', x: 1, z: 0 },
+    { id: 'selected-hog', kind: 'HOG', x: 3, z: 0 },
+  ];
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({
+    self: { survivorId: 'alice', x: 0, z: 0, heading: 0, sequence: 1 },
+    others: [], accepted: true, wildlife,
+  }), (...action) => sent.push(action), () => ({
+    draw: () => ({ project: () => ({ visible: true, x: 0, y: 0 }) }), dispose() {},
+  }));
+  const byId = id => fixture.documentRoot.getElementById(id);
+  const commands = byId('surviveWorldActions');
+  const canvas = byId('surviveWorldCanvas');
+  const press = code => canvas.emit('keydown', { code, preventDefault() {} });
+  try {
+    commands.hidden = true;
+    world.setState({ ...worldState, actions: ['HUNT'] });
+    fixture.frame(0);
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.frame(16);
+    press('Tab');
+    press('Tab');
+    press('Enter');
+    assert.deepEqual(commands.children.map(button => button.textContent), ['Check', 'Engage']);
+    commands.emit('click', { target: { closest: () => commands.children[1] } });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(sent, [['ENGAGE', 'selected-hog']]);
+  } finally { world.dispose(); }
+});
+
 test('selecting an animal opens commands and Escape returns to the island', () => {
   const { documentRoot, renderer } = worldFixture();
   const actions = [];

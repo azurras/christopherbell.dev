@@ -99,6 +99,8 @@ export function mountSurviveController(documentRoot, world, onResume) {
           focused.selectedIndex = choice;
           focused.dispatchEvent(new view.Event('change', { bubbles: true }));
         }
+      } else if (join.hidden && !game.hidden && !currentMenu() && focused === canvas) {
+        key(canvas, step > 0 ? 'Numpad0' : 'NumpadDecimal');
       } else moveMenuFocus(step);
     }
     if (pressed(CONFIRM)) {

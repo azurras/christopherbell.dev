@@ -25,6 +25,35 @@ class SurviveWildlifeTest {
   private static final Instant START = Instant.parse("2026-11-05T14:00:00Z");
 
   @Test
+  void engageUsesTheSelectedCreatureAndNeverSubstitutesAnother() {
+    var clock = new TravelClock();
+    clock.now = SurviveClock.WORLD_EPOCH.plusSeconds(300);
+    var service = new SurviveService(clock, () -> 1, 10, new InMemorySurviveWorldRepository());
+    var joined = service.join(null, "Scout");
+    var view = service.pulseForOwner(joined.token(), null, new SurviveMovement(0, 0, 0, 0));
+    for (int step = 1; step <= 20; step++) {
+      var hog = view.wildlife().stream().filter(animal -> animal.id().equals("meadow-hog")).findFirst().orElseThrow();
+      double dx = hog.x() - view.self().x();
+      double dz = hog.z() - view.self().z();
+      double distance = Math.hypot(dx, dz);
+      if (distance < 3) break;
+      clock.now = clock.now.plusSeconds(1);
+      double fraction = Math.min(1, 5.5 / distance);
+      view = service.pulseForOwner(joined.token(), null,
+          new SurviveMovement(view.self().x() + dx * fraction, view.self().z() + dz * fraction, 0, step));
+    }
+    var current = service.find(joined.token()).orElseThrow();
+    assertThrows(ResponseStatusException.class,
+        () -> service.actForOwner(joined.token(), null, SurviveAction.ENGAGE, current.revision(), "shore-hog"));
+    var engaged = service.actForOwner(joined.token(), null, SurviveAction.ENGAGE, current.revision(), "meadow-hog");
+    assertEquals(Status.COMBAT, engaged.status());
+    assertNotNull(engaged.nextStrikeAt());
+    var encounter = service.pulseForOwner(joined.token(), null,
+        new SurviveMovement(view.self().x(), view.self().z(), 0, 21)).encounter();
+    assertEquals("meadow-hog", encounter.id());
+  }
+
+  @Test
   void nightRaidApproachesCampAndCanBeDefeatedAfterRestart() {
     var clock = new TravelClock();
     var nightfall = SurviveClock.WORLD_EPOCH.plusSeconds(18 * 60);
