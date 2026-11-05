@@ -120,7 +120,8 @@ final class SurviveWorld {
         SurviveClock.phaseAt(now), SurviveClock.dayAt(now), SurviveClock.secondsToNextPhaseAt(now),
         player.hunger, player.stone, player.weapon, player.weaponDurability, player.enemy,
         bedsInUse(), shelters * BEDS_PER_SHELTER, player.guarding,
-        player.nextStrikeAt, player.tacticalPoints, player.defending, player.combatOutcome);
+        player.nextStrikeAt, player.nextStrikeAt == null ? 0 : Math.max(0, Duration.between(now, player.nextStrikeAt).toMillis()),
+        player.tacticalPoints, player.defending, player.combatOutcome);
   }
 
   /** Settles elapsed personal fights even when their owners did not send any requests. */

@@ -12,7 +12,7 @@ public record SurviveSnapshot(
     List<SurviveAction> actions, String message, String survivorId, List<Recipient> recipients, boolean saved,
     Phase phase, long day, long secondsToNextPhase, int hunger, int stone, SurviveWeapon weapon,
     int weaponDurability, SurviveEnemy enemy, int bedsInUse, int beds, boolean guarding,
-    Instant nextStrikeAt, int tacticalPoints, boolean defending, String combatOutcome) {
+    Instant nextStrikeAt, long millisecondsUntilStrike, int tacticalPoints, boolean defending, String combatOutcome) {
 
   /** Public targeting identity only; it never authorizes control of the survivor. */
   public record Recipient(String survivorId, String name) {}

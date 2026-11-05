@@ -82,15 +82,23 @@ export function createWorldFeedback(documentRoot, now = () => Date.now()) {
       show(message || 'The action could not be completed.', 'error');
     },
     acceptState(next, busy = false) {
-      if (previous?.survivorId !== next?.survivorId) reset();
+      const resumed = previous?.survivorId !== next?.survivorId;
+      if (resumed) reset();
       if (!next) { previous = null; return; }
       if (previous?.survivorId === next.survivorId && next.revision < previous.revision) return;
       const change = worldChangesBetween(previous, next);
       if (change) { pending = false; show(change.message, change.kind, change.numbers); }
+      else if (resumed && next.status !== 'COMBAT' && next.combatOutcome) show(next.combatOutcome, 'action');
       else if (pending && !busy) { pending = false; notice.hidden = true; }
       combat.hidden = next.status !== 'COMBAT';
       enemyMarker.hidden = combat.hidden;
       if (!combat.hidden) {
+        const title = documentRoot.getElementById('surviveWorldCombatTitle');
+        const phaseLabel = next.nextStrikeAt ? 'In combat' : 'Animal nearby';
+        if (title.textContent !== phaseLabel) title.textContent = phaseLabel;
+        const tp = documentRoot.getElementById('surviveWorldTacticalPoints');
+        const tpLabel = `TP: ${next.tacticalPoints ?? 0} / 300`;
+        if (tp.textContent !== tpLabel) tp.textContent = tpLabel;
         const name = ENEMIES[next.enemy] || 'Wild animal';
         const label = `${name} · ${next.enemyHealth} health`;
         const enemyName = documentRoot.getElementById('surviveWorldEnemyName');

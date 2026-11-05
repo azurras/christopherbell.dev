@@ -117,3 +117,5 @@ The canvas is focusable with visible focus; keyboard input is scoped to that can
 World feedback styles include high-contrast action notices, projected resource and
 damage numbers, persistent combat health, and action buttons inside the viewport.
 Numbers stop moving when reduced motion is requested; warnings still remain visible.
+The combat overlay also owns the selectable enemy marker, target details, TP, and
+the contextual combat buttons. Text controls remain available when WebGL is inactive.

@@ -42,13 +42,15 @@
             <canvas id="surviveWorldCanvas" tabindex="0" aria-label="Third-person island. WASD or arrows to walk; drag to turn the camera. Q and R rotate, E interacts, Escape stops walking." aria-describedby="surviveWorldHelp"></canvas>
             <div id="surviveWorldLabels" class="survive-world-labels" aria-hidden="true"></div>
             <div id="surviveWorldCombat" class="survive-world-combat" role="status" hidden>
-              <strong>In combat</strong>
+              <strong id="surviveWorldCombatTitle">Animal nearby</strong>
               <span id="surviveWorldEnemyName"></span>
               <meter id="surviveWorldEnemyMeter" min="0" max="5" value="5" aria-label="Enemy health"></meter>
               <span id="surviveWorldPlayerHealth"></span>
+              <span id="surviveWorldTacticalPoints"></span>
+              <span id="surviveWorldTargetDetails"></span>
             </div>
             <p id="surviveWorldNotice" class="survive-world-notice" role="status" aria-live="polite" aria-atomic="true" hidden></p>
-            <span id="surviveWorldEnemyMarker" class="survive-world-enemy-marker" aria-hidden="true" hidden></span>
+            <button type="button" id="surviveWorldEnemyMarker" class="survive-world-enemy-marker" aria-pressed="false" hidden></button>
             <div id="surviveWorldNumbers" class="survive-world-numbers" aria-hidden="true"></div>
             <div id="surviveWorldActions" class="survive-world-actions" role="group" aria-label="Actions at your location"></div>
           </div>
@@ -60,7 +62,7 @@
             <button type="button" data-camera-turn="-1" aria-label="Turn camera left">↶</button>
             <button type="button" data-camera-turn="1" aria-label="Turn camera right">↷</button>
           </div>
-          <p id="surviveWorldHelp" class="survive-muted">Focus the island to walk with WASD or arrows. Drag to look around; Q / R turn, E interacts. Hold the direction buttons on touch screens, or choose a destination to walk there.</p>
+          <p id="surviveWorldHelp" class="survive-muted">Focus the island to walk with WASD or arrows. Drag to look around or turn with Q / R. Press E to interact or select an animal, then Tab to its commands. Tap an animal's label to select it on touch screens.</p>
           <nav class="survive-world-destinations" aria-label="Walk to a landmark">
             <button type="button" data-destination="0">Camp</button><button type="button" data-destination="1">Pine forest</button><button type="button" data-destination="2">Stone ridge</button><button type="button" data-destination="3">Hunting grounds</button><button type="button" data-destination="4">Boat shore</button>
           </nav>
@@ -105,6 +107,9 @@
           </div>
           </div>
           <div id="surviveDirectActions" class="survive-direct-actions" role="group" aria-label="Moves right now">
+            <button type="button" data-action="ENGAGE">Engage <small>Attacks continue while away</small></button>
+            <button type="button" data-action="DISENGAGE">Disengage <small>Stop automatic attacks</small></button>
+            <button type="button" data-action="WEAPON_SKILL">Weapon skill <small>Spend 100 TP</small></button>
             <button type="button" data-action="ATTACK">Attack <small>The animal bites back</small></button>
             <button type="button" data-action="DEFEND">Defend <small>Block the next bite</small></button>
             <button type="button" data-action="FLEE">Flee <small>Return to camp · Take one bite</small></button>

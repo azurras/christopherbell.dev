@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advancePosition, actionsAt, cameraMatrix, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
+import { advancePosition, actionsAt, cameraMatrix, projectPoint, targetActionsFor } from '../../main/resources/static/js/survive-world-model.js';
+
+test('the island offers Check and Engage after selection and weapon skills only when confirmed', () => {
+  const encounter = { status: 'COMBAT', actions: ['ATTACK', 'ENGAGE', 'DEFEND', 'FLEE'] };
+  assert.deepEqual(targetActionsFor(encounter, false), ['SELECT_TARGET', 'FLEE']);
+  assert.deepEqual(targetActionsFor(encounter, true), ['CHECK_TARGET', 'ENGAGE', 'FLEE']);
+  const engaged = { ...encounter, nextStrikeAt: '2026-11-05T14:00:00Z',
+    actions: ['DISENGAGE', 'DEFEND', 'FLEE'] };
+  assert.deepEqual(targetActionsFor(engaged, true), ['DEFEND', 'DISENGAGE', 'FLEE']);
+  assert.deepEqual(targetActionsFor({ ...engaged, actions: [...engaged.actions, 'WEAPON_SKILL'] }, true),
+    ['WEAPON_SKILL', 'DEFEND', 'DISENGAGE', 'FLEE']);
+});
 import { mountSurviveWorld } from '../../main/resources/static/js/survive-world.js';
 
 test('walking is camera relative, normalizes diagonals and stays on the island', () => {

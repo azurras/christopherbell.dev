@@ -11,7 +11,18 @@ export const ACTION_LABELS = {
   BUILD_BOAT: 'Build boat', ESCAPE: 'Sail away', REST: 'Rest', SLEEP: 'Sleep', GUARD: 'Stand guard',
   CRAFT_CLUB: 'Craft club', CRAFT_AXE: 'Craft axe', CRAFT_SPEAR: 'Craft spear', EAT: 'Eat food',
   ATTACK: 'Attack', DEFEND: 'Defend', FLEE: 'Flee to camp', WAKE: 'Wake up',
+  SELECT_TARGET: 'Select target', CHECK_TARGET: 'Check', ENGAGE: 'Engage',
+  DISENGAGE: 'Disengage', WEAPON_SKILL: 'Weapon skill',
 };
+
+/** The island's target menu reveals commands in the order the player can use them. */
+export function targetActionsFor(state, selected) {
+  if (state.nextStrikeAt) {
+    return ['WEAPON_SKILL', 'DEFEND', 'DISENGAGE', 'FLEE'].filter(action => state.actions.includes(action));
+  }
+  if (!selected) return ['SELECT_TARGET', 'FLEE'];
+  return ['CHECK_TARGET', 'ENGAGE', 'FLEE'];
+}
 const PORTABLE_ACTIONS = ['EAT', 'ATTACK', 'DEFEND', 'FLEE', 'WAKE'];
 
 /** Keep an encounter in the follow camera's forward view even when the survivor faces the camera. */
