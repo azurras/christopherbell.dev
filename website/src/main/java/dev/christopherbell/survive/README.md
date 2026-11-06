@@ -199,7 +199,9 @@ the existing Mongo representation; no position schema is added.
 
 `POST /api/survive/v1/movement` accepts `{ "x": 0, "z": 0, "heading": 0, "sequence": 1 }`.
 Cookie/account ownership resolves the survivor; IDs and names cannot select another
-character. It returns `self`, `others`, `accepted`, `wildlife` and `encounter`.
+character. It returns `self`, `others`, `accepted`, `wildlife`, `encounter` and
+`onlineCount`. Other player poses are sent within 64 metres of the acknowledged
+position. The online count includes active players elsewhere on the island.
 Visible players in `others` carry their equipped weapon type, engagement and
 guard state from the settled world. An engaged player faces their known encounter.
 Coordinates are finite, inside

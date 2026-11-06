@@ -275,6 +275,7 @@ Local firelight falls off around the pit, and reduced motion freezes the effect.
 sequenced presence pulses, timeout/backoff, player labels and frame/listener cleanup.
 Nearby survivors render their confirmed main weapon, engagement and guard stance
 from the presence response. Standing combat poses stay visible with reduced motion.
+The connection label uses the island-wide online count, independent of nearby poses.
 `survive.js` still serializes durable survival commands. New presence uses the API
 constants in `lib/api.js`; it never computes survival rewards. The SVG scene remains
 the fallback for unavailable/lost WebGL. Labels use text nodes, never HTML.
