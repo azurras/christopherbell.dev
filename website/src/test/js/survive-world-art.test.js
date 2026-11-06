@@ -5,7 +5,7 @@ import { prepareActorArt } from '../../main/resources/static/js/survive-authored
 import { createDynamicMesh } from '../../main/resources/static/js/survive-dynamic-mesh.js';
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
 import { cameraMatrix, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
-import { actionPose, enemyCountered, enemyCounterPose } from '../../main/resources/static/js/survive-action-pose.js';
+import { actionPose, combatStance, enemyCountered, enemyCounterPose } from '../../main/resources/static/js/survive-action-pose.js';
 import { drawBoat, drawCampFlame, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
 
 test('dynamic frames upload the same vertices while reusing their allocated capacity', () => {
@@ -120,10 +120,13 @@ test('an engaged stance moves the equipped spear from the back to the hand', () 
     mesh.avatar(0, 0, 0, [0.24, 0.31, 0.42], 'COMBAT', 0, 'SPEAR', action);
     return mesh.vertices;
   };
-  const idle = draw(null);
-  const ready = draw({ kind: 'ready', progress: 0.5, weight: 0.75 });
+  assert.equal(combatStance(false, true), null);
+  const idle = draw(combatStance(false));
+  const ready = draw(combatStance(true));
+  const guard = draw(combatStance(true, true));
   assert.equal(ready.length, idle.length);
   assert.notDeepEqual(ready, idle);
+  assert.notDeepEqual(ready, guard);
   assert.ok(ready.every(Number.isFinite));
 });
 
