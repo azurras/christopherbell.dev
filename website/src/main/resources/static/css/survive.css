@@ -64,10 +64,7 @@
 .survive-status-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 12px; }
 .survive-status-head h2 { margin: 0; overflow-wrap: anywhere; }
 .survive-status-head p { margin: 0; font-size: .75rem; }
-.survive-inventory { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 16px 0 12px; }
-.survive-inventory > div { padding: 8px 6px; border: 1px solid #2f3b31; border-radius: 9px; background: #18221c; text-align: center; }
-.survive-inventory dt { color: #9fab98; font-size: .7rem; }
-.survive-inventory dd { margin: 2px 0 0; color: #eef4e8; font-weight: 700; font-variant-numeric: tabular-nums; }
+.survive-item-list { display: block; width: 100%; margin: 6px 0; }
 .survive-card-line { margin: 6px 0; font-size: .85rem; }
 .survive-recent-heading { display: flex; align-items: baseline; justify-content: space-between; margin-top: 16px; }
 .survive-recent-heading h3 { margin: 0; font-size: .9rem; }
@@ -224,7 +221,6 @@
 .survive-main-menu-list summary:hover, .survive-main-menu-list summary:focus-visible,
 .survive-world .survive-world-actions button:hover, .survive-world .survive-world-actions button:focus-visible { background: #485c91; }
 .survive-main-menu summary:focus-visible { outline: 2px solid #f3d392; outline-offset: -2px; }
-.survive-main-menu-list .survive-inventory { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .survive-world-actions { display: grid; max-height: 12rem; overflow: auto; margin-top: .25rem; padding: .2rem; }
 .survive-world .survive-world-actions button { color: #f2f3ff; background: none; border: 0; border-radius: .15rem; min-height: 2.3rem; padding: .3rem .55rem; }
 .survive-world-actions button::before { margin-right: .5rem; }

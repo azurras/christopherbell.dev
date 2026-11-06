@@ -4,7 +4,7 @@ Owns site styling for server-rendered pages and frontend components.
 
 ## What Lives Here
 
-- `survive.css` owns the responsive shared-world adventure, target markers, survivor stats, camp and chat log.
+- `survive.css` owns the responsive shared-world adventure, target markers, survivor stats, camp, Items list and chat log.
 
 - `main.css` is the primary shared stylesheet for the current site, Void feed,
   tools, auth, profile, messages, post cards, and responsive layout.

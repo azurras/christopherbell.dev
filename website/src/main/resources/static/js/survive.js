@@ -3,6 +3,7 @@ import { API } from './lib/api.js';
 import { fetchJson } from './lib/util.js';
 import { appendSurviveLogMessage, syncSurviveLog } from './survive-log.js';
 import { mountSurviveController } from './survive-controller.js';
+import { renderSurviveItems } from './survive-items.js';
 import { keepFocusInActionBar, mountActionMenus, syncActionMenus } from './survive-menus.js';
 import { mountPanelSections, summarizeCamp } from './survive-panel.js';
 import { mountSurviveParty } from './survive-party.js';
@@ -69,14 +70,10 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveHungerText', `${state.hunger} / 10`);
   documentRoot.getElementById('surviveHunger').value = state.hunger;
   documentRoot.getElementById('surviveHungerWarning').hidden = state.hunger > HUNGER_WARNING_LEVEL;
-  setText('surviveWood', state.wood);
-  setText('surviveFood', state.food);
-  setText('surviveStone', state.stone);
   const packedWeapons = state.packedWeapons ?? [];
-  const gearCount = documentRoot.getElementById('survivePackedGearCount');
-  if (gearCount) gearCount.textContent = String(packedWeapons.length);
   const carried = state.wood + state.food + state.stone + packedWeapons.length;
   setText('surviveInventoryCount', `${carried} / ${state.inventoryCapacity}`);
+  renderSurviveItems(documentRoot, state, mutationPending);
   setText('surviveWeapon', state.weapon
     ? `${WEAPON_LABELS[state.weapon] || state.weapon} · ${state.weaponDurability} uses left`
     : 'Bare hands');
@@ -160,13 +157,6 @@ function renderWeaponChoices(documentRoot, weapons, actions, pending) {
       return row;
     });
     choices.replaceChildren(...rows);
-    const packedGear = documentRoot.getElementById('survivePackedGear');
-    packedGear.replaceChildren(...weapons.map(weapon => {
-      const item = documentRoot.createElement('li');
-      item.textContent = `${weapon.name} · ${weapon.durability} uses left`;
-      return item;
-    }));
-    packedGear.hidden = weapons.length === 0;
     choices.dataset.weapons = signature;
     if (focused) choices.parentElement.querySelector('summary').focus({ preventScroll: true });
   }
@@ -200,6 +190,9 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const cancel = documentRoot.getElementById('surviveCancel');
   const giftForm = documentRoot.getElementById('surviveGift');
   const equipment = documentRoot.getElementById('surviveEquipment');
+  const itemList = documentRoot.getElementById('surviveItemList');
+  const itemSort = documentRoot.getElementById('surviveItemSort');
+  const itemUse = documentRoot.getElementById('surviveItemUse');
   const game = documentRoot.getElementById('surviveGame');
   const log = documentRoot.getElementById('surviveGameLog');
   const logToggle = documentRoot.getElementById('surviveLogToggle');
@@ -318,6 +311,19 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     }
   };
   equipment?.addEventListener('click', useEquipment);
+  const updateItems = () => {
+    if (state) renderSurviveItems(documentRoot, state, mutationPending);
+  };
+  const sortItems = () => {
+    itemList.dataset.sort = itemList.dataset.sort === 'name' ? 'type' : 'name';
+    updateItems();
+  };
+  const useItem = () => {
+    if (itemList.value === 'food' && !itemUse.disabled && !mutationPending) performAction('EAT');
+  };
+  itemList?.addEventListener('change', updateItems);
+  itemSort?.addEventListener('click', sortItems);
+  itemUse?.addEventListener('click', useItem);
   const showJoin = () => {
     joinForm.hidden = false;
     cancel.hidden = !state;
@@ -391,6 +397,9 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       panel.dispose();
       party?.dispose();
       equipment?.removeEventListener('click', useEquipment);
+      itemList?.removeEventListener('change', updateItems);
+      itemSort?.removeEventListener('click', sortItems);
+      itemUse?.removeEventListener('click', useItem);
       controller.dispose();
       world.dispose();
       documentRoot.getElementById('surviveCampScene').removeEventListener('click', act);

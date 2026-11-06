@@ -225,7 +225,9 @@ bounded coverage, dashboard-only results and deferred billing/email delivery.
 
 ### Survive island
 
-Items lists packed weapons. Equipment → Main uses the same confirmed action
+Items lists carried resources and packed weapons, supports sorting, and keeps
+the selected item across refreshes. Use Food sends the existing Eat action.
+Equipment → Main uses the same confirmed action
 path as field commands to equip or remove gear. Polls preserve the weapon
 buttons while the pack is unchanged.
 

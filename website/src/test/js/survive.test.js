@@ -32,6 +32,7 @@ function documentFixture() {
       setAttribute(name, value) { this.attributes.set(name, String(value)); },
       getAttribute(name) { return this.attributes.get(name) ?? null; },
       appendChild(child) { child.parent = this; this.children.push(child); return child; },
+      append(child) { this.appendChild(child); },
       closest() {
         for (let candidate = this; candidate; candidate = candidate.parent) {
           if (candidate.dataset.action) {
@@ -237,14 +238,13 @@ test('saved live survivors show durable ownership and only terminal characters c
   assert.equal(documentRoot.getElementById('surviveRestart').disabled, false);
 });
 
-test('shows the shared clock, hunger, stone, weapon and beds from the server snapshot', () => {
+test('shows the shared clock, hunger, weapon and beds from the server snapshot', () => {
   const documentRoot = documentFixture();
   renderSurviveState(documentRoot, snapshot);
   assert.equal(documentRoot.getElementById('surviveClock').dataset.phase, 'DUSK');
   assert.equal(documentRoot.getElementById('surviveCalendar').textContent, '01/03/1000 · 21:55');
   assert.equal(documentRoot.getElementById('surviveHungerText').textContent, '6 / 10');
   assert.equal(documentRoot.getElementById('surviveHungerWarning').hidden, true);
-  assert.equal(documentRoot.getElementById('surviveStone').textContent, '2');
   assert.equal(documentRoot.getElementById('surviveWeapon').textContent, 'Spear · 9 uses left');
   assert.equal(documentRoot.getElementById('surviveBeds').textContent, '1 / 2');
   renderSurviveState(documentRoot, { ...snapshot, hunger: 3, weapon: null, weaponDurability: 0, guarding: true });
@@ -356,11 +356,43 @@ test('the status menu shows equipment and the chat log keeps all available world
   renderSurviveState(documentRoot, { ...snapshot, events });
   const recent = documentRoot.getElementById('surviveRecentEvents').children.map(item => item.textContent);
   assert.deepEqual(recent, events);
-  assert.equal(documentRoot.getElementById('surviveWood').textContent, '4');
-  assert.equal(documentRoot.getElementById('surviveStone').textContent, '2');
   assert.equal(documentRoot.getElementById('surviveInventoryCount').textContent, '7 / 10');
   assert.equal(documentRoot.getElementById('surviveWeapon').textContent, 'Spear · 9 uses left');
   assert.equal(documentRoot.getElementById('surviveCampSummary').textContent, '1 shelter · 0 boats · 2 survivors');
+});
+
+test('Items sorts named stacks, retains selection after a refresh, and uses food once', async () => {
+  const documentRoot = documentFixture();
+  const requests = [];
+  let state = { ...snapshot, packedWeapons: [{ id: 'club-one', name: 'club', damageBonus: 1, durability: 6 }] };
+  const mounted = mountSurvive(documentRoot, async (url, options) => {
+    requests.push({ url, options });
+    if (options.method === 'POST') state = { ...state, food: 0, actions: [], revision: 8 };
+    return state;
+  });
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    const list = documentRoot.getElementById('surviveItemList');
+    const names = () => list.children.map(item => item.textContent);
+    assert.deepEqual(names(), ['Food ×1', 'Wood ×4', 'Stone ×2', 'Club ×1']);
+    list.value = 'food';
+    list.listeners.get('change')();
+    assert.match(documentRoot.getElementById('surviveItemDetail').textContent, /2 HP.*5 fullness/);
+    documentRoot.getElementById('surviveItemSort').listeners.get('click')();
+    assert.deepEqual(names(), ['Club ×1', 'Food ×1', 'Stone ×2', 'Wood ×4']);
+    assert.equal(list.value, 'food');
+    state = { ...state, food: 2 };
+    mounted.refresh();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(list.value, 'food');
+    assert.ok(names().includes('Food ×2'));
+    documentRoot.getElementById('surviveItemUse').listeners.get('click')();
+    await new Promise(resolve => setImmediate(resolve));
+    const mutations = requests.filter(request => request.options.method === 'POST');
+    assert.equal(mutations.length, 1);
+    assert.deepEqual(JSON.parse(mutations[0].options.body), { action: 'EAT', revision: 7 });
+    assert.equal(documentRoot.getElementById('surviveItemUse').disabled, true);
+  } finally { mounted.dispose(); }
 });
 
 test('the world log appends repeated outcomes once per world revision and preserves scrollback', () => {

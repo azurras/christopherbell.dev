@@ -99,14 +99,12 @@
                 </details>
                 <details class="survive-panel survive-section">
                   <summary>Items</summary>
-                  <dl class="survive-inventory" aria-label="Inventory">
-                    <div><dt>Wood</dt><dd id="surviveWood"></dd></div>
-                    <div><dt>Food</dt><dd id="surviveFood"></dd></div>
-                    <div><dt>Stone</dt><dd id="surviveStone"></dd></div>
-                    <div><dt>Spare gear</dt><dd id="survivePackedGearCount">0</dd></div>
-                    <div><dt>Carried</dt><dd id="surviveInventoryCount"></dd></div>
-                  </dl>
-                  <ul id="survivePackedGear" aria-label="Packed weapons" hidden></ul>
+                  <p>Carried <strong id="surviveInventoryCount"></strong></p>
+                  <button id="surviveItemSort" type="button">Sort: Type</button>
+                  <select id="surviveItemList" class="survive-item-list" size="5" aria-label="Carried items"
+                          aria-describedby="surviveItemDetail"></select>
+                  <p id="surviveItemDetail" class="survive-muted"></p>
+                  <button id="surviveItemUse" type="button" hidden>Use Food</button>
                 </details>
                 <details id="surviveEquipment" class="survive-panel survive-section">
                   <summary>Equipment</summary>
