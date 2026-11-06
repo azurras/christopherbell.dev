@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.IntSupplier;
@@ -218,7 +219,36 @@ public class SurviveService {
     var animals = new ArrayList<>(wildlife.roaming(now, world.raiderApproaching(now), world.reservedFieldRoutes()));
     animals.addAll(world.visibleFieldClaims(player, now));
     var encounter = claimedFight == null ? wildlife.encounter(player.survivorId) : SurviveWorld.fieldAnimal(claimedFight, false);
-    return view.withWildlife(player.status, animals, encounter);
+    return view.withScene(player.status, describeVisiblePlayers(view.others()), animals, encounter);
+  }
+
+  /** Resolve appearance from the settled world, even when the visible player has not sent another pulse. */
+  private List<SurvivePresence.Pose> describeVisiblePlayers(List<SurvivePresence.Pose> visiblePlayers) {
+    if (visiblePlayers.isEmpty()) {
+      return visiblePlayers;
+    }
+    var bySurvivorId = world.players.values().stream()
+        .collect(Collectors.toMap(player -> player.survivorId, player -> player));
+    var describedPlayers = new ArrayList<SurvivePresence.Pose>(visiblePlayers.size());
+    for (var pose : visiblePlayers) {
+      var player = bySurvivorId.get(pose.survivorId());
+      if (player == null) {
+        continue;
+      }
+      double heading = pose.heading();
+      boolean engaged = player.nextStrikeAt != null;
+      if (engaged) {
+        var fight = world.fieldFightFor(player);
+        var target = fight == null ? wildlife.encounter(player.survivorId) : SurviveWorld.fieldAnimal(fight, false);
+        if (target != null && (target.x() != pose.x() || target.z() != pose.z())) {
+          heading = Math.atan2(target.x() - pose.x(), target.z() - pose.z());
+        }
+      }
+      var appearance = new SurvivePresence.Appearance(player.weapon, engaged, player.defending);
+      describedPlayers.add(new SurvivePresence.Pose(pose.survivorId(), pose.name(), pose.x(), pose.z(),
+          heading, pose.sequence(), player.status, appearance));
+    }
+    return describedPlayers;
   }
 
   private void releaseFinishedEncounters(Instant now) {

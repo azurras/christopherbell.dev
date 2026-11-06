@@ -8,6 +8,13 @@ const POSES = {
   FLEE: ['run', 0.95], ESCAPE: ['row', 1.55], GIVE: ['give', 0.95],
 };
 
+/** A settled combat stance remains visible between strikes and with reduced motion. */
+export function combatStance(engaged, defending = false) {
+  if (!engaged) return null;
+  return defending ? { kind: 'brace', progress: 0.7, weight: 1 }
+    : { kind: 'ready', progress: 0.5, weight: 0.75 };
+}
+
 /** Convert a confirmed command into a bounded, frame-rate-independent visual pose. */
 export function actionPose(gesture) {
   const definition = POSES[gesture?.action];
