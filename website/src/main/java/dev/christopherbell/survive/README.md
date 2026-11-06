@@ -257,6 +257,14 @@ without duplication, with the finisher receiving first claim and any remainder
 going to the other contributing fighter if there is room. Night raids and text
 combat retain their current rules.
 
+In a party fight, Heavy Strike opens Impact if the enemy and opener survive.
+A different fighter can close it with a club's Crushing Blow at least one
+second and less than five seconds later. If the closing hit leaves the enemy
+alive, Impact adds three damage. Each skill still spends 100 TP. Any weapon
+skill consumes the previous opening, and Heavy Strike can start a new one.
+The server saves the opener and time with the fight. Commands names the
+equipped technique and chat announces the opening and completed chain.
+
 ## Fishing
 
 Fish at the Fishing bank using the Commands window. A cast has a 60% chance

@@ -251,7 +251,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         ...(selected.joinable !== false && inEngageRange(position, selected) ? ['ENGAGE'] : [])]
       : state ? actionsAt(position, state.actions, wildlife) : [];
     const blocked = state?.status === 'COMBAT' ? busy : busy || !connected;
-    const signature = available.join(',');
+    const weaponSkill = available.includes('WEAPON_SKILL') ? state.weaponSkill : '';
+    const signature = [weaponSkill, ...available].join(',');
     if (signature === lastActionSignature) {
       if (blocked !== lastActionsBlocked) {
         for (const button of actionList.children) button.setAttribute('aria-disabled', String(blocked));
@@ -267,7 +268,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     const buttons = available.map(action => {
       const button = documentRoot.createElement('button');
       button.type = 'button';
-      button.textContent = ACTION_LABELS[action] || action;
+      button.textContent = (action === 'WEAPON_SKILL' && weaponSkill) || ACTION_LABELS[action] || action;
       button.dataset.worldAction = action;
       button.setAttribute('aria-disabled', String(blocked));
       return button;

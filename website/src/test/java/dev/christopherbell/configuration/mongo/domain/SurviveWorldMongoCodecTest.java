@@ -77,7 +77,8 @@ class SurviveWorldMongoCodecTest {
     var party = new SurviveParty(UUID.randomUUID().toString(),
         alice.survivorId(), guest.survivorId(), null);
     var fight = new SurviveFieldFight("meadow-hog", UUID.randomUUID().toString(), party.id(), SurviveEnemy.HOG,
-        -34, 24, 0, 5, List.of(alice.survivorId()), null);
+        -34, 24, 0, 5, List.of(alice.survivorId()), null,
+        new SurviveFieldFight.SkillOpening(alice.survivorId(), alice.lastSeen()));
     var saved = new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of("Shared journal"),
         List.of(alice, guest), 43L, 21L, List.of(party), List.of(fight));
     var envelope = codec.encode(saved);

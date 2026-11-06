@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.IntSupplier;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,46 @@ class SurviveWorldTest {
   private static final Instant DAWN = DAY.plus(Duration.ofMinutes(24));
   private final SurviveWorld world = new SurviveWorld();
   private final SurvivePlayer player = new SurvivePlayer("Chris", Instant.EPOCH);
+
+  @Test
+  void differentPartyMemberClosesAStoredOpeningForBonusDamage() {
+    var guard = startSkillchainFight();
+    world.perform(SurviveAction.WEAPON_SKILL, player, DAY, () -> 1);
+    assertEquals(9, guard.enemyHealth);
+    var restored = SurviveWorld.restore(world.saveState(0L));
+    var restoredGuard = restored.players.get(guard.survivorId);
+    restored.perform(SurviveAction.WEAPON_SKILL, restoredGuard, DAY.plusSeconds(1), () -> 1);
+    var state = restored.snapshotFor(restoredGuard, DAY.plusSeconds(1), Instant.MIN);
+    assertEquals(Status.EXPLORING, state.status());
+    assertEquals(0, state.tacticalPoints());
+    assertEquals(1, state.events().stream().filter(line -> line.contains("Impact skillchain")).count());
+  }
+
+  @Test
+  void closingBeforeOrAtTheEndOfTheWindowDealsOnlyNormalDamage() {
+    var guard = startSkillchainFight();
+    world.perform(SurviveAction.WEAPON_SKILL, player, DAY, () -> 1);
+    for (var closeAt : List.of(DAY.plusMillis(999), DAY.plusSeconds(5))) {
+      var restored = SurviveWorld.restore(world.saveState(0L));
+      var restoredGuard = restored.players.get(guard.survivorId);
+      restored.perform(SurviveAction.WEAPON_SKILL, restoredGuard, closeAt, () -> 1);
+      assertEquals(3, restoredGuard.enemyHealth);
+    }
+  }
+
+  private SurvivePlayer startSkillchainFight() {
+    var guard = new SurvivePlayer("Guard", DAY);
+    guard.weapon = SurviveWeapon.CLUB;
+    guard.weaponDurability = guard.weapon.durability();
+    guard.tacticalPoints = 100;
+    player.tacticalPoints = 100;
+    world.players.put(player.survivorId, player);
+    world.players.put(guard.survivorId, guard);
+    var bear = new SurviveWildlife.Animal("ridge-bear", SurviveEnemy.BEAR, 43, -27, 0, 10);
+    world.startPartyFight(player, UUID.randomUUID().toString(), bear, DAY, false);
+    world.joinPartyFight(guard, world.fieldFightAt(bear.id()), DAY);
+    return guard;
+  }
 
   @Test
   void gatheringUsesChanceCapacityAndExponentialProgression() {

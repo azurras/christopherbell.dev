@@ -13,7 +13,7 @@ public record SurviveSnapshot(
     Phase phase, long day, long secondsToNextPhase, int hunger, int stone, SurviveWeapon weapon,
     int weaponDurability, SurviveEnemy enemy, int bedsInUse, int beds, boolean guarding,
     Instant nextStrikeAt, long millisecondsUntilStrike, int tacticalPoints, boolean defending, String combatOutcome,
-    SurviveParty.View party) {
+    SurviveParty.View party, String weaponSkill) {
 
   /** Public targeting identity only; it never authorizes control of the survivor. */
   public record Recipient(String survivorId, String name) {}

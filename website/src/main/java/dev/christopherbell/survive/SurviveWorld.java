@@ -43,6 +43,11 @@ final class SurviveWorld {
   private static final Duration SLEEP_PER_HEALTH = Duration.ofMinutes(2);
   private static final Duration STRIKE_INTERVAL = Duration.ofSeconds(3);
   private static final int SKILL_COST = 100;
+  private static final String HEAVY_STRIKE = "Heavy Strike";
+  private static final String CRUSHING_BLOW = "Crushing Blow";
+  private static final int IMPACT_BONUS = 3;
+  private static final Duration IMPACT_MIN_DELAY = Duration.ofSeconds(1);
+  private static final Duration IMPACT_WINDOW = Duration.ofSeconds(5);
   private static final int MAX_TACTICAL_POINTS = 300;
   private static final int MAX_ELAPSED_ROUNDS = 16;
   private static final int FULLNESS_INTERVAL_MILLISECONDS = 300_000;
@@ -138,7 +143,8 @@ final class SurviveWorld {
         player.hunger, player.stone, player.weapon, player.weaponDurability, player.enemy,
         bedsInUse(), shelters * BEDS_PER_SHELTER, player.guarding,
         player.nextStrikeAt, player.nextStrikeAt == null ? 0 : Math.max(0, Duration.between(now, player.nextStrikeAt).toMillis()),
-        player.tacticalPoints, player.defending, player.combatOutcome, parties.viewFor(player, players.values(), now));
+        player.tacticalPoints, player.defending, player.combatOutcome, parties.viewFor(player, players.values(), now),
+        weaponSkillFor(player.weapon));
   }
 
   /** Settles elapsed fights even when their participants did not send any requests. */
@@ -545,7 +551,7 @@ final class SurviveWorld {
 
   void startPartyFight(SurvivePlayer player, String partyId, SurviveWildlife.Animal animal, Instant now, boolean aggro) {
     var fight = new SurviveFieldFight(animal.id(), UUID.randomUUID().toString(), partyId, animal.kind(),
-        animal.x(), animal.z(), animal.heading(), animal.kind().health(), List.of(player.survivorId), null);
+        animal.x(), animal.z(), animal.heading(), animal.kind().health(), List.of(player.survivorId), null, null);
     fieldFights.put(animal.id(), fight);
     if (aggro) {
       aggro(player, animal.kind(), now);
@@ -621,6 +627,10 @@ final class SurviveWorld {
 
   private String strikeFieldEnemy(SurviveFieldFight fight, SurvivePlayer attacker, int damage, String skill, Instant now) {
     int health = Math.max(0, fight.health() - damage);
+    if (health > 0 && closesImpact(fight.skillOpening(), attacker, skill, now)) {
+      health = Math.max(0, health - IMPACT_BONUS);
+      recordEvent(attacker.name + " closed the Impact skillchain with Crushing Blow for " + IMPACT_BONUS + " bonus damage.");
+    }
     var weapon = attacker.weapon;
     boolean blocked = attacker.defending || !attacker.struckFirst && weapon != null && weapon.keepsFirstBiteAway();
     attacker.defending = false;
@@ -637,8 +647,30 @@ final class SurviveWorld {
       fighter.enemyHealth = health;
     }
     retainLivingFighters(fight.withProgress(health, fight.fighters(), null));
+    if (skill != null) {
+      updateSkillOpening(fight.routeId(), attacker, skill, now);
+    }
     return strike + (blocked ? " You blocked the bite." : " The " + fight.enemy().displayName()
         + " bit you for " + bite + " damage.") + weaponNote;
+  }
+
+  private static boolean closesImpact(SurviveFieldFight.SkillOpening opening, SurvivePlayer attacker, String skill,
+      Instant now) {
+    return CRUSHING_BLOW.equals(skill) && opening != null && !opening.survivorId().equals(attacker.survivorId)
+        && !now.isBefore(opening.openedAt().plus(IMPACT_MIN_DELAY)) && now.isBefore(opening.openedAt().plus(IMPACT_WINDOW));
+  }
+
+  private void updateSkillOpening(String routeId, SurvivePlayer attacker, String skill, Instant now) {
+    var fight = fieldFights.get(routeId);
+    if (fight == null) {
+      return;
+    }
+    SurviveFieldFight.SkillOpening opening = null;
+    if (HEAVY_STRIKE.equals(skill) && fight.fighters().contains(attacker.survivorId)) {
+      opening = new SurviveFieldFight.SkillOpening(attacker.survivorId, now);
+      recordEvent(attacker.name + " opened Impact with Heavy Strike. Follow with Crushing Blow in 1 to 5 seconds.");
+    }
+    fieldFights.put(routeId, fight.withSkillOpening(opening));
   }
 
   private String finishPartyFight(SurviveFieldFight fight, SurvivePlayer attacker, Instant now, String strike) {
@@ -698,14 +730,18 @@ final class SurviveWorld {
   }
 
   private String useWeaponSkill(SurvivePlayer player, Instant now) {
-    String skill = player.weapon == null ? "Heavy Strike" : switch (player.weapon) {
-      case CLUB -> "Crushing Blow";
-      case STONE_AXE -> "Cleave";
-      case SPEAR -> "Piercing Thrust";
-    };
+    String skill = weaponSkillFor(player.weapon);
     player.tacticalPoints -= SKILL_COST;
     player.nextStrikeAt = now.plus(STRIKE_INTERVAL);
     return attack(player, player.attackDamage() + 2, skill, now);
+  }
+
+  private static String weaponSkillFor(SurviveWeapon weapon) {
+    return weapon == null ? HEAVY_STRIKE : switch (weapon) {
+      case CLUB -> CRUSHING_BLOW;
+      case STONE_AXE -> "Cleave";
+      case SPEAR -> "Piercing Thrust";
+    };
   }
 
   private String attack(SurvivePlayer player, int damage, String skill, Instant now) {
