@@ -15,7 +15,7 @@ import dev.christopherbell.survive.model.SurviveSnapshot.Status;
  */
 public record SurviveSavedWorld(@Id String id, @Version Long version, long revision,
     int shelters, int boats, List<String> events, List<Player> players, Long settledBoundaries,
-    Long activeRaidNight, List<SurviveParty> parties) {
+    Long activeRaidNight, List<SurviveParty> parties, List<SurviveFieldFight> fieldFights) {
   public SurviveSavedWorld {
     if (!"shared".equals(id) || version != null && version < 0 || revision < 0
         || shelters < 0 || shelters > 1000 || boats < 0 || boats > 1000) {
@@ -24,6 +24,13 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
     events = List.copyOf(events);
     players = List.copyOf(players);
     parties = parties == null ? List.of() : List.copyOf(parties);
+    fieldFights = fieldFights == null ? List.of() : List.copyOf(fieldFights);
+    var fieldRoutes = new HashSet<String>();
+    var fieldFighters = new HashSet<String>();
+    if (fieldFights.size() > 5 || fieldFights.stream().anyMatch(fight -> !fieldRoutes.add(fight.routeId())
+        || !fight.fighters().stream().allMatch(fieldFighters::add))) {
+      throw new IllegalArgumentException("Saved field encounters overlap or exceed their bounds.");
+    }
     if (events.size() > 30 || players.size() > 1000
         || events.stream().anyMatch(event -> event.length() > 1024)) {
       throw new IllegalArgumentException("Saved world exceeds its bounds.");
@@ -52,7 +59,7 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
 
   /** New worlds have no durable version until their first successful insert. */
   public static SurviveSavedWorld empty() {
-    return new SurviveSavedWorld("shared", null, 0, 0, 0, List.of(), List.of(), null, null, List.of());
+    return new SurviveSavedWorld("shared", null, 0, 0, 0, List.of(), List.of(), null, null, List.of(), List.of());
   }
 
   /**

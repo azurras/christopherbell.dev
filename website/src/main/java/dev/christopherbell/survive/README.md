@@ -47,7 +47,7 @@ after two minutes. Either member can leave. The invitee alone can accept or decl
 and the inviter alone can cancel. Both survivors must be exploring to form the party.
 Membership is saved with the world and the party view is private to its participants.
 Changes appear in the chat log when the client receives them. Replacing or losing a
-survivor ends their membership. Parties do not yet share enemy health or rewards.
+survivor ends their membership. Party members can join the same roaming fight in the 3D world.
 
 Each snapshot includes a public `survivorId` separate from the private owner identity and
 eligible `recipients` with public ID and name. The existing `survivors` names list
@@ -201,7 +201,8 @@ speed, rejects stale sequences and prevents movement outside EXPLORING. Pulses
 normally avoid writes. A newly triggered encounter commits through the durable
 world before claiming the animal. Locations
 are process-local: the first pulse, reconnection after 30 idle seconds and application
-restart spawn at camp. At most 1000 poses are kept, with two-hour expiry; other
+restart spawn at camp, except active party fighters resume at their saved encounter.
+At most 1000 poses are kept, with two-hour expiry; other
 players disappear after 30 seconds without a pulse. This first release assumes one
 application process. Multiple tabs sharing one character reconcile the same sequence.
 
@@ -228,7 +229,7 @@ In 3D, hogs roam passively and wolves and bears start combat within seven and
 ten metres, respectively. The server evaluates only acknowledged poses against
 shared routes. Hunt can reveal the nearest unclaimed animal within five metres.
 The animal stays claimed until the encounter ends and then respawns after 35
-seconds. Routes and claims are process-local. The older text adventure still
+seconds. Solo field routes and claims are process-local. The older text adventure still
 uses its hunt and ambush rolls. Select the target, Check it, or Engage. Engaging starts a server-timed
 exchange every three seconds. Each automatic attack builds 50 TP up to 300.
 Weapon skills spend 100 TP and restart the attack interval. Defend guards the
@@ -241,8 +242,20 @@ Survive world read or action resolves elapsed exchanges from their original
 deadlines and saves the result before checking command revisions. The snapshot
 reports time until the next strike, TP, guard state and the last combat outcome.
 Legacy encounters load without an attack deadline and require Engage to start
-the timer. Encounter health is currently per survivor. Shared enemies and party
-combat are future MMO work.
+the timer.
+
+When a member of an accepted party uses Engage on a roaming animal or is
+attacked by a roaming hostile, the world saves one claim and health pool. The
+other member can Check and Engage that same animal within five metres.
+Outsiders see the claim but cannot join it or Hunt it. The server resolves
+automatic strikes by deadline, with join order breaking ties. The animal
+retaliates against the attacker on a nonlethal strike. Disengage stops only
+that player's timer, and Flee releases their place in the fight. The claim
+resets if no fighters remain. A defeat ends both participants' encounters and
+starts one saved 35-second respawn cooldown. The existing food drop is shared
+without duplication, with the finisher receiving first claim and any remainder
+going to the other contributing fighter if there is room. Night raids and text
+combat retain their current rules.
 
 ## Fishing
 

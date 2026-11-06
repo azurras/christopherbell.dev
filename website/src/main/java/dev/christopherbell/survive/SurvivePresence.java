@@ -18,6 +18,11 @@ final class SurvivePresence {
   private final Map<String, TrackedPose> poses = new HashMap<>();
 
   View pulse(String survivorId, String name, Status status, SurviveMovement movement, Instant now) {
+    return pulse(survivorId, name, status, movement, now, null);
+  }
+
+  View pulse(String survivorId, String name, Status status, SurviveMovement movement, Instant now,
+      SurviveWildlife.Animal savedEncounter) {
     poses.values().removeIf(pose -> !pose.seenAt().isAfter(now.minus(SESSION_TIMEOUT)));
     var previous = poses.get(survivorId);
     if (previous == null && poses.size() >= CAPACITY) {
@@ -28,7 +33,9 @@ final class SurvivePresence {
     boolean accepted = true;
     TrackedPose current;
     if (reconnecting) {
-      current = new TrackedPose(new Pose(survivorId, name, 0, 0, 0, movement.sequence(), status), now, now);
+      double x = savedEncounter == null ? 0 : savedEncounter.x();
+      double z = savedEncounter == null ? 0 : savedEncounter.z();
+      current = new TrackedPose(new Pose(survivorId, name, x, z, 0, movement.sequence(), status), now, now);
     }
     else if (movement.sequence() <= previous.pose().sequence()) {
       current = previous;

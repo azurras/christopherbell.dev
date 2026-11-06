@@ -21,7 +21,7 @@ class InMemorySurviveWorldRepository implements SurviveWorldRepository {
     }
     saved = new SurviveSavedWorld(candidate.id(), saved == null ? 0L : saved.version() + 1,
         candidate.revision(), candidate.shelters(), candidate.boats(), candidate.events(), candidate.players(),
-        candidate.settledBoundaries(), candidate.activeRaidNight(), candidate.parties());
+        candidate.settledBoundaries(), candidate.activeRaidNight(), candidate.parties(), candidate.fieldFights());
     return saved;
   }
 }

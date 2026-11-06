@@ -11,12 +11,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveEnemy;
 import dev.christopherbell.survive.model.SurviveMovement;
+import dev.christopherbell.survive.model.SurviveParty.Command;
+import dev.christopherbell.survive.model.SurviveRequests.Party;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
@@ -53,6 +57,69 @@ class SurviveWildlifeTest {
     var encounter = service.pulseForOwner(joined.token(), null,
         new SurviveMovement(view.self().x(), view.self().z(), 0, 21)).encounter();
     assertEquals("meadow-hog", encounter.id());
+  }
+
+  @Test
+  void partySharesDamageAndOneDefeatAcrossRestart() {
+    var clock = new TravelClock();
+    clock.now = SurviveClock.WORLD_EPOCH.plusSeconds(300);
+    var repository = new InMemorySurviveWorldRepository();
+    var service = new SurviveService(clock, () -> 1, 10, repository);
+    var scout = service.join(null, "Scout");
+    var guard = service.join(null, "Guard");
+    var observer = service.join(null, "Observer");
+    var invite = service.changePartyForOwner(scout.token(), null,
+        new Party(Command.INVITE, UUID.fromString(guard.state().survivorId()))).party();
+    service.changePartyForOwner(guard.token(), null, new Party(Command.ACCEPT, invite.id()));
+    var tokens = List.of(scout.token(), guard.token(), observer.token());
+    var view = service.pulseForOwner(scout.token(), null, new SurviveMovement(0, 0, 0, 0));
+    for (var token : tokens.subList(1, 3)) {
+      service.pulseForOwner(token, null, new SurviveMovement(0, 0, 0, 0));
+    }
+    for (int sequence = 1; sequence <= 20; sequence++) {
+      var hog = view.wildlife().stream().filter(animal -> animal.id().equals("meadow-hog")).findFirst().orElseThrow();
+      double dx = hog.x() - view.self().x();
+      double dz = hog.z() - view.self().z();
+      double distance = Math.hypot(dx, dz);
+      if (distance < 2) {
+        break;
+      }
+      clock.now = clock.now.plusSeconds(1);
+      double fraction = Math.min(1, 5.5 / distance);
+      var movement = new SurviveMovement(view.self().x() + dx * fraction, view.self().z() + dz * fraction, 0, sequence);
+      for (var token : tokens) {
+        view = service.pulseForOwner(token, null, movement);
+      }
+    }
+    service.actForOwner(scout.token(), null, SurviveAction.ENGAGE, scout.state().revision(), "meadow-hog");
+    var outsiderClaim = service.pulseForOwner(observer.token(), null,
+        new SurviveMovement(view.self().x(), view.self().z(), 0, 21)).wildlife().stream()
+        .filter(animal -> animal.id().equals("meadow-hog")).findFirst().orElseThrow();
+    assertTrue(outsiderClaim.claimed());
+    assertFalse(outsiderClaim.joinable());
+    assertThrows(ResponseStatusException.class, () -> service.actForOwner(observer.token(), null,
+        SurviveAction.ENGAGE, observer.state().revision(), "meadow-hog"));
+    service.actForOwner(guard.token(), null, SurviveAction.ENGAGE, guard.state().revision(), "meadow-hog");
+    clock.now = clock.now.plusSeconds(3);
+    assertEquals(1, service.find(scout.token()).orElseThrow().enemyHealth());
+    assertEquals(1, service.find(guard.token()).orElseThrow().enemyHealth());
+
+    var restarted = new SurviveService(clock, () -> 1, 10, repository);
+    var guardBeforeDefeat = restarted.find(guard.token()).orElseThrow();
+    assertEquals(1, guardBeforeDefeat.enemyHealth());
+    var resumed = restarted.pulseForOwner(guard.token(), null, new SurviveMovement(0, 0, 0, 0));
+    assertEquals(outsiderClaim.x(), resumed.self().x());
+    assertEquals("meadow-hog", resumed.encounter().id());
+    clock.now = clock.now.plusSeconds(3);
+    var finished = restarted.find(scout.token()).orElseThrow();
+    assertEquals(Status.EXPLORING, finished.status());
+    assertEquals(Status.EXPLORING, restarted.find(guard.token()).orElseThrow().status());
+    assertEquals(1, finished.events().stream().filter(event -> event.contains("The party defeated the hog")).count());
+    assertEquals(1, restarted.find(scout.token()).orElseThrow().food() + restarted.find(guard.token()).orElseThrow().food());
+    assertEquals(409, assertThrows(ResponseStatusException.class, () -> restarted.act(
+        guard.token(), SurviveAction.ATTACK, guardBeforeDefeat.revision())).getStatusCode().value());
+    var afterDefeat = restarted.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 0));
+    assertFalse(afterDefeat.wildlife().stream().anyMatch(animal -> animal.id().equals("meadow-hog")));
   }
 
   @Test
