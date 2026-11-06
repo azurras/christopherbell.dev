@@ -51,7 +51,7 @@ export function advancePosition(position, right, forward, yaw, seconds) {
 /** Only actions already offered by Java may be presented at the matching landmark. */
 export function actionsAt(position, allowedActions, wildlife = []) {
   return allowedActions.filter(action => action === 'HUNT' ? wildlife.some(animal =>
-    Math.hypot(position.x - animal.x, position.z - animal.z) <= 5) : PORTABLE_ACTIONS.includes(action) || LANDMARKS.some(landmark =>
+    !animal.claimed && Math.hypot(position.x - animal.x, position.z - animal.z) <= 5) : PORTABLE_ACTIONS.includes(action) || LANDMARKS.some(landmark =>
     landmark.actions.includes(action) && Math.hypot(position.x - landmark.x, position.z - landmark.z) <= landmark.radius));
 }
 

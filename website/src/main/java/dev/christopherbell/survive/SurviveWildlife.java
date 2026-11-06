@@ -11,8 +11,8 @@ import java.util.stream.Stream;
 
 /** Shared, process-local routes and encounter reservations. Mutated only under the service lock. */
 final class SurviveWildlife {
-  private static final double HUNT_RANGE_METRES = 5;
-  private static final long RESPAWN_SECONDS = 35;
+  static final double HUNT_RANGE_METRES = 5;
+  static final long RESPAWN_SECONDS = 35;
   private static final List<Route> ROUTES = List.of(
       new Route("meadow-hog", SurviveEnemy.HOG, -34, 24, 6, 0.14, 0, 0),
       new Route("shore-hog", SurviveEnemy.HOG, 17, 46, 7, 0.12, 2, 0),
@@ -27,7 +27,12 @@ final class SurviveWildlife {
   }
 
   List<Animal> roaming(Instant now, Animal raider) {
+    return roaming(now, raider, Set.of());
+  }
+
+  List<Animal> roaming(Instant now, Animal raider, Set<String> reservedRoutes) {
     var roamingAnimals = ROUTES.stream()
+        .filter(route -> !reservedRoutes.contains(route.id()))
         .filter(route -> !now.isBefore(respawnAt.getOrDefault(route.id(), Instant.MIN)))
         .filter(route -> encounters.values().stream().noneMatch(animal -> animal.id().equals(route.id())))
         .map(route -> route.pose(now));
@@ -39,20 +44,30 @@ final class SurviveWildlife {
   }
 
   Animal nearest(SurvivePresence.Pose player, Instant now, boolean hostileOnly, Animal raider) {
+    return nearest(player, now, hostileOnly, raider, Set.of());
+  }
+
+  Animal nearest(SurvivePresence.Pose player, Instant now, boolean hostileOnly, Animal raider,
+      Set<String> reservedRoutes) {
     if (player == null) {
       return null;
     }
-    return roaming(now, raider).stream()
+    return roaming(now, raider, reservedRoutes).stream()
         .filter(animal -> animal.distanceFrom(player) <= (hostileOnly ? animal.aggroMetres() : HUNT_RANGE_METRES))
         .filter(animal -> !hostileOnly || animal.aggroMetres() > 0)
         .min(Comparator.comparingDouble(animal -> animal.distanceFrom(player))).orElse(null);
   }
 
   Animal targetInReach(SurvivePresence.Pose player, Instant now, String targetId, Animal raider) {
+    return targetInReach(player, now, targetId, raider, Set.of());
+  }
+
+  Animal targetInReach(SurvivePresence.Pose player, Instant now, String targetId, Animal raider,
+      Set<String> reservedRoutes) {
     if (player == null) {
       return null;
     }
-    return roaming(now, raider).stream()
+    return roaming(now, raider, reservedRoutes).stream()
         .filter(animal -> animal.id().equals(targetId) && animal.distanceFrom(player) <= HUNT_RANGE_METRES)
         .findFirst().orElse(null);
   }
@@ -78,7 +93,11 @@ final class SurviveWildlife {
   }
 
   /** Public render data. All positions and aggro checks use the same route calculation. */
-  public record Animal(String id, SurviveEnemy kind, double x, double z, double heading, double aggroMetres) {
+  public record Animal(String id, SurviveEnemy kind, double x, double z, double heading, double aggroMetres,
+                       boolean claimed, boolean joinable) {
+    public Animal(String id, SurviveEnemy kind, double x, double z, double heading, double aggroMetres) {
+      this(id, kind, x, z, heading, aggroMetres, false, true);
+    }
     double distanceFrom(SurvivePresence.Pose player) {
       return Math.hypot(x - player.x(), z - player.z());
     }

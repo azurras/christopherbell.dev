@@ -96,7 +96,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   function syncNameLabels() {
     const entries = [...LANDMARKS.map(landmark => ({ ...landmark, id: landmark.name, landmark: true })),
       ...others.map(other => ({ ...other, id: other.survivorId })),
-      ...wildlife.map(animal => ({ ...animal, name: `${animal.kind.toLowerCase()} · ${animal.aggroMetres ? 'hostile' : 'passive'}` }))];
+      ...wildlife.map(animal => ({ ...animal, name: `${animal.kind.toLowerCase()} · ${fieldAnimalStatus(animal)}` }))];
     const oldById = new Map(desiredNameLabels.map(label => [label.id, label]));
     desiredNameLabels = entries.map(entry => {
       const label = oldById.get(entry.id)?.element || documentRoot.createElement('span');
@@ -223,16 +223,17 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     }
     const selected = wildlife.find(animal => animal.id === fieldTargetId);
     if (selected && action === 'CHECK_TARGET') {
-      appendSurviveLogMessage(documentRoot, `${selected.kind.toLowerCase()} · ${FIELD_THREAT[selected.kind] || 'Unknown threat'}.`);
+      const claim = selected.claimed ? ` · ${fieldAnimalStatus(selected)}` : '';
+      appendSurviveLogMessage(documentRoot, `${selected.kind.toLowerCase()} · ${FIELD_THREAT[selected.kind] || 'Unknown threat'}${claim}.`);
       return;
     }
-    if (selected && action === 'ENGAGE' && connected && !busy && inEngageRange(position, selected)) {
+    if (selected && selected.joinable !== false && action === 'ENGAGE' && connected && !busy && inEngageRange(position, selected)) {
       stopWalking();
       await pulsePromise;
       await sendPulse();
       const acknowledged = wildlife.find(animal => animal.id === selected.id);
       if (!disposed && connected && state?.status === 'EXPLORING' && fieldTargetId === selected.id
-          && acknowledged && inEngageRange(confirmed, acknowledged)) onAction(action, selected.id);
+          && acknowledged && acknowledged.joinable !== false && inEngageRange(confirmed, acknowledged)) onAction(action, selected.id);
       return;
     }
     if (!connected || busy || !state || !actionsAt(position, state.actions, wildlife).includes(action)) return;
@@ -246,7 +247,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   function updateActions() {
     const selected = wildlife.find(animal => animal.id === fieldTargetId);
     const available = state?.status === 'COMBAT' ? targetActionsFor(state, targetSelected)
-      : state?.status === 'EXPLORING' && selected ? ['CHECK_TARGET', ...(inEngageRange(position, selected) ? ['ENGAGE'] : [])]
+      : state?.status === 'EXPLORING' && selected ? ['CHECK_TARGET',
+        ...(selected.joinable !== false && inEngageRange(position, selected) ? ['ENGAGE'] : [])]
       : state ? actionsAt(position, state.actions, wildlife) : [];
     const blocked = state?.status === 'COMBAT' ? busy : busy || !connected;
     const signature = available.join(',');
@@ -535,4 +537,9 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     },
     dispose,
   };
+}
+
+function fieldAnimalStatus(animal) {
+  if (animal.claimed) return animal.joinable ? 'party fight' : 'claimed';
+  return animal.aggroMetres ? 'hostile' : 'passive';
 }

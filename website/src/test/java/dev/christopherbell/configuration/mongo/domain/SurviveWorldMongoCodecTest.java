@@ -13,6 +13,7 @@ import static org.mockito.ArgumentMatchers.eq;
 
 import dev.christopherbell.survive.model.SurviveSavedWorld;
 import dev.christopherbell.survive.model.SurviveEnemy;
+import dev.christopherbell.survive.model.SurviveFieldFight;
 import dev.christopherbell.survive.model.SurviveParty;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveWeapon;
@@ -35,8 +36,8 @@ class SurviveWorldMongoCodecTest {
     var kind = DomainDocumentKindRegistry.of(Map.of("survive_world", "application_runtime"))
         .require("survive_world", 1, SurviveSavedWorld.class);
     var codec = new DomainDocumentCodec<>(kind, mongo.getConverter());
-    var initial = new SurviveSavedWorld("shared", 1L, 0, 0, 0, List.of(), List.of(), null, null, List.of());
-    var updated = new SurviveSavedWorld("shared", 2L, 1, 1, 0, List.of(), List.of(), null, null, List.of());
+    var initial = new SurviveSavedWorld("shared", 1L, 0, 0, 0, List.of(), List.of(), null, null, List.of(), List.of());
+    var updated = new SurviveSavedWorld("shared", 2L, 1, 1, 0, List.of(), List.of(), null, null, List.of(), List.of());
     when(mongo.findOne(any(Query.class), eq(Document.class), eq("application_runtime")))
         .thenReturn(codec.encode(initial), codec.encode(updated), null);
     var storedVersion = new AtomicLong(1);
@@ -75,8 +76,10 @@ class SurviveWorldMongoCodecTest {
         0, 1, 0, 0, 0, Status.EXPLORING, 0, "At camp.", 1, 6, null, SurviveWeapon.CLUB, 5, true, null, false, null, null, null, null, null);
     var party = new SurviveParty(UUID.randomUUID().toString(),
         alice.survivorId(), guest.survivorId(), null);
+    var fight = new SurviveFieldFight("meadow-hog", UUID.randomUUID().toString(), party.id(), SurviveEnemy.HOG,
+        -34, 24, 0, 5, List.of(alice.survivorId()), null);
     var saved = new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of("Shared journal"),
-        List.of(alice, guest), 43L, 21L, List.of(party));
+        List.of(alice, guest), 43L, 21L, List.of(party), List.of(fight));
     var envelope = codec.encode(saved);
     assertEquals(party.id(), envelope.get("payload", Document.class)
         .getList("parties", Document.class).getFirst().getString("_id"));
@@ -84,9 +87,9 @@ class SurviveWorldMongoCodecTest {
     assertEquals(saved, codec.decode(envelope));
     assertTrue(DomainCollectionManifest.forKind("survive_world").isEmpty());
     assertThrows(IllegalArgumentException.class, () -> new SurviveSavedWorld("shared", 0L, 0, 0, 0,
-        List.of(), List.of(alice, alice), null, null, List.of()));
+        List.of(), List.of(alice, alice), null, null, List.of(), List.of()));
     assertThrows(IllegalArgumentException.class, () -> new SurviveSavedWorld("shared", 0L, 0, 1001, 0,
-        List.of(), List.of(alice), null, null, List.of()));
+        List.of(), List.of(alice), null, null, List.of(), List.of()));
   }
 
   @Test void worldSavedBeforeTheClockLoadsWithDefaultsForEveryNewField() {
@@ -97,12 +100,14 @@ class SurviveWorldMongoCodecTest {
     var fighter = new SurviveSavedWorld.Player("account-a", null, UUID.randomUUID().toString(),
         "Alice", Instant.parse("2026-10-06T12:00:00Z"), 8, 3, 11, 1, 2, 2, 1, 5,
         Status.COMBAT, 19, "A hog blocks your path.", null, null, null, null, null, null, null, null, null, null, null, null, null);
-    var envelope = codec.encode(new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of(), List.of(fighter), null, null, List.of()));
+    var envelope = codec.encode(new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of(), List.of(fighter), null, null,
+        List.of(), List.of()));
     var newFields = List.of("stone", "hunger", "enemy", "weapon", "weaponDurability", "guarding", "sleptAt", "struckFirst", "nextStrikeAt", "tacticalPoints", "defending", "combatOutcome", "activeFullnessMilliseconds");
     var payload = envelope.get("payload", Document.class);
     payload.remove("settledBoundaries");
     payload.remove("activeRaidNight");
     payload.remove("parties");
+    payload.remove("fieldFights");
     for (var storedPlayer : payload.getList("players", Document.class)) {
       newFields.forEach(storedPlayer::remove);
     }
@@ -111,6 +116,7 @@ class SurviveWorldMongoCodecTest {
 
     assertEquals(null, restored.settledBoundaries());
     assertEquals(List.of(), restored.parties());
+    assertEquals(List.of(), restored.fieldFights());
     var restoredFighter = restored.players().getFirst();
     assertEquals(0, restoredFighter.stone());
     assertEquals(10, restoredFighter.hunger());

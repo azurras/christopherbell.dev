@@ -1,6 +1,8 @@
 package dev.christopherbell.survive;
 
 import dev.christopherbell.survive.model.SurviveAction;
+import dev.christopherbell.survive.model.SurviveEnemy;
+import dev.christopherbell.survive.model.SurviveParty;
 import dev.christopherbell.survive.model.SurviveSnapshot;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveResource;
@@ -13,6 +15,7 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.IntSupplier;
@@ -135,11 +138,19 @@ public class SurviveService {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Walk to the action's landmark first.");
     }
     var pose = presence.activePose(player.survivorId, now);
+    var existingFight = fieldEngage ? world.fieldFightAt(targetId) : null;
+    String partyId = fieldEngage ? world.acceptedPartyId(player, now) : null;
     SurviveWildlife.Animal hunted = null;
-    if (fieldEngage || action == SurviveAction.HUNT && presence.tracks(player.survivorId)) {
+    if (existingFight != null) {
+      if (existingFight.health() == 0 || !existingFight.partyId().equals(partyId)
+          || pose == null || SurviveWorld.fieldAnimal(existingFight, true).distanceFrom(pose) > SurviveWildlife.HUNT_RANGE_METRES) {
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That party fight is unavailable or out of reach.");
+      }
+    } else if (fieldEngage || action == SurviveAction.HUNT && presence.tracks(player.survivorId)) {
       releaseFinishedEncounters(now);
       var raider = world.raiderApproaching(now);
-      hunted = fieldEngage ? wildlife.targetInReach(pose, now, targetId, raider) : wildlife.nearest(pose, now, false, raider);
+      hunted = fieldEngage ? wildlife.targetInReach(pose, now, targetId, raider, world.reservedFieldRoutes())
+          : wildlife.nearest(pose, now, false, raider, world.reservedFieldRoutes());
       if (hunted == null) {
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, fieldEngage
             ? "That target is no longer available within five metres."
@@ -148,14 +159,18 @@ public class SurviveService {
     }
     world.observeActivity(player, now);
     if (player.status != Status.DEAD) {
-      if (fieldEngage) {
+      if (existingFight != null) {
+        world.joinPartyFight(player, existingFight, now);
+      } else if (fieldEngage && partyId != null && hunted.kind() != SurviveEnemy.RAIDER) {
+        world.startPartyFight(player, partyId, hunted, now, false);
+      } else if (fieldEngage) {
         world.engageFieldTarget(player, hunted.kind(), now);
       } else {
         world.perform(action, player, now, rollPercent, pose != null, hunted == null ? null : hunted.kind());
       }
     }
     commitWorld();
-    if (hunted != null && player.status == Status.COMBAT) {
+    if (hunted != null && player.status == Status.COMBAT && world.fieldFightFor(player) == null) {
       wildlife.claim(player.survivorId, hunted);
     }
     if (action == SurviveAction.FLEE && player.status != Status.DEAD) {
@@ -173,23 +188,33 @@ public class SurviveService {
     if (player == null || !player.lastSeen.isAfter(now.minus(IDLE_TIMEOUT))) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Your survivor expired. Rejoin the camp.");
     }
-    var view = presence.pulse(player.survivorId, player.name, player.status, movement, now);
+    var currentFight = world.fieldFightFor(player);
+    var view = presence.pulse(player.survivorId, player.name, player.status, movement, now,
+        currentFight == null ? null : SurviveWorld.fieldAnimal(currentFight, false));
     releaseFinishedEncounters(now);
     if (view.accepted() && player.status == Status.EXPLORING) {
-      var attacker = wildlife.nearest(view.self(), now, true, world.raiderApproaching(now));
+      var attacker = wildlife.nearest(view.self(), now, true, world.raiderApproaching(now), world.reservedFieldRoutes());
       if (attacker != null) {
         world.observeActivity(player, now);
         if (player.status == Status.EXPLORING) {
-          world.aggro(player, attacker.kind(), now);
+          var partyId = world.acceptedPartyId(player, now);
+          if (partyId != null && attacker.kind() != SurviveEnemy.RAIDER) {
+            world.startPartyFight(player, partyId, attacker, now, true);
+          } else {
+            world.aggro(player, attacker.kind(), now);
+          }
         }
         commitWorld();
-        if (player.status == Status.COMBAT) {
+        if (player.status == Status.COMBAT && world.fieldFightFor(player) == null) {
           wildlife.claim(player.survivorId, attacker);
         }
       }
     }
-    return view.withWildlife(player.status, wildlife.roaming(now, world.raiderApproaching(now)),
-        wildlife.encounter(player.survivorId));
+    var claimedFight = world.fieldFightFor(player);
+    var animals = new ArrayList<>(wildlife.roaming(now, world.raiderApproaching(now), world.reservedFieldRoutes()));
+    animals.addAll(world.visibleFieldClaims(player, now));
+    var encounter = claimedFight == null ? wildlife.encounter(player.survivorId) : SurviveWorld.fieldAnimal(claimedFight, false);
+    return view.withWildlife(player.status, animals, encounter);
   }
 
   private void releaseFinishedEncounters(Instant now) {
@@ -263,6 +288,9 @@ public class SurviveService {
     var survivor = world.players.get(ownerKey(token, accountId));
     if (survivor == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Your survivor expired. Join the camp again.");
+    }
+    if (request.command() == SurviveParty.Command.LEAVE && world.fieldFightFor(survivor) != null) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "Flee or finish the fight before leaving the party.");
     }
     world.parties.apply(survivor, request, world.players.values(), clock.instant());
     commitWorld();

@@ -36,6 +36,7 @@ test('fishing and hunting require the bank or a nearby roaming animal', () => {
   assert.deepEqual(actionsAt({ x: 0, z: 0 }, ['FISH']), []);
   const hog = { x: -34, z: 24 };
   assert.deepEqual(actionsAt({ x: -30, z: 24 }, ['HUNT'], [hog]), ['HUNT']);
+  assert.deepEqual(actionsAt({ x: -30, z: 24 }, ['HUNT'], [{ ...hog, claimed: true }]), []);
   assert.deepEqual(actionsAt({ x: -28, z: 24 }, ['HUNT'], [hog]), []);
 });
 

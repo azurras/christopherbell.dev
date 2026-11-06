@@ -2,6 +2,8 @@ package dev.christopherbell.survive;
 
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveEnemy;
+import dev.christopherbell.survive.model.SurviveFieldFight;
+import dev.christopherbell.survive.model.SurviveParty;
 import dev.christopherbell.survive.model.SurviveResource;
 import dev.christopherbell.survive.model.SurviveSavedWorld;
 import dev.christopherbell.survive.model.SurviveSnapshot;
@@ -18,6 +20,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
@@ -46,6 +50,7 @@ final class SurviveWorld {
   private static final Duration RAID_WINDOW = Duration.ofSeconds(60);
   final Map<String, SurvivePlayer> players = new LinkedHashMap<>();
   final SurviveParties parties = new SurviveParties();
+  private final Map<String, SurviveFieldFight> fieldFights = new LinkedHashMap<>();
   private final ArrayDeque<String> events = new ArrayDeque<>();
   private int shelters;
   private int boats;
@@ -71,6 +76,9 @@ final class SurviveWorld {
     world.activeRaidNight = saved.activeRaidNight();
     world.events.addAll(saved.events());
     world.parties.restore(saved.parties());
+    for (var fight : saved.fieldFights()) {
+      world.fieldFights.put(fight.routeId(), fight);
+    }
     for (var stored : saved.players()) {
       var player = new SurvivePlayer(stored.name(), stored.lastSeen(), stored.accountId(), stored.survivorId());
       player.health = stored.health();
@@ -114,7 +122,7 @@ final class SurviveWorld {
           player.activeFullnessMilliseconds);
     }).toList();
     return new SurviveSavedWorld("shared", storageVersion, revision, shelters, boats, List.copyOf(events),
-        storedPlayers, settledBoundaries, activeRaidNight, parties.save());
+        storedPlayers, settledBoundaries, activeRaidNight, parties.save(), List.copyOf(fieldFights.values()));
   }
 
   SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline) {
@@ -133,15 +141,18 @@ final class SurviveWorld {
         player.tacticalPoints, player.defending, player.combatOutcome, parties.viewFor(player, players.values(), now));
   }
 
-  /** Settles elapsed personal fights even when their owners did not send any requests. */
+  /** Settles elapsed fights even when their participants did not send any requests. */
   boolean settleCombatUntil(Instant now) {
-    boolean changed = false;
+    boolean changed = settleFieldCombat(now);
     for (var player : players.values()) {
+      if (fieldFightFor(player) != null) {
+        continue;
+      }
       for (int round = 0; round < MAX_ELAPSED_ROUNDS && player.nextStrikeAt != null
           && !player.nextStrikeAt.isAfter(now); round++) {
         player.nextStrikeAt = player.nextStrikeAt.plus(STRIKE_INTERVAL);
         player.tacticalPoints = Math.min(MAX_TACTICAL_POINTS, player.tacticalPoints + 50);
-        String outcome = attack(player, (player.attackDamage() + 1) / 2, null);
+        String outcome = attack(player, (player.attackDamage() + 1) / 2, null, now);
         recordAction(player, outcome, true);
         changed = true;
       }
@@ -255,7 +266,7 @@ final class SurviveWorld {
       case CRAFT_CLUB -> craft(player, SurviveWeapon.CLUB);
       case CRAFT_AXE -> craft(player, SurviveWeapon.STONE_AXE);
       case CRAFT_SPEAR -> craft(player, SurviveWeapon.SPEAR);
-      case ATTACK -> attack(player, player.attackDamage(), null);
+      case ATTACK -> attack(player, player.attackDamage(), null, now);
       case ENGAGE -> engage(player, now);
       case DISENGAGE -> disengage(player);
       case WEAPON_SKILL -> useWeaponSkill(player, now);
@@ -268,6 +279,9 @@ final class SurviveWorld {
       case WAKE -> wakeEarly(player, now);
       case ESCAPE -> escape(player);
     };
+    if (action == SurviveAction.FLEE) {
+      removeFromFieldFight(player);
+    }
     recordAction(player, outcome, wasFighting);
   }
 
@@ -492,6 +506,170 @@ final class SurviveWorld {
     recordAction(player, engage(player, now), false);
   }
 
+  String acceptedPartyId(SurvivePlayer player, Instant now) {
+    var party = parties.viewFor(player, players.values(), now);
+    return party != null && party.state() == SurviveParty.State.MEMBER ? party.id().toString() : null;
+  }
+
+  Set<String> reservedFieldRoutes() {
+    return fieldFights.keySet();
+  }
+
+  SurviveFieldFight fieldFightAt(String routeId) {
+    return fieldFights.get(routeId);
+  }
+
+  SurviveFieldFight fieldFightFor(SurvivePlayer player) {
+    for (var fight : fieldFights.values()) {
+      if (fight.fighters().contains(player.survivorId)) {
+        return fight;
+      }
+    }
+    return null;
+  }
+
+  static SurviveWildlife.Animal fieldAnimal(SurviveFieldFight fight, boolean joinable) {
+    return new SurviveWildlife.Animal(fight.routeId(), fight.enemy(), fight.x(), fight.z(), fight.heading(),
+        0, true, joinable);
+  }
+
+  List<SurviveWildlife.Animal> visibleFieldClaims(SurvivePlayer player, Instant now) {
+    if (fieldFights.isEmpty()) {
+      return List.of();
+    }
+    var partyId = acceptedPartyId(player, now);
+    return fieldFights.values().stream().filter(fight -> fight.health() > 0)
+        .filter(fight -> !fight.fighters().contains(player.survivorId))
+        .map(fight -> fieldAnimal(fight, fight.partyId().equals(partyId))).toList();
+  }
+
+  void startPartyFight(SurvivePlayer player, String partyId, SurviveWildlife.Animal animal, Instant now, boolean aggro) {
+    var fight = new SurviveFieldFight(animal.id(), UUID.randomUUID().toString(), partyId, animal.kind(),
+        animal.x(), animal.z(), animal.heading(), animal.kind().health(), List.of(player.survivorId), null);
+    fieldFights.put(animal.id(), fight);
+    if (aggro) {
+      aggro(player, animal.kind(), now);
+    } else {
+      engageFieldTarget(player, animal.kind(), now);
+    }
+  }
+
+  void joinPartyFight(SurvivePlayer player, SurviveFieldFight fight, Instant now) {
+    var fighters = new ArrayList<>(fight.fighters());
+    fighters.add(player.survivorId);
+    fieldFights.put(fight.routeId(), fight.withProgress(fight.health(), fighters, null));
+    player.startFighting(fight.enemy());
+    player.enemyHealth = fight.health();
+    engage(player, now);
+    recordAction(player, "You join the party's fight against the " + fight.enemy().displayName() + ".", false);
+  }
+
+  private List<SurvivePlayer> livingFighters(SurviveFieldFight fight) {
+    return players.values().stream().filter(player -> fight.fighters().contains(player.survivorId)
+        && player.status == Status.COMBAT).toList();
+  }
+
+  private boolean settleFieldCombat(Instant now) {
+    boolean changed = false;
+    for (var savedFight : List.copyOf(fieldFights.values())) {
+      if (savedFight.respawnAt() != null) {
+        if (!now.isBefore(savedFight.respawnAt())) {
+          fieldFights.remove(savedFight.routeId());
+          changed = true;
+        }
+        continue;
+      }
+      changed |= retainLivingFighters(savedFight);
+      for (int round = 0; round < 2 * MAX_ELAPSED_ROUNDS; round++) {
+        var fight = fieldFights.get(savedFight.routeId());
+        if (fight == null || fight.health() == 0) {
+          break;
+        }
+        var attacker = livingFighters(fight).stream()
+            .filter(player -> player.nextStrikeAt != null && !player.nextStrikeAt.isAfter(now))
+            .min(Comparator.comparing((SurvivePlayer player) -> player.nextStrikeAt)
+                .thenComparingInt(player -> fight.fighters().indexOf(player.survivorId))).orElse(null);
+        if (attacker == null) {
+          break;
+        }
+        var strikeAt = attacker.nextStrikeAt;
+        attacker.nextStrikeAt = strikeAt.plus(STRIKE_INTERVAL);
+        attacker.tacticalPoints = Math.min(MAX_TACTICAL_POINTS, attacker.tacticalPoints + 50);
+        recordAction(attacker, strikeFieldEnemy(fight, attacker, (attacker.attackDamage() + 1) / 2, null, strikeAt), true);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  private void removeFromFieldFight(SurvivePlayer player) {
+    var fight = fieldFightFor(player);
+    if (fight != null) {
+      retainLivingFighters(fight);
+    }
+  }
+
+  private boolean retainLivingFighters(SurviveFieldFight fight) {
+    var living = livingFighters(fight).stream().map(player -> player.survivorId).toList();
+    if (living.isEmpty()) {
+      fieldFights.remove(fight.routeId());
+    } else if (living.size() != fight.fighters().size() || fieldFights.get(fight.routeId()).health() != fight.health()) {
+      fieldFights.put(fight.routeId(), fight.withProgress(fight.health(), living, null));
+    }
+    return living.size() != fight.fighters().size();
+  }
+
+  private String strikeFieldEnemy(SurviveFieldFight fight, SurvivePlayer attacker, int damage, String skill, Instant now) {
+    int health = Math.max(0, fight.health() - damage);
+    var weapon = attacker.weapon;
+    boolean blocked = attacker.defending || !attacker.struckFirst && weapon != null && weapon.keepsFirstBiteAway();
+    attacker.defending = false;
+    attacker.struckFirst = true;
+    String weaponNote = attacker.wearWeaponAndReportBreak() ? " Your " + weapon.displayName() + " broke." : "";
+    String strike = (skill == null ? "You dealt " : skill + " dealt ") + damage + " damage.";
+    if (health == 0) {
+      return finishPartyFight(fight, attacker, now, strike + weaponNote);
+    }
+
+    int bite = blocked ? 0 : fight.enemy().bite();
+    attacker.takeDamage(bite);
+    for (var fighter : livingFighters(fight)) {
+      fighter.enemyHealth = health;
+    }
+    retainLivingFighters(fight.withProgress(health, fight.fighters(), null));
+    return strike + (blocked ? " You blocked the bite." : " The " + fight.enemy().displayName()
+        + " bit you for " + bite + " damage.") + weaponNote;
+  }
+
+  private String finishPartyFight(SurviveFieldFight fight, SurvivePlayer attacker, Instant now, String strike) {
+    fieldFights.put(fight.routeId(), fight.withProgress(0, List.of(), now.plusSeconds(SurviveWildlife.RESPAWN_SECONDS)));
+    recordEvent("The party defeated the " + fight.enemy().displayName() + ".");
+    int totalFood = fight.enemy().foodReward();
+    int attackerFood = awardFieldFood(attacker, totalFood);
+    totalFood -= attackerFood;
+    for (var fighter : livingFighters(fight)) {
+      if (fighter == attacker) {
+        continue;
+      }
+      int food = fighter.struckFirst ? awardFieldFood(fighter, totalFood) : 0;
+      totalFood -= food;
+      fighter.stopFighting();
+      recordAction(fighter, "Your party won the fight." + foodNotice(food), true);
+    }
+    attacker.stopFighting();
+    return strike + " Your party won the fight." + foodNotice(attackerFood);
+  }
+
+  private static int awardFieldFood(SurvivePlayer player, int availableFood) {
+    int food = Math.min(availableFood, INVENTORY_CAPACITY - player.inventoryCount());
+    player.food += food;
+    return food;
+  }
+
+  private static String foodNotice(int food) {
+    return food == 0 ? "" : " You gained " + food + " food.";
+  }
+
   private static SurviveEnemy nightAnimalFor(int rollPercent) {
     if (rollPercent <= 50) {
       return SurviveEnemy.HOG;
@@ -527,10 +705,14 @@ final class SurviveWorld {
     };
     player.tacticalPoints -= SKILL_COST;
     player.nextStrikeAt = now.plus(STRIKE_INTERVAL);
-    return attack(player, player.attackDamage() + 2, skill);
+    return attack(player, player.attackDamage() + 2, skill, now);
   }
 
-  private String attack(SurvivePlayer player, int damage, String skill) {
+  private String attack(SurvivePlayer player, int damage, String skill, Instant now) {
+    var fieldFight = fieldFightFor(player);
+    if (fieldFight != null) {
+      return strikeFieldEnemy(fieldFight, player, damage, skill, now);
+    }
     var enemy = player.enemy;
     boolean reachSparesBite = !player.struckFirst && player.weapon != null && player.weapon.keepsFirstBiteAway();
     boolean defended = player.defending;
