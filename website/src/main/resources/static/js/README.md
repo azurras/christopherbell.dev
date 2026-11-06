@@ -271,6 +271,8 @@ builds the shelters, boats and resource-site props used by the same renderer.
 `survive-dynamic-mesh.js` reuses typed vertex and GPU buffer capacity across frames.
 `survive-world.js` owns scoped keyboard and controller movement, camera input,
 sequenced presence pulses, timeout/backoff, player labels and frame/listener cleanup.
+Nearby survivors render their confirmed main weapon, engagement and guard stance
+from the presence response. Standing combat poses stay visible with reduced motion.
 `survive.js` still serializes durable survival commands. New presence uses the API
 constants in `lib/api.js`; it never computes survival rewards. The SVG scene remains
 the fallback for unavailable/lost WebGL. Labels use text nodes, never HTML.

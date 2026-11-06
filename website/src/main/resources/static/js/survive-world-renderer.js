@@ -2,7 +2,7 @@
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from './survive-world-art.js';
 import { createIslandMaterials } from './survive-world-materials.js';
 import { drawBoat, drawCampFlame, drawShelter } from './survive-world-props.js';
-import { actionPose } from './survive-action-pose.js';
+import { actionPose, combatStance } from './survive-action-pose.js';
 import { prepareActorArt } from './survive-authored-actors.js';
 import { createDynamicMesh } from './survive-dynamic-mesh.js';
 import { cameraMatrix, projectPoint } from './survive-world-model.js';
@@ -201,9 +201,9 @@ export function createWorldRenderer(canvas) {
         const actors = materials.authoredActorsReady ? authoredActors : fallbackActors;
         drawCampFlame(actors, position.animate ? animationSeconds : 0);
         const stride = avatar => avatar.moving ? Math.sin(animationSeconds * 11) : 0;
-        const pose = actionPose(gesture) || (state.status === 'COMBAT' && state.nextStrikeAt
-          ? { kind: 'ready', progress: 0.5, weight: 0.75 }
-          : state.status === 'SLEEPING' && position.animate
+        const pose = actionPose(gesture)
+          || combatStance(state.status === 'COMBAT' && state.nextStrikeAt, state.defending)
+          || (state.status === 'SLEEPING' && position.animate
             ? { kind: 'sleep', weight: Math.sin(animationSeconds * 2.6) } : null);
         const restingHeading = position.x === 0 && position.z === 0 ? Math.PI : position.heading;
         const heading = pose?.kind === 'fish' ? Math.atan2(position.x, position.z)
@@ -214,7 +214,9 @@ export function createWorldRenderer(canvas) {
         const nearestPlayers = others.map(other => ({ other, distance: Math.hypot(other.x - position.x, other.z - position.z) }))
           .filter(player => player.distance <= 60).sort((a, b) => a.distance - b.distance).slice(0, 24);
         for (const [index, { other, distance }] of nearestPlayers.entries()) {
-          actors.avatar(other.x, other.z, other.heading, [0.34, 0.43, 0.45], other.status, stride(other), null, null,
+          const pose = combatStance(other.appearance?.engaged, other.appearance?.defending);
+          actors.avatar(other.x, other.z, other.heading, [0.34, 0.43, 0.45], other.status,
+            pose ? 0 : stride(other), other.appearance?.weapon, pose,
             index < 6 && distance < 13, animationSeconds);
         }
         const keeper = state.waystationKeeper;

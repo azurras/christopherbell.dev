@@ -200,6 +200,8 @@ the existing Mongo representation; no position schema is added.
 `POST /api/survive/v1/movement` accepts `{ "x": 0, "z": 0, "heading": 0, "sequence": 1 }`.
 Cookie/account ownership resolves the survivor; IDs and names cannot select another
 character. It returns `self`, `others`, `accepted`, `wildlife` and `encounter`.
+Visible players in `others` carry their equipped weapon type, engagement and
+guard state from the settled world. An engaged player faces their known encounter.
 Coordinates are finite, inside
 78 metres, with heading in radians and a nonnegative sequence. The server bounds
 speed, rejects stale sequences and prevents movement outside EXPLORING. Pulses
