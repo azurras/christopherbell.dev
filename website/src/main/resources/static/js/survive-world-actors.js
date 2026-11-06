@@ -114,9 +114,10 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
     }
     const authored = detailed && actorArt?.adventurer;
     if (authored) {
-      const gesture = !resting && action?.kind !== 'run' && authored.poses[action?.kind];
+      const gestureClip = action?.kind === 'ready' ? 'brace' : action?.kind;
+      const gesture = !resting && gestureClip !== 'run' && authored.poses[gestureClip];
       const motion = action?.kind === 'run' ? 'run' : 'walk';
-      const clip = gesture ? action.kind : (stride !== 0 ? motion : 'idle');
+      const clip = gesture ? gestureClip : (stride !== 0 ? motion : 'idle');
       const progress = gesture ? action.progress : seconds * { idle: 0.44, walk: 1.7, run: 2.6 }[clip];
       const hand = drawActorArt(triangle, authored, pose, clip, progress, !gesture, color);
       drawEquipment(hand);
@@ -156,7 +157,7 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
       beam(knee, ankle, 0.129, 0.105, leather, 10, LEATHER);
       part(pose(side * 0.19, 0.54 + Math.max(0, swing) * 0.17, swing * 0.36), 0.17, 0.07, 0.145, [0.51, 0.37, 0.25]);
       part(pose(side * 0.20, 0.13 + Math.max(0, swing) * 0.16, swing * 0.58 + 0.10), 0.13, 0.115, 0.25, leather, LEATHER);
-      const reach = resting ? null : actionReach(action, side);
+      const reach = resting ? null : actionReach(action?.kind === 'ready' ? { ...action, kind: 'brace' } : action, side);
       const elbow = pose(side * 0.51, 1.48 + (reach?.lift ?? 0) * 0.48,
         -swing * 0.29 + (reach?.forward ?? 0) * 0.45);
       const wrist = pose(side * 0.55 - (reach?.inward ?? 0) * side, 1.14 + (reach?.lift ?? 0),
@@ -175,6 +176,7 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
 
     function drawEquipment(toolHand) {
       const tool = resting ? null : action?.kind;
+      const readyWeapon = weapon && status === 'COMBAT' && ['ready', 'brace', 'aim'].includes(tool);
       if (['chop', 'mine', 'hammer', 'fish', 'row'].includes(tool) || (tool === 'strike' && weapon)) {
         const length = tool === 'fish' ? 2.1 : tool === 'row' || (tool === 'strike' && weapon === 'SPEAR') ? 1.5 : 0.82;
         const arc = Math.sin(action.progress * Math.PI * (tool === 'fish' ? 2 : 4));
@@ -191,7 +193,12 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
       } else if (tool === 'eat' || tool === 'give') {
         ellipsoid(...toolHand, 0.13, 0.09, 0.13, [0.65, 0.45, 0.23], 6, 3);
       }
-      if (weapon && tool !== 'strike') {
+      if (readyWeapon) {
+        const length = weapon === 'SPEAR' ? 1.48 : 0.72;
+        const tip = [toolHand[0] + sin * length, toolHand[1] + length * 0.46, toolHand[2] + cos * length];
+        beam(toolHand, tip, 0.043, 0.023, [0.49, 0.34, 0.20], 5);
+        drawToolHead(triangle, beam, tip, heading, 'strike', weapon, hardware);
+      } else if (weapon && tool !== 'strike') {
         const length = weapon === 'SPEAR' ? 2.8 : 1.65;
         const haft = pose(0.32, 0.58, -0.36);
         const tip = pose(-0.35, 0.58 + length, -0.37);

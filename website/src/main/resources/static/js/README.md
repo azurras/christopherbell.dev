@@ -233,6 +233,8 @@ The North Gate road has grouped verge plants outside the walking line.
 Enemy counter animation follows a confirmed hit or spent guard in the combat
 snapshot. The player's attack pose stays separate, and reduced motion disables
 the counter lunge.
+Engaged players use a ready stance and carry their weapon in hand between
+confirmed actions. Disengaging restores the idle pose and stowed weapon.
 
 Items lists carried resources and packed weapons, supports sorting, and keeps
 the selected item across refreshes. Use Food sends the existing Eat action.

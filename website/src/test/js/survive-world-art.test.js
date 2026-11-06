@@ -93,6 +93,21 @@ test('enemy motion requires a confirmed bite or guard and winds back before lung
   assert.equal(enemyCounterPose(0.76), null);
 });
 
+test('an engaged stance moves the equipped spear from the back to the hand', () => {
+  const asset = JSON.parse(readFileSync(new URL('../../main/resources/static/images/survive/adventurer.json', import.meta.url), 'utf8'));
+  const actorArt = { adventurer: prepareActorArt(asset, { adventurer: true }) };
+  const draw = action => {
+    const mesh = meshBuilder(actorArt);
+    mesh.avatar(0, 0, 0, [0.24, 0.31, 0.42], 'COMBAT', 0, 'SPEAR', action);
+    return mesh.vertices;
+  };
+  const idle = draw(null);
+  const ready = draw({ kind: 'ready', progress: 0.5, weight: 0.75 });
+  assert.equal(ready.length, idle.length);
+  assert.notDeepEqual(ready, idle);
+  assert.ok(ready.every(Number.isFinite));
+});
+
 test('the rendered island has finite geometry within its static triangle budget', () => {
   const { vertices } = islandMesh();
   const triangleSize = MESH_VERTEX_FLOATS * 3;
