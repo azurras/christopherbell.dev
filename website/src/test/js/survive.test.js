@@ -395,6 +395,27 @@ test('Items sorts named stacks, retains selection after a refresh, and uses food
   } finally { mounted.dispose(); }
 });
 
+test('the game view toggle switches the layout without sending a game command', async () => {
+  const documentRoot = documentFixture();
+  let requests = 0;
+  const mounted = mountSurvive(documentRoot, async () => {
+    requests++;
+    return snapshot;
+  });
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    const shell = documentRoot.getElementById('survivePlayShell');
+    const toggle = documentRoot.getElementById('surviveGameViewToggle');
+    toggle.listeners.get('click')();
+    assert.equal(shell.dataset.windowed, 'true');
+    assert.equal(toggle.textContent, 'Fill browser window');
+    toggle.listeners.get('click')();
+    assert.equal(shell.dataset.windowed, 'false');
+    assert.equal(toggle.textContent, 'Show page view');
+    assert.equal(requests, 1);
+  } finally { mounted.dispose(); }
+});
+
 test('the world log appends repeated outcomes once per world revision and preserves scrollback', () => {
   const documentRoot = documentFixture();
   const list = documentRoot.getElementById('surviveRecentEvents');

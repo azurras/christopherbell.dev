@@ -225,6 +225,9 @@ bounded coverage, dashboard-only results and deferred billing/email delivery.
 
 ### Survive island
 
+The desktop Main Menu switches between the browser-filling game and the site
+page view without resetting the session.
+
 Items lists carried resources and packed weapons, supports sorting, and keeps
 the selected item across refreshes. Use Food sends the existing Eat action.
 Equipment → Main uses the same confirmed action

@@ -169,6 +169,10 @@ when storage allows. World refreshes keep menus in the player's chosen state.
 
 ## Shared 3D island
 
+An active desktop 3D session fills the browser window. Main Menu → Show page
+view restores the surrounding site. The join form and text fallback use page
+view. Phone fullscreen and controller requirements still apply.
+
 The browser renders original adventurer meshes, textured forest and terrain,
 a weathered stone gate and shore details
 with native WebGL and a third-person
