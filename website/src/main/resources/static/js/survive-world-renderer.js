@@ -201,8 +201,10 @@ export function createWorldRenderer(canvas) {
         const actors = materials.authoredActorsReady ? authoredActors : fallbackActors;
         drawCampFlame(actors, position.animate ? animationSeconds : 0);
         const stride = avatar => avatar.moving ? Math.sin(animationSeconds * 11) : 0;
-        const pose = actionPose(gesture) || (state.status === 'SLEEPING' && position.animate
-          ? { kind: 'sleep', weight: Math.sin(animationSeconds * 2.6) } : null);
+        const pose = actionPose(gesture) || (state.status === 'COMBAT' && state.nextStrikeAt
+          ? { kind: 'ready', progress: 0.5, weight: 0.75 }
+          : state.status === 'SLEEPING' && position.animate
+            ? { kind: 'sleep', weight: Math.sin(animationSeconds * 2.6) } : null);
         const restingHeading = position.x === 0 && position.z === 0 ? Math.PI : position.heading;
         const heading = pose?.kind === 'fish' ? Math.atan2(position.x, position.z)
           : state.status === 'COMBAT' ? Math.atan2(enemy.x - position.x, enemy.z - position.z) : restingHeading;
