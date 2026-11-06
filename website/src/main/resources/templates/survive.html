@@ -51,6 +51,7 @@
               <meter id="surviveWorldEnemyMeter" min="0" max="5" value="5" aria-label="Enemy health"></meter>
             </div>
             <button type="button" id="surviveWorldEnemyMarker" class="survive-world-enemy-marker" aria-pressed="false" hidden></button>
+            <span id="surviveFishingCue" class="survive-world-label is-passive" role="status" hidden></span>
             <div class="survive-command-window">
               <button type="button" id="surviveCommandButton" aria-controls="surviveWorldActions" aria-expanded="false" aria-keyshortcuts="Enter" hidden>Commands</button>
               <div id="surviveWorldActions" class="survive-world-actions" role="group" aria-label="Action commands" hidden></div>
@@ -192,6 +193,7 @@
               <button type="button" role="menuitem" data-action="GATHER_STONE">Gather stone <small>40% chance · +1 stone</small></button>
               <button type="button" role="menuitem" data-action="HUNT">Hunt <small>Hogs by day · Wolves and bears after dark</small></button>
               <button type="button" role="menuitem" data-action="FISH">Fish <small>Cast for food at the fishing bank</small></button>
+              <button type="button" role="menuitem" data-action="CANCEL_FISHING">Pull in line</button>
             </div>
           </div>
           <div class="survive-menu">

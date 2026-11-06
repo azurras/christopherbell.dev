@@ -89,11 +89,16 @@ final class SurvivePresence {
       case GATHER -> near(x, z, -24, -15, 13);
       case GATHER_STONE -> near(x, z, 30, -12, 12);
       case HUNT -> true;
-      case FISH -> near(x, z, -13, 70, 7);
+      case FISH, REEL_IN -> atFishingBank(x, z);
       case BUILD_BOAT, ESCAPE -> near(x, z, 0, 62, 13);
       case BUILD_SHELTER, REST, GUARD, SLEEP, CRAFT_CLUB, CRAFT_AXE, CRAFT_SPEAR -> near(x, z, 0, 0, 15);
-      case EAT, ATTACK, ENGAGE, DISENGAGE, WEAPON_SKILL, DEFEND, FLEE, WAKE, TALK_WAYSTATION, EQUIP_WEAPON, STOW_WEAPON -> true;
+      case EAT, ATTACK, ENGAGE, DISENGAGE, WEAPON_SKILL, DEFEND, FLEE, WAKE, TALK_WAYSTATION, EQUIP_WEAPON, STOW_WEAPON,
+          CANCEL_FISHING -> true;
     };
+  }
+
+  static boolean atFishingBank(double x, double z) {
+    return near(x, z, -13, 70, 7);
   }
 
   void returnToCamp(String survivorId) {

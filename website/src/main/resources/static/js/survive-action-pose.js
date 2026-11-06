@@ -1,5 +1,5 @@
 const POSES = {
-  GATHER: ['chop', 1.35], GATHER_STONE: ['mine', 1.35], FISH: ['fish', 2.35],
+  GATHER: ['chop', 1.35], GATHER_STONE: ['mine', 1.35], FISH: ['fish', 1.2], REEL_IN: ['fish', 0.95],
   BUILD_SHELTER: ['hammer', 1.6], BUILD_BOAT: ['hammer', 1.6],
   CRAFT_CLUB: ['hammer', 1.6], CRAFT_AXE: ['hammer', 1.6], CRAFT_SPEAR: ['hammer', 1.6],
   HUNT: ['aim', 1.05], ENGAGE: ['aim', 0.75], ATTACK: ['strike', 0.7], WEAPON_SKILL: ['strike', 1.1],
@@ -24,7 +24,8 @@ export function actionPose(gesture) {
   const [kind, duration] = definition;
   const progress = gesture.ageSeconds / duration;
   const weight = Math.min(1, progress * 9, (1 - progress) * 6);
-  return { kind, progress, weight };
+  return gesture.action === 'REEL_IN' ? { kind, progress, weight, lineDistance: 13 - progress * 11 }
+    : { kind, progress, weight };
 }
 
 /** A confirmed incoming hit or consumed guard drives the enemy, independently of the player's pose. */

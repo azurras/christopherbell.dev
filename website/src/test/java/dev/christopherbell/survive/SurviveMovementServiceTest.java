@@ -1,7 +1,10 @@
 package dev.christopherbell.survive;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveMovement;
@@ -86,6 +89,48 @@ class SurviveMovementServiceTest {
     assertEquals(400, assertThrows(ResponseStatusException.class,
         () -> service.act(joined.token(), SurviveAction.TALK_WAYSTATION, 0)).getStatusCode().value());
     assertEquals("AVAILABLE", service.find(joined.token()).orElseThrow().waystationAssignment().name());
+  }
+
+  @Test
+  void timedFishingRequiresABiteAndAwardsOnceBeforeAnAbandonedCastExpires() {
+    var start = SurviveClock.WORLD_EPOCH;
+    var clock = mock(Clock.class);
+    when(clock.instant()).thenReturn(start);
+    var game = new SurviveService(clock, () -> 50, 10, repository);
+    var joined = game.join(null, "Angler");
+    game.pulseForOwner(joined.token(), null, new SurviveMovement(0, 0, 0, 0));
+    for (int step = 1; step <= 11; step++) {
+      when(clock.instant()).thenReturn(start.plusSeconds(step));
+      game.pulseForOwner(joined.token(), null, new SurviveMovement(-step, step * 6, 0, step));
+    }
+    var atBank = game.find(joined.token()).orElseThrow();
+    var cast = game.act(joined.token(), SurviveAction.FISH, atBank.revision());
+    assertEquals(0, cast.food());
+    assertEquals(2000, cast.fishing().millisecondsUntilBite());
+    assertEquals(400, assertThrows(ResponseStatusException.class,
+        () -> game.act(joined.token(), SurviveAction.REEL_IN, cast.revision())).getStatusCode().value());
+
+    when(clock.instant()).thenReturn(start.plusSeconds(13));
+    var caught = game.act(joined.token(), SurviveAction.REEL_IN, cast.revision());
+    assertEquals(1, caught.food());
+    assertNull(caught.fishing());
+    assertEquals(409, assertThrows(ResponseStatusException.class,
+        () -> game.act(joined.token(), SurviveAction.REEL_IN, cast.revision())).getStatusCode().value());
+
+    var abandoned = game.act(joined.token(), SurviveAction.FISH, caught.revision());
+    when(clock.instant()).thenReturn(start.plusSeconds(20));
+    var expired = game.find(joined.token()).orElseThrow();
+    assertNull(expired.fishing());
+    assertEquals(1, expired.food());
+    assertEquals(abandoned.revision() + 1, expired.revision());
+    assertEquals(expired.revision(), game.find(joined.token()).orElseThrow().revision());
+
+    var nextCast = game.act(joined.token(), SurviveAction.FISH, expired.revision());
+    game.pulseForOwner(joined.token(), null, new SurviveMovement(-11, 60, 0, 12));
+    var interrupted = game.find(joined.token()).orElseThrow();
+    assertNull(interrupted.fishing());
+    assertEquals(nextCast.revision() + 1, interrupted.revision());
+    assertEquals(1, interrupted.food());
   }
 
   @Test

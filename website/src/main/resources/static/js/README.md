@@ -275,6 +275,8 @@ Local firelight falls off around the pit, and reduced motion freezes the effect.
 sequenced presence pulses, timeout/backoff, player labels and frame/listener cleanup.
 Nearby survivors render their confirmed main weapon, engagement and guard stance
 from the presence response. Standing combat poses stay visible with reduced motion.
+Fishing projects a line and bite cue on the water and offers Reel In during the
+server-timed window. The bobber remains visible when reduced motion is enabled.
 `survive.js` still serializes durable survival commands. New presence uses the API
 constants in `lib/api.js`; it never computes survival rewards. The SVG scene remains
 the fallback for unavailable/lost WebGL. Labels use text nodes, never HTML.

@@ -143,6 +143,10 @@ public class SurviveService {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Walk to the action's landmark first.");
     }
     var pose = presence.activePose(player.survivorId, now);
+    if (action == SurviveAction.REEL_IN && (pose == null || now.isBefore(player.fishing.biteAt())
+        || !now.isBefore(player.fishing.escapesAt()))) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Reel in at the fishing bank while the fish is biting.");
+    }
     var existingFight = fieldEngage ? world.fieldFightAt(targetId) : null;
     String partyId = fieldEngage ? world.acceptedPartyId(player, now) : null;
     SurviveWildlife.Animal hunted = null;
@@ -196,6 +200,7 @@ public class SurviveService {
     var currentFight = world.fieldFightFor(player);
     var view = presence.pulse(player.survivorId, player.name, player.status, movement, now,
         currentFight == null ? null : SurviveWorld.fieldAnimal(currentFight, false));
+    boolean fishingInterrupted = view.accepted() && world.leaveFishingBank(player, view.self());
     releaseFinishedEncounters(now);
     if (view.accepted() && player.status == Status.EXPLORING) {
       var attacker = wildlife.nearest(view.self(), now, true, world.raiderApproaching(now), world.reservedFieldRoutes());
@@ -210,10 +215,14 @@ public class SurviveService {
           }
         }
         commitWorld();
+        fishingInterrupted = false;
         if (player.status == Status.COMBAT && world.fieldFightFor(player) == null) {
           wildlife.claim(player.survivorId, attacker);
         }
       }
+    }
+    if (fishingInterrupted) {
+      commitWorld();
     }
     var claimedFight = world.fieldFightFor(player);
     var animals = new ArrayList<>(wildlife.roaming(now, world.raiderApproaching(now), world.reservedFieldRoutes()));
@@ -357,7 +366,8 @@ public class SurviveService {
     var now = clock.instant();
     boolean worldAdvanced = world.settleUntil(now);
     boolean combatAdvanced = world.settleCombatUntil(now);
-    if (worldAdvanced || combatAdvanced) {
+    boolean fishingAdvanced = world.settleFishingUntil(now);
+    if (worldAdvanced || combatAdvanced || fishingAdvanced) {
       commitWorld();
     }
   }

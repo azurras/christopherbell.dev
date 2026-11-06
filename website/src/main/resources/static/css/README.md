@@ -113,6 +113,7 @@ class contracts, or legacy stylesheet usage changes.
 
 The Survive stylesheet also owns the responsive third-person WebGL viewport, projected
 player and landmark labels, contextual actions, the read-only map, and the game calendar.
+The projected fishing cue uses the passive label treatment and leaves input on the Commands window.
 The canvas is focusable with visible focus; keyboard input is scoped to that canvas.
 The viewport shows the enemy health display, a selectable target marker and the
 contextual combat buttons. Command outcomes appear in the Chat log. Text controls

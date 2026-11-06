@@ -301,8 +301,9 @@ Equip uses the selected pack entry's ID as `targetId`.
 
 ## Fishing
 
-Fish at the Fishing bank using the Commands window. A cast has a 60% chance
-to add one food if there is inventory space. The chat log
-reports the result. The cast, reel, and other action poses are browser visuals
-played after the command is confirmed. The text fallback offers the same fishing
-command without a position.
+Cast at the Fishing bank using Commands. The server saves the bite deadline two
+seconds after the cast and accepts Reel In for the following five seconds from
+an acknowledged position at the bank. A reel has a 60% chance to add one food
+if there is inventory space. Leaving the bank, entering combat, cancelling
+or missing the window ends the cast. Chat reports the result. Older saves
+start with no line out. The text fallback keeps one-command fishing.

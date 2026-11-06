@@ -17,6 +17,7 @@ import dev.christopherbell.survive.model.SurviveFieldFight;
 import dev.christopherbell.survive.model.SurviveParty;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveWeapon;
+import dev.christopherbell.survive.model.SurviveFishing;
 import dev.christopherbell.survive.persistence.MongoSurviveWorldRepository;
 import java.time.Instant;
 import java.util.List;
@@ -70,11 +71,11 @@ class SurviveWorldMongoCodecTest {
     var alice = new SurviveSavedWorld.Player("account-a", null, UUID.randomUUID().toString(),
         "Alice", Instant.parse("2026-10-06T12:00:00Z"), 8, 3, 11, 1, 2, 2, 1, 5,
         Status.COMBAT, 19, "A hog blocks your path.", null, null, null, null, null, null, null, null,
-        Instant.parse("2026-10-06T12:00:03Z"), 150, true, "Previous fight ended.", 123_000, null, null);
+        Instant.parse("2026-10-06T12:00:03Z"), 150, true, "Previous fight ended.", 123_000, null, null, null);
     var guest = new SurviveSavedWorld.Player(null, UUID.randomUUID().toString(),
         UUID.randomUUID().toString(), "Guest", alice.lastSeen(), 10, 2, 10,
         0, 1, 0, 0, 0, Status.EXPLORING, 0, "At camp.", 1, 6, null, SurviveWeapon.CLUB, 5, true, null, false,
-        null, null, null, null, null, null, null);
+        null, null, null, null, null, null, null, SurviveFishing.castAt(alice.lastSeen()));
     var party = new SurviveParty(UUID.randomUUID().toString(),
         alice.survivorId(), guest.survivorId(), null);
     var fight = new SurviveFieldFight("meadow-hog", UUID.randomUUID().toString(), party.id(), SurviveEnemy.HOG,
@@ -101,7 +102,7 @@ class SurviveWorldMongoCodecTest {
     var codec = new DomainDocumentCodec<>(kind, mongo.getConverter());
     var fighter = new SurviveSavedWorld.Player("account-a", null, UUID.randomUUID().toString(),
         "Alice", Instant.parse("2026-10-06T12:00:00Z"), 8, 3, 11, 1, 2, 2, 1, 5,
-        Status.COMBAT, 19, "A hog blocks your path.", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        Status.COMBAT, 19, "A hog blocks your path.", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     var envelope = codec.encode(new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of(), List.of(fighter), null, null,
         List.of(), List.of()));
     var newFields = List.of("stone", "hunger", "enemy", "weapon", "weaponDurability", "guarding", "sleptAt", "struckFirst", "nextStrikeAt", "tacticalPoints", "defending", "combatOutcome", "activeFullnessMilliseconds", "waystationAssignment");
