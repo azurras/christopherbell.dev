@@ -265,6 +265,18 @@ skill consumes the previous opening, and Heavy Strike can start a new one.
 The server saves the opener and time with the fight. Commands names the
 equipped technique and chat announces the opening and completed chain.
 
+## North Gate Patrol
+
+Follow the North Gate road to the Waystation Keeper. Select the keeper or
+open Commands within four metres and choose **Talk to Waystation Keeper**.
+The server checks the survivor's acknowledged position. Talk accepts the
+assignment, repeats the objective or turns it in, depending on progress.
+Each survivor must accept first, land damage and survive a shared roaming
+victory to receive credit. Return to the keeper for two food and one point
+of experience. A full inventory defers the reward until two slots are free.
+The server saves assignment stages with the survivor and awards the reward
+once. Dialogue, credit and rewards appear in chat.
+
 ## Fishing
 
 Fish at the Fishing bank using the Commands window. A cast has a 60% chance

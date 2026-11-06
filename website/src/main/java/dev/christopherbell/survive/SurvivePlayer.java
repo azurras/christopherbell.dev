@@ -3,6 +3,7 @@ package dev.christopherbell.survive;
 import dev.christopherbell.survive.model.SurviveEnemy;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveWeapon;
+import dev.christopherbell.survive.model.SurviveWaystation.Assignment;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -35,6 +36,7 @@ final class SurvivePlayer {
   int tacticalPoints;
   boolean defending;
   String combatOutcome;
+  Assignment waystationAssignment = Assignment.AVAILABLE;
   SurviveWeapon weapon;
   int weaponDurability;
   /** Standing watch at camp for the coming nightfall raid. */
@@ -69,7 +71,7 @@ final class SurvivePlayer {
     return 1 + strength + (weapon == null ? 0 : weapon.damageBonus());
   }
 
-  void gainGatheringExperience() {
+  void gainExperience() {
     // Bound exponential thresholds and attack strength without changing early progression.
     if (strength >= 20) {
       return;

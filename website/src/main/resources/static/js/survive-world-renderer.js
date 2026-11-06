@@ -215,6 +215,14 @@ export function createWorldRenderer(canvas) {
           actors.avatar(other.x, other.z, other.heading, [0.34, 0.43, 0.45], other.status, stride(other), null, null,
             index < 6 && distance < 13, animationSeconds);
         }
+        const keeper = state.waystationKeeper;
+        if (keeper) {
+          const distance = Math.hypot(keeper.x - position.x, keeper.z - position.z);
+          if (distance <= 32) {
+            actors.avatar(keeper.x, keeper.z, 0, [0.32, 0.43, 0.25], 'EXPLORING', 0,
+              null, null, distance < 16, animationSeconds);
+          }
+        }
         for (let index = 0; index < Math.min(8, state.shelters); index++) {
           const x = (index % 4) * 5 - 8;
           const z = Math.floor(index / 4) * 6 - 8;

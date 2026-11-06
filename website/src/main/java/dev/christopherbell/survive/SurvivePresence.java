@@ -3,6 +3,7 @@ package dev.christopherbell.survive;
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveMovement;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
+import dev.christopherbell.survive.model.SurviveWaystation;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
@@ -70,6 +71,11 @@ final class SurvivePresence {
 
   /** Older text clients retain their rules; spatial sessions execute at their last verified landmark. */
   boolean permits(String survivorId, SurviveAction action, Instant now) {
+    if (action == SurviveAction.TALK_WAYSTATION) {
+      var pose = activePose(survivorId, now);
+      var keeper = SurviveWaystation.KEEPER;
+      return pose != null && near(pose.x(), pose.z(), keeper.x(), keeper.z(), keeper.talkRange());
+    }
     var tracked = poses.get(survivorId);
     if (tracked == null) {
       return true;
@@ -85,7 +91,7 @@ final class SurvivePresence {
       case FISH -> near(x, z, -13, 70, 7);
       case BUILD_BOAT, ESCAPE -> near(x, z, 0, 62, 13);
       case BUILD_SHELTER, REST, GUARD, SLEEP, CRAFT_CLUB, CRAFT_AXE, CRAFT_SPEAR -> near(x, z, 0, 0, 15);
-      case EAT, ATTACK, ENGAGE, DISENGAGE, WEAPON_SKILL, DEFEND, FLEE, WAKE -> true;
+      case EAT, ATTACK, ENGAGE, DISENGAGE, WEAPON_SKILL, DEFEND, FLEE, WAKE, TALK_WAYSTATION -> true;
     };
   }
 

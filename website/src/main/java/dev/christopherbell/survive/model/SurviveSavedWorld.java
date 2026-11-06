@@ -74,7 +74,7 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       long revision, String message, Integer stone, Integer hunger, SurviveEnemy enemy,
       SurviveWeapon weapon, Integer weaponDurability, Boolean guarding, Instant sleptAt, Boolean struckFirst,
       Instant nextStrikeAt, Integer tacticalPoints, Boolean defending, String combatOutcome,
-      Integer activeFullnessMilliseconds) {
+      Integer activeFullnessMilliseconds, SurviveWaystation.Assignment waystationAssignment) {
     public Player {
       stone = stone == null ? 0 : stone;
       hunger = hunger == null ? 10 : hunger;
@@ -85,6 +85,7 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       tacticalPoints = tacticalPoints == null ? 0 : tacticalPoints;
       defending = defending != null && defending;
       activeFullnessMilliseconds = activeFullnessMilliseconds == null ? 0 : activeFullnessMilliseconds;
+      waystationAssignment = waystationAssignment == null ? SurviveWaystation.Assignment.AVAILABLE : waystationAssignment;
       UUID.fromString(survivorId);
       if (accountId == null) {
         UUID.fromString(token);

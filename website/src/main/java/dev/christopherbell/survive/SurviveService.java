@@ -130,8 +130,9 @@ public class SurviveService {
     }
     var now = clock.instant();
     boolean fieldEngage = targetId != null && action == SurviveAction.ENGAGE && player.status == Status.EXPLORING;
+    boolean talkAtWaystation = action == SurviveAction.TALK_WAYSTATION && player.status == Status.EXPLORING;
     if (action == null || targetId != null && !fieldEngage
-        || !fieldEngage && !world.actionsFor(player, now).contains(action)) {
+        || !fieldEngage && !talkAtWaystation && !world.actionsFor(player, now).contains(action)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That action is unavailable in the current state.");
     }
     if (!presence.permits(player.survivorId, action, now)) {

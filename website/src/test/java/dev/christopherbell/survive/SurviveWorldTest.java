@@ -29,6 +29,36 @@ class SurviveWorldTest {
   private final SurvivePlayer player = new SurvivePlayer("Chris", Instant.EPOCH);
 
   @Test
+  void waystationCreditsAContributingPartyAndRewardsEachSurvivorOnce() {
+    var guard = startSkillchainFight();
+    for (var survivor : List.of(player, guard)) {
+      survivor.stopFighting();
+      world.perform(SurviveAction.TALK_WAYSTATION, survivor, DAY, () -> 1);
+      assertTrue(survivor.message.contains("Assignment accepted"));
+    }
+    var bear = new SurviveWildlife.Animal("ridge-bear", SurviveEnemy.BEAR, 43, -27, 0, 10);
+    world.startPartyFight(player, UUID.randomUUID().toString(), bear, DAY, false);
+    world.perform(SurviveAction.WEAPON_SKILL, player, DAY, () -> 1);
+    world.joinPartyFight(guard, world.fieldFightAt("ridge-bear"), DAY);
+    world.perform(SurviveAction.WEAPON_SKILL, guard, DAY.plusSeconds(1), () -> 1);
+    var restored = SurviveWorld.restore(world.saveState(0L));
+    var scout = restored.players.get(player.survivorId);
+    var restoredGuard = restored.players.get(guard.survivorId);
+    for (var survivor : List.of(scout, restoredGuard)) {
+      int food = survivor.food;
+      survivor.wood = 9 - food;
+      restored.perform(SurviveAction.TALK_WAYSTATION, survivor, DAY, () -> 1);
+      assertTrue(survivor.message.contains("Free two inventory slots"));
+      assertEquals(food, survivor.food);
+      survivor.wood = 0;
+      restored.perform(SurviveAction.TALK_WAYSTATION, survivor, DAY, () -> 1);
+      assertEquals(food + 2, survivor.food);
+      restored.perform(SurviveAction.TALK_WAYSTATION, survivor, DAY, () -> 1);
+      assertEquals(food + 2, survivor.food);
+    }
+  }
+
+  @Test
   void differentPartyMemberClosesAStoredOpeningForBonusDamage() {
     var guard = startSkillchainFight();
     world.perform(SurviveAction.WEAPON_SKILL, player, DAY, () -> 1);

@@ -264,7 +264,8 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   };
   function performAction(action, targetId) {
     const fieldEngage = action === 'ENGAGE' && targetId && state?.status === 'EXPLORING';
-    if (!state || pending || !fieldEngage && !state.actions.includes(action)) return;
+    const fieldTalk = action === 'TALK_WAYSTATION' && state?.status === 'EXPLORING';
+    if (!state || pending || !fieldEngage && !fieldTalk && !state.actions.includes(action)) return;
     void sendRequest(API.survive.actions, {
       method: 'POST', body: JSON.stringify({ action, revision: state.revision, targetId }),
     }, action);
