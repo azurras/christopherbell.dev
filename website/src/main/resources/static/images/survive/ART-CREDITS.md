@@ -17,3 +17,6 @@ in 32767ths and animation poses in millimetres.
 Blender evaluates the source armatures offline. The browser refines the
 adventurer's head and leg proportions once on load, then interpolates the
 resulting vertex and hand positions. The keeper adds Survive's mantle and cap.
+The adventurer's model-space lighting is baked on load across neighboring
+surfaces, with distinct shading at sharp edges. Animation reuses those corner
+colors and the existing geometry and texture atlas.
