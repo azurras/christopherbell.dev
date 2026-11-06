@@ -13,6 +13,7 @@ import static org.mockito.ArgumentMatchers.eq;
 
 import dev.christopherbell.survive.model.SurviveSavedWorld;
 import dev.christopherbell.survive.model.SurviveEnemy;
+import dev.christopherbell.survive.model.SurviveParty;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveWeapon;
 import dev.christopherbell.survive.persistence.MongoSurviveWorldRepository;
@@ -72,7 +73,7 @@ class SurviveWorldMongoCodecTest {
     var guest = new SurviveSavedWorld.Player(null, UUID.randomUUID().toString(),
         UUID.randomUUID().toString(), "Guest", alice.lastSeen(), 10, 2, 10,
         0, 1, 0, 0, 0, Status.EXPLORING, 0, "At camp.", 1, 6, null, SurviveWeapon.CLUB, 5, true, null, false, null, null, null, null, null);
-    var party = new dev.christopherbell.survive.model.SurviveParty(UUID.randomUUID().toString(),
+    var party = new SurviveParty(UUID.randomUUID().toString(),
         alice.survivorId(), guest.survivorId(), null);
     var saved = new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of("Shared journal"),
         List.of(alice, guest), 43L, 21L, List.of(party));
