@@ -5,7 +5,7 @@ import { prepareActorArt } from '../../main/resources/static/js/survive-authored
 import { createDynamicMesh } from '../../main/resources/static/js/survive-dynamic-mesh.js';
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
 import { cameraMatrix, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
-import { actionPose } from '../../main/resources/static/js/survive-action-pose.js';
+import { actionPose, enemyCountered, enemyCounterPose } from '../../main/resources/static/js/survive-action-pose.js';
 import { drawBoat, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
 
 test('dynamic frames upload the same vertices while reusing their allocated capacity', () => {
@@ -79,6 +79,18 @@ test('the adventurer reshaping keeps clip topology and hand attachments', () => 
   assert.ok(feet >= 0);
   assert.equal(refined.poses.idle[0][feet], 0);
   assert.ok(refined.hands.strike[0][1] > baseline.hands.strike[0][1]);
+});
+
+test('enemy motion requires a confirmed bite or guard and winds back before lunging', () => {
+  const previous = { status: 'COMBAT', survivorId: 'scout', enemy: 'WOLF', revision: 4, health: 8, enemyHealth: 6 };
+  const afterStrike = { ...previous, revision: 5, enemyHealth: 4 };
+  assert.equal(enemyCountered(previous, afterStrike), false);
+  assert.equal(enemyCountered(previous, { ...afterStrike, health: 6 }), true);
+  assert.equal(enemyCountered({ ...previous, defending: true }, { ...afterStrike, defending: false }), true);
+  assert.equal(enemyCountered(previous, { ...afterStrike, survivorId: 'other', health: 6 }), false);
+  assert.ok(enemyCounterPose(0.11).forward < 0);
+  assert.ok(enemyCounterPose(0.43).forward > 0);
+  assert.equal(enemyCounterPose(0.76), null);
 });
 
 test('the rendered island has finite geometry within its static triangle budget', () => {

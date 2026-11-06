@@ -19,3 +19,20 @@ export function actionPose(gesture) {
   const weight = Math.min(1, progress * 9, (1 - progress) * 6);
   return { kind, progress, weight };
 }
+
+/** A confirmed incoming hit or consumed guard drives the enemy, independently of the player's pose. */
+export function enemyCountered(previous, current) {
+  return previous?.status === 'COMBAT' && current?.status === 'COMBAT'
+    && previous.survivorId === current.survivorId && previous.enemy === current.enemy
+    && current.revision > previous.revision && current.enemyHealth < previous.enemyHealth
+    && (current.health < previous.health || previous.defending && !current.defending);
+}
+
+/** Wind back, spring forward and return to the encounter position. */
+export function enemyCounterPose(ageSeconds) {
+  if (!Number.isFinite(ageSeconds) || ageSeconds < 0 || ageSeconds >= 0.76) return null;
+  const progress = ageSeconds / 0.76;
+  const forward = progress < 0.30 ? -0.19 * Math.sin(progress / 0.30 * Math.PI)
+    : 0.61 * Math.sin((progress - 0.30) / 0.70 * Math.PI);
+  return { kind: 'strike', progress, weight: Math.max(0, forward / 0.61), forward };
+}

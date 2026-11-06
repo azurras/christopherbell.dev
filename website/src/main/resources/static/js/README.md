@@ -230,6 +230,9 @@ page view without resetting the session.
 The North Gate waystation uses roof courses and a cloth pennant to mark the
 staffed building. The keeper wears a mantle and cap distinct from the player.
 The North Gate road has grouped verge plants outside the walking line.
+Enemy counter animation follows a confirmed hit or spent guard in the combat
+snapshot. The player's attack pose stays separate, and reduced motion disables
+the counter lunge.
 
 Items lists carried resources and packed weapons, supports sorting, and keeps
 the selected item across refreshes. Use Food sends the existing Eat action.

@@ -179,7 +179,7 @@ export function createWorldRenderer(canvas) {
       gl.drawArrays(gl.TRIANGLES, 0, count);
     }
     return {
-      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture, cameraZoom) {
+      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture, cameraZoom, counter) {
         const pixelBudgetRatio = Math.sqrt(2200000 / Math.max(1, canvas.clientWidth * canvas.clientHeight));
         const pixelRatio = Math.min(2, pixelBudgetRatio, globalThis.devicePixelRatio || 1);
         const width = Math.max(1, Math.round(canvas.clientWidth * pixelRatio));
@@ -247,11 +247,14 @@ export function createWorldRenderer(canvas) {
           const ringColor = state.nextStrikeAt ? [0.67, 0.23, 0.15] : [0.64, 0.48, 0.21];
           drawTargetRing(actors, enemy, radius, ringColor);
           const facing = Math.atan2(position.x - enemy.x, position.z - enemy.z);
+          const enemyX = enemy.x + Math.sin(facing) * (counter?.forward ?? 0);
+          const enemyZ = enemy.z + Math.cos(facing) * (counter?.forward ?? 0);
           if (state.enemy === 'RAIDER') {
-            actors.avatar(enemy.x, enemy.z, facing, RAIDER_CLOTH, 'COMBAT', stride(enemy), 'CLUB',
-              pose?.kind === 'strike' ? pose : null, true, animationSeconds, RAIDER_ARMOR_TINT);
+            actors.avatar(enemyX, enemyZ, facing, RAIDER_CLOTH, 'COMBAT', stride(enemy), 'CLUB',
+              counter, true, animationSeconds, RAIDER_ARMOR_TINT);
           } else {
-            actors.animal(enemy.x, enemy.z, state.enemy, scale, facing, stride(enemy), pose?.kind === 'strike' ? pose.weight : 0,
+            actors.animal(enemyX, enemyZ, state.enemy, scale, facing, stride(enemy),
+              !counter && pose?.kind === 'strike' ? pose.weight : 0,
               true, animationSeconds);
           }
         }
