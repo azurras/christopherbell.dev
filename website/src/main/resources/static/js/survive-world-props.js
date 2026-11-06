@@ -96,21 +96,10 @@ export function addResourceProps(mesh, groundHeight) {
   }
 }
 
-/** Draw short layered flame tongues above the static fire pit. */
-export function drawCampFlame(mesh, seconds) {
-  for (let tongue = 0; tongue < 7; tongue++) {
-    const angle = tongue * 2.39996;
-    const length = 0.51 + tongue % 3 * 0.18 + 0.18 * Math.sin(seconds * 9 + tongue * 1.8);
-    const x = 4 + Math.cos(angle) * 0.23;
-    const z = Math.sin(angle) * 0.23;
-    const dx = Math.cos(angle) * 0.19;
-    const dz = Math.sin(angle) * 0.19;
-    const tip = [x + 0.10 + Math.sin(seconds * 6 + tongue) * 0.16, 0.34 + length, z + 0.075];
-    const center = [x - dx * 0.12, 0.35 + length * 0.40, z - dz * 0.12];
-    const a = [x - dx, 0.32, z - dz];
-    const b = [x + dx, 0.32, z + dz];
-    mesh.triangle(a, b, center, [[0.70, 0.24, 0.06], [0.91, 0.37, 0.07], [1, 0.76, 0.23]], 10.5);
-    mesh.triangle(a, center, tip, [[0.67, 0.15, 0.03], [1, 0.73, 0.18], [0.86, 0.37, 0.07]], 10.5);
-    mesh.triangle(b, tip, center, [[0.81, 0.23, 0.04], [0.84, 0.39, 0.06], [1, 0.77, 0.18]], 10.5);
-  }
+/** Face the camera with a two-triangle surface for the flame and embers. */
+export function drawCampFlame(mesh, yaw) {
+  const dx = Math.cos(yaw) * 0.87;
+  const dz = -Math.sin(yaw) * 0.87;
+  panel(mesh, [4 - dx, 0.27, -dz], [4 + dx, 0.27, dz],
+    [4 + dx, 2.40, dz], [4 - dx, 2.40, -dz], [1, 1, 1], 10.5);
 }

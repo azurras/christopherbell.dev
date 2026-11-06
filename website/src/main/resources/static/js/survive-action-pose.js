@@ -44,10 +44,12 @@ export function enemyCountered(previous, current) {
 }
 
 /** Wind back, spring forward and return to the encounter position. */
-export function enemyCounterPose(ageSeconds) {
+export function enemyCounterPose(ageSeconds, landed = false) {
   if (!Number.isFinite(ageSeconds) || ageSeconds < 0 || ageSeconds >= 0.76) return null;
   const progress = ageSeconds / 0.76;
   const forward = progress < 0.30 ? -0.19 * Math.sin(progress / 0.30 * Math.PI)
     : 0.61 * Math.sin((progress - 0.30) / 0.70 * Math.PI);
-  return { kind: 'strike', progress, weight: Math.max(0, forward / 0.61), forward };
+  const impact = Math.max(0, (progress - 0.38) / 0.62);
+  const recoil = landed ? Math.sin(impact ** 0.55 * Math.PI) : 0;
+  return { kind: 'strike', progress, weight: Math.max(0, forward / 0.61), forward, recoil };
 }

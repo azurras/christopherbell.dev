@@ -268,6 +268,8 @@ once on load and preserves hard edges between steeply angled faces.
 the fallback models. `survive-world-props.js`
 builds the shelters, boats and resource-site props used by the same renderer.
 `survive-world-renderer.js` owns WebGL buffers, lighting, fog and disposal.
+The starting campfire uses one camera-facing quad for soft flames and embers.
+Local firelight falls off around the pit, and reduced motion freezes the effect.
 `survive-dynamic-mesh.js` reuses typed vertex and GPU buffer capacity across frames.
 `survive-world.js` owns scoped keyboard and controller movement, camera input,
 sequenced presence pulses, timeout/backoff, player labels and frame/listener cleanup.
@@ -283,6 +285,8 @@ the fallback for unavailable/lost WebGL. Labels use text nodes, never HTML.
 The Chat log is the only surface for command results. Roaming animals interpolate
 between server poses and approach the player visually on engagement.
 `survive-action-pose.js` maps confirmed commands to timed body and tool poses.
+Landed enemy counters add upper-body recoil to the local adventurer without
+moving their feet. Blocked counters and reduced motion leave the body steady.
 Walking and action poses respect reduced motion.
 
 The world target menu shows Check and the server-allowed combat commands for the

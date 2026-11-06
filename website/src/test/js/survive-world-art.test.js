@@ -6,7 +6,7 @@ import { createDynamicMesh } from '../../main/resources/static/js/survive-dynami
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
 import { cameraMatrix, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
 import { acceptRemoteStrike, actionPose, combatStance, enemyCountered, enemyCounterPose } from '../../main/resources/static/js/survive-action-pose.js';
-import { drawBoat, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
+import { drawBoat, drawCampFlame, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
 
 test('dynamic frames upload the same vertices while reusing their allocated capacity', () => {
   const allocations = [];
@@ -109,6 +109,9 @@ test('enemy motion requires a confirmed bite or guard and winds back before lung
   assert.equal(enemyCountered(previous, { ...afterStrike, survivorId: 'other', health: 6 }), false);
   assert.ok(enemyCounterPose(0.11).forward < 0);
   assert.ok(enemyCounterPose(0.43).forward > 0);
+  assert.equal(enemyCounterPose(0.43).recoil, 0);
+  assert.equal(enemyCounterPose(0.11, true).recoil, 0);
+  assert.ok(enemyCounterPose(0.43, true).recoil > 0.8);
   assert.equal(enemyCounterPose(0.76), null);
 });
 
@@ -120,6 +123,25 @@ test('a remote strike is played once despite repeated or out-of-order presence r
   assert.equal(acceptRemoteStrike(observed, { revision: 12 }, 11), observed);
   assert.equal(acceptRemoteStrike(observed, null, 11.5), observed);
   assert.equal(acceptRemoteStrike(observed, { ...strike, revision: 15 }, 12).receivedAtSeconds, 12);
+});
+
+test('a landed bite moves the authored torso without sliding the feet', () => {
+  const raw = JSON.parse(readFileSync(new URL('../../main/resources/static/images/survive/adventurer.json', import.meta.url), 'utf8'));
+  const actorArt = { adventurer: prepareActorArt(raw, { adventurer: true }) };
+  const draw = recoil => {
+    const mesh = meshBuilder(actorArt);
+    mesh.avatar(0, 0, 0, [0.24, 0.31, 0.42], 'COMBAT', 0, 'CLUB',
+      { kind: 'ready', progress: 0.5, weight: 0.75, recoil });
+    return mesh.vertices;
+  };
+  const ready = draw(0);
+  const hit = draw(1);
+  let torsoRetreat = false;
+  for (let index = 0; index < ready.length; index += MESH_VERTEX_FLOATS) {
+    if (ready[index + 1] < 0.5) assert.deepEqual(hit.slice(index, index + 3), ready.slice(index, index + 3));
+    if (ready[index + 1] > 1.9 && hit[index + 2] < ready[index + 2] - 0.2) torsoRetreat = true;
+  }
+  assert.ok(torsoRetreat);
 });
 
 test('an engaged stance moves the equipped spear from the back to the hand', () => {
@@ -201,6 +223,21 @@ test('constructed shelters and boats emit finite, textured geometry', () => {
   for (const { vertices } of [shelter, boat]) {
     assert.ok(vertices.length > MESH_VERTEX_FLOATS * 100);
     assert.ok(vertices.every(Number.isFinite));
+  }
+});
+
+test('campfire faces the camera with one textured quad', () => {
+  for (const yaw of [0, Math.PI / 2]) {
+    const fire = meshBuilder();
+    drawCampFlame(fire, yaw);
+    assert.equal(fire.vertices.length, 6 * MESH_VERTEX_FLOATS);
+    for (let offset = 0; offset < fire.vertices.length; offset += MESH_VERTEX_FLOATS) {
+      const [x, y, z, , , , material, u, v] = fire.vertices.slice(offset, offset + MESH_VERTEX_FLOATS);
+      assert.ok(Math.abs(Math.sin(yaw) * (x - 4) + Math.cos(yaw) * z) < 1e-12);
+      assert.equal(y, v === 0 ? 0.27 : 2.40);
+      assert.equal(material, 10.5);
+      assert.ok(u === 0 || u === 1);
+    }
   }
 });
 
