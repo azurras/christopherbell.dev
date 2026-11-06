@@ -6,7 +6,7 @@ import { createDynamicMesh } from '../../main/resources/static/js/survive-dynami
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
 import { cameraMatrix, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
 import { actionPose, enemyCountered, enemyCounterPose } from '../../main/resources/static/js/survive-action-pose.js';
-import { drawBoat, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
+import { drawBoat, drawCampFlame, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
 
 test('dynamic frames upload the same vertices while reusing their allocated capacity', () => {
   const allocations = [];
@@ -188,6 +188,21 @@ test('constructed shelters and boats emit finite, textured geometry', () => {
   for (const { vertices } of [shelter, boat]) {
     assert.ok(vertices.length > MESH_VERTEX_FLOATS * 100);
     assert.ok(vertices.every(Number.isFinite));
+  }
+});
+
+test('campfire faces the camera with one textured quad', () => {
+  for (const yaw of [0, Math.PI / 2]) {
+    const fire = meshBuilder();
+    drawCampFlame(fire, yaw);
+    assert.equal(fire.vertices.length, 6 * MESH_VERTEX_FLOATS);
+    for (let offset = 0; offset < fire.vertices.length; offset += MESH_VERTEX_FLOATS) {
+      const [x, y, z, , , , material, u, v] = fire.vertices.slice(offset, offset + MESH_VERTEX_FLOATS);
+      assert.ok(Math.abs(Math.sin(yaw) * (x - 4) + Math.cos(yaw) * z) < 1e-12);
+      assert.equal(y, v === 0 ? 0.27 : 2.40);
+      assert.equal(material, 10.5);
+      assert.ok(u === 0 || u === 1);
+    }
   }
 });
 
