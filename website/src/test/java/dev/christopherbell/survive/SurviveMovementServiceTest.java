@@ -49,6 +49,17 @@ class SurviveMovementServiceTest {
   }
 
   @Test
+  void waystationTalkRequiresAnAcknowledgedNearbyPose() {
+    var joined = service.join(null, "Scout");
+    assertEquals(400, assertThrows(ResponseStatusException.class,
+        () -> service.act(joined.token(), SurviveAction.TALK_WAYSTATION, 0)).getStatusCode().value());
+    service.pulseForOwner(joined.token(), null, new SurviveMovement(0, 0, 0, 0));
+    assertEquals(400, assertThrows(ResponseStatusException.class,
+        () -> service.act(joined.token(), SurviveAction.TALK_WAYSTATION, 0)).getStatusCode().value());
+    assertEquals("AVAILABLE", service.find(joined.token()).orElseThrow().waystationAssignment().name());
+  }
+
+  @Test
   void authenticatedOwnershipOverridesAnUnrelatedGuestCookie() {
     var guest = service.join(null, "Guest");
     var account = service.joinForOwner(null, "Account", "owner");

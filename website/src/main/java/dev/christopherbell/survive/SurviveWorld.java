@@ -11,6 +11,8 @@ import dev.christopherbell.survive.model.SurviveSnapshot.Phase;
 import dev.christopherbell.survive.model.SurviveSnapshot.Recipient;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveWeapon;
+import dev.christopherbell.survive.model.SurviveWaystation;
+import dev.christopherbell.survive.model.SurviveWaystation.Assignment;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -96,6 +98,7 @@ final class SurviveWorld {
       player.stone = stored.stone();
       player.hunger = stored.hunger();
       player.activeFullnessMilliseconds = stored.activeFullnessMilliseconds();
+      player.waystationAssignment = stored.waystationAssignment();
       player.enemy = stored.enemy();
       player.enemyHealth = stored.enemyHealth();
       player.struckFirst = stored.struckFirst();
@@ -124,7 +127,7 @@ final class SurviveWorld {
           player.status, player.revision, player.message, player.stone, player.hunger, player.enemy,
           player.weapon, player.weaponDurability, player.guarding, player.sleptAt, player.struckFirst,
           player.nextStrikeAt, player.tacticalPoints, player.defending, player.combatOutcome,
-          player.activeFullnessMilliseconds);
+          player.activeFullnessMilliseconds, player.waystationAssignment);
     }).toList();
     return new SurviveSavedWorld("shared", storageVersion, revision, shelters, boats, List.copyOf(events),
         storedPlayers, settledBoundaries, activeRaidNight, parties.save(), List.copyOf(fieldFights.values()));
@@ -144,7 +147,7 @@ final class SurviveWorld {
         bedsInUse(), shelters * BEDS_PER_SHELTER, player.guarding,
         player.nextStrikeAt, player.nextStrikeAt == null ? 0 : Math.max(0, Duration.between(now, player.nextStrikeAt).toMillis()),
         player.tacticalPoints, player.defending, player.combatOutcome, parties.viewFor(player, players.values(), now),
-        weaponSkillFor(player.weapon));
+        weaponSkillFor(player.weapon), SurviveWaystation.KEEPER, player.waystationAssignment);
   }
 
   /** Settles elapsed fights even when their participants did not send any requests. */
@@ -284,6 +287,7 @@ final class SurviveWorld {
       case SLEEP -> sleep(player, now);
       case WAKE -> wakeEarly(player, now);
       case ESCAPE -> escape(player);
+      case TALK_WAYSTATION -> talkAtWaystation(player);
     };
     if (action == SurviveAction.FLEE) {
       removeFromFieldFight(player);
@@ -433,7 +437,7 @@ final class SurviveWorld {
     }
     addSupplies(player, resource, 1);
     int previousStrength = player.strength;
-    player.gainGatheringExperience();
+    player.gainExperience();
     String gathered = switch (resource) {
       case WOOD -> "You gathered one piece of wood.";
       case STONE, FOOD -> "You gathered one stone.";
@@ -685,11 +689,41 @@ final class SurviveWorld {
       }
       int food = fighter.struckFirst ? awardFieldFood(fighter, totalFood) : 0;
       totalFood -= food;
+      String patrolCredit = creditWaystationPatrol(fighter);
       fighter.stopFighting();
-      recordAction(fighter, "Your party won the fight." + foodNotice(food), true);
+      recordAction(fighter, "Your party won the fight." + foodNotice(food) + patrolCredit, true);
     }
+    String patrolCredit = creditWaystationPatrol(attacker);
     attacker.stopFighting();
-    return strike + " Your party won the fight." + foodNotice(attackerFood);
+    return strike + " Your party won the fight." + foodNotice(attackerFood) + patrolCredit;
+  }
+
+  private static String creditWaystationPatrol(SurvivePlayer survivor) {
+    if (!survivor.struckFirst || survivor.waystationAssignment != Assignment.ACTIVE) {
+      return "";
+    }
+    survivor.waystationAssignment = Assignment.RETURN;
+    return " North Gate Patrol cleared. Return to the Waystation Keeper.";
+  }
+
+  private static String talkAtWaystation(SurvivePlayer survivor) {
+    return switch (survivor.waystationAssignment) {
+      case AVAILABLE -> {
+        survivor.waystationAssignment = Assignment.ACTIVE;
+        yield "Assignment accepted: North Gate Patrol. Fight a roaming creature alongside your party, then report back.";
+      }
+      case ACTIVE -> "North Gate Patrol: Land a hit and survive a victory in a shared party fight.";
+      case RETURN -> {
+        if (INVENTORY_CAPACITY - survivor.inventoryCount() < 2) {
+          yield "North Gate Patrol: Free two inventory slots to claim your reward.";
+        }
+        survivor.food += 2;
+        survivor.gainExperience();
+        survivor.waystationAssignment = Assignment.COMPLETE;
+        yield "Assignment complete: North Gate Patrol. You gained 2 food and patrol experience.";
+      }
+      case COMPLETE -> "Waystation Keeper: Thank you for completing North Gate Patrol.";
+    };
   }
 
   private static int awardFieldFood(SurvivePlayer player, int availableFood) {
@@ -883,7 +917,7 @@ final class SurviveWorld {
       guard.message = "You helped repel the raiders and claimed 1 food from their supplies.";
     }
     else {
-      guard.gainGatheringExperience();
+      guard.gainExperience();
       guard.message = "You helped repel the raiders and grew more experienced.";
     }
     guard.revision++;

@@ -94,16 +94,19 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     cameraZoom = Math.max(0.72, Math.min(1.55, cameraZoom + change));
   }
   function syncNameLabels() {
+    const keeper = state?.waystationKeeper;
     const entries = [...LANDMARKS.map(landmark => ({ ...landmark, id: landmark.name, landmark: true })),
+      ...(keeper ? [{ ...keeper, npc: true }] : []),
       ...others.map(other => ({ ...other, id: other.survivorId })),
       ...wildlife.map(animal => ({ ...animal, name: `${animal.kind.toLowerCase()} · ${fieldAnimalStatus(animal)}` }))];
     const oldById = new Map(desiredNameLabels.map(label => [label.id, label]));
     desiredNameLabels = entries.map(entry => {
       const label = oldById.get(entry.id)?.element || documentRoot.createElement('span');
       if (!oldById.has(entry.id)) label.hidden = true;
-      const labelType = entry.landmark ? ' is-landmark' : entry.kind ? (entry.aggroMetres ? ' is-hostile' : ' is-passive') : '';
+      const labelType = entry.landmark ? ' is-landmark'
+        : entry.npc || entry.kind ? (entry.aggroMetres ? ' is-hostile' : ' is-passive') : '';
       label.className = `survive-world-label${labelType}`;
-      if (entry.kind) label.dataset.fieldTarget = entry.id;
+      if (entry.kind || entry.npc) label.dataset.fieldTarget = entry.id;
       label.textContent = entry.name;
       return { ...entry, element: label };
     });
@@ -141,7 +144,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
           drawX: previousWildlife.get(animal.id)?.drawX ?? animal.x,
           drawZ: previousWildlife.get(animal.id)?.drawZ ?? animal.z,
         }));
-        if (!wildlife.some(animal => animal.id === fieldTargetId)) fieldTargetId = null;
+        if (fieldTargetId !== state.waystationKeeper?.id && !wildlife.some(animal => animal.id === fieldTargetId)) fieldTargetId = null;
         if (snapshot.encounter?.id !== encounter?.id) approachStartedAt = null;
         encounter = snapshot.encounter || null;
         if (snapshot.self.status === 'COMBAT' && state?.status === 'EXPLORING') {
@@ -182,7 +185,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
 
   function cycleFieldTarget(direction, wrap) {
     if (state?.status !== 'EXPLORING' || busy || !connected || mainMenu.open || !actionList.hidden) return false;
-    const visible = desiredNameLabels.filter(label => label.kind && !label.element.hidden);
+    const visible = desiredNameLabels.filter(label => (label.kind || label.npc) && !label.element.hidden);
     if (!visible.length) return false;
     const current = visible.findIndex(label => label.id === fieldTargetId);
     const next = current < 0 ? (direction > 0 ? 0 : visible.length - 1) : current + direction;
@@ -221,6 +224,13 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       }
       return;
     }
+    if (action === 'TALK_WAYSTATION' && connected && !busy && state?.status === 'EXPLORING' && canTalkAt(position)) {
+      stopWalking();
+      await pulsePromise;
+      await sendPulse();
+      if (!disposed && connected && state?.status === 'EXPLORING' && canTalkAt(confirmed)) onAction(action);
+      return;
+    }
     const selected = wildlife.find(animal => animal.id === fieldTargetId);
     if (selected && action === 'CHECK_TARGET') {
       const claim = selected.claimed ? ` · ${fieldAnimalStatus(selected)}` : '';
@@ -244,12 +254,18 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (!disposed && connected && actionsAt(confirmed, state.actions, wildlife).includes(action)) onAction(action);
   }
 
+  function canTalkAt(pose) {
+    const keeper = state?.waystationKeeper;
+    return keeper && Math.hypot(pose.x - keeper.x, pose.z - keeper.z) <= keeper.talkRange;
+  }
+
   function updateActions() {
     const selected = wildlife.find(animal => animal.id === fieldTargetId);
     const available = state?.status === 'COMBAT' ? targetActionsFor(state, targetSelected)
       : state?.status === 'EXPLORING' && selected ? ['CHECK_TARGET',
         ...(selected.joinable !== false && inEngageRange(position, selected) ? ['ENGAGE'] : [])]
-      : state ? actionsAt(position, state.actions, wildlife) : [];
+      : state ? [...(state.status === 'EXPLORING' && canTalkAt(position) ? ['TALK_WAYSTATION'] : []),
+        ...actionsAt(position, state.actions, wildlife)] : [];
     const blocked = state?.status === 'COMBAT' ? busy : busy || !connected;
     const weaponSkill = available.includes('WEAPON_SKILL') ? state.weaponSkill : '';
     const signature = [weaponSkill, ...available].join(',');
@@ -268,7 +284,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     const buttons = available.map(action => {
       const button = documentRoot.createElement('button');
       button.type = 'button';
-      button.textContent = (action === 'WEAPON_SKILL' && weaponSkill) || ACTION_LABELS[action] || action;
+      button.textContent = action === 'TALK_WAYSTATION' ? 'Talk to Waystation Keeper'
+        : (action === 'WEAPON_SKILL' && weaponSkill) || ACTION_LABELS[action] || action;
       button.dataset.worldAction = action;
       button.setAttribute('aria-disabled', String(blocked));
       return button;
@@ -442,10 +459,11 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         const animal = wildlife.find(candidate => candidate.id === label.id);
         const x = animal?.drawX ?? label.x;
         const z = animal?.drawZ ?? label.z;
-        const y = groundHeight(x, z) + (label.landmark ? 4 : ['BEAR', 'RAIDER'].includes(animal?.kind) ? 3 : animal ? 2 : 3);
+        const y = groundHeight(x, z) + (label.landmark ? 4 : label.npc ? 2.25
+          : ['BEAR', 'RAIDER'].includes(animal?.kind) ? 3 : animal ? 2 : 3);
         const projected = rendered.project([x, y, z]);
-        label.element.hidden = !projected.visible || (animal && Math.hypot(position.x - x, position.z - z) > 32);
-        if (animal) label.element.dataset.selected = String(animal.id === fieldTargetId);
+        label.element.hidden = !projected.visible || ((animal || label.npc) && Math.hypot(position.x - x, position.z - z) > 32);
+        if (animal || label.npc) label.element.dataset.selected = String(label.id === fieldTargetId);
         label.element.style.left = `${(projected.x + 1) * 50}%`;
         label.element.style.top = `${(1 - projected.y) * 50}%`;
       }

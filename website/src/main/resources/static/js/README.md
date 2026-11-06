@@ -231,6 +231,9 @@ and Hunt considers only free animals. Participants read the shared health from
 their game snapshots.
 Commands uses the weapon skill name returned by the game snapshot. Impact
 opening and closing messages use the existing chat event stream.
+The Waystation Keeper uses the same field targeting controls as creatures.
+The island exposes Talk within the server-supplied range, and assignment
+progress appears in chat.
 
 The Main Menu Party window sends invitation and membership commands through the
 same request path as game actions. Its roster and chat notices come from the
