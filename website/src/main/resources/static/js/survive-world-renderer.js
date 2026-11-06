@@ -237,8 +237,9 @@ export function createWorldRenderer(canvas) {
         const restingHeading = position.x === 0 && position.z === 0 ? Math.PI : position.heading;
         const heading = pose?.kind === 'fish' ? Math.atan2(position.x, position.z)
           : state.status === 'COMBAT' ? Math.atan2(enemy.x - position.x, enemy.z - position.z) : restingHeading;
+        const playerPose = counter?.recoil ? { ...pose, recoil: counter.recoil } : pose;
         actors.avatar(position.x, position.z, heading, [0.24, 0.31, 0.42], state.status,
-          pose?.kind === 'run' ? Math.sin(animationSeconds * 19) : stride(position), state.weapon, pose, true, animationSeconds);
+          pose?.kind === 'run' ? Math.sin(animationSeconds * 19) : stride(position), state.weapon, playerPose, true, animationSeconds);
         // Bound dynamic geometry in a crowded camp while drawing nearby players first.
         const nearestPlayers = others.map(other => ({ other, distance: Math.hypot(other.x - position.x, other.z - position.z) }))
           .filter(player => player.distance <= 60).sort((a, b) => a.distance - b.distance).slice(0, 24);
