@@ -4,6 +4,7 @@ import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveEnemy;
 import dev.christopherbell.survive.model.SurviveFieldFight;
 import dev.christopherbell.survive.model.SurviveParty;
+import dev.christopherbell.survive.model.SurvivePackedWeapon;
 import dev.christopherbell.survive.model.SurviveResource;
 import dev.christopherbell.survive.model.SurviveSavedWorld;
 import dev.christopherbell.survive.model.SurviveSnapshot;
@@ -108,6 +109,7 @@ final class SurviveWorld {
       player.combatOutcome = stored.combatOutcome();
       player.weapon = stored.weapon();
       player.weaponDurability = stored.weaponDurability();
+      player.packedWeapons.addAll(stored.packedWeapons());
       player.guarding = stored.guarding();
       player.sleptAt = stored.sleptAt();
       player.status = stored.status();
@@ -127,7 +129,7 @@ final class SurviveWorld {
           player.status, player.revision, player.message, player.stone, player.hunger, player.enemy,
           player.weapon, player.weaponDurability, player.guarding, player.sleptAt, player.struckFirst,
           player.nextStrikeAt, player.tacticalPoints, player.defending, player.combatOutcome,
-          player.activeFullnessMilliseconds, player.waystationAssignment);
+          player.activeFullnessMilliseconds, player.waystationAssignment, player.packedWeapons);
     }).toList();
     return new SurviveSavedWorld("shared", storageVersion, revision, shelters, boats, List.copyOf(events),
         storedPlayers, settledBoundaries, activeRaidNight, parties.save(), List.copyOf(fieldFights.values()));
@@ -147,7 +149,8 @@ final class SurviveWorld {
         bedsInUse(), shelters * BEDS_PER_SHELTER, player.guarding,
         player.nextStrikeAt, player.nextStrikeAt == null ? 0 : Math.max(0, Duration.between(now, player.nextStrikeAt).toMillis()),
         player.tacticalPoints, player.defending, player.combatOutcome, parties.viewFor(player, players.values(), now),
-        weaponSkillFor(player.weapon), SurviveWaystation.KEEPER, player.waystationAssignment);
+        weaponSkillFor(player.weapon), SurviveWaystation.KEEPER, player.waystationAssignment,
+        player.packedWeapons.stream().map(SurviveSnapshot.WeaponChoice::from).toList());
   }
 
   /** Settles elapsed fights even when their participants did not send any requests. */
@@ -256,11 +259,11 @@ final class SurviveWorld {
   }
 
   void perform(SurviveAction action, SurvivePlayer player, Instant now, IntSupplier rollPercent) {
-    perform(action, player, now, rollPercent, false, null);
+    perform(action, player, now, rollPercent, false, null, null);
   }
 
   void perform(SurviveAction action, SurvivePlayer player, Instant now, IntSupplier rollPercent,
-               boolean onIsland, SurviveEnemy huntedAnimal) {
+      boolean onIsland, SurviveEnemy huntedAnimal, SurvivePackedWeapon selectedWeapon) {
     var phase = SurviveClock.phaseAt(now);
     boolean wasFighting = player.status == Status.COMBAT;
     String outcome = switch (action) {
@@ -288,6 +291,8 @@ final class SurviveWorld {
       case WAKE -> wakeEarly(player, now);
       case ESCAPE -> escape(player);
       case TALK_WAYSTATION -> talkAtWaystation(player);
+      case EQUIP_WEAPON -> equipWeapon(player, selectedWeapon);
+      case STOW_WEAPON -> stowWeapon(player);
     };
     if (action == SurviveAction.FLEE) {
       removeFromFieldFight(player);
@@ -332,6 +337,12 @@ final class SurviveWorld {
 
   private List<SurviveAction> campActionsFor(SurvivePlayer player, Phase phase) {
     var actions = new ArrayList<>(List.of(SurviveAction.GATHER, SurviveAction.GATHER_STONE, SurviveAction.HUNT, SurviveAction.FISH));
+    if (player.weapon != null) {
+      actions.add(SurviveAction.STOW_WEAPON);
+    }
+    if (!player.packedWeapons.isEmpty()) {
+      actions.add(SurviveAction.EQUIP_WEAPON);
+    }
     if (player.wood >= 5 && shelters < MAX_STRUCTURES) {
       actions.add(SurviveAction.BUILD_SHELTER);
     }
@@ -468,11 +479,36 @@ final class SurviveWorld {
   private static String craft(SurvivePlayer player, SurviveWeapon weapon) {
     player.wood -= weapon.woodCost();
     player.stone -= weapon.stoneCost();
-    String replaced = player.weapon == null ? "" : " It replaces your " + player.weapon.displayName() + ".";
-    player.weapon = weapon;
-    player.weaponDurability = weapon.durability();
+    boolean mainSlotEmpty = player.weapon == null;
+    if (mainSlotEmpty) {
+      player.weapon = weapon;
+      player.weaponDurability = weapon.durability();
+    } else {
+      player.packedWeapons.add(SurvivePackedWeapon.pack(weapon, weapon.durability()));
+    }
     return "You crafted a " + weapon.displayName() + ": +" + weapon.damageBonus() + " damage for "
-        + weapon.durability() + " attacks." + replaced;
+        + weapon.durability() + " attacks." + (mainSlotEmpty ? " Equipped in Main." : " Stored in your pack.");
+  }
+
+  private static String equipWeapon(SurvivePlayer player, SurvivePackedWeapon selectedWeapon) {
+    player.packedWeapons.remove(selectedWeapon);
+    if (player.weapon != null) {
+      player.packedWeapons.add(SurvivePackedWeapon.pack(player.weapon, player.weaponDurability));
+    }
+    player.weapon = selectedWeapon.weapon();
+    player.weaponDurability = selectedWeapon.durability();
+    return "You equipped the " + player.weapon.displayName() + " in Main.";
+  }
+
+  private static String stowWeapon(SurvivePlayer player) {
+    if (!player.hasInventorySpace()) {
+      return "Your pack is full. Free one slot before removing your weapon.";
+    }
+    var weapon = player.weapon;
+    player.packedWeapons.add(SurvivePackedWeapon.pack(weapon, player.weaponDurability));
+    player.weapon = null;
+    player.weaponDurability = 0;
+    return "You stowed the " + weapon.displayName() + " in your pack.";
   }
 
   private String hunt(SurvivePlayer player, Phase phase, IntSupplier rollPercent) {

@@ -225,6 +225,10 @@ bounded coverage, dashboard-only results and deferred billing/email delivery.
 
 ### Survive island
 
+Items lists packed weapons. Equipment → Main uses the same confirmed action
+path as field commands to equip or remove gear. Polls preserve the weapon
+buttons while the pack is unchanged.
+
 Movement responses can include a claimed roaming animal. Party members in range
 can Engage it through Commands. Other players can select and Check the claim,
 and Hunt considers only free animals. Participants read the shared health from

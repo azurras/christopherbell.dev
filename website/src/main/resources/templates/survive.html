@@ -103,12 +103,18 @@
                     <div><dt>Wood</dt><dd id="surviveWood"></dd></div>
                     <div><dt>Food</dt><dd id="surviveFood"></dd></div>
                     <div><dt>Stone</dt><dd id="surviveStone"></dd></div>
+                    <div><dt>Spare gear</dt><dd id="survivePackedGearCount">0</dd></div>
                     <div><dt>Carried</dt><dd id="surviveInventoryCount"></dd></div>
                   </dl>
+                  <ul id="survivePackedGear" aria-label="Packed weapons" hidden></ul>
                 </details>
-                <details class="survive-panel survive-section">
+                <details id="surviveEquipment" class="survive-panel survive-section">
                   <summary>Equipment</summary>
-                  <p class="survive-card-line"><span class="survive-muted">Weapon</span> <strong id="surviveWeapon"></strong></p>
+                  <details>
+                    <summary>Main · <strong id="surviveWeapon"></strong></summary>
+                    <div id="surviveWeaponChoices" aria-label="Main weapon choices"></div>
+                    <button id="surviveStowWeapon" type="button" data-equipment-action="STOW_WEAPON" hidden>Remove weapon</button>
+                  </details>
                 </details>
                 <details id="surviveMapSection" class="survive-panel survive-section survive-map-section">
                   <summary>Map</summary>
