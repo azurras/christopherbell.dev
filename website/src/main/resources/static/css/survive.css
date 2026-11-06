@@ -266,3 +266,44 @@
 .survive-play-shell:fullscreen .survive-adventure,
 .survive-play-shell:fullscreen .survive-world { padding: 0; margin: 0; border: 0; border-radius: 0; }
 .survive-play-shell:fullscreen #surviveWorldCanvas { height: calc(100dvh - 3rem); }
+
+/* Let an active desktop session occupy the browser, with page view and fallback available. */
+.survive-play-shell[data-phone="true"] #surviveGameViewToggle,
+.survive-world:not([data-active]) #surviveGameViewToggle { display: none; }
+.survive-world #surviveGameViewToggle {
+  min-height: 2.25rem;
+  border: 0;
+  background: transparent;
+  color: #f2f3ff;
+  padding: .45rem .6rem;
+  width: 100%;
+}
+.survive-world #surviveGameViewToggle:is(:hover, :focus-visible) { background: #485c91; }
+.survive-page:has(.survive-play-shell:not([data-phone="true"], [data-windowed="true"])
+  #surviveGame:not([hidden]) .survive-world[data-active]):not(:has(#surviveJoin:not([hidden]))) {
+  overflow: hidden;
+}
+.survive-page:has(.survive-play-shell:not([data-phone="true"], [data-windowed="true"])
+  #surviveGame:not([hidden]) .survive-world[data-active]):not(:has(#surviveJoin:not([hidden])))
+  :is(#nav, #footer, .survive-hero, #surviveWorldHelp, .survive-attribution) { display: none; }
+.survive-page:has(.survive-play-shell:not([data-phone="true"], [data-windowed="true"])
+  #surviveGame:not([hidden]) .survive-world[data-active]):not(:has(#surviveJoin:not([hidden])))
+  :is(.survive-main, .survive-adventure, .survive-world) {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+.survive-page:has(.survive-play-shell:not([data-phone="true"], [data-windowed="true"])
+  #surviveGame:not([hidden]) .survive-world[data-active]):not(:has(#surviveJoin:not([hidden])))
+  .survive-world {
+  display: grid;
+  height: 100dvh;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.survive-page:has(.survive-play-shell:not([data-phone="true"], [data-windowed="true"])
+  #surviveGame:not([hidden]) .survive-world[data-active]):not(:has(#surviveJoin:not([hidden])))
+  #surviveWorldCanvas {
+  height: 100%;
+}

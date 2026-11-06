@@ -193,6 +193,8 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const itemList = documentRoot.getElementById('surviveItemList');
   const itemSort = documentRoot.getElementById('surviveItemSort');
   const itemUse = documentRoot.getElementById('surviveItemUse');
+  const playShell = documentRoot.getElementById('survivePlayShell');
+  const gameViewToggle = documentRoot.getElementById('surviveGameViewToggle');
   const game = documentRoot.getElementById('surviveGame');
   const log = documentRoot.getElementById('surviveGameLog');
   const logToggle = documentRoot.getElementById('surviveLogToggle');
@@ -324,6 +326,12 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   itemList?.addEventListener('change', updateItems);
   itemSort?.addEventListener('click', sortItems);
   itemUse?.addEventListener('click', useItem);
+  const toggleGameView = () => {
+    const showPage = playShell.dataset.windowed !== 'true';
+    playShell.dataset.windowed = String(showPage);
+    gameViewToggle.textContent = showPage ? 'Fill browser window' : 'Show page view';
+  };
+  gameViewToggle?.addEventListener('click', toggleGameView);
   const showJoin = () => {
     joinForm.hidden = false;
     cancel.hidden = !state;
@@ -400,6 +408,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       itemList?.removeEventListener('change', updateItems);
       itemSort?.removeEventListener('click', sortItems);
       itemUse?.removeEventListener('click', useItem);
+      gameViewToggle?.removeEventListener('click', toggleGameView);
       controller.dispose();
       world.dispose();
       documentRoot.getElementById('surviveCampScene').removeEventListener('click', act);
