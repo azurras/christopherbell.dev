@@ -40,6 +40,7 @@ varying vec2 uv;
 uniform float daylight;
 uniform vec3 sky;
 uniform float time;
+uniform float fireTime;
 uniform sampler2D grassTile;
 uniform sampler2D earthTile;
 uniform sampler2D stoneTile;
@@ -57,9 +58,31 @@ float cloudNoise(vec2 point) {
   float rowB = mix(grain(vec3(cell + vec2(0.0, 1.0), 4.0)), grain(vec3(cell + vec2(1.0), 4.0)), blend.x);
   return mix(rowA, rowB, blend.y);
 }
+float flameTongue(vec2 point, float offset, float width, float height, float phase) {
+  float rise = clamp(point.y / height, 0.0, 1.0);
+  float bend = rise * (0.13 * sin(phase + rise * 5.0) + 0.08);
+  float edge = width * (1.0 - rise * 0.91);
+  return (1.0 - smoothstep(edge * 0.32, edge, abs(point.x - offset - bend)))
+    * (1.0 - smoothstep(height * 0.62, height, point.y)) * smoothstep(0.0, 0.08, point.y);
+}
+float spark(vec2 point, float seed) {
+  float rise = fract(fireTime * 0.59 + seed);
+  vec2 ember = vec2(0.19 * sin(seed * 25.0 + rise * 5.0), 0.28 + rise * 0.68);
+  return (1.0 - smoothstep(0.004, 0.022, length((point - ember) * vec2(1.0, 1.6))))
+    * sin(rise * 3.14159);
+}
 void main() {
   if (surfaceMaterial > 10.0 && surfaceMaterial < 11.0) {
-    gl_FragColor = vec4(tint * 1.42, 1.0);
+    vec2 point = vec2(uv.x - 0.5, uv.y);
+    float pulse = fireTime * 6.0;
+    float body = max(flameTongue(point, -0.16, 0.20, 0.54 + 0.10 * sin(pulse), pulse),
+      flameTongue(point, 0.13, 0.19, 0.49 + 0.09 * sin(pulse + 2.1), pulse + 2.1));
+    float core = flameTongue(point, -0.02, 0.20, 0.64 + 0.08 * sin(pulse + 4.2), pulse + 4.2);
+    float embers = max(spark(point, 0.18), spark(point, 0.68));
+    float alpha = max(max(body * 0.81, core), embers);
+    if (alpha < 0.025) discard;
+    vec3 flame = mix(vec3(1.0, 0.23, 0.035), vec3(1.0, 0.91, 0.52), max(embers, core * (1.0 - point.y)));
+    gl_FragColor = vec4(flame, alpha);
     return;
   }
   if (surfaceMaterial > 9.0 && surfaceMaterial < 10.0) {
@@ -105,6 +128,11 @@ void main() {
     albedo = mix(albedo, ground, 0.67);
   }
   vec3 lit = albedo * daylight;
+  if (abs(surface.x - 4.0) < 3.4 && abs(surface.z) < 3.4 && surface.y < 2.6) {
+    float firelight = 1.0 - smoothstep(0.35, 3.4, distance(surface, vec3(4.0, 0.45, 0.0)));
+    float flicker = 0.90 + 0.10 * sin(fireTime * 6.0);
+    lit += albedo * vec3(0.82, 0.37, 0.11) * firelight * flicker * (1.42 - daylight);
+  }
   if (surface.y < -0.64 || surfaceMaterial > 13.0) {
     float ripple = sin(surface.x * 1.6 + surface.z * 0.7 + time * 2.4)
       * sin(surface.z * 1.2 - surface.x * 0.4 - time * 1.8);
@@ -165,6 +193,7 @@ export function createWorldRenderer(canvas) {
     const daylightUniform = gl.getUniformLocation(program, 'daylight');
     const skyUniform = gl.getUniformLocation(program, 'sky');
     const timeUniform = gl.getUniformLocation(program, 'time');
+    const fireTimeUniform = gl.getUniformLocation(program, 'fireTime');
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -196,10 +225,10 @@ export function createWorldRenderer(canvas) {
         gl.uniform1f(daylightUniform, state.phase === 'NIGHT' ? 0.57 : state.phase === 'DUSK' ? 0.79 : 1.13);
         gl.uniform3fv(skyUniform, sky);
         gl.uniform1f(timeUniform, animationSeconds % 120);
+        gl.uniform1f(fireTimeUniform, position.animate ? animationSeconds % 120 : 0);
         drawBuffer(staticBuffer, scenery.vertices.length / MESH_VERTEX_FLOATS);
         dynamicMesh.reset();
         const actors = materials.authoredActorsReady ? authoredActors : fallbackActors;
-        drawCampFlame(actors, position.animate ? animationSeconds : 0);
         const stride = avatar => avatar.moving ? Math.sin(animationSeconds * 11) : 0;
         const pose = actionPose(gesture)
           || combatStance(state.status === 'COMBAT' && state.nextStrikeAt, state.defending)
@@ -262,6 +291,7 @@ export function createWorldRenderer(canvas) {
               true, animationSeconds);
           }
         }
+        if (Math.hypot(position.x - 4, position.z) < 45) drawCampFlame(actors, yaw);
         drawBuffer(actorBuffer, dynamicMesh.upload() / MESH_VERTEX_FLOATS);
         return { project: point => projectPoint(matrix, point) };
       },
