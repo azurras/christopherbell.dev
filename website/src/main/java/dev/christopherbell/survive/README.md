@@ -280,6 +280,11 @@ once. Dialogue, credit and rewards appear in chat.
 
 ## Main equipment slot
 
+Items lists the carried food, wood, stone and spare weapons. Sort by type
+or name and select a row to inspect it. Use Food sends the existing Eat
+command while the server allows it. Quantity and result come from the
+confirmed snapshot and chat. The pack still holds ten units.
+
 Open Equipment → Main to inspect and equip a spare weapon or remove the
 equipped one. A first craft equips into an empty Main slot. Further crafts
 go into the pack, where each spare uses one inventory unit. Equipping a spare
