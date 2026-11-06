@@ -351,16 +351,24 @@ function cross(a, b) {
 /** Store interleaved world-space positions and baked directional color for WebGL. */
 export function meshBuilder(actorArt, appendVertex) {
   const vertices = [];
-  function triangle(a, b, c, color, material = 0, coordinates = null) {
-    const normal = cross(b.map((value, index) => value - a[index]), c.map((value, index) => value - a[index]));
-    const length = Math.hypot(...normal) || 1;
-    const shade = 0.66 + 0.34 * Math.abs((-normal[0] * 0.39 + normal[1] * 0.83 - normal[2] * 0.36) / length);
+  function triangle(a, b, c, color, material = 0, coordinates = null, bakedShades) {
+    let faceShade;
+    let horizontal;
+    let side;
+    if (!bakedShades) {
+      const normal = cross(b.map((value, index) => value - a[index]), c.map((value, index) => value - a[index]));
+      const length = Math.hypot(...normal) || 1;
+      faceShade = 0.66 + 0.34 * Math.abs((-normal[0] * 0.39 + normal[1] * 0.83 - normal[2] * 0.36) / length);
+      const [nx, ny, nz] = normal.map(Math.abs);
+      horizontal = ny >= nx && ny >= nz;
+      side = nx > nz;
+    }
     const colors = Array.isArray(color[0]) ? color : [color, color, color];
     const weights = Array.isArray(material) ? material : [material, material, material];
-    const [nx, ny, nz] = normal.map(Math.abs);
     [a, b, c].forEach((point, index) => {
       const [x, y, z] = point;
-      const uv = coordinates?.[index] || (weights[index] < 2 || (ny >= nx && ny >= nz) ? [x, z] : nx > nz ? [z, y] : [x, y]);
+      const uv = coordinates?.[index] || (weights[index] < 2 || horizontal ? [x, z] : side ? [z, y] : [x, y]);
+      const shade = bakedShades?.[index] ?? faceShade;
       const [red, green, blue] = colors[index];
       if (appendVertex) appendVertex(x, y, z, red * shade, green * shade, blue * shade, weights[index], uv[0], uv[1]);
       else vertices.push(x, y, z, red * shade, green * shade, blue * shade, weights[index], uv[0], uv[1]);

@@ -70,7 +70,7 @@ test('the adventurer reshaping keeps clip topology and hand attachments', () => 
   const raw = JSON.parse(readFileSync(new URL('../../main/resources/static/images/survive/adventurer.json', import.meta.url), 'utf8'));
   const baseline = prepareActorArt(raw);
   const refined = prepareActorArt(raw, { adventurer: true });
-  assert.deepEqual(refined.triangles, baseline.triangles);
+  assert.deepEqual(refined.triangles.map(({ indices, uv }) => ({ indices, uv })), baseline.triangles);
   for (const [clip, frames] of Object.entries(refined.poses)) {
     assert.equal(frames.length, baseline.poses[clip].length);
     assert.equal(frames[0].length, baseline.poses[clip][0].length);
@@ -79,6 +79,25 @@ test('the adventurer reshaping keeps clip topology and hand attachments', () => 
   assert.ok(feet >= 0);
   assert.equal(refined.poses.idle[0][feet], 0);
   assert.ok(refined.hands.strike[0][1] > baseline.hands.strike[0][1]);
+});
+
+test('authored lighting interpolates across triangle corners without adding vertices', () => {
+  const mesh = meshBuilder();
+  mesh.triangle([0, 0, 0], [0, 1, 0], [1, 0, 0], [1, 1, 1], 12,
+    [[0, 0], [0, 1], [1, 0]], [0.76, 0.89, 1]);
+  assert.equal(mesh.vertices.length, 3 * MESH_VERTEX_FLOATS);
+  assert.deepEqual(mesh.vertices.filter((_, index) => index % MESH_VERTEX_FLOATS === 3), [0.76, 0.89, 1]);
+
+  const raw = {
+    faces: [0, 1, 2, 1, 0, 3, 0, 2, 4],
+    uv: Array(18).fill(0),
+    poses: { idle: [[0, 0, 0, 1000, 0, 0, 0, 0, 1000, 0, 500, -1000, 0, 1000, 0]] },
+    hands: {},
+  };
+  const [flat, tilted, crease] = prepareActorArt(raw, { adventurer: true }).triangles;
+  assert.equal(flat.shades[0], tilted.shades[1]);
+  assert.equal(flat.shades[1], tilted.shades[0]);
+  assert.notEqual(flat.shades[0], crease.shades[0]);
 });
 
 test('enemy motion requires a confirmed bite or guard and winds back before lunging', () => {

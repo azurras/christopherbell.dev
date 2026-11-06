@@ -16,8 +16,43 @@ export function prepareActorArt(data, { adventurer = false } = {}) {
   const compactFrames = clips => Object.fromEntries(Object.entries(clips).map(([clip, frames]) =>
     [clip, frames.map(frame => Int16Array.from(frame))]));
   const model = { triangles, poses: compactFrames(data.poses), hands: compactFrames(data.hands) };
-  if (adventurer) refineAdventurerProportions(model);
+  if (adventurer) {
+    refineAdventurerProportions(model);
+    bakeAdventurerShading(model);
+  }
   return model;
+}
+
+/** Smooth adjacent surfaces in model space while keeping armor and garment edges distinct. */
+function bakeAdventurerShading({ triangles, poses }) {
+  const rest = poses.idle[0];
+  const adjacentNormals = Array.from({ length: rest.length / 3 }, () => []);
+  const faceNormals = triangles.map(({ indices: [a, b, c] }) => {
+    const edge = vertex => [0, 1, 2].map(axis => rest[vertex * 3 + axis] - rest[a * 3 + axis]);
+    const [ux, uy, uz] = edge(b);
+    const [vx, vy, vz] = edge(c);
+    const normal = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+    const length = Math.hypot(...normal) || 1;
+    const unit = normal.map(component => component / length);
+    for (const vertex of [a, b, c]) adjacentNormals[vertex].push(unit);
+    return unit;
+  });
+  triangles.forEach((triangle, index) => {
+    const [nx, ny, nz] = faceNormals[index];
+    triangle.shades = triangle.indices.map(vertex => {
+      let x = 0;
+      let y = 0;
+      let z = 0;
+      for (const [ax, ay, az] of adjacentNormals[vertex]) {
+        if (nx * ax + ny * ay + nz * az < 0.64) continue;
+        x += ax;
+        y += ay;
+        z += az;
+      }
+      // Broad overhead light avoids a different brightness on each small triangle.
+      return 0.76 + 0.24 * Math.abs(y) / (Math.hypot(x, y, z) || 1);
+    });
+  });
 }
 
 /** Refine the baked proportions once, keeping vertex order, UVs and clip lengths intact. */
@@ -67,8 +102,8 @@ export function drawActorArt(triangle, model, pose, clip, progress, loop = false
   for (let offset = 0; offset < first.length; offset += 3) {
     points.push(pose(sample(first, second, offset), sample(first, second, offset + 1), sample(first, second, offset + 2)));
   }
-  for (const { indices: [a, b, c], uv } of model.triangles) {
-    triangle(points[a], points[b], points[c], color, 12, uv);
+  for (const { indices: [a, b, c], uv, shades } of model.triangles) {
+    triangle(points[a], points[b], points[c], color, 12, uv, shades);
   }
   const hands = model.hands[clip];
   if (hands) return pose(sample(hands[index], hands[next], 0), sample(hands[index], hands[next], 1),
