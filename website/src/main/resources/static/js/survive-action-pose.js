@@ -25,7 +25,7 @@ export function enemyCountered(previous, current) {
   return previous?.status === 'COMBAT' && current?.status === 'COMBAT'
     && previous.survivorId === current.survivorId && previous.enemy === current.enemy
     && current.revision > previous.revision && current.enemyHealth < previous.enemyHealth
-    && (current.health < previous.health || previous.defending && !current.defending);
+    && (current.health < previous.health || previous.defending === true && current.defending === false);
 }
 
 /** Wind back, spring forward and return to the encounter position. */
