@@ -186,7 +186,26 @@ export function islandMesh() {
   addResourceProps(mesh, groundHeight);
   buildRuinedGate(mesh);
   buildGateCrossing(mesh);
+  plantNorthGateVerge(mesh);
   return mesh;
+}
+
+/** Cluster plants along the road's edges, leaving the gate and bridge deck clear. */
+function plantNorthGateVerge(mesh) {
+  for (const side of [-1, 1]) {
+    for (const section of [-6, -9, -13, -15, -20, -31, -34, -36, -40]) {
+      const centerX = side * (3.4 + Math.sin(section * 1.7) * 0.7);
+      for (let blade = 0; blade < 7; blade++) {
+        const angle = blade * 2.39996 + section;
+        const x = centerX + Math.cos(angle) * 0.75;
+        const z = section + Math.sin(angle) * 0.65;
+        mesh.grass(x, z, angle, 0.21 + (blade % 4) * 0.07);
+      }
+      if (section === -13 || section === -34 || section === -40) {
+        mesh.underbrush(centerX + side * 1.1, section, section * 0.14);
+      }
+    }
+  }
 }
 
 /** The old gate leads to a timber crossing and a stone waystation. */
@@ -228,15 +247,49 @@ function buildGateCrossing(mesh) {
     mesh.box(windowX, base + 0.94, front + 0.07, 0.77, 0.12, 0.24, stone, STONE_MATERIAL);
     mesh.box(windowX, base + 1.30, front + 0.06, 0.08, 0.69, 0.06, BARK, BARK_MATERIAL);
   }
-  const roof = [0.40, 0.22, 0.15];
+  // A framed entrance and a painted pennant distinguish the staffed waystation from a ruin.
+  const trim = [0.63, 0.59, 0.47];
+  for (const side of [-1, 1]) {
+    const x = waystationX + side * 1.94;
+    mesh.box(x, base + 1.05, front + 0.08, 0.36, 2.65, 0.43, trim, STONE_MATERIAL);
+    mesh.box(x, base + 0.09, front + 0.10, 0.53, 0.30, 0.59, stone, STONE_MATERIAL);
+  }
+  mesh.box(waystationX, base + 2.29, front + 0.08, 4.28, 0.23, 0.41, trim, STONE_MATERIAL);
+  mesh.box(waystationX, base - 0.11, front + 0.59, 1.62, 0.18, 0.77, trim, STONE_MATERIAL);
+  const pennantX = waystationX - 1.30;
+  const pennantZ = front + 0.35;
+  mesh.beam([pennantX - 0.34, base + 2.42, pennantZ], [pennantX + 0.34, base + 2.42, pennantZ],
+    0.035, 0.035, BARK, 5, BARK_MATERIAL);
+  const banner = [0.58, 0.30, 0.22];
+  const left = [pennantX - 0.29, base + 2.37, pennantZ];
+  const right = [pennantX + 0.29, base + 2.37, pennantZ];
+  const hemLeft = [pennantX - 0.24, base + 1.27, pennantZ + 0.05];
+  const hemRight = [pennantX + 0.24, base + 1.27, pennantZ + 0.05];
+  const tip = [pennantX, base + 1.03, pennantZ + 0.04];
+  mesh.triangle(left, right, hemRight, banner, 5.5);
+  mesh.triangle(left, hemRight, hemLeft, banner, 5.5);
+  mesh.triangle(hemLeft, hemRight, tip, tint(banner, 0.82), 5.5);
+
+  const roof = [0.56, 0.31, 0.22];
   const a = [waystationX - 2.35, base + 2.52, waystationZ - 2.05];
   const b = [waystationX - 2.35, base + 2.52, waystationZ + 2.05];
   const c = [waystationX, base + 4.12, waystationZ + 2.05];
   const d = [waystationX, base + 4.12, waystationZ - 2.05];
   const e = [waystationX + 2.35, base + 2.52, waystationZ + 2.05];
   const f = [waystationX + 2.35, base + 2.52, waystationZ - 2.05];
-  for (const [p, q, r] of [[a, b, c], [a, c, d], [c, e, f], [c, f, d], [b, e, c], [a, d, f]]) {
-    mesh.triangle(p, q, r, roof, BARK_MATERIAL);
+  mesh.triangle(b, e, c, stone, STONE_MATERIAL);
+  mesh.triangle(a, d, f, stone, STONE_MATERIAL);
+  for (const [nearEave, farEave] of [[b, a], [e, f]]) {
+    for (let course = 0; course < 7; course++) {
+      const p = mix(nearEave, c, course / 7);
+      const q = mix(farEave, d, course / 7);
+      const r = mix(farEave, d, (course + 1) / 7);
+      const s = mix(nearEave, c, (course + 1) / 7);
+      const tile = tint(roof, 0.84 + course % 3 * 0.07);
+      mesh.triangle(p, q, r, tile, STONE_MATERIAL);
+      mesh.triangle(p, r, s, tile, STONE_MATERIAL);
+      mesh.beam(p, q, 0.027, 0.027, tint(roof, 0.72), 4, STONE_MATERIAL);
+    }
   }
   for (const edge of [[a, b], [b, c], [c, e], [e, f], [f, d], [d, a], [c, d]]) {
     mesh.beam(...edge, 0.09, 0.09, BARK, 4, BARK_MATERIAL);

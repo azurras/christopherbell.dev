@@ -34,7 +34,7 @@ test('dynamic frames upload the same vertices while reusing their allocated capa
 test('authored actors draw bounded texture coordinates and animate with the equipped tool', () => {
   const asset = kind => JSON.parse(readFileSync(new URL(`../../main/resources/static/images/survive/${kind}.json`, import.meta.url), 'utf8'));
   const actorArt = {
-    adventurer: prepareActorArt(asset('adventurer')),
+    adventurer: prepareActorArt(asset('adventurer'), { adventurer: true }),
     boar: prepareActorArt(asset('boar')),
     wolf: prepareActorArt(asset('wolf')),
     bear: prepareActorArt(asset('bear')),
@@ -64,6 +64,21 @@ test('authored actors draw bounded texture coordinates and animate with the equi
     assert.ok(mining[index + 2] >= 0 && mining[index + 2] <= 1);
   }
   assert.equal(texturedCorners, (2151 + 1144 + 1348 + 929) * 3);
+});
+
+test('the adventurer reshaping keeps clip topology and hand attachments', () => {
+  const raw = JSON.parse(readFileSync(new URL('../../main/resources/static/images/survive/adventurer.json', import.meta.url), 'utf8'));
+  const baseline = prepareActorArt(raw);
+  const refined = prepareActorArt(raw, { adventurer: true });
+  assert.deepEqual(refined.triangles, baseline.triangles);
+  for (const [clip, frames] of Object.entries(refined.poses)) {
+    assert.equal(frames.length, baseline.poses[clip].length);
+    assert.equal(frames[0].length, baseline.poses[clip][0].length);
+  }
+  const feet = baseline.poses.idle[0].findIndex((value, index) => index % 3 === 1 && value === 0);
+  assert.ok(feet >= 0);
+  assert.equal(refined.poses.idle[0][feet], 0);
+  assert.ok(refined.hands.strike[0][1] > baseline.hands.strike[0][1]);
 });
 
 test('the rendered island has finite geometry within its static triangle budget', () => {

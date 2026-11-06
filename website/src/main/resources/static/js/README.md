@@ -227,6 +227,9 @@ bounded coverage, dashboard-only results and deferred billing/email delivery.
 
 The desktop Main Menu switches between the browser-filling game and the site
 page view without resetting the session.
+The North Gate waystation uses roof courses and a cloth pennant to mark the
+staffed building. The keeper wears a mantle and cap distinct from the player.
+The North Gate road has grouped verge plants outside the walking line.
 
 Items lists carried resources and packed weapons, supports sorting, and keeps
 the selected item across refreshes. Use Food sends the existing Eat action.

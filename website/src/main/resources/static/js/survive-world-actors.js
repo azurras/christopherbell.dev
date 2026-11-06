@@ -86,7 +86,8 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
     }
   }
 
-  function avatar(x, z, heading, cloth, status, stride = 0, weapon, action = null, detailed = true, seconds = 0, color) {
+  function avatar(x, z, heading, cloth, status, stride = 0, weapon, action = null, detailed = true, seconds = 0,
+      color, keeper = false) {
     const y = groundHeight(x, z);
     const resting = status === 'SLEEPING' || status === 'DEAD' || (status === 'ESCAPED' && action?.kind !== 'row');
     const cos = Math.cos(heading);
@@ -103,6 +104,14 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
     const part = (at, width, height, depth, color, material = 0) =>
       ellipsoid(...at, width, resting ? depth : height, resting ? height : depth, color, detailed ? 10 : 6, 4, heading, material);
     groundShadow(x, z, 1.08, 0.48);
+    if (keeper) {
+      const wool = [0.37, 0.49, 0.36];
+      profile(pose, [[1.01, 0.45, 0.34], [1.37, 0.39, 0.30], [1.81, 0.43, 0.31],
+        [2.01, 0.52, 0.32], [2.15, 0.26, 0.24]], wool, CLOTH, 12);
+      profile(pose, [[2.42, 0.31, 0.30], [2.50, 0.29, 0.28], [2.66, 0.22, 0.24],
+        [2.69, 0.06, 0.06]], [0.42, 0.28, 0.18], LEATHER, 12);
+      part(pose(0, 1.94, 0.33), 0.09, 0.11, 0.035, [0.74, 0.63, 0.36]);
+    }
     const authored = detailed && actorArt?.adventurer;
     if (authored) {
       const gesture = !resting && action?.kind !== 'run' && authored.poses[action?.kind];

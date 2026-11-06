@@ -145,7 +145,7 @@ export function createWorldRenderer(canvas) {
     materials = createIslandMaterials(gl, canvas.ownerDocument, program);
     for (const kind of ['adventurer', 'boar', 'wolf', 'bear']) {
       fetchJson(`/images/survive/${kind}.json`, { signal: actorRequests.signal })
-        .then(data => { actorArt[kind] = prepareActorArt(data); })
+        .then(data => { actorArt[kind] = prepareActorArt(data, { adventurer: kind === 'adventurer' }); })
         .catch(() => { /* The procedural model remains available. */ });
     }
     const scenery = islandMesh();
@@ -220,7 +220,7 @@ export function createWorldRenderer(canvas) {
           const distance = Math.hypot(keeper.x - position.x, keeper.z - position.z);
           if (distance <= 32) {
             actors.avatar(keeper.x, keeper.z, 0, [0.32, 0.43, 0.25], 'EXPLORING', 0,
-              null, null, distance < 16, animationSeconds);
+              null, null, distance < 16, animationSeconds, [0.93, 0.91, 0.76], true);
           }
         }
         for (let index = 0; index < Math.min(8, state.shelters); index++) {
