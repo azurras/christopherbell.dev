@@ -81,11 +81,15 @@ class SurviveWildlifeTest {
       double dx = hog.x() - view.self().x();
       double dz = hog.z() - view.self().z();
       double distance = Math.hypot(dx, dz);
-      if (distance < 2) break;
+      if (distance < 2) {
+        break;
+      }
       clock.now = clock.now.plusSeconds(1);
       double fraction = Math.min(1, 5.5 / distance);
       var movement = new SurviveMovement(view.self().x() + dx * fraction, view.self().z() + dz * fraction, 0, sequence);
-      for (var token : tokens) view = service.pulseForOwner(token, null, movement);
+      for (var token : tokens) {
+        view = service.pulseForOwner(token, null, movement);
+      }
     }
     service.actForOwner(scout.token(), null, SurviveAction.ENGAGE, scout.state().revision(), "meadow-hog");
     var outsiderClaim = service.pulseForOwner(observer.token(), null,
