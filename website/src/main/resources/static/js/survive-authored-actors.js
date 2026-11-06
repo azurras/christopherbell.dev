@@ -1,7 +1,7 @@
 /** Samples baked skinning clips and submits the pose to the existing island mesh. */
 const WHITE = [1, 1, 1];
 
-export function prepareActorArt(data) {
+export function prepareActorArt(data, { adventurer = false } = {}) {
   const triangles = [];
   for (let index = 0; index < data.faces.length; index += 3) {
     const uv = [];
@@ -15,7 +15,43 @@ export function prepareActorArt(data) {
   }
   const compactFrames = clips => Object.fromEntries(Object.entries(clips).map(([clip, frames]) =>
     [clip, frames.map(frame => Int16Array.from(frame))]));
-  return { triangles, poses: compactFrames(data.poses), hands: compactFrames(data.hands) };
+  const model = { triangles, poses: compactFrames(data.poses), hands: compactFrames(data.hands) };
+  if (adventurer) refineAdventurerProportions(model);
+  return model;
+}
+
+/** Refine the baked proportions once, keeping vertex order, UVs and clip lengths intact. */
+function refineAdventurerProportions(model) {
+  const rest = model.poses.idle[0].slice();
+  const head = [];
+  for (let offset = 0; offset < rest.length; offset += 3) {
+    if (rest[offset + 1] >= 1940) head.push(offset);
+  }
+  const lengthenLegs = millimetres => millimetres + Math.max(0, Math.min(1150, millimetres)) * 0.19;
+  for (const frames of Object.values(model.poses)) {
+    for (const frame of frames) {
+      let centerX = 0;
+      let centerZ = 0;
+      let baseY = Infinity;
+      for (const offset of head) {
+        centerX += frame[offset];
+        centerZ += frame[offset + 2];
+        baseY = Math.min(baseY, frame[offset + 1]);
+      }
+      centerX /= head.length;
+      centerZ /= head.length;
+      for (const offset of head) {
+        const weight = Math.min(1, (rest[offset + 1] - 1940) / 140);
+        frame[offset] += (centerX - frame[offset]) * weight * 0.18;
+        frame[offset + 1] += (baseY - frame[offset + 1]) * weight * 0.23;
+        frame[offset + 2] += (centerZ - frame[offset + 2]) * weight * 0.17;
+      }
+      for (let height = 1; height < frame.length; height += 3) frame[height] = lengthenLegs(frame[height]);
+    }
+  }
+  for (const frames of Object.values(model.hands)) {
+    for (const hand of frames) hand[1] = lengthenLegs(hand[1]);
+  }
 }
 
 export function drawActorArt(triangle, model, pose, clip, progress, loop = false, color = WHITE) {
