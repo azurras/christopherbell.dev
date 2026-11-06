@@ -156,12 +156,23 @@ export function islandMesh() {
     mesh.ellipsoid(x, groundHeight(x, z) + size * 0.25, z, size, size * 0.54, size * 0.82,
       tint(STONE, 0.82 + index % 4 * 0.07), 6, 3, angle);
   }
-  for (let index = 0; index < 9; index++) {
-    const angle = index / 9 * TAU;
-    mesh.ellipsoid(4 + Math.cos(angle) * 1.1, 0.14, Math.sin(angle) * 1.1, 0.33, 0.25, 0.27, STONE, 6, 3);
+  mesh.disk(4, 0.026, 0, 0.93, [0.25, 0.21, 0.16], 18);
+  mesh.disk(4, 0.032, 0, 0.58, [0.19, 0.16, 0.13], 14);
+  for (let index = 0; index < 11; index++) {
+    const angle = index / 11 * TAU;
+    const radius = 0.91 + (index % 3) * 0.041;
+    const x = 4 + Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    mesh.ellipsoid(x, groundHeight(x, z) + 0.09, z, 0.23 + (index % 4) * 0.031, 0.15 + (index % 3) * 0.04,
+      0.23, tint(STONE, 0.78 + (index % 5) * 0.075), 7, 3, angle, STONE_MATERIAL);
   }
-  mesh.beam([3.3, 0.25, -0.45], [4.7, 0.24, 0.45], 0.16, 0.13, BARK, 5);
-  mesh.beam([3.3, 0.17, 0.43], [4.7, 0.22, -0.43], 0.16, 0.13, BARK, 5);
+  mesh.beam([3.39, 0.25, -0.40], [4.61, 0.22, 0.40], 0.15, 0.12, BARK, 7, BARK_MATERIAL);
+  mesh.beam([3.43, 0.16, 0.40], [4.57, 0.20, -0.40], 0.14, 0.11, BARK, 7, BARK_MATERIAL);
+  for (let index = 0; index < 5; index++) {
+    const angle = index * 2.39996;
+    mesh.ellipsoid(4 + Math.cos(angle) * 0.39, 0.07, Math.sin(angle) * 0.39, 0.082, 0.052, 0.064,
+      [0.31, 0.18, 0.12], 5, 3, angle);
+  }
   for (let plank = 0; plank < 19; plank++) {
     mesh.box(0, 0.72, 68 + plank * 0.63, 3.35, 0.18, 0.59, tint([0.44, 0.32, 0.21], 0.88 + plank % 4 * 0.08), BARK_MATERIAL);
   }
