@@ -208,7 +208,7 @@ export function createWorldRenderer(canvas) {
       gl.drawArrays(gl.TRIANGLES, 0, count);
     }
     return {
-      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture, cameraZoom, counter) {
+      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture, cameraZoom, counter, defeatedEnemy) {
         const pixelBudgetRatio = Math.sqrt(2200000 / Math.max(1, canvas.clientWidth * canvas.clientHeight));
         const pixelRatio = Math.min(2, pixelBudgetRatio, globalThis.devicePixelRatio || 1);
         const width = Math.max(1, Math.round(canvas.clientWidth * pixelRatio));
@@ -288,6 +288,14 @@ export function createWorldRenderer(canvas) {
             actors.animal(enemyX, enemyZ, state.enemy, scale, facing, stride(enemy),
               !counter && pose?.kind === 'strike' ? pose.weight : 0,
               true, animationSeconds);
+          }
+        }
+        if (defeatedEnemy) {
+          const { x, z, kind, heading, fall } = defeatedEnemy;
+          if (kind === 'RAIDER') {
+            actors.avatar(x, z, heading, RAIDER_CLOTH, 'COMBAT', 0, null, fall, true, 0, RAIDER_ARMOR_TINT);
+          } else {
+            actors.animal(x, z, kind, kind === 'BEAR' ? 1.6 : 1, heading, 0, 0, true, 0, fall);
           }
         }
         if (Math.hypot(position.x - 4, position.z) < 45) drawCampFlame(actors, yaw);
