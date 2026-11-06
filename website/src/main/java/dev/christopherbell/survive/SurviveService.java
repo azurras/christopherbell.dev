@@ -4,6 +4,7 @@ import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveSnapshot;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveResource;
+import dev.christopherbell.survive.model.SurviveRequests;
 import java.time.Clock;
 import dev.christopherbell.survive.model.SurviveSavedWorld;
 import dev.christopherbell.survive.persistence.SurviveWorldRepository;
@@ -253,6 +254,19 @@ public class SurviveService {
     }
     commitWorld();
     return snapshotFor(sender);
+  }
+
+  /** Applies a party command using the private owner identity and the exact invitation or target ID. */
+  public synchronized SurviveSnapshot changePartyForOwner(String token, String accountId, SurviveRequests.Party request) {
+    loadSettledWorld();
+    expireInactivePlayers();
+    var survivor = world.players.get(ownerKey(token, accountId));
+    if (survivor == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Your survivor expired. Join the camp again.");
+    }
+    world.parties.apply(survivor, request, world.players.values(), clock.instant());
+    commitWorld();
+    return snapshotFor(survivor);
   }
 
   private static String ownerKey(String token, String accountId) {

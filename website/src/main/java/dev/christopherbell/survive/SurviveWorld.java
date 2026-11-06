@@ -45,6 +45,7 @@ final class SurviveWorld {
   private static final Duration MAX_ACTIVE_GAP = Duration.ofSeconds(15);
   private static final Duration RAID_WINDOW = Duration.ofSeconds(60);
   final Map<String, SurvivePlayer> players = new LinkedHashMap<>();
+  final SurviveParties parties = new SurviveParties();
   private final ArrayDeque<String> events = new ArrayDeque<>();
   private int shelters;
   private int boats;
@@ -69,6 +70,7 @@ final class SurviveWorld {
     world.settledBoundaries = saved.settledBoundaries();
     world.activeRaidNight = saved.activeRaidNight();
     world.events.addAll(saved.events());
+    world.parties.restore(saved.parties());
     for (var stored : saved.players()) {
       var player = new SurvivePlayer(stored.name(), stored.lastSeen(), stored.accountId(), stored.survivorId());
       player.health = stored.health();
@@ -112,7 +114,7 @@ final class SurviveWorld {
           player.activeFullnessMilliseconds);
     }).toList();
     return new SurviveSavedWorld("shared", storageVersion, revision, shelters, boats, List.copyOf(events),
-        storedPlayers, settledBoundaries, activeRaidNight);
+        storedPlayers, settledBoundaries, activeRaidNight, parties.save());
   }
 
   SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline) {
@@ -128,7 +130,7 @@ final class SurviveWorld {
         player.hunger, player.stone, player.weapon, player.weaponDurability, player.enemy,
         bedsInUse(), shelters * BEDS_PER_SHELTER, player.guarding,
         player.nextStrikeAt, player.nextStrikeAt == null ? 0 : Math.max(0, Duration.between(now, player.nextStrikeAt).toMillis()),
-        player.tacticalPoints, player.defending, player.combatOutcome);
+        player.tacticalPoints, player.defending, player.combatOutcome, parties.viewFor(player, players.values(), now));
   }
 
   /** Settles elapsed personal fights even when their owners did not send any requests. */

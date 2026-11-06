@@ -5,6 +5,7 @@ import { appendSurviveLogMessage, syncSurviveLog } from './survive-log.js';
 import { mountSurviveController } from './survive-controller.js';
 import { keepFocusInActionBar, mountActionMenus, syncActionMenus } from './survive-menus.js';
 import { mountPanelSections, summarizeCamp } from './survive-panel.js';
+import { mountSurviveParty } from './survive-party.js';
 import { renderSurviveScene } from './survive-scene.js';
 import { mountSurviveWorld } from './survive-world.js';
 
@@ -164,6 +165,9 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const logScrollback = documentRoot.getElementById('surviveLogScrollback');
   const world = mountSurviveWorld(documentRoot, requestJson, performAction, undefined, () => readWorld());
   const controller = mountSurviveController(documentRoot, world, () => { if (state) readWorld(); });
+  const party = mountSurviveParty(documentRoot, (command, targetId) => {
+    void sendRequest(API.survive.party, { method: 'POST', body: JSON.stringify({ command, targetId }) });
+  });
 
   function setLogExpanded(expanded) {
     const followsLatest = logScrollback.scrollHeight - logScrollback.clientHeight - logScrollback.scrollTop <= 4;
@@ -198,6 +202,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     if (state) {
       renderSurviveState(documentRoot, state, pending, mutationPending);
     }
+    party?.render(state, mutationPending);
     world.setState(state, mutationPending);
   }
 
@@ -212,6 +217,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       nextWorldPollAt = Date.now() + delay;
       renderSurviveState(documentRoot, state, pending, mutationPending);
     }
+    party?.render(state, mutationPending);
     world.setState(state, mutationPending);
   }
 
@@ -334,6 +340,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       startOver.removeEventListener('click', showJoin);
       menus.dispose();
       panel.dispose();
+      party?.dispose();
       controller.dispose();
       world.dispose();
       documentRoot.getElementById('surviveCampScene').removeEventListener('click', act);

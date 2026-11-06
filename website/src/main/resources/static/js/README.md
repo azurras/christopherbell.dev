@@ -225,6 +225,10 @@ bounded coverage, dashboard-only results and deferred billing/email delivery.
 
 ### Survive island
 
+The Main Menu Party window sends invitation and membership commands through the
+same request path as game actions. Its roster and chat notices come from the
+requesting survivor's snapshot. Polls preserve the selected invite recipient.
+
 `survive-world-model.js` owns display-only landmark filtering, camera projection and
 movement prediction. `survive-world-art.js` generates terrain, layered tree
 crowns, underbrush and actor

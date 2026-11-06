@@ -40,6 +40,14 @@ Guests also share the durable camp; closing their browser can end their session.
 - `POST /api/survive/v1/game`: `{ "name": "Chris" }` creates a guest or replaces it; creates an account character, resumes a living one, or replaces a terminal one.
 - `POST /api/survive/v1/actions`: `{ "action": "GATHER", "revision": 0 }` applies a command.
 - `POST /api/survive/v1/gifts`: `{ "recipientId": "public-uuid", "resource": "WOOD", "quantity": 2, "revision": 0 }` gives wood, food or stone to another survivor.
+- `POST /api/survive/v1/party`: `{ "command": "INVITE", "targetId": "public-uuid" }` invites another active, exploring survivor. Accept, Decline, Cancel and Leave use the exact party ID returned by the server.
+
+Main Menu → Party exposes two-player invitations and membership. Invitations expire
+after two minutes. Either member can leave. The invitee alone can accept or decline,
+and the inviter alone can cancel. Both survivors must be exploring to form the party.
+Membership is saved with the world and the party view is private to its participants.
+Changes appear in the chat log when the client receives them. Replacing or losing a
+survivor ends their membership. Parties do not yet share enemy health or rewards.
 
 Each snapshot includes a public `survivorId` separate from the private owner identity and
 eligible `recipients` with public ID and name. The existing `survivors` names list

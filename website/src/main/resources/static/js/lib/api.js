@@ -18,6 +18,7 @@ export const API = {
     game: '/api/survive/v1/game',
     actions: '/api/survive/v1/actions',
     gifts: '/api/survive/v1/gifts',
+    party: '/api/survive/v1/party',
   },
   siteMonitor: {
     workspace: '/api/site-monitor/v1',
