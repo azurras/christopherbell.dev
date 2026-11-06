@@ -277,6 +277,16 @@ of experience. A full inventory defers the reward until two slots are free.
 The server saves assignment stages with the survivor and awards the reward
 once. Dialogue, credit and rewards appear in chat.
 
+## Main equipment slot
+
+Open Equipment → Main to inspect and equip a spare weapon or remove the
+equipped one. A first craft equips into an empty Main slot. Further crafts
+go into the pack, where each spare uses one inventory unit. Equipping a spare
+stows the previous weapon in the vacated space with its remaining durability.
+Removing a weapon without a replacement requires a free unit. Changes are
+available while exploring and use the existing actions endpoint and revision.
+Equip uses the selected pack entry's ID as `targetId`.
+
 ## Fishing
 
 Fish at the Fishing bank using the Commands window. A cast has a 60% chance

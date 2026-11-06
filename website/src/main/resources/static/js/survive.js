@@ -72,11 +72,15 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveWood', state.wood);
   setText('surviveFood', state.food);
   setText('surviveStone', state.stone);
-  const carried = state.wood + state.food + state.stone;
+  const packedWeapons = state.packedWeapons ?? [];
+  const gearCount = documentRoot.getElementById('survivePackedGearCount');
+  if (gearCount) gearCount.textContent = String(packedWeapons.length);
+  const carried = state.wood + state.food + state.stone + packedWeapons.length;
   setText('surviveInventoryCount', `${carried} / ${state.inventoryCapacity}`);
   setText('surviveWeapon', state.weapon
     ? `${WEAPON_LABELS[state.weapon] || state.weapon} · ${state.weaponDurability} uses left`
     : 'Bare hands');
+  renderWeaponChoices(documentRoot, packedWeapons, state.actions, mutationPending);
   setText('surviveShelters', state.shelters);
   setText('surviveBeds', `${state.bedsInUse} / ${state.beds}`);
   setText('surviveBoats', state.boats);
@@ -139,6 +143,42 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
     : 'Give supplies to help another survivor. Their inventory must have room.');
 }
 
+function renderWeaponChoices(documentRoot, weapons, actions, pending) {
+  const choices = documentRoot.getElementById('surviveWeaponChoices');
+  if (!choices) return;
+  const signature = weapons.map(weapon => weapon.id).join(',');
+  if (choices.dataset.weapons !== signature) {
+    const focused = choices.contains(documentRoot.activeElement);
+    const rows = weapons.map(weapon => {
+      const row = documentRoot.createElement('p');
+      const button = documentRoot.createElement('button');
+      button.type = 'button';
+      button.dataset.equipmentAction = 'EQUIP_WEAPON';
+      button.dataset.itemId = weapon.id;
+      button.textContent = `Equip ${weapon.name} · +${weapon.damageBonus} damage · ${weapon.durability} uses left`;
+      row.append(button);
+      return row;
+    });
+    choices.replaceChildren(...rows);
+    const packedGear = documentRoot.getElementById('survivePackedGear');
+    packedGear.replaceChildren(...weapons.map(weapon => {
+      const item = documentRoot.createElement('li');
+      item.textContent = `${weapon.name} · ${weapon.durability} uses left`;
+      return item;
+    }));
+    packedGear.hidden = weapons.length === 0;
+    choices.dataset.weapons = signature;
+    if (focused) choices.parentElement.querySelector('summary').focus({ preventScroll: true });
+  }
+  for (const button of choices.querySelectorAll('button')) {
+    button.disabled = !actions.includes('EQUIP_WEAPON');
+    button.setAttribute('aria-disabled', String(pending));
+  }
+  const stow = documentRoot.getElementById('surviveStowWeapon');
+  stow.hidden = !actions.includes('STOW_WEAPON');
+  stow.setAttribute('aria-disabled', String(pending));
+}
+
 /** Serialize browser requests; failed mutations are never automatically repeated. */
 export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const joinForm = documentRoot.getElementById('surviveJoin');
@@ -159,6 +199,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const refresh = documentRoot.getElementById('surviveRefresh');
   const cancel = documentRoot.getElementById('surviveCancel');
   const giftForm = documentRoot.getElementById('surviveGift');
+  const equipment = documentRoot.getElementById('surviveEquipment');
   const game = documentRoot.getElementById('surviveGame');
   const log = documentRoot.getElementById('surviveGameLog');
   const logToggle = documentRoot.getElementById('surviveLogToggle');
@@ -270,6 +311,13 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       method: 'POST', body: JSON.stringify({ action, revision: state.revision, targetId }),
     }, action);
   }
+  const useEquipment = event => {
+    const button = event.target.closest('[data-equipment-action]');
+    if (button && !button.disabled && button.getAttribute('aria-disabled') !== 'true') {
+      performAction(button.dataset.equipmentAction, button.dataset.itemId);
+    }
+  };
+  equipment?.addEventListener('click', useEquipment);
   const showJoin = () => {
     joinForm.hidden = false;
     cancel.hidden = !state;
@@ -342,6 +390,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       menus.dispose();
       panel.dispose();
       party?.dispose();
+      equipment?.removeEventListener('click', useEquipment);
       controller.dispose();
       world.dispose();
       documentRoot.getElementById('surviveCampScene').removeEventListener('click', act);

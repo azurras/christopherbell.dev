@@ -131,10 +131,13 @@ public class SurviveService {
     var now = clock.instant();
     boolean fieldEngage = targetId != null && action == SurviveAction.ENGAGE && player.status == Status.EXPLORING;
     boolean talkAtWaystation = action == SurviveAction.TALK_WAYSTATION && player.status == Status.EXPLORING;
-    if (action == null || targetId != null && !fieldEngage
+    boolean equipping = action == SurviveAction.EQUIP_WEAPON;
+    if (action == null || targetId != null && !fieldEngage && !equipping
         || !fieldEngage && !talkAtWaystation && !world.actionsFor(player, now).contains(action)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That action is unavailable in the current state.");
     }
+    var selectedWeapon = equipping ? player.packedWeapons.stream().filter(weapon -> weapon.id().equals(targetId))
+        .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "That weapon is no longer in your pack.")) : null;
     if (!presence.permits(player.survivorId, action, now)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Walk to the action's landmark first.");
     }
@@ -167,7 +170,7 @@ public class SurviveService {
       } else if (fieldEngage) {
         world.engageFieldTarget(player, hunted.kind(), now);
       } else {
-        world.perform(action, player, now, rollPercent, pose != null, hunted == null ? null : hunted.kind());
+        world.perform(action, player, now, rollPercent, pose != null, hunted == null ? null : hunted.kind(), selectedWeapon);
       }
     }
     commitWorld();

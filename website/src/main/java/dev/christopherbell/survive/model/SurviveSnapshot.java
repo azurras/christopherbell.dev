@@ -14,7 +14,14 @@ public record SurviveSnapshot(
     int weaponDurability, SurviveEnemy enemy, int bedsInUse, int beds, boolean guarding,
     Instant nextStrikeAt, long millisecondsUntilStrike, int tacticalPoints, boolean defending, String combatOutcome,
     SurviveParty.View party, String weaponSkill, SurviveWaystation.Keeper waystationKeeper,
-    SurviveWaystation.Assignment waystationAssignment) {
+    SurviveWaystation.Assignment waystationAssignment, List<WeaponChoice> packedWeapons) {
+
+  /** Owned weapon choice and the stats shown in Main before equipping. */
+  public record WeaponChoice(String id, String name, int damageBonus, int durability) {
+    public static WeaponChoice from(SurvivePackedWeapon item) {
+      return new WeaponChoice(item.id(), item.weapon().displayName(), item.weapon().damageBonus(), item.durability());
+    }
+  }
 
   /** Public targeting identity only; it never authorizes control of the survivor. */
   public record Recipient(String survivorId, String name) {}
@@ -30,5 +37,6 @@ public record SurviveSnapshot(
     events = List.copyOf(events);
     actions = List.copyOf(actions);
     recipients = List.copyOf(recipients);
+    packedWeapons = List.copyOf(packedWeapons);
   }
 }

@@ -74,7 +74,8 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       long revision, String message, Integer stone, Integer hunger, SurviveEnemy enemy,
       SurviveWeapon weapon, Integer weaponDurability, Boolean guarding, Instant sleptAt, Boolean struckFirst,
       Instant nextStrikeAt, Integer tacticalPoints, Boolean defending, String combatOutcome,
-      Integer activeFullnessMilliseconds, SurviveWaystation.Assignment waystationAssignment) {
+      Integer activeFullnessMilliseconds, SurviveWaystation.Assignment waystationAssignment,
+      List<SurvivePackedWeapon> packedWeapons) {
     public Player {
       stone = stone == null ? 0 : stone;
       hunger = hunger == null ? 10 : hunger;
@@ -86,6 +87,7 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       defending = defending != null && defending;
       activeFullnessMilliseconds = activeFullnessMilliseconds == null ? 0 : activeFullnessMilliseconds;
       waystationAssignment = waystationAssignment == null ? SurviveWaystation.Assignment.AVAILABLE : waystationAssignment;
+      packedWeapons = packedWeapons == null ? List.of() : List.copyOf(packedWeapons);
       UUID.fromString(survivorId);
       if (accountId == null) {
         UUID.fromString(token);
@@ -101,7 +103,8 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
           || health < 0 || health > 10 || strength < 2 || strength > 20
           || stamina != strength + 8 || experience < 0 || experienceToNextLevel < 1
           || experienceToNextLevel != (1 << (strength - 2)) || experience >= experienceToNextLevel
-          || wood < 0 || food < 0 || stone < 0 || wood + food + stone > 10
+          || wood < 0 || food < 0 || stone < 0 || wood + food + stone + packedWeapons.size() > 10
+          || packedWeapons.stream().map(SurvivePackedWeapon::id).distinct().count() != packedWeapons.size()
           || hunger < 0 || hunger > 10 || status == null || (status == Status.DEAD) != (health == 0)
           || activeFullnessMilliseconds < 0 || activeFullnessMilliseconds >= 300_000
           || (status == Status.COMBAT) != (enemy != null) || (status == Status.COMBAT) != (enemyHealth > 0)

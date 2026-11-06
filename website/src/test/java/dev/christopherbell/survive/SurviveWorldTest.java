@@ -99,6 +99,32 @@ class SurviveWorldTest {
   }
 
   @Test
+  void craftingAndSwappingKeepBothWeaponsAndTheirCondition() {
+    world.players.put(player.survivorId, player);
+    player.wood = 4;
+    player.stone = 2;
+    perform(SurviveAction.CRAFT_CLUB, 1);
+    player.weaponDurability = 5;
+    perform(SurviveAction.CRAFT_AXE, 1);
+    assertEquals(SurviveWeapon.CLUB, player.weapon);
+    var axe = player.packedWeapons.getFirst();
+    world.perform(SurviveAction.EQUIP_WEAPON, player, DAY, () -> 1, false, null, axe);
+    assertEquals(SurviveWeapon.STONE_AXE, player.weapon);
+    var restored = SurviveWorld.restore(world.saveState(0L)).players.get(player.survivorId);
+    assertEquals(5, restored.packedWeapons.getFirst().durability());
+    assertEquals(SurviveWeapon.CLUB, restored.packedWeapons.getFirst().weapon());
+    assertEquals(12, restored.weaponDurability);
+    player.food = 9;
+    perform(SurviveAction.STOW_WEAPON, 1);
+    assertTrue(player.message.contains("pack is full"));
+    assertEquals(SurviveWeapon.STONE_AXE, player.weapon);
+    player.food--;
+    perform(SurviveAction.STOW_WEAPON, 1);
+    assertNull(player.weapon);
+    assertEquals(10, player.inventoryCount());
+  }
+
+  @Test
   void gatheringUsesChanceCapacityAndExponentialProgression() {
     perform(SurviveAction.GATHER, 51);
     assertEquals(0, player.wood);

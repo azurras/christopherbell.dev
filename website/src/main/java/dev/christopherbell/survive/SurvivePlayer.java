@@ -3,8 +3,11 @@ package dev.christopherbell.survive;
 import dev.christopherbell.survive.model.SurviveEnemy;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveWeapon;
+import dev.christopherbell.survive.model.SurvivePackedWeapon;
 import dev.christopherbell.survive.model.SurviveWaystation.Assignment;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /** Private survivor state, owned and mutated only under the world service's monitor. */
@@ -39,6 +42,7 @@ final class SurvivePlayer {
   Assignment waystationAssignment = Assignment.AVAILABLE;
   SurviveWeapon weapon;
   int weaponDurability;
+  final List<SurvivePackedWeapon> packedWeapons = new ArrayList<>();
   /** Standing watch at camp for the coming nightfall raid. */
   boolean guarding;
   /** When this survivor lay down in a shelter bed, present exactly while sleeping. */
@@ -59,7 +63,7 @@ final class SurvivePlayer {
   }
 
   int inventoryCount() {
-    return wood + food + stone;
+    return wood + food + stone + packedWeapons.size();
   }
 
   boolean hasInventorySpace() {

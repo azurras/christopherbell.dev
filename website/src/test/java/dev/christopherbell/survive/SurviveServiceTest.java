@@ -25,6 +25,26 @@ class SurviveServiceTest {
   private final Clock clock = Clock.fixed(Instant.parse("2026-10-06T01:00:00Z"), ZoneOffset.UTC);
 
   @Test
+  void equipRequiresAnOwnedPackEntryAndTheCurrentRevision() {
+    var repository = new InMemorySurviveWorldRepository();
+    var service = new SurviveService(Clock.fixed(SurviveClock.WORLD_EPOCH, ZoneOffset.UTC), () -> 25, 10, repository);
+    var scout = service.join(null, "Scout");
+    var state = scout.state();
+    for (int count = 0; count < 4; count++) {
+      state = service.act(scout.token(), SurviveAction.GATHER, state.revision());
+    }
+    state = service.act(scout.token(), SurviveAction.CRAFT_CLUB, state.revision());
+    var withSpare = service.act(scout.token(), SurviveAction.CRAFT_CLUB, state.revision());
+    var spare = withSpare.packedWeapons().getFirst();
+    assertThrows(ResponseStatusException.class, () -> service.actForOwner(scout.token(), null,
+        SurviveAction.EQUIP_WEAPON, withSpare.revision(), "unknown"));
+    var equipped = service.actForOwner(scout.token(), null, SurviveAction.EQUIP_WEAPON, withSpare.revision(), spare.id());
+    assertNotEquals(spare.id(), equipped.packedWeapons().getFirst().id());
+    assertThrows(ResponseStatusException.class, () -> service.actForOwner(scout.token(), null,
+        SurviveAction.EQUIP_WEAPON, withSpare.revision(), spare.id()));
+  }
+
+  @Test
   void fullnessUsesActiveTimeAcrossRestartsAndIgnoresTimeAway() {
     var joinedAt = SurviveClock.WORLD_EPOCH;
     var mutableClock = mock(Clock.class);
