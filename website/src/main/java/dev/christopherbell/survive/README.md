@@ -109,8 +109,9 @@ fleeing costs the enemy's bite. Camp actions are never ambushed.
 **Stone and weapons.** Gather stone succeeds 40% of the time and shares the
 10-slot inventory. One private weapon slot holds a club (2 wood, +1, 8 uses),
 stone axe (2 wood and 2 stone, +2, 12 uses, wood gathering 70%) or spear (3 wood
-and 3 stone, +3, 12 uses, no bite on the first attack of each fight). Crafting
-replaces the held weapon; each attack spends a use and the weapon breaks at 0.
+and 3 stone, +3, 12 uses, no bite on the first attack of each fight). Each attack
+spends a use. The weapon breaks at zero. See Main equipment slot for crafting
+and storage behavior.
 
 **Sleep.** Each shelter has two beds. Sleep is available at dusk or night when a
 bed is free; a sleeper can only Wake, recovering 1 health per 2 minutes asleep.
