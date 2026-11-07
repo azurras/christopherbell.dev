@@ -107,6 +107,42 @@ function worldFixture() {
 }
 const worldState = { survivorId: 'alice', name: 'Alice', phase: 'DAY', status: 'EXPLORING', shelters: 0, boats: 0, actions: [] };
 
+test('presence reconciliation starts one remote recoil and keeps its receipt time on repeated health', async context => {
+  let now = 1000;
+  context.mock.method(Date, 'now', () => now);
+  context.mock.method(performance, 'now', () => now);
+  const fixture = worldFixture();
+  let health = 10;
+  let drawn;
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({
+    self: { survivorId: 'alice', x: 0, z: 0, heading: 0, sequence: 1 }, accepted: true,
+    others: [{ survivorId: 'bob', name: 'Bob', x: 1, z: 0, heading: 0, status: 'COMBAT', appearance: { health } }],
+  }), () => {}, () => ({
+    draw(_position, _yaw, _state, others) {
+      drawn = others;
+      return { project: () => ({ visible: false }) };
+    }, dispose() {},
+  }));
+  try {
+    world.setState(worldState);
+    fixture.frame(now);
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.frame(now + 16);
+    assert.equal(drawn[0].hitAtSeconds, undefined);
+    health = 9;
+    now = 2000;
+    fixture.frame(now);
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.frame(now + 16);
+    assert.equal(drawn[0].hitAtSeconds, 2);
+    now = 3000;
+    fixture.frame(now);
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.frame(now + 16);
+    assert.equal(drawn[0].hitAtSeconds, 2);
+  } finally { world.dispose(); }
+});
+
 test('zoom resets and a locked camera tracks the acknowledged enemy without orbit input', async () => {
   const fixture = worldFixture();
   const world = mountSurviveWorld(fixture.documentRoot, async () => ({

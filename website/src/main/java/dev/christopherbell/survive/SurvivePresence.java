@@ -138,8 +138,8 @@ final class SurvivePresence {
     }
   }
 
-  /** Confirmed equipment and stance for drawing another survivor. */
-  public record Appearance(SurviveWeapon weapon, boolean engaged, boolean defending, SurviveStrike strike) {}
+  /** Confirmed equipment, stance and health for drawing another survivor's combat response. */
+  public record Appearance(SurviveWeapon weapon, boolean engaged, boolean defending, SurviveStrike strike, int health) {}
 
   /** Acknowledged pose, nearby players, and island-wide active presence count. */
   public record View(Pose self, List<Pose> others, boolean accepted, List<SurviveWildlife.Animal> wildlife,

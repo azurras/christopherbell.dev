@@ -47,14 +47,14 @@ class SurviveMovementServiceTest {
     var idle = service.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 0)).others().getFirst();
     assertEquals(fighter.state().survivorId(), idle.survivorId());
     assertEquals(Status.COMBAT, idle.status());
-    assertEquals(new SurvivePresence.Appearance(SurviveWeapon.CLUB, false, false, null), idle.appearance());
+    assertEquals(new SurvivePresence.Appearance(SurviveWeapon.CLUB, false, false, null, 10), idle.appearance());
 
     var engaged = service.act(fighter.token(), SurviveAction.ENGAGE, targeted.revision());
     var ready = service.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 1)).others().getFirst();
-    assertEquals(new SurvivePresence.Appearance(SurviveWeapon.CLUB, true, false, null), ready.appearance());
+    assertEquals(new SurvivePresence.Appearance(SurviveWeapon.CLUB, true, false, null, 10), ready.appearance());
     var guarded = service.act(fighter.token(), SurviveAction.DEFEND, engaged.revision());
     var braced = service.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 2)).others().getFirst();
-    assertEquals(new SurvivePresence.Appearance(SurviveWeapon.CLUB, true, true, null), braced.appearance());
+    assertEquals(new SurvivePresence.Appearance(SurviveWeapon.CLUB, true, true, null, 10), braced.appearance());
 
     service.act(fighter.token(), SurviveAction.DISENGAGE, guarded.revision());
     var stowed = service.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 3)).others().getFirst();
@@ -77,6 +77,8 @@ class SurviveMovementServiceTest {
     when(clock.instant()).thenReturn(strikeAt);
     var cue = timedService.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 0))
         .others().getFirst().appearance().strike();
+    assertEquals(9, timedService.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 1))
+        .others().getFirst().appearance().health());
     assertEquals(strikeAt, cue.at());
     assertEquals(engaged.revision() + 1, cue.revision());
     assertEquals(cue, repository.load().orElseThrow().players().getFirst().lastStrike());

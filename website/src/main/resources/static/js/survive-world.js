@@ -5,7 +5,7 @@ import { advancePosition, actionsAt, ACTION_LABELS, LANDMARKS, combatPosition, t
 import { groundHeight } from './survive-world-art.js';
 import { createWorldRenderer } from './survive-world-renderer.js';
 import { createWorldFeedback } from './survive-world-feedback.js';
-import { acceptRemoteStrike, enemyCountered, enemyCounterPose } from './survive-action-pose.js';
+import { acceptRemoteStrike, enemyCountered, enemyCounterPose, receivedCombatDamage } from './survive-action-pose.js';
 
 const FIELD_THREAT = { HOG: 'Low threat', WOLF: 'Dangerous', BEAR: 'Severe threat', RAIDER: 'Camp attacker' };
 const inEngageRange = (position, target) => Math.hypot(position.x - target.x, position.z - target.z) <= 5;
@@ -141,6 +141,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         others = snapshot.others.map(other => {
           const previous = previousOthers.get(other.survivorId);
           return { ...other, drawX: previous?.drawX ?? other.x, drawZ: previous?.drawZ ?? other.z,
+            hitAtSeconds: receivedCombatDamage(previous, other) ? receivedAtSeconds : previous?.hitAtSeconds,
             strike: acceptRemoteStrike(previous?.strike, other.appearance?.strike, receivedAtSeconds) };
         });
         const previousWildlife = new Map(wildlife.map(animal => [animal.id, animal]));
