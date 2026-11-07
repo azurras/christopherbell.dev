@@ -159,7 +159,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         }
         syncNameLabels();
         pulseInterval = Math.max(500, pulseInterval * 0.9);
-        feedback.textContent = `Live island · ${others.length + 1} online`;
+        feedback.textContent = `Live island · ${snapshot.onlineCount ?? others.length + 1} online`;
       } catch (error) {
         if (disposed || generation !== requestGeneration) return;
         connected = false;
