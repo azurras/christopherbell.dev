@@ -5,6 +5,7 @@ Owns browser-side behavior for server-rendered pages.
 ## What Lives Here
 
 - `survive.js` renders the Java-owned shared survival world and serializes commands; it owns no game rules. See the `survive` Java package README for the API and lifetime contract.
+- The viewport vitals card shows an accepted partner's HP and TP from the same game snapshot. Invitations, ended parties and older snapshots without vitals clear the partner row.
 - `survive-world-materials.js` paints the adventurer's eyes, brows and lips on the mirrored face chart when staging the shared actor atlas. Keep the paint coordinates paired with `adventurer.json` and `authored-actors.jpg` when changing those assets.
 
 - Page entry modules such as `home-feed.js`, `messages.js`, `profile.js`,

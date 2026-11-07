@@ -175,6 +175,24 @@ test('renders survivor and shared camp using text nodes and server allowed actio
   assert.ok(documentRoot.buttons.every(button => button.disabled));
 });
 
+test('shows only confirmed accepted party vitals and clears them when the party ends', () => {
+  const documentRoot = documentFixture();
+  const party = { state: 'MEMBER', name: '<b>Guard</b>', vitals: { health: 7, maxHealth: 10, tacticalPoints: 50 } };
+  const row = documentRoot.getElementById('surviveHudPartner');
+  renderSurviveState(documentRoot, { ...snapshot, party });
+  assert.equal(row.hidden, false);
+  assert.equal(documentRoot.getElementById('surviveHudPartnerName').textContent, '<b>Guard</b>');
+  assert.equal(documentRoot.getElementById('surviveHudPartnerHealth').textContent, 'HP 7/10');
+  assert.equal(documentRoot.getElementById('surviveHudPartnerTp').textContent, 'TP 50');
+  for (const nextParty of [{ ...party, state: 'INCOMING' }, { ...party, vitals: undefined }, null]) {
+    renderSurviveState(documentRoot, { ...snapshot, party: nextParty });
+    assert.equal(row.hidden, true);
+    assert.equal(documentRoot.getElementById('surviveHudPartnerName').textContent, '');
+    assert.equal(documentRoot.getElementById('surviveHudPartnerHealth').textContent, '');
+    assert.equal(documentRoot.getElementById('surviveHudPartnerTp').textContent, '');
+  }
+});
+
 test('serializes actions with the server revision and reconciles failure without replay', async () => {
   const documentRoot = documentFixture();
   const requests = [];

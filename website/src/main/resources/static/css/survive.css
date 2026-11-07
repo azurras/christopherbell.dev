@@ -227,6 +227,10 @@
 .survive-world-actions button::before { margin-right: .5rem; }
 .survive-game-vitals { display: flex; flex-wrap: wrap; gap: .15rem .65rem; padding: .35rem .55rem; font-variant-numeric: tabular-nums; }
 .survive-game-vitals strong { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.survive-party-vitals {
+  display: flex; flex-wrap: wrap; gap: inherit; width: 100%; min-width: 0;
+  border-top: 1px solid rgba(225, 232, 255, .28); margin-top: .15rem; padding-top: .25rem;
+}
 .survive-game-log { padding: .2rem .45rem; }
 .survive-log-scrollback { overflow: auto; max-height: 3.6rem; scrollbar-color: #8795b1 #172249; }
 .survive-game-log[data-expanded="true"] .survive-log-scrollback { max-height: min(36vh, 17rem); }

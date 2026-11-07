@@ -38,7 +38,9 @@ final class SurviveParties {
       return null;
     }
     var state = party.accepted() ? State.MEMBER : sentInvite ? State.OUTGOING : State.INCOMING;
-    return new SurviveParty.View(UUID.fromString(party.id()), partner.name, state);
+    var vitals = party.accepted()
+        ? new SurviveParty.MemberVitals(partner.health, SurvivePlayer.MAX_HEALTH, partner.tacticalPoints) : null;
+    return new SurviveParty.View(UUID.fromString(party.id()), partner.name, state, vitals);
   }
 
   void apply(SurvivePlayer survivor, SurviveRequests.Party request, Collection<SurvivePlayer> players, Instant now) {
