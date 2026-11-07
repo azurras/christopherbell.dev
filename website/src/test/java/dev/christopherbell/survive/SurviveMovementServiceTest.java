@@ -143,10 +143,13 @@ class SurviveMovementServiceTest {
     assertEquals(strikeAt, cue.at());
     assertEquals(engaged.revision() + 1, cue.revision());
     assertEquals(cue, repository.load().orElseThrow().players().getFirst().lastStrike());
+    assertEquals(cue, timedService.find(fighter.token()).orElseThrow().strike());
+    assertNull(timedService.find(observer.token()).orElseThrow().strike());
     assertEquals(cue, timedService.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 1))
         .others().getFirst().appearance().strike());
 
     when(clock.instant()).thenReturn(strikeAt.plusMillis(1400));
+    assertNull(timedService.find(fighter.token()).orElseThrow().strike());
     assertNull(timedService.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 2))
         .others().getFirst().appearance().strike());
     when(clock.instant()).thenReturn(strikeAt.plusSeconds(12));
