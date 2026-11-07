@@ -2,6 +2,7 @@ package dev.christopherbell.survive;
 
 import dev.christopherbell.survive.model.SurviveEnemy;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
+import dev.christopherbell.survive.model.SurviveStrike;
 import dev.christopherbell.survive.model.SurviveWeapon;
 import dev.christopherbell.survive.model.SurvivePackedWeapon;
 import dev.christopherbell.survive.model.SurviveWaystation.Assignment;
@@ -36,6 +37,7 @@ final class SurvivePlayer {
   boolean struckFirst;
   /** The next server-clock exchange, or null until the player explicitly engages. */
   Instant nextStrikeAt;
+  SurviveStrike lastStrike;
   int tacticalPoints;
   boolean defending;
   String combatOutcome;

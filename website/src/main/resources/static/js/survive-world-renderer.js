@@ -244,9 +244,14 @@ export function createWorldRenderer(canvas) {
         const nearestPlayers = others.map(other => ({ other, distance: Math.hypot(other.x - position.x, other.z - position.z) }))
           .filter(player => player.distance <= 60).sort((a, b) => a.distance - b.distance).slice(0, 24);
         for (const [index, { other, distance }] of nearestPlayers.entries()) {
-          const pose = combatStance(other.appearance?.engaged, other.appearance?.defending);
+          const strike = position.animate && other.strike ? actionPose({
+            action: other.strike.weaponSkill ? 'WEAPON_SKILL' : 'ATTACK',
+            ageSeconds: animationSeconds - other.strike.receivedAtSeconds,
+          }) : null;
+          const pose = strike || combatStance(other.appearance?.engaged, other.appearance?.defending);
+          const weapon = strike ? other.strike.weapon : other.appearance?.weapon;
           actors.avatar(other.x, other.z, other.heading, [0.34, 0.43, 0.45], other.status,
-            pose ? 0 : stride(other), other.appearance?.weapon, pose,
+            pose ? 0 : stride(other), weapon, pose,
             index < 6 && distance < 13, animationSeconds);
         }
         const keeper = state.waystationKeeper;

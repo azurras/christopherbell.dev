@@ -15,6 +15,14 @@ export function combatStance(engaged, defending = false) {
     : { kind: 'ready', progress: 0.5, weight: 0.75 };
 }
 
+/** Retain the last observed revision so repeated pulses cannot restart its animation. */
+export function acceptRemoteStrike(previous, strike, receivedAtSeconds) {
+  if (!strike || !Number.isSafeInteger(strike.revision) || strike.revision <= (previous?.revision ?? 0)) {
+    return previous;
+  }
+  return { ...strike, receivedAtSeconds };
+}
+
 /** Convert a confirmed command into a bounded, frame-rate-independent visual pose. */
 export function actionPose(gesture) {
   const definition = POSES[gesture?.action];

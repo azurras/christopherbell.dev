@@ -5,7 +5,7 @@ import { advancePosition, actionsAt, ACTION_LABELS, LANDMARKS, combatPosition, t
 import { groundHeight } from './survive-world-art.js';
 import { createWorldRenderer } from './survive-world-renderer.js';
 import { createWorldFeedback } from './survive-world-feedback.js';
-import { enemyCountered, enemyCounterPose, enemyDefeated, enemyFallPose } from './survive-action-pose.js';
+import { acceptRemoteStrike, enemyCountered, enemyCounterPose, enemyDefeated, enemyFallPose } from './survive-action-pose.js';
 
 const FIELD_THREAT = { HOG: 'Low threat', WOLF: 'Dangerous', BEAR: 'Severe threat', RAIDER: 'Camp attacker' };
 const inEngageRange = (position, target) => Math.hypot(position.x - target.x, position.z - target.z) <= 5;
@@ -139,10 +139,12 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         }
         connected = true;
         const previousOthers = new Map(others.map(other => [other.survivorId, other]));
-        others = snapshot.others.map(other => ({ ...other,
-          drawX: previousOthers.get(other.survivorId)?.drawX ?? other.x,
-          drawZ: previousOthers.get(other.survivorId)?.drawZ ?? other.z,
-        }));
+        const receivedAtSeconds = performance.now() / 1000;
+        others = snapshot.others.map(other => {
+          const previous = previousOthers.get(other.survivorId);
+          return { ...other, drawX: previous?.drawX ?? other.x, drawZ: previous?.drawZ ?? other.z,
+            strike: acceptRemoteStrike(previous?.strike, other.appearance?.strike, receivedAtSeconds) };
+        });
         const previousWildlife = new Map(wildlife.map(animal => [animal.id, animal]));
         wildlife = (snapshot.wildlife || []).map(animal => ({ ...animal,
           drawX: previousWildlife.get(animal.id)?.drawX ?? animal.x,
