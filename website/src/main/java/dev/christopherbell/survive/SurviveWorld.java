@@ -12,6 +12,7 @@ import dev.christopherbell.survive.model.SurviveSnapshot;
 import dev.christopherbell.survive.model.SurviveSnapshot.Phase;
 import dev.christopherbell.survive.model.SurviveSnapshot.Recipient;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
+import dev.christopherbell.survive.model.SurviveStrike;
 import dev.christopherbell.survive.model.SurviveWeapon;
 import dev.christopherbell.survive.model.SurviveWaystation;
 import dev.christopherbell.survive.model.SurviveWaystation.Assignment;
@@ -105,6 +106,7 @@ final class SurviveWorld {
       player.enemyHealth = stored.enemyHealth();
       player.struckFirst = stored.struckFirst();
       player.nextStrikeAt = stored.nextStrikeAt();
+      player.lastStrike = stored.lastStrike();
       player.tacticalPoints = stored.tacticalPoints();
       player.defending = stored.defending();
       player.combatOutcome = stored.combatOutcome();
@@ -131,7 +133,7 @@ final class SurviveWorld {
           player.status, player.revision, player.message, player.stone, player.hunger, player.enemy,
           player.weapon, player.weaponDurability, player.guarding, player.sleptAt, player.struckFirst,
           player.nextStrikeAt, player.tacticalPoints, player.defending, player.combatOutcome,
-          player.activeFullnessMilliseconds, player.waystationAssignment, player.packedWeapons, player.fishing);
+          player.activeFullnessMilliseconds, player.waystationAssignment, player.packedWeapons, player.lastStrike, player.fishing);
     }).toList();
     return new SurviveSavedWorld("shared", storageVersion, revision, shelters, boats, List.copyOf(events),
         storedPlayers, settledBoundaries, activeRaidNight, parties.save(), List.copyOf(fieldFights.values()));
@@ -165,9 +167,10 @@ final class SurviveWorld {
       }
       for (int round = 0; round < MAX_ELAPSED_ROUNDS && player.nextStrikeAt != null
           && !player.nextStrikeAt.isAfter(now); round++) {
-        player.nextStrikeAt = player.nextStrikeAt.plus(STRIKE_INTERVAL);
+        var strikeAt = player.nextStrikeAt;
+        player.nextStrikeAt = strikeAt.plus(STRIKE_INTERVAL);
         player.tacticalPoints = Math.min(MAX_TACTICAL_POINTS, player.tacticalPoints + 50);
-        String outcome = attack(player, (player.attackDamage() + 1) / 2, null, now);
+        String outcome = attack(player, (player.attackDamage() + 1) / 2, null, strikeAt);
         recordAction(player, outcome, true);
         changed = true;
       }
@@ -714,6 +717,7 @@ final class SurviveWorld {
   }
 
   private String strikeFieldEnemy(SurviveFieldFight fight, SurvivePlayer attacker, int damage, String skill, Instant now) {
+    attacker.lastStrike = new SurviveStrike(attacker.revision + 1, now, attacker.weapon, skill != null);
     int health = Math.max(0, fight.health() - damage);
     if (health > 0 && closesImpact(fight.skillOpening(), attacker, skill, now)) {
       health = Math.max(0, health - IMPACT_BONUS);
@@ -867,6 +871,7 @@ final class SurviveWorld {
     if (fieldFight != null) {
       return strikeFieldEnemy(fieldFight, player, damage, skill, now);
     }
+    player.lastStrike = new SurviveStrike(player.revision + 1, now, player.weapon, skill != null);
     var enemy = player.enemy;
     boolean reachSparesBite = !player.struckFirst && player.weapon != null && player.weapon.keepsFirstBiteAway();
     boolean defended = player.defending;

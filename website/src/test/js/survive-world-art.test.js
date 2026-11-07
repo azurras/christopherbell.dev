@@ -5,7 +5,7 @@ import { prepareActorArt } from '../../main/resources/static/js/survive-authored
 import { createDynamicMesh } from '../../main/resources/static/js/survive-dynamic-mesh.js';
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
 import { cameraMatrix, fishingFloat, fishingPhase, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
-import { actionPose, combatStance, enemyCountered, enemyCounterPose } from '../../main/resources/static/js/survive-action-pose.js';
+import { acceptRemoteStrike, actionPose, combatStance, enemyCountered, enemyCounterPose } from '../../main/resources/static/js/survive-action-pose.js';
 import { drawBoat, drawCampFlame, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
 
 test('dynamic frames upload the same vertices while reusing their allocated capacity', () => {
@@ -113,6 +113,16 @@ test('enemy motion requires a confirmed bite or guard and winds back before lung
   assert.equal(enemyCounterPose(0.11, true).recoil, 0);
   assert.ok(enemyCounterPose(0.43, true).recoil > 0.8);
   assert.equal(enemyCounterPose(0.76), null);
+});
+
+test('a remote strike is played once despite repeated or out-of-order presence responses', () => {
+  const strike = { revision: 14, weapon: 'CLUB', weaponSkill: true };
+  const observed = acceptRemoteStrike(undefined, strike, 10);
+  assert.deepEqual(observed, { ...strike, receivedAtSeconds: 10 });
+  assert.equal(acceptRemoteStrike(observed, strike, 10.5), observed);
+  assert.equal(acceptRemoteStrike(observed, { revision: 12 }, 11), observed);
+  assert.equal(acceptRemoteStrike(observed, null, 11.5), observed);
+  assert.equal(acceptRemoteStrike(observed, { ...strike, revision: 15 }, 12).receivedAtSeconds, 12);
 });
 
 test('a landed bite moves the authored torso without sliding the feet', () => {

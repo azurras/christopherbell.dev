@@ -75,7 +75,7 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       SurviveWeapon weapon, Integer weaponDurability, Boolean guarding, Instant sleptAt, Boolean struckFirst,
       Instant nextStrikeAt, Integer tacticalPoints, Boolean defending, String combatOutcome,
       Integer activeFullnessMilliseconds, SurviveWaystation.Assignment waystationAssignment,
-      List<SurvivePackedWeapon> packedWeapons, SurviveFishing fishing) {
+      List<SurvivePackedWeapon> packedWeapons, SurviveStrike lastStrike, SurviveFishing fishing) {
     public Player {
       stone = stone == null ? 0 : stone;
       hunger = hunger == null ? 10 : hunger;
@@ -113,7 +113,8 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
           || nextStrikeAt != null && status != Status.COMBAT || defending && nextStrikeAt == null
           || fishing != null && status != Status.EXPLORING
           || tacticalPoints < 0 || tacticalPoints > 300 || combatOutcome != null && combatOutcome.length() > 1024
-          || revision < 0 || message == null || message.length() > 1024) {
+          || revision < 0 || lastStrike != null && lastStrike.revision() > revision
+          || message == null || message.length() > 1024) {
         throw new IllegalArgumentException("Saved survivor progress is invalid.");
       }
     }

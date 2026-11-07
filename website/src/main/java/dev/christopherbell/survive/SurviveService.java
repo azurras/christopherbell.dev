@@ -228,11 +228,11 @@ public class SurviveService {
     var animals = new ArrayList<>(wildlife.roaming(now, world.raiderApproaching(now), world.reservedFieldRoutes()));
     animals.addAll(world.visibleFieldClaims(player, now));
     var encounter = claimedFight == null ? wildlife.encounter(player.survivorId) : SurviveWorld.fieldAnimal(claimedFight, false);
-    return view.withScene(player.status, describeVisiblePlayers(view.others()), animals, encounter);
+    return view.withScene(player.status, describeVisiblePlayers(view.others(), now), animals, encounter);
   }
 
   /** Resolve appearance from the settled world, even when the visible player has not sent another pulse. */
-  private List<SurvivePresence.Pose> describeVisiblePlayers(List<SurvivePresence.Pose> visiblePlayers) {
+  private List<SurvivePresence.Pose> describeVisiblePlayers(List<SurvivePresence.Pose> visiblePlayers, Instant now) {
     if (visiblePlayers.isEmpty()) {
       return visiblePlayers;
     }
@@ -253,7 +253,9 @@ public class SurviveService {
           heading = Math.atan2(target.x() - pose.x(), target.z() - pose.z());
         }
       }
-      var appearance = new SurvivePresence.Appearance(player.weapon, engaged, player.defending);
+      var strike = player.lastStrike;
+      var appearance = new SurvivePresence.Appearance(player.weapon, engaged, player.defending,
+          strike != null && strike.visibleAt(now) ? strike : null);
       describedPlayers.add(new SurvivePresence.Pose(pose.survivorId(), pose.name(), pose.x(), pose.z(),
           heading, pose.sequence(), player.status, appearance));
     }

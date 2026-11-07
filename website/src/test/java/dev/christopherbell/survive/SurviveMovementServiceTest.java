@@ -47,18 +47,48 @@ class SurviveMovementServiceTest {
     var idle = service.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 0)).others().getFirst();
     assertEquals(fighter.state().survivorId(), idle.survivorId());
     assertEquals(Status.COMBAT, idle.status());
-    assertEquals(new SurvivePresence.Appearance(SurviveWeapon.CLUB, false, false), idle.appearance());
+    assertEquals(new SurvivePresence.Appearance(SurviveWeapon.CLUB, false, false, null), idle.appearance());
 
     var engaged = service.act(fighter.token(), SurviveAction.ENGAGE, targeted.revision());
     var ready = service.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 1)).others().getFirst();
-    assertEquals(new SurvivePresence.Appearance(SurviveWeapon.CLUB, true, false), ready.appearance());
+    assertEquals(new SurvivePresence.Appearance(SurviveWeapon.CLUB, true, false, null), ready.appearance());
     var guarded = service.act(fighter.token(), SurviveAction.DEFEND, engaged.revision());
     var braced = service.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 2)).others().getFirst();
-    assertEquals(new SurvivePresence.Appearance(SurviveWeapon.CLUB, true, true), braced.appearance());
+    assertEquals(new SurvivePresence.Appearance(SurviveWeapon.CLUB, true, true, null), braced.appearance());
 
     service.act(fighter.token(), SurviveAction.DISENGAGE, guarded.revision());
     var stowed = service.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 3)).others().getFirst();
     assertEquals(idle, stowed);
+  }
+
+  @Test
+  void observerGetsCommittedStrikeOnceByRevisionAndNoCueForOldRounds() {
+    var start = SurviveClock.WORLD_EPOCH;
+    var clock = mock(Clock.class);
+    when(clock.instant()).thenReturn(start);
+    var timedService = new SurviveService(clock, () -> 50, 10, repository);
+    var fighter = timedService.join(null, "Fighter");
+    var observer = timedService.join(null, "Observer");
+    var targeted = timedService.act(fighter.token(), SurviveAction.HUNT, fighter.state().revision());
+    var engaged = timedService.act(fighter.token(), SurviveAction.ENGAGE, targeted.revision());
+    timedService.pulseForOwner(fighter.token(), null, new SurviveMovement(0, 0, 0, 0));
+
+    var strikeAt = engaged.nextStrikeAt();
+    when(clock.instant()).thenReturn(strikeAt);
+    var cue = timedService.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 0))
+        .others().getFirst().appearance().strike();
+    assertEquals(strikeAt, cue.at());
+    assertEquals(engaged.revision() + 1, cue.revision());
+    assertEquals(cue, repository.load().orElseThrow().players().getFirst().lastStrike());
+    assertEquals(cue, timedService.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 1))
+        .others().getFirst().appearance().strike());
+
+    when(clock.instant()).thenReturn(strikeAt.plusMillis(1400));
+    assertNull(timedService.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 2))
+        .others().getFirst().appearance().strike());
+    when(clock.instant()).thenReturn(strikeAt.plusSeconds(12));
+    assertNull(timedService.pulseForOwner(observer.token(), null, new SurviveMovement(0, 0, 0, 3))
+        .others().getFirst().appearance().strike());
   }
 
   @Test
