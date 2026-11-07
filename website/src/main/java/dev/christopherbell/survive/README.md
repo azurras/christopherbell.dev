@@ -204,6 +204,9 @@ character. It returns `self`, `others`, `accepted`, `wildlife`, `encounter` and
 position. The online count includes active players elsewhere on the island.
 Visible players in `others` carry their equipped weapon type, engagement and
 guard state from the settled world. An engaged player faces their known encounter.
+The most recent strike cue is committed with the damage and only included in
+presence for 1.4 seconds after the strike's effective time. Older saves have no
+cue until their next strike. Presence never publishes old rounds as new swings.
 Coordinates are finite, inside
 78 metres, with heading in radians and a nonnegative sequence. The server bounds
 speed, rejects stale sequences and prevents movement outside EXPLORING. Pulses

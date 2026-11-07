@@ -3,6 +3,7 @@ package dev.christopherbell.survive;
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveMovement;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
+import dev.christopherbell.survive.model.SurviveStrike;
 import dev.christopherbell.survive.model.SurviveWaystation;
 import dev.christopherbell.survive.model.SurviveWeapon;
 import java.time.Duration;
@@ -138,7 +139,7 @@ final class SurvivePresence {
   }
 
   /** Confirmed equipment and stance for drawing another survivor. */
-  public record Appearance(SurviveWeapon weapon, boolean engaged, boolean defending) {}
+  public record Appearance(SurviveWeapon weapon, boolean engaged, boolean defending, SurviveStrike strike) {}
 
   /** Acknowledged pose, nearby players, and island-wide active presence count. */
   public record View(Pose self, List<Pose> others, boolean accepted, List<SurviveWildlife.Animal> wildlife,
