@@ -1,7 +1,8 @@
 /** Owns 3D input, prediction, acknowledged live presence, labels and cleanup for one page. */
 import { API } from './lib/api.js';
 import { appendSurviveLogMessage } from './survive-log.js';
-import { advancePosition, actionsAt, ACTION_LABELS, LANDMARKS, combatPosition, targetActionsFor } from './survive-world-model.js';
+import { advancePosition, actionsAt, ACTION_LABELS, LANDMARKS, combatPosition, fishingFloat, fishingPhase,
+  targetActionsFor } from './survive-world-model.js';
 import { groundHeight } from './survive-world-art.js';
 import { createWorldRenderer } from './survive-world-renderer.js';
 import { createWorldFeedback } from './survive-world-feedback.js';
@@ -24,6 +25,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   const mapSection = documentRoot.getElementById('surviveMapSection');
   const locationLabel = documentRoot.getElementById('surviveWorldLocation');
   const target = documentRoot.getElementById('surviveWorldEnemyMarker');
+  const fishingCue = documentRoot.getElementById('surviveFishingCue');
   let renderer;
   function releasePresence() {
     return requestJson(API.survive.leaveIsland, { method: 'POST', body: '{}', redirectOnUnauthorized: false,
@@ -73,6 +75,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   let enemyCounter = null;
   let lastCombatEnemy = null;
   let defeatedEnemy = null;
+  let fishingDeadlines = null;
   let pulsePromise = null;
   let controller = null;
   let nextPulseAt = 0;
@@ -219,6 +222,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   }
 
   async function interact(action) {
+    if (action === 'REEL_IN' && fishingPhase(fishingDeadlines, Date.now()) !== 'bite') return;
     if (state?.status === 'COMBAT') {
       if (action === 'SELECT_TARGET') {
         selectTarget();
@@ -267,7 +271,10 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
 
   function updateActions() {
     const selected = wildlife.find(animal => animal.id === fieldTargetId);
+    const fishing = fishingPhase(fishingDeadlines, Date.now());
     const available = state?.status === 'COMBAT' ? targetActionsFor(state, targetSelected)
+      : state?.fishing ? actionsAt(position, state.actions, wildlife)
+        .filter(action => action !== 'REEL_IN' || fishing === 'bite')
       : state?.status === 'EXPLORING' && selected ? ['CHECK_TARGET',
         ...(selected.joinable !== false && inEngageRange(position, selected) ? ['ENGAGE'] : [])]
       : state ? [...(state.status === 'EXPLORING' && canTalkAt(position) ? ['TALK_WAYSTATION'] : []),
@@ -287,6 +294,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     commandButton.hidden = available.length === 0;
     if (!available.length) closeCommands();
     const focusedAction = documentRoot.activeElement?.dataset?.worldAction;
+    const nextFocus = focusedAction === 'CANCEL_FISHING' && available.includes('REEL_IN') ? 'REEL_IN' : focusedAction;
     const buttons = available.map(action => {
       const button = documentRoot.createElement('button');
       button.type = 'button';
@@ -297,8 +305,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       return button;
     });
     actionList.replaceChildren(...buttons);
-    if (focusedAction) {
-      (buttons.find(button => button.dataset.worldAction === focusedAction) || buttons[0] || canvas).focus({ preventScroll: true });
+    if (nextFocus) {
+      (buttons.find(button => button.dataset.worldAction === nextFocus) || buttons[0] || canvas).focus({ preventScroll: true });
     }
   }
 
@@ -466,11 +474,22 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       const fall = defeatedEnemy && !motionPreference?.matches
         ? enemyFallPose((Date.now() - defeatedEnemy.at) / 1000) : null;
       if (!fall) defeatedEnemy = null;
-      const rendered = renderer.draw({ ...position, moving, animate: !motionPreference?.matches }, yaw, state,
+      const fishing = fishingPhase(fishingDeadlines, Date.now());
+      const rendered = renderer.draw({ ...position, moving, fishing, animate: !motionPreference?.matches }, yaw, state,
         others.map(other => ({ ...other, x: other.drawX, z: other.drawZ })), timestamp / 1000,
         wildlife.map(animal => ({ ...animal, x: animal.drawX, z: animal.drawZ })), enemy, pose, cameraZoom, counter,
         fall ? { ...defeatedEnemy, fall } : null);
       worldFeedback.draw(rendered.project, enemy);
+      if (fishingCue) {
+        const float = fishing ? rendered.project(fishingFloat(position.x, position.z)) : null;
+        fishingCue.hidden = !float?.visible;
+        const message = fishing === 'bite' ? 'Bite! Reel in' : 'Line cast';
+        if (float) {
+          if (fishingCue.textContent !== message) fishingCue.textContent = message;
+          fishingCue.style.left = `${(float.x + 1) * 50}%`;
+          fishingCue.style.top = `${(1 - float.y) * 50}%`;
+        }
+      }
       for (const label of desiredNameLabels) {
         const animal = wildlife.find(candidate => candidate.id === label.id);
         const x = animal?.drawX ?? label.x;
@@ -570,6 +589,17 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         defeatedEnemy = null;
         stopWalking();
         nextPulseAt = 0;
+      }
+      if (state !== nextState) {
+        const now = Date.now();
+        if (nextState?.fishing && !state?.fishing && connected) {
+          yaw = Math.atan2(position.x, position.z) + Math.PI;
+          stopWalking();
+        }
+        fishingDeadlines = nextState?.fishing ? {
+          biteAt: now + nextState.fishing.millisecondsUntilBite,
+          escapeAt: now + nextState.fishing.millisecondsUntilEscape,
+        } : null;
       }
       state = nextState;
       busy = isBusy;
