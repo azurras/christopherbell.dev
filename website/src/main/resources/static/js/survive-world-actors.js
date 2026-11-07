@@ -1,5 +1,6 @@
 /** Articulated adventurers and species-specific animal silhouettes for the world renderer. */
 import { drawActorArt } from './survive-authored-actors.js';
+import { fishingFloat } from './survive-world-model.js';
 
 const CLOTH = 5.5;
 const LEATHER = 6.5;
@@ -190,7 +191,8 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
           toolHand[2] + cos * length * 0.73];
         beam(toolHand, tip, 0.043, 0.023, [0.49, 0.34, 0.20], 5);
         if (tool === 'fish') {
-          const float = [x + sin * 13, -0.59, z + cos * 13];
+          const float = fishingFloat(x, z, heading, action.lineDistance);
+          float[1] -= action.bobberDip ?? 0;
           beam(tip, float, 0.016, 0.013, [0.70, 0.68, 0.51], 3);
           ellipsoid(...float, 0.095, 0.13, 0.095, [0.77, 0.27, 0.16], 6, 3);
         } else {

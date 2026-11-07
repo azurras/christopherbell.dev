@@ -5,7 +5,7 @@ import { drawBoat, drawCampFlame, drawShelter } from './survive-world-props.js';
 import { actionPose, combatStance, hitRecoil } from './survive-action-pose.js';
 import { prepareActorArt } from './survive-authored-actors.js';
 import { createDynamicMesh } from './survive-dynamic-mesh.js';
-import { cameraMatrix, projectPoint } from './survive-world-model.js';
+import { cameraMatrix, fishingHeading, projectPoint } from './survive-world-model.js';
 import { fetchJson } from './lib/util.js';
 
 const VERTEX_SHADER = `
@@ -230,12 +230,15 @@ export function createWorldRenderer(canvas) {
         dynamicMesh.reset();
         const actors = materials.authoredActorsReady ? authoredActors : fallbackActors;
         const stride = avatar => avatar.moving ? Math.sin(animationSeconds * 11) : 0;
-        const pose = actionPose(gesture)
+        const fishingPose = position.fishing ? { kind: 'fish', progress: 0.14, weight: 0.65,
+          bobberDip: position.fishing === 'bite' && position.animate
+            ? 0.17 * (1 + Math.sin(animationSeconds * 14)) : 0 } : null;
+        const pose = actionPose(gesture) || fishingPose
           || combatStance(state.status === 'COMBAT' && state.nextStrikeAt, state.defending)
           || (state.status === 'SLEEPING' && position.animate
             ? { kind: 'sleep', weight: Math.sin(animationSeconds * 2.6) } : null);
         const restingHeading = position.x === 0 && position.z === 0 ? Math.PI : position.heading;
-        const heading = pose?.kind === 'fish' ? Math.atan2(position.x, position.z)
+        const heading = pose?.kind === 'fish' ? fishingHeading(position.x, position.z)
           : state.status === 'COMBAT' ? Math.atan2(enemy.x - position.x, enemy.z - position.z) : restingHeading;
         const playerPose = counter?.recoil ? { ...pose, recoil: counter.recoil } : pose;
         actors.avatar(position.x, position.z, heading, [0.24, 0.31, 0.42], state.status,
