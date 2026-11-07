@@ -193,6 +193,13 @@ Check reports its threat in chat. Engage within five metres to start timed
 combat with the chosen creature. If it moves away or another player claims it,
 the command fails without switching targets. Untargeted Hunt remains available
 through the existing action path.
+In a shared roaming fight, damage adds durable and fading enmity to the striker.
+The next surviving exchange counters the living fighter with the highest combined
+score. Ties favor the earlier participant. The target's guard can block the bite,
+and taking damage reduces durable enmity. Fading points are evaluated at the actual
+strike deadline, including catch-up. Both players get the counter result in chat.
+The saved fight retains enmity and drops it when a fighter leaves or the enemy falls.
+Old saves start with empty scores. Personal encounters retain their existing exchange.
 Existing hunger, combat, weapons, day/night, raids, gifts and durable progress remain
 Java-owned. Rendering does not award supplies. Saved characters and inventory retain
 the existing Mongo representation; no position schema is added.
