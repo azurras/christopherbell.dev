@@ -8,6 +8,7 @@ import dev.christopherbell.survive.model.SurviveWaystation;
 import dev.christopherbell.survive.model.SurviveWeapon;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,8 @@ final class SurvivePresence {
   private static final Duration SESSION_TIMEOUT = Duration.ofHours(2);
   private static final int CAPACITY = 1000;
   private static final double SPEED_PER_SECOND = 6.5;
+  // The renderer draws players out to 60 m. This margin lets it interpolate boundary crossings.
+  private static final double POSE_RADIUS_METRES = 64;
   private final Map<String, TrackedPose> poses = new HashMap<>();
 
   View pulse(String survivorId, String name, Status status, SurviveMovement movement, Instant now) {
@@ -26,13 +29,15 @@ final class SurvivePresence {
 
   View pulse(String survivorId, String name, Status status, SurviveMovement movement, Instant now,
       SurviveWildlife.Animal savedEncounter) {
-    poses.values().removeIf(pose -> !pose.seenAt().isAfter(now.minus(SESSION_TIMEOUT)));
+    var sessionDeadline = now.minus(SESSION_TIMEOUT);
+    var visibleDeadline = now.minus(VISIBLE_TIMEOUT);
+    poses.values().removeIf(pose -> !pose.seenAt().isAfter(sessionDeadline));
     var previous = poses.get(survivorId);
     if (previous == null && poses.size() >= CAPACITY) {
       throw new org.springframework.web.server.ResponseStatusException(
           org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "The island is full. Try again later.");
     }
-    boolean reconnecting = previous == null || !previous.seenAt().isAfter(now.minus(VISIBLE_TIMEOUT));
+    boolean reconnecting = previous == null || !previous.seenAt().isAfter(visibleDeadline);
     boolean accepted = true;
     TrackedPose current;
     if (reconnecting) {
@@ -55,11 +60,22 @@ final class SurvivePresence {
           accepted ? movement.heading() : previous.pose().heading(), movement.sequence(), status), now, now);
     }
     poses.put(survivorId, current);
-    var others = poses.values().stream()
-        .filter(pose -> !pose.pose().survivorId().equals(survivorId)
-            && pose.seenAt().isAfter(now.minus(VISIBLE_TIMEOUT)))
-        .map(TrackedPose::pose).toList();
-    return new View(current.pose(), others, accepted, List.of(), null);
+    var acknowledged = current.pose();
+    var others = new ArrayList<Pose>();
+    int onlineCount = 0;
+    for (var tracked : poses.values()) {
+      if (!tracked.seenAt().isAfter(visibleDeadline)) {
+        continue;
+      }
+      onlineCount++;
+      var pose = tracked.pose();
+      double dx = pose.x() - acknowledged.x();
+      double dz = pose.z() - acknowledged.z();
+      if (!pose.survivorId().equals(survivorId) && dx * dx + dz * dz <= POSE_RADIUS_METRES * POSE_RADIUS_METRES) {
+        others.add(pose);
+      }
+    }
+    return new View(acknowledged, others, accepted, List.of(), null, onlineCount);
   }
 
   Pose activePose(String survivorId, Instant now) {
@@ -130,9 +146,9 @@ final class SurvivePresence {
   /** Confirmed equipment and stance for drawing another survivor. */
   public record Appearance(SurviveWeapon weapon, boolean engaged, boolean defending, SurviveStrike strike) {}
 
-  /** The sender's acknowledged pose and currently visible other players. */
+  /** Acknowledged pose, nearby players, and island-wide active presence count. */
   public record View(Pose self, List<Pose> others, boolean accepted, List<SurviveWildlife.Animal> wildlife,
-                     SurviveWildlife.Animal encounter) {
+                     SurviveWildlife.Animal encounter, int onlineCount) {
     public View {
       others = List.copyOf(others);
       wildlife = List.copyOf(wildlife);
@@ -141,7 +157,7 @@ final class SurvivePresence {
     View withScene(Status status, List<Pose> visiblePlayers, List<SurviveWildlife.Animal> animals,
         SurviveWildlife.Animal target) {
       return new View(new Pose(self.survivorId(), self.name(), self.x(), self.z(), self.heading(), self.sequence(), status),
-          visiblePlayers, accepted, animals, target);
+          visiblePlayers, accepted, animals, target, onlineCount);
     }
   }
 
