@@ -286,6 +286,9 @@ public class RateLimitFilterTest {
     var properties = new RateLimitProperties();
     for (var rule : properties.getRules()) {
       if ("survive-movement".equals(rule.getName())) {
+        assertEquals(250, rule.getCapacity());
+        assertEquals(Duration.ofSeconds(5), rule.getWindow());
+        assertEquals(List.of("POST"), rule.getMethods());
         rule.setCapacity(1);
         rule.setWindow(Duration.ofMinutes(1));
       } else if ("api-mutations".equals(rule.getName())) {

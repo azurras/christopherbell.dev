@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.IntSupplier;
@@ -31,6 +32,8 @@ public class SurviveService {
   static final Duration IDLE_TIMEOUT = Duration.ofHours(2);
   private SurviveWorld world;
   private Long storageVersion;
+  private SurviveSavedWorld indexedMovementWorld;
+  private volatile Map<String, Instant> movementOwners = Map.of();
   private final SurviveWorldRepository repository;
   private final Clock clock;
   private final IntSupplier rollPercent;
@@ -189,13 +192,22 @@ public class SurviveService {
   }
 
   /** Acknowledges movement and commits a new hostile encounter only after verified proximity. */
-  public synchronized SurvivePresence.View pulseForOwner(String token, String accountId,
+  public SurvivePresence.View pulseForOwner(String token, String accountId,
       dev.christopherbell.survive.model.SurviveMovement movement) {
+    String owner = ownerKey(token, accountId);
+    requireMovementAdmission(owner);
+    return pulseAdmittedOwner(owner, movement);
+  }
+
+  private synchronized SurvivePresence.View pulseAdmittedOwner(String owner,
+      dev.christopherbell.survive.model.SurviveMovement movement) {
+    // A replacement can commit while this pulse waits for the world monitor.
+    requireMovementAdmission(owner);
     restoreSettledWorld(repository.loadForMovement().orElseGet(SurviveSavedWorld::empty));
-    var player = world.players.get(ownerKey(token, accountId));
+    var player = world.players.get(owner);
     var now = clock.instant();
     if (player == null || !player.lastSeen.isAfter(now.minus(IDLE_TIMEOUT))) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Your survivor expired. Rejoin the camp.");
+      throw movementOwnerUnavailable();
     }
     var currentFight = world.fieldFightFor(player);
     var view = presence.pulse(player.survivorId, player.name, player.status, movement, now,
@@ -365,6 +377,7 @@ public class SurviveService {
   private void restoreSettledWorld(SurviveSavedWorld saved) {
     world = SurviveWorld.restore(saved);
     storageVersion = saved.version();
+    indexMovementOwners(saved);
     var now = clock.instant();
     boolean worldAdvanced = world.settleUntil(now);
     boolean combatAdvanced = world.settleCombatUntil(now);
@@ -376,10 +389,31 @@ public class SurviveService {
 
   private void commitWorld() {
     try {
-      storageVersion = repository.save(world.saveState(storageVersion)).version();
+      var saved = repository.save(world.saveState(storageVersion));
+      storageVersion = saved.version();
+      indexMovementOwners(saved);
     } catch (OptimisticLockingFailureException changed) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "The world changed. Refresh before acting again.", changed);
     }
+  }
+
+  /** Publish only owners from durable snapshots, without rebuilding the index on an unchanged pulse. */
+  private void indexMovementOwners(SurviveSavedWorld saved) {
+    if (indexedMovementWorld == saved) return;
+    movementOwners = saved.players().stream().collect(Collectors.toUnmodifiableMap(
+        player -> ownerKey(player.token(), player.accountId()), SurviveSavedWorld.Player::lastSeen));
+    indexedMovementWorld = saved;
+  }
+
+  private void requireMovementAdmission(String owner) {
+    var lastSeen = owner == null ? null : movementOwners.get(owner);
+    if (lastSeen == null || !lastSeen.isAfter(clock.instant().minus(IDLE_TIMEOUT))) {
+      throw movementOwnerUnavailable();
+    }
+  }
+
+  private static ResponseStatusException movementOwnerUnavailable() {
+    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Refresh your survivor before moving.");
   }
 
   private SurviveSnapshot snapshotFor(SurvivePlayer player) {
