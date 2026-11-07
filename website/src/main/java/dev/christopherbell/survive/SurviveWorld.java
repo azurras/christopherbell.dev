@@ -152,7 +152,8 @@ final class SurviveWorld {
         player.nextStrikeAt, player.nextStrikeAt == null ? 0 : Math.max(0, Duration.between(now, player.nextStrikeAt).toMillis()),
         player.tacticalPoints, player.defending, player.combatOutcome, parties.viewFor(player, players.values(), now),
         weaponSkillFor(player.weapon), SurviveWaystation.KEEPER, player.waystationAssignment,
-        player.packedWeapons.stream().map(SurviveSnapshot.WeaponChoice::from).toList());
+        player.packedWeapons.stream().map(SurviveSnapshot.WeaponChoice::from).toList(),
+        player.lastStrike != null && player.lastStrike.visibleAt(now) ? player.lastStrike : null);
   }
 
   /** Settles elapsed fights even when their participants did not send any requests. */
