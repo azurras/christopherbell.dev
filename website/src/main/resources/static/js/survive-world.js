@@ -70,6 +70,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   let encounter = null;
   let approachStartedAt = null;
   let gesture = null;
+  let observedStrike = null;
   let enemyCounter = null;
   let pulsePromise = null;
   let controller = null;
@@ -517,14 +518,19 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     setState(nextState, isBusy = false) {
       if (disposed) return;
       worldFeedback.acceptState(nextState);
+      const sameSurvivor = state?.survivorId === nextState?.survivorId;
+      const confirmedStrike = acceptRemoteStrike(sameSurvivor ? observedStrike : null, nextState?.strike, 0);
       if (enemyCountered(state, nextState)) {
         enemyCounter = { at: Date.now(), landed: nextState.health < state.health };
       }
-      if (nextState && state?.survivorId === nextState.survivorId && state.nextStrikeAt
+      if (sameSurvivor && confirmedStrike && confirmedStrike !== observedStrike) {
+        gesture = { action: confirmedStrike.weaponSkill ? 'WEAPON_SKILL' : 'ATTACK', at: Date.now() };
+      } else if (nextState && !Object.hasOwn(nextState, 'strike') && sameSurvivor && state.nextStrikeAt
           && nextState.revision > state.revision && nextState.enemyHealth < state.enemyHealth
           && (nextState.status === 'COMBAT' || nextState.combatOutcome?.startsWith('You defeated '))) {
         gesture = { action: 'ATTACK', at: Date.now() };
       }
+      observedStrike = confirmedStrike;
       if (nextState?.status !== 'COMBAT' || state?.survivorId !== nextState.survivorId || state?.enemy !== nextState.enemy) {
         enemyCounter = null;
         targetSelected = false;
