@@ -29,6 +29,34 @@ class SurviveWorldTest {
   private final SurvivePlayer player = new SurvivePlayer("Chris", Instant.EPOCH);
 
   @Test
+  void weaponDelaySchedulesAutomaticStrikesAndChangesAfterBreakage() {
+    world.players.put("scout", player);
+    for (var weapon : SurviveWeapon.values()) {
+      player.weapon = weapon;
+      player.weaponDurability = 2;
+      player.startFighting(SurviveEnemy.BEAR);
+      world.perform(SurviveAction.ENGAGE, player, DAY, () -> 50);
+      var firstStrike = DAY.plusMillis(weapon.attackDelayMilliseconds());
+      assertEquals(firstStrike, player.nextStrikeAt);
+      world.settleCombatUntil(firstStrike.minusMillis(1));
+      assertEquals(0, player.tacticalPoints);
+      world.settleCombatUntil(firstStrike);
+      assertEquals(50, player.tacticalPoints);
+      assertEquals(firstStrike.plusMillis(weapon.attackDelayMilliseconds()), player.nextStrikeAt);
+      player.stopFighting();
+      player.tacticalPoints = 0;
+      player.health = 10;
+    }
+    player.weapon = SurviveWeapon.CLUB;
+    player.weaponDurability = 1;
+    player.startFighting(SurviveEnemy.BEAR);
+    world.perform(SurviveAction.ENGAGE, player, DAY, () -> 50);
+    world.settleCombatUntil(DAY.plusMillis(3200));
+    assertNull(player.weapon);
+    assertEquals(DAY.plusMillis(6200), player.nextStrikeAt);
+  }
+
+  @Test
   void waystationCreditsAContributingPartyAndRewardsEachSurvivorOnce() {
     var guard = startSkillchainFight();
     for (var survivor : List.of(player, guard)) {
