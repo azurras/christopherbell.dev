@@ -94,8 +94,18 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
     const sin = Math.sin(heading);
     const crouch = action?.kind === 'rest' ? action.weight * 0.38 : 0;
     const recoil = action?.recoil ?? 0;
+    const fall = action?.kind === 'fall' ? action : null;
+    const fallPitch = fall ? fall.weight * Math.PI * 0.5 : 0;
+    const fallCos = fall ? Math.cos(fallPitch) : 1;
+    const fallSin = fall ? Math.sin(fallPitch) : 0;
     const pose = (across, height, forward = 0) => {
       if (resting) return [x + across * cos + height * sin, y + 0.31 + forward, z - across * sin + height * cos];
+      if (fall) {
+        const offset = forward * fallCos - height * fallSin;
+        return [x + across * cos + offset * sin,
+          y + height * fallCos + forward * fallSin + 0.22 * fall.weight - 0.48 * fall.sink,
+          z - across * sin + offset * cos];
+      }
       // Lean away from contact above the hips, keeping the same ground contact.
       const lean = recoil ? recoil * Math.max(0, height - 1.18) : 0;
       const offset = forward - lean * 0.29;
@@ -213,21 +223,28 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
       }
     }
   }
-  function animal(x, z, kind, scale = 1, heading = 0, stride = 0, recoil = 0, detailed = true, seconds = 0) {
+  function animal(x, z, kind, scale = 1, heading = 0, stride = 0, recoil = 0, detailed = true, seconds = 0, fall = null) {
     const y = groundHeight(x, z);
     const model = ANIMALS[kind] || ANIMALS.HOG;
     const sin = Math.sin(heading);
     const cos = Math.cos(heading);
     const bob = Math.abs(stride) * 0.04;
-    const p = (forward, height, across = 0) => [x + ((forward - recoil * 0.22) * sin + across * cos) * scale,
-      y + height * scale, z + ((forward - recoil * 0.22) * cos - across * sin) * scale];
+    const roll = fall ? fall.weight * Math.PI * 0.49 : 0;
+    const rollCos = fall ? Math.cos(roll) : 1;
+    const rollSin = fall ? Math.sin(roll) : 0;
+    const p = (forward, height, across = 0) => {
+      const side = fall ? across * rollCos - height * rollSin : across;
+      const lift = fall ? height * rollCos + across * rollSin + 0.38 * fall.weight - 0.7 * fall.sink : height;
+      const length = forward - recoil * 0.22;
+      return [x + (length * sin + side * cos) * scale, y + lift * scale, z + (length * cos - side * sin) * scale];
+    };
     const axis = (across, forward, height) => p(forward, height + bob, across);
     const fur = model.color;
     const material = kind === 'WOLF' ? WOLF_FUR : BROWN_FUR;
     const sides = detailed ? 14 : 8;
     const part = (point, width, height, depth, color, texture = 0) =>
       ellipsoid(...p(...point), width * scale, height * scale, depth * scale, color, detailed ? 9 : 6, 4, heading, texture);
-    groundShadow(x, z, 0.92 * scale, 0.46 * scale);
+    if (!fall?.sink) groundShadow(x, z, 0.92 * scale, 0.46 * scale);
     const authored = actorArt?.[kind === 'HOG' ? 'boar' : kind?.toLowerCase()];
     if (authored) {
       const clip = stride !== 0 ? 'walk' : 'idle';

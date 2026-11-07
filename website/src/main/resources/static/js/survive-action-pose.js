@@ -53,3 +53,17 @@ export function enemyCounterPose(ageSeconds, landed = false) {
   const recoil = landed ? Math.sin(impact ** 0.55 * Math.PI) : 0;
   return { kind: 'strike', progress, weight: Math.max(0, forward / 0.61), forward, recoil };
 }
+
+/** A successful combat exit leaves a brief visual at the last rendered enemy position. */
+export function enemyDefeated(previous, current) {
+  return previous?.status === 'COMBAT' && current?.status === 'EXPLORING'
+    && previous.survivorId === current.survivorId && current.revision > previous.revision
+    && (current.combatOutcome?.startsWith('You defeated ') || current.combatOutcome?.includes('Your party won the fight.'));
+}
+
+/** Let the finishing swing connect, then fall and clear the defeated model. */
+export function enemyFallPose(ageSeconds) {
+  if (!Number.isFinite(ageSeconds) || ageSeconds < 0 || ageSeconds >= 1.18) return null;
+  const descent = Math.max(0, Math.min(1, (ageSeconds - 0.22) / 0.54));
+  return { kind: 'fall', weight: descent ** 1.55, sink: Math.max(0, (ageSeconds - 0.82) / 0.36) };
+}
