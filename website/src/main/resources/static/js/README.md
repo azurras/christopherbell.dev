@@ -267,6 +267,9 @@ once on load and preserves hard edges between steeply angled faces.
 `survive-world-actors.js` supplies
 the fallback models. `survive-world-props.js`
 builds the shelters, boats and resource-site props used by the same renderer.
+The fishing bank groups textured rocks, driftwood and bent reeds around the dock,
+leaving the central approach open. These props share the static scenery buffer.
+Sand extends below the ocean surface and darkens near the waterline.
 `survive-world-renderer.js` owns WebGL buffers, lighting, fog and disposal.
 The starting campfire uses one camera-facing quad for soft flames and embers.
 Local firelight falls off around the pit, and reduced motion freezes the effect.

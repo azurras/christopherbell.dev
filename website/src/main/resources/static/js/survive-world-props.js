@@ -96,6 +96,48 @@ export function addResourceProps(mesh, groundHeight) {
   }
 }
 
+/** Compose the fishing approach around the open walking and casting space. */
+export function addFishingBank(mesh, groundHeight) {
+  const stone = [0.40, 0.43, 0.35];
+  for (const [x, z, width, height, depth, angle] of [
+    [-18.2, 72.1, 1.35, 0.61, 0.83, 0.6], [-17.1, 73.9, 0.83, 0.44, 0.68, 1.9],
+    [-9.0, 72.9, 1.14, 0.52, 0.80, 0.2], [-8.0, 74.2, 0.71, 0.34, 0.59, 1.5],
+    [-18.9, 70.3, 0.62, 0.31, 0.47, 2.4], [-7.3, 71.8, 0.55, 0.29, 0.48, 0.9],
+  ]) {
+    const y = groundHeight(x, z);
+    mesh.ellipsoid(x, y + height * 0.26, z, width, height, depth, stone, 9, 4, angle, 2.5);
+  }
+  // A bleached trunk and fork sit beyond the deck rather than across its approach.
+  const base = groundHeight(-17.5, 70.1);
+  mesh.beam([-19.3, base + 0.22, 70.8], [-16.9, base + 0.30, 70.2], 0.20, 0.14,
+    [0.53, 0.47, 0.36], 9, WOOD);
+  mesh.beam([-18.1, base + 0.27, 70.5], [-18.6, base + 0.51, 69.8], 0.11, 0.024,
+    [0.53, 0.47, 0.36], 7, WOOD);
+  for (const [x, z] of [[-18.4, 69.5], [-16.5, 72.5], [-16.9, 75], [-9.3, 70.8], [-8.8, 73.8], [-7.6, 70.1]]) {
+    const y = groundHeight(x, z);
+    for (let stem = 0; stem < 5; stem++) {
+      const angle = stem * 2.39996 + x;
+      const sx = x + Math.cos(angle) * 0.28;
+      const sz = z + Math.sin(angle) * 0.28;
+      const height = 0.88 + stem % 3 * 0.21;
+      const tip = [sx + Math.cos(angle) * 0.16, y + height, sz + Math.sin(angle) * 0.16];
+      mesh.beam([sx, y - 0.02, sz], tip, 0.018, 0.009, [0.41, 0.44, 0.23], 4);
+      if (stem % 2 === 0) mesh.ellipsoid(tip[0], tip[1], tip[2], 0.042, 0.15, 0.042,
+        [0.39, 0.28, 0.16], 5, 3);
+      for (const side of [-1, 1]) {
+        const dx = Math.cos(angle + side * 0.7);
+        const dz = Math.sin(angle + side * 0.7);
+        const root = [sx, y + 0.06, sz];
+        const bend = [sx + dx * 0.30, y + height * 0.69, sz + dz * 0.30];
+        const edge = [bend[0] - dz * 0.035, bend[1], bend[2] + dx * 0.035];
+        const end = [sx + dx * 0.67, y + height * 0.41, sz + dz * 0.67];
+        mesh.triangle(root, bend, edge, [0.37, 0.42, 0.20]);
+        mesh.triangle(bend, end, edge, [0.48, 0.47, 0.25]);
+      }
+    }
+  }
+}
+
 /** Face the camera with a two-triangle surface for the flame and embers. */
 export function drawCampFlame(mesh, yaw) {
   const dx = Math.cos(yaw) * 0.87;

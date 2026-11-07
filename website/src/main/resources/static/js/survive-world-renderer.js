@@ -127,6 +127,10 @@ void main() {
     ground *= clamp(tint.g * 2.6 + 0.15, 0.50, 1.13);
     albedo = mix(albedo, ground, 0.67);
   }
+  if (surfaceMaterial > 0.5 && surfaceMaterial < 2.0) {
+    float wetSand = smoothstep(75.8, 79.0, length(surface.xz));
+    albedo *= mix(vec3(1.0), vec3(0.58, 0.64, 0.65), wetSand);
+  }
   vec3 lit = albedo * daylight;
   if (abs(surface.x - 4.0) < 3.4 && abs(surface.z) < 3.4 && surface.y < 2.6) {
     float firelight = 1.0 - smoothstep(0.35, 3.4, distance(surface, vec3(4.0, 0.45, 0.0)));
@@ -136,7 +140,7 @@ void main() {
   if (surface.y < -0.64 || surfaceMaterial > 13.0) {
     float ripple = sin(surface.x * 1.6 + surface.z * 0.7 + time * 2.4)
       * sin(surface.z * 1.2 - surface.x * 0.4 - time * 1.8);
-    float foam = (1.0 - smoothstep(0.1, 1.6, abs(length(surface.xz) - 78.0))) * (0.4 + ripple * 0.3);
+    float foam = (1.0 - smoothstep(0.1, 1.6, abs(length(surface.xz) - 78.8))) * (0.4 + ripple * 0.3);
     lit = mix(lit * (1.0 + ripple * 0.12), vec3(0.62, 0.70, 0.68) * daylight, foam);
   }
   gl_FragColor = vec4(mix(lit, sky, smoothstep(36.0, 144.0, depth)), 1.0);
