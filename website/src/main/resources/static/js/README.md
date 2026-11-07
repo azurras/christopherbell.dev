@@ -275,6 +275,7 @@ Local firelight falls off around the pit, and reduced motion freezes the effect.
 sequenced presence pulses, timeout/backoff, player labels and frame/listener cleanup.
 Nearby survivors render their confirmed main weapon, engagement and guard stance
 from the presence response. Standing combat poses stay visible with reduced motion.
+Equipment and weapon item details display the server-provided automatic attack delay.
 The connection label uses the island-wide online count, independent of nearby poses.
 Recent confirmed strikes animate once per attacker revision. Reduced motion
 keeps the standing combat poses and suppresses strike playback.
