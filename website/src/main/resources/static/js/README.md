@@ -282,6 +282,8 @@ server-timed window. The bobber remains visible when reduced motion is enabled.
 The connection label uses the island-wide online count, independent of nearby poses.
 Recent confirmed strikes animate once per attacker revision. Reduced motion
 keeps the standing combat poses and suppresses strike playback.
+The local attack animation uses the owner's confirmed cue, so an ally's hit
+does not make the local adventurer swing.
 `survive.js` still serializes durable survival commands. New presence uses the API
 constants in `lib/api.js`; it never computes survival rewards. The SVG scene remains
 the fallback for unavailable/lost WebGL. Labels use text nodes, never HTML.

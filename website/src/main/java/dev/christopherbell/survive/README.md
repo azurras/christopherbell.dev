@@ -211,6 +211,8 @@ guard state from the settled world. An engaged player faces their known encounte
 The most recent strike cue is committed with the damage and only included in
 presence for 1.4 seconds after the strike's effective time. Older saves have no
 cue until their next strike. Presence never publishes old rounds as new swings.
+The owner's game snapshot carries the same recent cue. Clients use it to distinguish
+their own strike from damage dealt by a party member.
 Coordinates are finite, inside
 78 metres, with heading in radians and a nonnegative sequence. The server bounds
 speed, rejects stale sequences and prevents movement outside EXPLORING. Pulses
