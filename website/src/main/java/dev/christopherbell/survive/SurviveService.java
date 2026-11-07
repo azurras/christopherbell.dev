@@ -399,7 +399,9 @@ public class SurviveService {
 
   /** Publish only owners from durable snapshots, without rebuilding the index on an unchanged pulse. */
   private void indexMovementOwners(SurviveSavedWorld saved) {
-    if (indexedMovementWorld == saved) return;
+    if (indexedMovementWorld == saved) {
+      return;
+    }
     movementOwners = saved.players().stream().collect(Collectors.toUnmodifiableMap(
         player -> player.accountId() == null ? player.token() : "account:" + player.accountId(),
         SurviveSavedWorld.Player::lastSeen));
