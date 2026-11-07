@@ -5,6 +5,7 @@ Owns browser-side behavior for server-rendered pages.
 ## What Lives Here
 
 - `survive.js` renders the Java-owned shared survival world and serializes commands; it owns no game rules. See the `survive` Java package README for the API and lifetime contract.
+- `survive-world-materials.js` paints the adventurer's eyes, brows and lips on the mirrored face chart when staging the shared actor atlas. Keep the paint coordinates paired with `adventurer.json` and `authored-actors.jpg` when changing those assets.
 
 - Page entry modules such as `home-feed.js`, `messages.js`, `profile.js`,
   `post.js`, `user-feed.js`, `vin-decoder.js`, `zip-coordinates.js`, and
@@ -278,9 +279,13 @@ Local firelight falls off around the pit, and reduced motion freezes the effect.
 sequenced presence pulses, timeout/backoff, player labels and frame/listener cleanup.
 Nearby survivors render their confirmed main weapon, engagement and guard stance
 from the presence response. Standing combat poses stay visible with reduced motion.
+Fishing projects a line and bite cue on the water and offers Reel In during the
+server-timed window. The bobber remains visible when reduced motion is enabled.
 The connection label uses the island-wide online count, independent of nearby poses.
 Recent confirmed strikes animate once per attacker revision. Reduced motion
 keeps the standing combat poses and suppresses strike playback.
+The local attack animation uses the owner's confirmed cue, so an ally's hit
+does not make the local adventurer swing.
 `survive.js` still serializes durable survival commands. New presence uses the API
 constants in `lib/api.js`; it never computes survival rewards. The SVG scene remains
 the fallback for unavailable/lost WebGL. Labels use text nodes, never HTML.
@@ -291,6 +296,8 @@ between server poses and approach the player visually on engagement.
 `survive-action-pose.js` maps confirmed commands to timed body and tool poses.
 Landed enemy counters add upper-body recoil to the local adventurer without
 moving their feet. Blocked counters and reduced motion leave the body steady.
+A confirmed victory keeps the defeated target visible briefly at the point of
+contact. The target ring clears immediately, and reduced motion skips the fall.
 Walking and action poses respect reduced motion.
 
 The world target menu shows Check and the server-allowed combat commands for the

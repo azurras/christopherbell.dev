@@ -5,7 +5,7 @@ import { drawBoat, drawCampFlame, drawShelter } from './survive-world-props.js';
 import { actionPose, combatStance } from './survive-action-pose.js';
 import { prepareActorArt } from './survive-authored-actors.js';
 import { createDynamicMesh } from './survive-dynamic-mesh.js';
-import { cameraMatrix, projectPoint } from './survive-world-model.js';
+import { cameraMatrix, fishingHeading, projectPoint } from './survive-world-model.js';
 import { fetchJson } from './lib/util.js';
 
 const VERTEX_SHADER = `
@@ -212,7 +212,7 @@ export function createWorldRenderer(canvas) {
       gl.drawArrays(gl.TRIANGLES, 0, count);
     }
     return {
-      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture, cameraZoom, counter) {
+      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture, cameraZoom, counter, defeatedEnemy) {
         const pixelBudgetRatio = Math.sqrt(2200000 / Math.max(1, canvas.clientWidth * canvas.clientHeight));
         const pixelRatio = Math.min(2, pixelBudgetRatio, globalThis.devicePixelRatio || 1);
         const width = Math.max(1, Math.round(canvas.clientWidth * pixelRatio));
@@ -234,12 +234,15 @@ export function createWorldRenderer(canvas) {
         dynamicMesh.reset();
         const actors = materials.authoredActorsReady ? authoredActors : fallbackActors;
         const stride = avatar => avatar.moving ? Math.sin(animationSeconds * 11) : 0;
-        const pose = actionPose(gesture)
+        const fishingPose = position.fishing ? { kind: 'fish', progress: 0.14, weight: 0.65,
+          bobberDip: position.fishing === 'bite' && position.animate
+            ? 0.17 * (1 + Math.sin(animationSeconds * 14)) : 0 } : null;
+        const pose = actionPose(gesture) || fishingPose
           || combatStance(state.status === 'COMBAT' && state.nextStrikeAt, state.defending)
           || (state.status === 'SLEEPING' && position.animate
             ? { kind: 'sleep', weight: Math.sin(animationSeconds * 2.6) } : null);
         const restingHeading = position.x === 0 && position.z === 0 ? Math.PI : position.heading;
-        const heading = pose?.kind === 'fish' ? Math.atan2(position.x, position.z)
+        const heading = pose?.kind === 'fish' ? fishingHeading(position.x, position.z)
           : state.status === 'COMBAT' ? Math.atan2(enemy.x - position.x, enemy.z - position.z) : restingHeading;
         const playerPose = counter?.recoil ? { ...pose, recoil: counter.recoil } : pose;
         actors.avatar(position.x, position.z, heading, [0.24, 0.31, 0.42], state.status,
@@ -299,6 +302,14 @@ export function createWorldRenderer(canvas) {
             actors.animal(enemyX, enemyZ, state.enemy, scale, facing, stride(enemy),
               !counter && pose?.kind === 'strike' ? pose.weight : 0,
               true, animationSeconds);
+          }
+        }
+        if (defeatedEnemy) {
+          const { x, z, kind, heading, fall } = defeatedEnemy;
+          if (kind === 'RAIDER') {
+            actors.avatar(x, z, heading, RAIDER_CLOTH, 'COMBAT', 0, null, fall, true, 0, RAIDER_ARMOR_TINT);
+          } else {
+            actors.animal(x, z, kind, kind === 'BEAR' ? 1.6 : 1, heading, 0, 0, true, 0, fall);
           }
         }
         if (Math.hypot(position.x - 4, position.z) < 45) drawCampFlame(actors, yaw);

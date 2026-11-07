@@ -3,6 +3,7 @@ package dev.christopherbell.survive;
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveEnemy;
 import dev.christopherbell.survive.model.SurviveFieldFight;
+import dev.christopherbell.survive.model.SurviveFishing;
 import dev.christopherbell.survive.model.SurviveParty;
 import dev.christopherbell.survive.model.SurvivePackedWeapon;
 import dev.christopherbell.survive.model.SurviveResource;
@@ -112,6 +113,7 @@ final class SurviveWorld {
       player.weapon = stored.weapon();
       player.weaponDurability = stored.weaponDurability();
       player.packedWeapons.addAll(stored.packedWeapons());
+      player.fishing = stored.fishing();
       player.guarding = stored.guarding();
       player.sleptAt = stored.sleptAt();
       player.status = stored.status();
@@ -131,7 +133,7 @@ final class SurviveWorld {
           player.status, player.revision, player.message, player.stone, player.hunger, player.enemy,
           player.weapon, player.weaponDurability, player.guarding, player.sleptAt, player.struckFirst,
           player.nextStrikeAt, player.tacticalPoints, player.defending, player.combatOutcome,
-          player.activeFullnessMilliseconds, player.waystationAssignment, player.packedWeapons, player.lastStrike);
+          player.activeFullnessMilliseconds, player.waystationAssignment, player.packedWeapons, player.lastStrike, player.fishing);
     }).toList();
     return new SurviveSavedWorld("shared", storageVersion, revision, shelters, boats, List.copyOf(events),
         storedPlayers, settledBoundaries, activeRaidNight, parties.save(), List.copyOf(fieldFights.values()));
@@ -152,7 +154,9 @@ final class SurviveWorld {
         player.nextStrikeAt, player.nextStrikeAt == null ? 0 : Math.max(0, Duration.between(now, player.nextStrikeAt).toMillis()),
         player.tacticalPoints, player.defending, player.combatOutcome, parties.viewFor(player, players.values(), now),
         weaponSkillFor(player.weapon), SurviveWaystation.KEEPER, player.waystationAssignment,
-        player.packedWeapons.stream().map(SurviveSnapshot.WeaponChoice::from).toList());
+        player.packedWeapons.stream().map(SurviveSnapshot.WeaponChoice::from).toList(),
+        player.fishing == null ? null : player.fishing.timingAt(now),
+        player.lastStrike != null && player.lastStrike.visibleAt(now) ? player.lastStrike : null);
   }
 
   /** Settles elapsed fights even when their participants did not send any requests. */
@@ -275,7 +279,12 @@ final class SurviveWorld {
           () -> gather(player, rollPercent, 40, SurviveResource.STONE));
       case HUNT -> ventureOut(player, phase, rollPercent, onIsland,
           () -> huntedAnimal == null ? hunt(player, phase, rollPercent) : revealAnimal(player, huntedAnimal));
-      case FISH -> fish(player, rollPercent);
+      case FISH -> onIsland ? cast(player, now) : fish(player, rollPercent);
+      case REEL_IN -> reelIn(player, rollPercent);
+      case CANCEL_FISHING -> {
+        player.fishing = null;
+        yield "You pull in your line.";
+      }
       case BUILD_SHELTER -> buildShelter(player);
       case BUILD_BOAT -> buildBoat(player);
       case CRAFT_CLUB -> craft(player, SurviveWeapon.CLUB);
@@ -304,6 +313,9 @@ final class SurviveWorld {
   }
 
   private void recordAction(SurvivePlayer player, String outcome, boolean wasFighting) {
+    if (player.status != Status.EXPLORING) {
+      player.fishing = null;
+    }
     if (player.status == Status.DEAD) {
       outcome += " You have died. Start a new survivor to try again.";
     }
@@ -320,7 +332,8 @@ final class SurviveWorld {
       case DEAD, ESCAPED -> List.of();
       case SLEEPING -> List.of(SurviveAction.WAKE);
       case COMBAT -> combatActionsFor(player);
-      case EXPLORING -> campActionsFor(player, SurviveClock.phaseAt(now));
+      case EXPLORING -> player.fishing == null ? campActionsFor(player, SurviveClock.phaseAt(now))
+          : List.of(SurviveAction.REEL_IN, SurviveAction.CANCEL_FISHING);
     };
   }
 
@@ -542,6 +555,42 @@ final class SurviveWorld {
     }
     player.food++;
     return "You reel in a fish. You gained 1 food.";
+  }
+
+  private static String cast(SurvivePlayer player, Instant now) {
+    if (!player.hasInventorySpace()) {
+      return "Your inventory is full. Make room before fishing.";
+    }
+    player.guarding = false;
+    player.fishing = SurviveFishing.castAt(now);
+    return "You cast your line. Wait for a bite.";
+  }
+
+  private static String reelIn(SurvivePlayer player, IntSupplier rollPercent) {
+    player.fishing = null;
+    return fish(player, rollPercent);
+  }
+
+  /** Settle a missed bite once, whether the angler stayed online or left. */
+  boolean settleFishingUntil(Instant now) {
+    boolean expired = false;
+    for (var player : players.values()) {
+      if (player.fishing != null && !now.isBefore(player.fishing.escapesAt())) {
+        player.fishing = null;
+        recordAction(player, "The fish got away. Cast again to keep fishing.", false);
+        expired = true;
+      }
+    }
+    return expired;
+  }
+
+  boolean leaveFishingBank(SurvivePlayer player, SurvivePresence.Pose pose) {
+    if (player.fishing == null || SurvivePresence.atFishingBank(pose.x(), pose.z())) {
+      return false;
+    }
+    player.fishing = null;
+    recordAction(player, "You left the fishing bank and pulled in your line.", false);
+    return true;
   }
 
   void aggro(SurvivePlayer player, SurviveEnemy animal, Instant now) {

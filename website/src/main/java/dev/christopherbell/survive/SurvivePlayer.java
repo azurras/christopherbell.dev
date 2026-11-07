@@ -1,6 +1,7 @@
 package dev.christopherbell.survive;
 
 import dev.christopherbell.survive.model.SurviveEnemy;
+import dev.christopherbell.survive.model.SurviveFishing;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveStrike;
 import dev.christopherbell.survive.model.SurviveWeapon;
@@ -37,6 +38,7 @@ final class SurvivePlayer {
   boolean struckFirst;
   /** The next server-clock exchange, or null until the player explicitly engages. */
   Instant nextStrikeAt;
+  SurviveFishing fishing;
   SurviveStrike lastStrike;
   int tacticalPoints;
   boolean defending;
