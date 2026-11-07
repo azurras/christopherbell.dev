@@ -1,7 +1,7 @@
 /** Display-only terrain and meshes. The server still owns island coordinates and action ranges. */
 import { LANDMARKS } from './survive-world-model.js';
 import { createActorModels } from './survive-world-actors.js';
-import { addResourceProps, drawQuarryRock } from './survive-world-props.js';
+import { addFishingBank, addResourceProps, drawQuarryRock } from './survive-world-props.js';
 
 const TAU = Math.PI * 2;
 export const MESH_VERTEX_FLOATS = 9;
@@ -195,6 +195,7 @@ export function islandMesh() {
   }
   mesh.box(-5.32, workbenchY + 1.14, 3.11, 0.56, 0.09, 0.29, STONE);
   addResourceProps(mesh, groundHeight);
+  addFishingBank(mesh, groundHeight);
   buildRuinedGate(mesh);
   buildGateCrossing(mesh);
   plantNorthGateVerge(mesh);
