@@ -282,6 +282,39 @@ public class RateLimitFilterTest {
   }
 
   @Test
+  void surgeOfSurviveMovementLeavesRoomForActionsAndLeaving() throws Exception {
+    var properties = new RateLimitProperties();
+    for (var rule : properties.getRules()) {
+      if ("survive-movement".equals(rule.getName())) {
+        rule.setCapacity(1);
+        rule.setWindow(Duration.ofMinutes(1));
+      } else if ("api-mutations".equals(rule.getName())) {
+        rule.setCapacity(2);
+      }
+    }
+    var filter = new RateLimitFilter(new ClientIpResolver(new ClientIpProperties()), properties);
+    var chain = mock(FilterChain.class);
+    var firstMove = new MockHttpServletResponse();
+    var throttledMove = new MockHttpServletResponse();
+    var action = new MockHttpServletResponse();
+    var leave = new MockHttpServletResponse();
+    var nestedMovement = new MockHttpServletResponse();
+
+    filter.doFilter(request("POST", "/api/survive/v1/movement"), firstMove, chain);
+    filter.doFilter(request("POST", "/api/survive/v1/movement"), throttledMove, chain);
+    filter.doFilter(request("POST", "/api/survive/v1/actions"), action, chain);
+    filter.doFilter(request("POST", "/api/survive/v1/movement/leave"), leave, chain);
+    filter.doFilter(request("POST", "/api/survive/v1/movement/other"), nestedMovement, chain);
+
+    assertEquals(200, firstMove.getStatus());
+    assertEquals(429, throttledMove.getStatus());
+    assertEquals(200, action.getStatus());
+    assertEquals(200, leave.getStatus());
+    assertEquals("2", nestedMovement.getHeader("X-RateLimit-Limit"));
+    assertEquals(429, nestedMovement.getStatus());
+  }
+
+  @Test
   void musicMutationsUseDedicatedLimitsWhilePlaybackReadsRemainOutsideThem() throws Exception {
     var rules = new RateLimitProperties().getRules();
     int apiMutations = indexOf(rules, "api-mutations");
