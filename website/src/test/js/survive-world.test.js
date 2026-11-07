@@ -93,7 +93,7 @@ function worldFixture() {
   const rendered = [];
   let disposals = 0;
   const renderer = { draw(position, yaw, _state, _others, _time, _wildlife, _enemy, _gesture, zoom) {
-    rendered.push({ ...position, yaw, zoom });
+    rendered.push({ ...position, yaw, zoom, gesture: _gesture });
     return { project: () => ({ visible: false, x: 0, y: 0 }) };
   },
     dispose() { disposals++; } };
@@ -140,6 +140,28 @@ test('presence reconciliation starts one remote recoil and keeps its receipt tim
     await new Promise(resolve => setImmediate(resolve));
     fixture.frame(now + 16);
     assert.equal(drawn[0].hitAtSeconds, 2);
+  } finally { world.dispose(); }
+});
+
+test('an ally hit does not animate the local fighter, while their own confirmed strike does', async () => {
+  const fixture = worldFixture();
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({
+    self: { survivorId: 'alice', x: 0, z: 0, heading: 0, sequence: 1 },
+    others: [], accepted: true, wildlife: [],
+  }), () => {}, () => fixture.renderer);
+  const engaged = { ...worldState, status: 'COMBAT', enemy: 'BEAR', enemyHealth: 10,
+    nextStrikeAt: '2026-11-05T14:00:00Z', revision: 1, strike: null };
+  try {
+    world.setState(engaged);
+    fixture.frame(0);
+    await new Promise(resolve => setImmediate(resolve));
+    world.setState({ ...engaged, revision: 2, enemyHealth: 7 });
+    fixture.frame(16);
+    assert.equal(fixture.rendered.at(-1).gesture, null);
+    world.setState({ ...engaged, revision: 3, enemyHealth: 5,
+      strike: { revision: 3, weaponSkill: true, weapon: 'CLUB' } });
+    fixture.frame(32);
+    assert.equal(fixture.rendered.at(-1).gesture.action, 'WEAPON_SKILL');
   } finally { world.dispose(); }
 });
 

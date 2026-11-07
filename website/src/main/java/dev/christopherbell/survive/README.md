@@ -211,6 +211,8 @@ guard state from the settled world. An engaged player faces their known encounte
 The most recent strike cue is committed with the damage and only included in
 presence for 1.4 seconds after the strike's effective time. Older saves have no
 cue until their next strike. Presence never publishes old rounds as new swings.
+The owner's game snapshot carries the same recent cue. Clients use it to distinguish
+their own strike from damage dealt by a party member.
 Coordinates are finite, inside
 78 metres, with heading in radians and a nonnegative sequence. The server bounds
 speed, rejects stale sequences and prevents movement outside EXPLORING. Pulses
@@ -226,12 +228,15 @@ Once on the island, existing command endpoints enforce landmark proximity under 
 same service monitor. Flee relocates to camp after the durable action commits. Older
 text clients keep their existing mechanics. `POST /api/survive/v1/movement/leave`
 releases only the caller's pose for the accessible text fallback, without touching
-saved progress. Both routes retain CSRF, no-store and existing API rate limits.
+saved progress. Both routes retain CSRF and no-store. Movement has a separate IP
+quota from commands. Join or read `/game` before moving, including after an app
+restart. Movement checks the last loaded durable owner index before taking the
+world monitor or reading Mongo, then checks ownership again against the latest save.
 
 Visible browsers pulse every 500 ms with one outstanding request and a four-second
 timeout; hidden tabs pause, errors stop prediction and show adaptive backoff, and
-remote positions interpolate. The existing 300 mutations/minute/IP limit remains:
-large shared-IP groups may see connection pauses. Render geometry/pixel density are
+remote positions interpolate. The movement quota refills 250 requests per five
+seconds per IP. Commands and leave use the general mutation quota. Render geometry/pixel density are
 bounded. WebGL failure exposes the prior illustration and action menus.
 
 The adventurer and wildlife use authored models and a painted atlas. Asset requests
