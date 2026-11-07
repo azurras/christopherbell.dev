@@ -401,7 +401,8 @@ public class SurviveService {
   private void indexMovementOwners(SurviveSavedWorld saved) {
     if (indexedMovementWorld == saved) return;
     movementOwners = saved.players().stream().collect(Collectors.toUnmodifiableMap(
-        player -> ownerKey(player.token(), player.accountId()), SurviveSavedWorld.Player::lastSeen));
+        player -> player.accountId() == null ? player.token() : "account:" + player.accountId(),
+        SurviveSavedWorld.Player::lastSeen));
     indexedMovementWorld = saved;
   }
 

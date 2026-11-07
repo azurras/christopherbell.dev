@@ -71,6 +71,20 @@ class SurviveMovementServiceTest {
   }
 
   @Test
+  void legacyStoredTokenSpellingDoesNotBreakOtherSurvivors() {
+    var legacy = service.join(null, "Legacy Scout");
+    var current = service.join(null, "Current Scout");
+    var saved = repository.load().orElseThrow();
+    var world = SurviveWorld.restore(saved);
+    world.players.put("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", world.players.remove(legacy.token()));
+    repository.save(world.saveState(saved.version()));
+
+    assertEquals(current.state().survivorId(), service.find(current.token()).orElseThrow().survivorId());
+    assertEquals(current.state().survivorId(), service.pulseForOwner(
+        current.token(), null, new SurviveMovement(0, 0, 0, 0)).self().survivorId());
+  }
+
+  @Test
   void pulseDoesNotWriteProgressAndPublicIdsCannotAuthorizeMovement() {
     var joined = service.join(null, "Alice");
     var saved = repository.load().orElseThrow();
