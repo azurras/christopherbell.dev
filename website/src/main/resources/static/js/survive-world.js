@@ -70,7 +70,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   let encounter = null;
   let approachStartedAt = null;
   let gesture = null;
-  let enemyCounterAt = null;
+  let enemyCounter = null;
   let pulsePromise = null;
   let controller = null;
   let nextPulseAt = 0;
@@ -453,8 +453,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       const enemy = encounterPosition(position, yaw, timestamp);
       if (cameraLocked && encounter) yaw = Math.atan2(position.x - enemy.x, position.z - enemy.z);
       const pose = gesture && !motionPreference?.matches ? { action: gesture.action, ageSeconds: (Date.now() - gesture.at) / 1000 } : null;
-      const counter = enemyCounterAt !== null && !motionPreference?.matches
-        ? enemyCounterPose((Date.now() - enemyCounterAt) / 1000) : null;
+      const counter = enemyCounter && !motionPreference?.matches
+        ? enemyCounterPose((Date.now() - enemyCounter.at) / 1000, enemyCounter.landed) : null;
       const rendered = renderer.draw({ ...position, moving, animate: !motionPreference?.matches }, yaw, state,
         others.map(other => ({ ...other, x: other.drawX, z: other.drawZ })), timestamp / 1000,
         wildlife.map(animal => ({ ...animal, x: animal.drawX, z: animal.drawZ })), enemy, pose, cameraZoom, counter);
@@ -515,14 +515,16 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     setState(nextState, isBusy = false) {
       if (disposed) return;
       worldFeedback.acceptState(nextState);
-      if (enemyCountered(state, nextState)) enemyCounterAt = Date.now();
+      if (enemyCountered(state, nextState)) {
+        enemyCounter = { at: Date.now(), landed: nextState.health < state.health };
+      }
       if (nextState && state?.survivorId === nextState.survivorId && state.nextStrikeAt
           && nextState.revision > state.revision && nextState.enemyHealth < state.enemyHealth
           && (nextState.status === 'COMBAT' || nextState.combatOutcome?.startsWith('You defeated '))) {
         gesture = { action: 'ATTACK', at: Date.now() };
       }
       if (nextState?.status !== 'COMBAT' || state?.survivorId !== nextState.survivorId || state?.enemy !== nextState.enemy) {
-        enemyCounterAt = null;
+        enemyCounter = null;
         targetSelected = false;
         cameraLocked = false;
         target.setAttribute('aria-pressed', 'false');
@@ -547,7 +549,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         yaw = 0;
         approachStartedAt = null;
         gesture = null;
-        enemyCounterAt = null;
+        enemyCounter = null;
         stopWalking();
         nextPulseAt = 0;
       }
