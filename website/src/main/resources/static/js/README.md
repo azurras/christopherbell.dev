@@ -291,6 +291,8 @@ between server poses and approach the player visually on engagement.
 `survive-action-pose.js` maps confirmed commands to timed body and tool poses.
 Landed enemy counters add upper-body recoil to the local adventurer without
 moving their feet. Blocked counters and reduced motion leave the body steady.
+A confirmed victory keeps the defeated target visible briefly at the point of
+contact. The target ring clears immediately, and reduced motion skips the fall.
 Walking and action poses respect reduced motion.
 
 The world target menu shows Check and the server-allowed combat commands for the
