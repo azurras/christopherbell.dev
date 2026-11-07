@@ -110,6 +110,9 @@ public class RateLimitProperties {
             "/api/music" + APIVersion.V20260728 + "/library/**",
             "/api/music" + APIVersion.V20260728 + "/queue",
             "/api/music" + APIVersion.V20260728 + "/queue/**")));
+    // At two pulses per second, twenty survivors on one network offer forty per second.
+    rules.add(new Rule("survive-movement", 250, Duration.ofSeconds(5),
+        List.of("POST"), List.of("/api/survive/v1/movement")));
     rules.add(new Rule(
         "api-mutations",
         300,

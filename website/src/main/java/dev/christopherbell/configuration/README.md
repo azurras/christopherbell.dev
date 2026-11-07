@@ -77,7 +77,9 @@ Owns application-wide Spring and web infrastructure.
   matched rule window. Shared-folder upload, mutation, and transcode
   rules are first-match groups at 240, 60, and 10 requests per minute respectively. Music
   library/queue mutations and metadata rewrites use separate 120 and 10 request-per-minute
-  groups. GET, HEAD, range, and progressive media reads do not consume mutation buckets. Rejections use a
+  groups. Survive's exact movement POST has a separate IP budget of 250 requests per five
+  seconds to support concurrent half-second pulses. Actions and leaving the island use
+  the generic mutation budget. GET, HEAD, range, and progressive media reads do not consume mutation buckets. Rejections use a
   standard API-envelope `429` body with `Retry-After` and `X-RateLimit-*`
   guidance. The mutation
   rule covers deployed `/folders`, `/entries`, and `/admin/recycle/**` writes plus planned aliases;

@@ -154,7 +154,8 @@ final class SurviveWorld {
         player.tacticalPoints, player.defending, player.combatOutcome, parties.viewFor(player, players.values(), now),
         weaponSkillFor(player.weapon), SurviveWaystation.KEEPER, player.waystationAssignment,
         player.packedWeapons.stream().map(SurviveSnapshot.WeaponChoice::from).toList(),
-        player.fishing == null ? null : player.fishing.timingAt(now), player.attackDelayMilliseconds());
+        player.fishing == null ? null : player.fishing.timingAt(now), player.attackDelayMilliseconds(),
+        player.lastStrike != null && player.lastStrike.visibleAt(now) ? player.lastStrike : null);
   }
 
   /** Settles elapsed fights even when their participants did not send any requests. */
