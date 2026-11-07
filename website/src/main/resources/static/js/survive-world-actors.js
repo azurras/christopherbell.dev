@@ -94,9 +94,15 @@ export function createActorModels({ triangle, beam, ellipsoid, groundHeight, act
     const cos = Math.cos(heading);
     const sin = Math.sin(heading);
     const crouch = action?.kind === 'rest' ? action.weight * 0.38 : 0;
-    const pose = (across, height, forward = 0) => resting
-      ? [x + across * cos + height * sin, y + 0.31 + forward, z - across * sin + height * cos]
-      : [x + across * cos + forward * sin, y + height + (0.12 - crouch) * Math.min(1, height), z - across * sin + forward * cos];
+    const recoil = action?.recoil ?? 0;
+    const pose = (across, height, forward = 0) => {
+      if (resting) return [x + across * cos + height * sin, y + 0.31 + forward, z - across * sin + height * cos];
+      // Lean away from contact above the hips, keeping the same ground contact.
+      const lean = recoil ? recoil * Math.max(0, height - 1.18) : 0;
+      const offset = forward - lean * 0.29;
+      return [x + across * cos + offset * sin, y + height + (0.12 - crouch) * Math.min(1, height) - lean * 0.10,
+        z - across * sin + offset * cos];
+    };
     const headPose = (across, height, forward = 0) => pose(across * 0.87, 2.12 + (height - 2.12) * 0.84, forward * 0.91);
     const leather = [0.34, 0.21, 0.16];
     const trousers = [0.23, 0.25, 0.27];

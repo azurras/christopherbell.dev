@@ -109,7 +109,29 @@ test('enemy motion requires a confirmed bite or guard and winds back before lung
   assert.equal(enemyCountered(previous, { ...afterStrike, survivorId: 'other', health: 6 }), false);
   assert.ok(enemyCounterPose(0.11).forward < 0);
   assert.ok(enemyCounterPose(0.43).forward > 0);
+  assert.equal(enemyCounterPose(0.43).recoil, 0);
+  assert.equal(enemyCounterPose(0.11, true).recoil, 0);
+  assert.ok(enemyCounterPose(0.43, true).recoil > 0.8);
   assert.equal(enemyCounterPose(0.76), null);
+});
+
+test('a landed bite moves the authored torso without sliding the feet', () => {
+  const raw = JSON.parse(readFileSync(new URL('../../main/resources/static/images/survive/adventurer.json', import.meta.url), 'utf8'));
+  const actorArt = { adventurer: prepareActorArt(raw, { adventurer: true }) };
+  const draw = recoil => {
+    const mesh = meshBuilder(actorArt);
+    mesh.avatar(0, 0, 0, [0.24, 0.31, 0.42], 'COMBAT', 0, 'CLUB',
+      { kind: 'ready', progress: 0.5, weight: 0.75, recoil });
+    return mesh.vertices;
+  };
+  const ready = draw(0);
+  const hit = draw(1);
+  let torsoRetreat = false;
+  for (let index = 0; index < ready.length; index += MESH_VERTEX_FLOATS) {
+    if (ready[index + 1] < 0.5) assert.deepEqual(hit.slice(index, index + 3), ready.slice(index, index + 3));
+    if (ready[index + 1] > 1.9 && hit[index + 2] < ready[index + 2] - 0.2) torsoRetreat = true;
+  }
+  assert.ok(torsoRetreat);
 });
 
 test('an engaged stance moves the equipped spear from the back to the hand', () => {
