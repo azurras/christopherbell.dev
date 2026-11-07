@@ -34,9 +34,33 @@ class SurvivePresenceTest {
     var bob = presence.pulse("bob", "Bob", Status.EXPLORING, move(0, 0, 1), now);
     assertEquals("alice", bob.others().getFirst().survivorId());
     assertEquals("<Alice>", bob.others().getFirst().name());
+    assertEquals(2, bob.onlineCount());
     var later = presence.pulse("bob", "Bob", Status.EXPLORING, move(0, 0, 2), now.plusSeconds(31));
     assertTrue(later.others().isEmpty());
+    assertEquals(1, later.onlineCount());
     assertEquals(0, later.self().x());
+  }
+
+  @Test
+  void sendsNearbyPosesWithoutDroppingFarPlayersFromTheOnlineCount() {
+    presence.pulse("scout", "Scout", Status.EXPLORING, move(0, 0, 0), now);
+    for (int step = 1; step <= 10; step++) {
+      presence.pulse("scout", "Scout", Status.EXPLORING, move(step * 6, 0, step), now.plusSeconds(step));
+    }
+    presence.pulse("scout", "Scout", Status.EXPLORING, move(64, 0, 11), now.plusSeconds(11));
+    var atBoundary = presence.pulse("camp", "Camp", Status.EXPLORING, move(0, 0, 0), now.plusSeconds(11));
+    assertEquals("scout", atBoundary.others().getFirst().survivorId());
+    assertEquals(2, atBoundary.onlineCount());
+
+    presence.pulse("scout", "Scout", Status.EXPLORING, move(66, 0, 12), now.plusSeconds(12));
+    var outOfView = presence.pulse("camp", "Camp", Status.EXPLORING, move(0, 0, 1), now.plusSeconds(12));
+    assertTrue(outOfView.others().isEmpty());
+    assertEquals(2, outOfView.onlineCount());
+
+    var rejected = presence.pulse("camp", "Camp", Status.EXPLORING, move(66, 0, 2), now.plusSeconds(13));
+    assertFalse(rejected.accepted());
+    assertTrue(rejected.others().isEmpty());
+    assertEquals(2, rejected.onlineCount());
   }
 
   @Test
