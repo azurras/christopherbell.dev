@@ -7,6 +7,10 @@ license, which is served at `/licenses/survive-MIT.txt`. No Python process is us
 
 ## One authoritative world
 
+The private party view carries the accepted partner's confirmed HP and TP for the
+viewport vitals panel. Invitations carry no vitals. The existing game snapshot poll
+updates the row even when the partner is beyond nearby pose distance.
+
 `SurviveService` restores one shared durable world for every operation and commits
 a versioned replacement after successful commands. Movement pulses can reuse
 the last immutable snapshot after Mongo confirms the document still has that

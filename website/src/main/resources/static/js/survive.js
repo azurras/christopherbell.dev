@@ -63,6 +63,11 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveHudName', state.name);
   setText('surviveHudHealth', `HP ${state.health}/10`);
   setText('surviveHudTp', `TP ${state.tacticalPoints ?? 0}`);
+  const partnerVitals = state.party?.state === 'MEMBER' ? state.party.vitals : null;
+  documentRoot.getElementById('surviveHudPartner').hidden = !partnerVitals;
+  setText('surviveHudPartnerName', partnerVitals ? state.party.name : '');
+  setText('surviveHudPartnerHealth', partnerVitals ? `HP ${partnerVitals.health}/${partnerVitals.maxHealth}` : '');
+  setText('surviveHudPartnerTp', partnerVitals ? `TP ${partnerVitals.tacticalPoints}` : '');
   documentRoot.getElementById('surviveHealth').value = state.health;
   setText('surviveStrength', state.strength);
   setText('surviveStamina', state.stamina);
