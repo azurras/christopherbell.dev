@@ -1,5 +1,5 @@
 const POSES = {
-  GATHER: ['chop', 1.35], GATHER_STONE: ['mine', 1.35], FISH: ['fish', 2.35],
+  GATHER: ['chop', 1.35], GATHER_STONE: ['mine', 1.35], FISH: ['fish', 1.2], REEL_IN: ['fish', 0.95],
   BUILD_SHELTER: ['hammer', 1.6], BUILD_BOAT: ['hammer', 1.6],
   CRAFT_CLUB: ['hammer', 1.6], CRAFT_AXE: ['hammer', 1.6], CRAFT_SPEAR: ['hammer', 1.6],
   HUNT: ['aim', 1.05], ENGAGE: ['aim', 0.75], ATTACK: ['strike', 0.7], WEAPON_SKILL: ['strike', 1.1],
@@ -32,7 +32,8 @@ export function actionPose(gesture) {
   const [kind, duration] = definition;
   const progress = gesture.ageSeconds / duration;
   const weight = Math.min(1, progress * 9, (1 - progress) * 6);
-  return { kind, progress, weight };
+  return gesture.action === 'REEL_IN' ? { kind, progress, weight, lineDistance: 13 - progress * 11 }
+    : { kind, progress, weight };
 }
 
 /** A confirmed incoming hit or consumed guard drives the enemy, independently of the player's pose. */
@@ -52,4 +53,18 @@ export function enemyCounterPose(ageSeconds, landed = false) {
   const impact = Math.max(0, (progress - 0.38) / 0.62);
   const recoil = landed ? Math.sin(impact ** 0.55 * Math.PI) : 0;
   return { kind: 'strike', progress, weight: Math.max(0, forward / 0.61), forward, recoil };
+}
+
+/** A successful combat exit leaves a brief visual at the last rendered enemy position. */
+export function enemyDefeated(previous, current) {
+  return previous?.status === 'COMBAT' && current?.status === 'EXPLORING'
+    && previous.survivorId === current.survivorId && current.revision > previous.revision
+    && (current.combatOutcome?.startsWith('You defeated ') || current.combatOutcome?.includes('Your party won the fight.'));
+}
+
+/** Let the finishing swing connect, then fall and clear the defeated model. */
+export function enemyFallPose(ageSeconds) {
+  if (!Number.isFinite(ageSeconds) || ageSeconds < 0 || ageSeconds >= 1.18) return null;
+  const descent = Math.max(0, Math.min(1, (ageSeconds - 0.22) / 0.54));
+  return { kind: 'fall', weight: descent ** 1.55, sink: Math.max(0, (ageSeconds - 0.82) / 0.36) };
 }
