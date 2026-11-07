@@ -249,7 +249,8 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     cancel.hidden = !state;
     if (state) {
       phaseEndsAtMilliseconds = Date.now() + state.secondsToNextPhase * 1000;
-      const delay = state.nextStrikeAt ? Math.max(100, (state.millisecondsUntilStrike ?? 0) + 50) : 5000;
+      const delay = state.nextStrikeAt ? Math.max(100, (state.millisecondsUntilStrike ?? 0) + 50)
+        : state.fishing ? Math.min(5000, state.fishing.millisecondsUntilEscape + 50) : 5000;
       nextWorldPollAt = Date.now() + delay;
       renderSurviveState(documentRoot, state, pending, mutationPending);
     }

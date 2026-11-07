@@ -4,7 +4,7 @@ import test from 'node:test';
 import { prepareActorArt } from '../../main/resources/static/js/survive-authored-actors.js';
 import { createDynamicMesh } from '../../main/resources/static/js/survive-dynamic-mesh.js';
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
-import { cameraMatrix, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
+import { cameraMatrix, fishingFloat, fishingPhase, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
 import { acceptRemoteStrike, actionPose, combatStance, enemyCountered, enemyCounterPose } from '../../main/resources/static/js/survive-action-pose.js';
 import { drawBoat, drawCampFlame, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
 
@@ -250,6 +250,18 @@ test('confirmed harvest, fishing and combat actions create distinct animated mes
   });
   for (let index = 1; index < meshes.length; index++) assert.notDeepEqual(meshes[index - 1], meshes[index]);
   assert.equal(actionPose({ action: 'FISH', ageSeconds: 3 }), null);
+});
+
+test('the fishing cue has distinct waiting, bite and expiry boundaries', () => {
+  const cast = { biteAt: 2000, escapeAt: 7000 };
+  assert.equal(fishingPhase(cast, 1999), 'waiting');
+  assert.equal(fishingPhase(cast, 2000), 'bite');
+  assert.equal(fishingPhase(cast, 6999), 'bite');
+  assert.equal(fishingPhase(cast, 7000), null);
+  const [x, , z] = fishingFloat(-13, 70);
+  assert.ok(Math.hypot(x, z) > 78);
+  assert.ok(actionPose({ action: 'REEL_IN', ageSeconds: 0.8 }).lineDistance
+    < actionPose({ action: 'REEL_IN', ageSeconds: 0.2 }).lineDistance);
 });
 
 test('adventurer gait changes geometry and the follow camera anchors to each landmark height', () => {
