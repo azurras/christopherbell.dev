@@ -4,6 +4,7 @@ import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveMovement;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveWaystation;
+import dev.christopherbell.survive.model.SurviveWeapon;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
@@ -112,8 +113,16 @@ final class SurvivePresence {
     return Math.hypot(x - centerX, z - centerZ) <= radius;
   }
 
-  /** Public render data only: no cookie, account ID, inventory or other private state. */
-  public record Pose(String survivorId, String name, double x, double z, double heading, long sequence, Status status) {}
+  /** Public render data only: no cookie, account ID, or inventory. */
+  public record Pose(String survivorId, String name, double x, double z, double heading, long sequence, Status status,
+                     Appearance appearance) {
+    Pose(String survivorId, String name, double x, double z, double heading, long sequence, Status status) {
+      this(survivorId, name, x, z, heading, sequence, status, null);
+    }
+  }
+
+  /** Confirmed equipment and stance for drawing another survivor. */
+  public record Appearance(SurviveWeapon weapon, boolean engaged, boolean defending) {}
 
   /** The sender's acknowledged pose and currently visible other players. */
   public record View(Pose self, List<Pose> others, boolean accepted, List<SurviveWildlife.Animal> wildlife,
@@ -123,9 +132,10 @@ final class SurvivePresence {
       wildlife = List.copyOf(wildlife);
     }
 
-    View withWildlife(Status status, List<SurviveWildlife.Animal> animals, SurviveWildlife.Animal target) {
+    View withScene(Status status, List<Pose> visiblePlayers, List<SurviveWildlife.Animal> animals,
+        SurviveWildlife.Animal target) {
       return new View(new Pose(self.survivorId(), self.name(), self.x(), self.z(), self.heading(), self.sequence(), status),
-          others, accepted, animals, target);
+          visiblePlayers, accepted, animals, target);
     }
   }
 
