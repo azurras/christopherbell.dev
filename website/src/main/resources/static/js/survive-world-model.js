@@ -5,11 +5,12 @@ export const LANDMARKS = [
   { name: 'Stone ridge', x: 30, z: -12, radius: 12, actions: ['GATHER_STONE'] },
   { name: 'Hunting grounds', x: -36, z: 25, radius: 13, actions: [] },
   { name: 'Boat shore', x: 0, z: 62, radius: 13, actions: ['BUILD_BOAT', 'ESCAPE'] },
-  { name: 'Fishing bank', x: -13, z: 70, radius: 7, actions: ['FISH'] },
+  { name: 'Fishing bank', x: -13, z: 70, radius: 7, actions: ['FISH', 'REEL_IN'] },
   { name: 'Waystation', x: 0, z: -38, radius: 0, actions: [] },
 ];
 export const ACTION_LABELS = {
-  GATHER: 'Gather wood', GATHER_STONE: 'Gather stone', HUNT: 'Hunt nearby animal', FISH: 'Fish', BUILD_SHELTER: 'Build shelter',
+  GATHER: 'Gather wood', GATHER_STONE: 'Gather stone', HUNT: 'Hunt nearby animal', FISH: 'Cast line', BUILD_SHELTER: 'Build shelter',
+  REEL_IN: 'Reel in', CANCEL_FISHING: 'Pull in line',
   BUILD_BOAT: 'Build boat', ESCAPE: 'Sail away', REST: 'Rest', SLEEP: 'Sleep', GUARD: 'Stand guard',
   CRAFT_CLUB: 'Craft club', CRAFT_AXE: 'Craft axe', CRAFT_SPEAR: 'Craft spear', EAT: 'Eat food',
   ATTACK: 'Attack', DEFEND: 'Defend', FLEE: 'Flee to camp', WAKE: 'Wake up',
@@ -25,7 +26,21 @@ export function targetActionsFor(state, selected) {
   if (!selected) return ['SELECT_TARGET', 'FLEE'];
   return ['CHECK_TARGET', 'ENGAGE', 'FLEE'];
 }
-const PORTABLE_ACTIONS = ['EAT', 'ATTACK', 'DEFEND', 'FLEE', 'WAKE'];
+const PORTABLE_ACTIONS = ['EAT', 'ATTACK', 'DEFEND', 'FLEE', 'WAKE', 'CANCEL_FISHING'];
+
+/** The projected cue and the rod share the same point on the water. */
+export function fishingHeading(x, z) {
+  return Math.atan2(x, z) + 0.23;
+}
+
+export function fishingFloat(x, z, heading = fishingHeading(x, z), distance = 13) {
+  return [x + Math.sin(heading) * distance, -0.59, z + Math.cos(heading) * distance];
+}
+
+export function fishingPhase(deadlines, nowMilliseconds) {
+  if (!deadlines || nowMilliseconds >= deadlines.escapeAt) return null;
+  return nowMilliseconds >= deadlines.biteAt ? 'bite' : 'waiting';
+}
 
 /** Keep an encounter in the follow camera's forward view even when the survivor faces the camera. */
 export function combatPosition(position, yaw) {

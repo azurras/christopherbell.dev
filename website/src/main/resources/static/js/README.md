@@ -276,6 +276,8 @@ sequenced presence pulses, timeout/backoff, player labels and frame/listener cle
 Nearby survivors render their confirmed main weapon, engagement and guard stance
 from the presence response. Standing combat poses stay visible with reduced motion.
 Equipment and weapon item details display the server-provided automatic attack delay.
+Fishing projects a line and bite cue on the water and offers Reel In during the
+server-timed window. The bobber remains visible when reduced motion is enabled.
 The connection label uses the island-wide online count, independent of nearby poses.
 Recent confirmed strikes animate once per attacker revision. Reduced motion
 keeps the standing combat poses and suppresses strike playback.
@@ -289,6 +291,8 @@ between server poses and approach the player visually on engagement.
 `survive-action-pose.js` maps confirmed commands to timed body and tool poses.
 Landed enemy counters add upper-body recoil to the local adventurer without
 moving their feet. Blocked counters and reduced motion leave the body steady.
+A confirmed victory keeps the defeated target visible briefly at the point of
+contact. The target ring clears immediately, and reduced motion skips the fall.
 Walking and action poses respect reduced motion.
 
 The world target menu shows Check and the server-allowed combat commands for the

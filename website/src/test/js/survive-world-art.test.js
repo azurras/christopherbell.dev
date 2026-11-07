@@ -4,8 +4,8 @@ import test from 'node:test';
 import { prepareActorArt } from '../../main/resources/static/js/survive-authored-actors.js';
 import { createDynamicMesh } from '../../main/resources/static/js/survive-dynamic-mesh.js';
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
-import { cameraMatrix, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
-import { acceptRemoteStrike, actionPose, combatStance, enemyCountered, enemyCounterPose } from '../../main/resources/static/js/survive-action-pose.js';
+import { cameraMatrix, fishingFloat, fishingPhase, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
+import { acceptRemoteStrike, actionPose, combatStance, enemyCountered, enemyCounterPose, enemyDefeated, enemyFallPose } from '../../main/resources/static/js/survive-action-pose.js';
 import { drawBoat, drawCampFlame, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
 
 test('dynamic frames upload the same vertices while reusing their allocated capacity', () => {
@@ -144,6 +144,36 @@ test('a landed bite moves the authored torso without sliding the feet', () => {
   assert.ok(torsoRetreat);
 });
 
+test('confirmed personal and party wins leave a short fall without animating flee or defeat', () => {
+  const fighting = { survivorId: 'scout', status: 'COMBAT', revision: 9 };
+  const exit = { survivorId: 'scout', status: 'EXPLORING', revision: 10 };
+  assert.equal(enemyDefeated(fighting, { ...exit, combatOutcome: 'You defeated the hog.' }), true);
+  assert.equal(enemyDefeated(fighting, { ...exit, combatOutcome: 'Your party won the fight. You gained 1 food.' }), true);
+  assert.equal(enemyDefeated(fighting, { ...exit, combatOutcome: 'You fled from the hog.' }), false);
+  assert.equal(enemyDefeated(fighting, { ...exit, status: 'DEAD' }), false);
+  assert.equal(enemyDefeated(fighting, { ...exit, survivorId: 'other', combatOutcome: 'You defeated the hog.' }), false);
+  assert.equal(enemyFallPose(0.18).weight, 0);
+  assert.ok(enemyFallPose(0.61).weight > 0.5);
+  assert.equal(enemyFallPose(0.8).weight, 1);
+  assert.ok(enemyFallPose(1.02).sink > 0.5);
+  assert.equal(enemyFallPose(1.18), null);
+});
+
+test('authored wildlife rolls to the ground without changing its texture coordinates', () => {
+  const raw = JSON.parse(readFileSync(new URL('../../main/resources/static/images/survive/boar.json', import.meta.url), 'utf8'));
+  const draw = fall => {
+    const mesh = meshBuilder({ boar: prepareActorArt(raw) });
+    mesh.animal(0, 0, 'HOG', 1, 0, 0, 0, true, 0, fall);
+    return mesh.vertices.filter((_, index, vertices) => vertices[index - index % MESH_VERTEX_FLOATS + 6] === 12);
+  };
+  const standing = draw(enemyFallPose(0));
+  const fallen = draw(enemyFallPose(0.8));
+  const heights = mesh => mesh.filter((_, index) => index % MESH_VERTEX_FLOATS === 1);
+  assert.ok(Math.max(...heights(fallen)) < Math.max(...heights(standing)) * 0.7);
+  assert.deepEqual(fallen.filter((_, index) => index % MESH_VERTEX_FLOATS > 6),
+    standing.filter((_, index) => index % MESH_VERTEX_FLOATS > 6));
+});
+
 test('an engaged stance moves the equipped spear from the back to the hand', () => {
   const asset = JSON.parse(readFileSync(new URL('../../main/resources/static/images/survive/adventurer.json', import.meta.url), 'utf8'));
   const actorArt = { adventurer: prepareActorArt(asset, { adventurer: true }) };
@@ -250,6 +280,18 @@ test('confirmed harvest, fishing and combat actions create distinct animated mes
   });
   for (let index = 1; index < meshes.length; index++) assert.notDeepEqual(meshes[index - 1], meshes[index]);
   assert.equal(actionPose({ action: 'FISH', ageSeconds: 3 }), null);
+});
+
+test('the fishing cue has distinct waiting, bite and expiry boundaries', () => {
+  const cast = { biteAt: 2000, escapeAt: 7000 };
+  assert.equal(fishingPhase(cast, 1999), 'waiting');
+  assert.equal(fishingPhase(cast, 2000), 'bite');
+  assert.equal(fishingPhase(cast, 6999), 'bite');
+  assert.equal(fishingPhase(cast, 7000), null);
+  const [x, , z] = fishingFloat(-13, 70);
+  assert.ok(Math.hypot(x, z) > 78);
+  assert.ok(actionPose({ action: 'REEL_IN', ageSeconds: 0.8 }).lineDistance
+    < actionPose({ action: 'REEL_IN', ageSeconds: 0.2 }).lineDistance);
 });
 
 test('adventurer gait changes geometry and the follow camera anchors to each landmark height', () => {
