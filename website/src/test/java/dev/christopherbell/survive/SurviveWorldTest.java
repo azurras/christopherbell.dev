@@ -80,6 +80,24 @@ class SurviveWorldTest {
   }
 
   @Test
+  void sharedFightShowsAttentionOnlyToItsCurrentFighters() {
+    var guard = startSkillchainFight();
+    assertNull(world.snapshotFor(player, DAY, Instant.MIN).enemyAttention());
+
+    world.perform(SurviveAction.WEAPON_SKILL, player, DAY, () -> 1);
+    var scoutAttention = world.snapshotFor(player, DAY, Instant.MIN).enemyAttention();
+    var guardAttention = world.snapshotFor(guard, DAY, Instant.MIN).enemyAttention();
+    assertEquals("Chris", scoutAttention.name());
+    assertTrue(scoutAttention.self());
+    assertEquals("Chris", guardAttention.name());
+    assertFalse(guardAttention.self());
+    assertNull(world.snapshotFor(new SurvivePlayer("Observer", DAY), DAY, Instant.MIN).enemyAttention());
+
+    world.perform(SurviveAction.FLEE, player, DAY.plusSeconds(1), () -> 1);
+    assertNull(world.snapshotFor(guard, DAY.plusSeconds(1), Instant.MIN).enemyAttention());
+  }
+
+  @Test
   void fadedEnmityLetsAnotherPartyMemberDrawTheCounter() {
     var guard = startSkillchainFight();
     world.perform(SurviveAction.WEAPON_SKILL, player, DAY, () -> 1);

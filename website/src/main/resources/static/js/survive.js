@@ -62,6 +62,9 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveHealthText', `${state.health} / 10`);
   setText('surviveHudName', state.name);
   setText('surviveHudHealth', `HP ${state.health}/10`);
+  const attention = state.enemyAttention;
+  documentRoot.getElementById('surviveHudEnemyAttention').hidden = !attention;
+  setText('surviveHudEnemyAttention', attention ? "Enemy attention · " + (attention.self ? 'You' : attention.name) : '');
   setText('surviveHudTp', `TP ${state.tacticalPoints ?? 0}`);
   const partnerVitals = state.party?.state === 'MEMBER' ? state.party.vitals : null;
   documentRoot.getElementById('surviveHudPartner').hidden = !partnerVitals;

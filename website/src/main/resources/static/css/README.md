@@ -128,3 +128,6 @@ Wildlife labels distinguish hostile and passive animals by wording and color.
 On phones the play shell hides the game until fullscreen and controller setup
 are complete. Fullscreen uses the available viewport for the canvas and leaves
 the existing HUD and game menus in view.
+
+The Survive viewport vitals panel shows enemy attention during shared combat,
+using the private enmity leader from the survivor snapshot.

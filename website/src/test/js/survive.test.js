@@ -462,3 +462,16 @@ test('rendering never opens or closes the side panel sections', () => {
   renderSurviveState(documentRoot, { ...snapshot, worldRevision: 11, events: [...snapshot.events, 'Later'] });
   assert.equal(camp.open, true);
 });
+
+test('shows enemy attention for either fighter and clears it when the fight ends', () => {
+  const documentRoot = documentFixture();
+  const row = documentRoot.getElementById('surviveHudEnemyAttention');
+  renderSurviveState(documentRoot, { ...snapshot, enemyAttention: { name: '<b>Guard</b>', self: false } });
+  assert.equal(row.hidden, false);
+  assert.equal(row.textContent, 'Enemy attention · <b>Guard</b>');
+  renderSurviveState(documentRoot, { ...snapshot, enemyAttention: { name: 'Scout', self: true } });
+  assert.equal(row.textContent, 'Enemy attention · You');
+  renderSurviveState(documentRoot, snapshot);
+  assert.equal(row.hidden, true);
+  assert.equal(row.textContent, '');
+});
