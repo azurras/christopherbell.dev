@@ -1,7 +1,7 @@
 /** Display-only terrain and meshes. The server still owns island coordinates and action ranges. */
 import { LANDMARKS } from './survive-world-model.js';
 import { createActorModels } from './survive-world-actors.js';
-import { addResourceProps, drawQuarryRock } from './survive-world-props.js';
+import { addFishingBank, addResourceProps, drawQuarryRock } from './survive-world-props.js';
 
 const TAU = Math.PI * 2;
 export const MESH_VERTEX_FLOATS = 9;
@@ -119,6 +119,17 @@ export function islandMesh() {
     }
     innerRing = outerRing;
   }
+  // Continue the visible sand below water instead of ending it above the sea plane.
+  const submergedShore = Array.from({ length: sectors }, (_, sector) => {
+    const angle = sector / sectors * TAU;
+    return [Math.cos(angle) * 80, -0.88, Math.sin(angle) * 80];
+  });
+  for (let sector = 0; sector < sectors; sector++) {
+    const next = (sector + 1) % sectors;
+    const dampSand = [0.37, 0.34, 0.25];
+    mesh.triangle(innerRing[sector].point, submergedShore[sector], submergedShore[next], dampSand, 1.9);
+    mesh.triangle(innerRing[sector].point, submergedShore[next], innerRing[next].point, dampSand, 1.9);
+  }
   for (const tree of trees) mesh.tree(tree.x, tree.z, tree.height, tree.angle, tree.broadleaf);
   for (let index = 0; index < 37; index++) {
     const angle = index * 2.39996;
@@ -195,6 +206,7 @@ export function islandMesh() {
   }
   mesh.box(-5.32, workbenchY + 1.14, 3.11, 0.56, 0.09, 0.29, STONE);
   addResourceProps(mesh, groundHeight);
+  addFishingBank(mesh, groundHeight);
   buildRuinedGate(mesh);
   buildGateCrossing(mesh);
   plantNorthGateVerge(mesh);

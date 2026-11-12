@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.survive.model.SurviveAction;
+import dev.christopherbell.survive.model.SurviveParty.MemberVitals;
 import dev.christopherbell.survive.model.SurviveParty.Command;
 import dev.christopherbell.survive.model.SurviveParty.State;
 import dev.christopherbell.survive.model.SurviveRequests.Party;
@@ -49,6 +51,29 @@ class SurvivePartyTest {
         () -> restarted.changePartyForOwner(guard.token(), null, accept)).getStatusCode());
     assertNull(restarted.changePartyForOwner(scout.token(), null, new Party(Command.LEAVE, invitation.id())).party());
     assertNull(restarted.find(guard.token()).orElseThrow().party());
+  }
+
+  @Test
+  void onlyAcceptedPartySeesCurrentPartnerVitals() {
+    when(clock.instant()).thenReturn(SurviveClock.WORLD_EPOCH);
+    var service = new SurviveService(clock, () -> 50, 10, repository);
+    var scout = service.join(null, "Scout");
+    var guard = service.join(null, "Guard");
+    var invitation = service.changePartyForOwner(scout.token(), null,
+        new Party(Command.INVITE, UUID.fromString(guard.state().survivorId()))).party();
+    assertNull(invitation.vitals());
+    assertNull(service.find(guard.token()).orElseThrow().party().vitals());
+    service.changePartyForOwner(guard.token(), null, new Party(Command.ACCEPT, invitation.id()));
+
+    assertEquals(new MemberVitals(10, 10, 0), service.find(scout.token()).orElseThrow().party().vitals());
+    var guardState = service.find(guard.token()).orElseThrow();
+    var targeted = service.act(guard.token(), SurviveAction.HUNT, guardState.revision());
+    var engaged = service.act(guard.token(), SurviveAction.ENGAGE, targeted.revision());
+    when(clock.instant()).thenReturn(engaged.nextStrikeAt());
+
+    assertEquals(new MemberVitals(9, 10, 50), service.find(scout.token()).orElseThrow().party().vitals());
+    service.changePartyForOwner(scout.token(), null, new Party(Command.LEAVE, invitation.id()));
+    assertNull(service.find(guard.token()).orElseThrow().party());
   }
 
   @Test

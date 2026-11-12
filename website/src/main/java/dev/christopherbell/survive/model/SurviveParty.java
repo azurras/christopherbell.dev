@@ -29,7 +29,10 @@ public record SurviveParty(String id, String inviterId, String inviteeId, Instan
   public enum Command { INVITE, ACCEPT, DECLINE, CANCEL, LEAVE }
 
   /** The other survivor and the relationship visible to the requesting player. */
-  public record View(UUID id, String name, State state) {}
+  public record View(UUID id, String name, State state, MemberVitals vitals) {}
+
+  /** Confirmed battle resources visible only to the accepted partner. */
+  public record MemberVitals(int health, int maxHealth, int tacticalPoints) {}
 
   public enum State { INCOMING, OUTGOING, MEMBER }
 }

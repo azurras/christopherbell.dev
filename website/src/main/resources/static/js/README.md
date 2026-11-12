@@ -5,6 +5,7 @@ Owns browser-side behavior for server-rendered pages.
 ## What Lives Here
 
 - `survive.js` renders the Java-owned shared survival world and serializes commands; it owns no game rules. See the `survive` Java package README for the API and lifetime contract.
+- The viewport vitals card shows an accepted partner's HP and TP from the same game snapshot. Invitations, ended parties and older snapshots without vitals clear the partner row.
 - `survive-world-materials.js` paints the adventurer's eyes, brows and lips on the mirrored face chart when staging the shared actor atlas. Keep the paint coordinates paired with `adventurer.json` and `authored-actors.jpg` when changing those assets.
 
 - Page entry modules such as `home-feed.js`, `messages.js`, `profile.js`,
@@ -268,6 +269,9 @@ once on load and preserves hard edges between steeply angled faces.
 `survive-world-actors.js` supplies
 the fallback models. `survive-world-props.js`
 builds the shelters, boats and resource-site props used by the same renderer.
+The fishing bank groups textured rocks, driftwood and bent reeds around the dock,
+leaving the central approach open. These props share the static scenery buffer.
+Sand extends below the ocean surface and darkens near the waterline.
 `survive-world-renderer.js` owns WebGL buffers, lighting, fog and disposal.
 The starting campfire uses one camera-facing quad for soft flames and embers.
 Local firelight falls off around the pit, and reduced motion freezes the effect.

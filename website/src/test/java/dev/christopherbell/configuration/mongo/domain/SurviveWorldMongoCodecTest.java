@@ -13,6 +13,7 @@ import static org.mockito.ArgumentMatchers.eq;
 
 import dev.christopherbell.survive.model.SurviveSavedWorld;
 import dev.christopherbell.survive.model.SurviveEnemy;
+import dev.christopherbell.survive.model.SurviveEnmity;
 import dev.christopherbell.survive.model.SurviveFieldFight;
 import dev.christopherbell.survive.model.SurviveParty;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
@@ -82,7 +83,8 @@ class SurviveWorldMongoCodecTest {
         alice.survivorId(), guest.survivorId(), null);
     var fight = new SurviveFieldFight("meadow-hog", UUID.randomUUID().toString(), party.id(), SurviveEnemy.HOG,
         -34, 24, 0, 5, List.of(alice.survivorId()), null,
-        new SurviveFieldFight.SkillOpening(alice.survivorId(), alice.lastSeen()));
+        new SurviveFieldFight.SkillOpening(alice.survivorId(), alice.lastSeen()),
+        Map.of(alice.survivorId(), SurviveEnmity.emptyAt(alice.lastSeen()).afterDamageDealt(2, alice.lastSeen())));
     var saved = new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of("Shared journal"),
         List.of(alice, guest), 43L, 21L, List.of(party), List.of(fight));
     var envelope = codec.encode(saved);
@@ -90,6 +92,8 @@ class SurviveWorldMongoCodecTest {
         .getList("parties", Document.class).getFirst().getString("_id"));
     assertEquals("survive_world", envelope.getString("_kind"));
     assertEquals(saved, codec.decode(envelope));
+    envelope.get("payload", Document.class).getList("fieldFights", Document.class).getFirst().remove("enmity");
+    assertEquals(Map.of(), codec.decode(envelope).fieldFights().getFirst().enmity());
     assertTrue(DomainCollectionManifest.forKind("survive_world").isEmpty());
     assertThrows(IllegalArgumentException.class, () -> new SurviveSavedWorld("shared", 0L, 0, 0, 0,
         List.of(), List.of(alice, alice), null, null, List.of(), List.of()));

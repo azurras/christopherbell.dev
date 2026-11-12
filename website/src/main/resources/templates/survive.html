@@ -56,9 +56,13 @@
               <button type="button" id="surviveCommandButton" aria-controls="surviveWorldActions" aria-expanded="false" aria-keyshortcuts="Enter" hidden>Commands</button>
               <div id="surviveWorldActions" class="survive-world-actions" role="group" aria-label="Action commands" hidden></div>
             </div>
-            <div id="surviveWorldVitals" class="survive-game-vitals" aria-label="Survivor vitals">
+            <div id="surviveWorldVitals" class="survive-game-vitals" role="group" aria-label="Survivor and party vitals">
               <strong id="surviveHudName"></strong>
               <span id="surviveHudHealth"></span><span id="surviveHudTp"></span>
+              <div id="surviveHudPartner" class="survive-party-vitals" role="group" aria-label="Party member vitals" hidden>
+                <strong id="surviveHudPartnerName"></strong>
+                <span id="surviveHudPartnerHealth"></span><span id="surviveHudPartnerTp"></span>
+              </div>
             </div>
             <div id="surviveGameLog" class="survive-game-log">
               <div class="survive-recent-heading">

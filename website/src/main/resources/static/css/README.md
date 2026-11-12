@@ -5,6 +5,7 @@ Owns site styling for server-rendered pages and frontend components.
 ## What Lives Here
 
 - `survive.css` owns the desktop play view, responsive shared-world adventure, target markers, survivor stats, camp, Items list and chat log.
+- The viewport vitals card uses the same responsive bounds for its optional party row.
 
 - `main.css` is the primary shared stylesheet for the current site, Void feed,
   tools, auth, profile, messages, post cards, and responsive layout.
