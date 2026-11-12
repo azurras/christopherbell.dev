@@ -329,3 +329,20 @@ test('Escape closes the weapon picker, then Equipment, then Main Menu', () => {
     world.dispose();
   }
 });
+
+test('Arrow Down moves from the Main weapon row to an available weapon choice', () => {
+  const fixture = worldFixture();
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({}), () => {}, () => fixture.renderer);
+  const shell = fixture.documentRoot.getElementById('surviveWorld');
+  const disabled = { disabled: true, getClientRects: () => [{}] };
+  let focused;
+  const weapon = { getClientRects: () => [{}], focus: () => { focused = weapon; } };
+  const main = { getClientRects: () => [{}], closest: selector => selector === '.survive-main-menu-panel' ? panel : null };
+  const panel = { querySelectorAll: () => [main, disabled, weapon] };
+  try {
+    shell.emit('keydown', { code: 'ArrowDown', target: main, preventDefault() {} });
+    assert.equal(focused, weapon);
+  } finally {
+    world.dispose();
+  }
+});
