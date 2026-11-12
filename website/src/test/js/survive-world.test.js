@@ -92,8 +92,8 @@ function worldFixture() {
   documentRoot.getElementById('surviveJoin').hidden = true;
   const rendered = [];
   let disposals = 0;
-  const renderer = { draw(position, yaw, _state, _others, _time, _wildlife, _enemy, _gesture, zoom) {
-    rendered.push({ ...position, yaw, zoom, gesture: _gesture });
+  const renderer = { draw(position, yaw, _state, _others, _time, _wildlife, _enemy, gesture, zoom, counter) {
+    rendered.push({ ...position, yaw, zoom, gesture, counter });
     return { project: () => ({ visible: false, x: 0, y: 0 }) };
   },
     dispose() { disposals++; } };
@@ -114,14 +114,15 @@ test('an ally hit does not animate the local fighter, while their own confirmed 
     others: [], accepted: true, wildlife: [],
   }), () => {}, () => fixture.renderer);
   const engaged = { ...worldState, status: 'COMBAT', enemy: 'BEAR', enemyHealth: 10,
-    nextStrikeAt: '2026-11-05T14:00:00Z', revision: 1, strike: null };
+    nextStrikeAt: '2026-11-05T14:00:00Z', revision: 1, health: 10, defending: true, strike: null };
   try {
     world.setState(engaged);
     fixture.frame(0);
     await new Promise(resolve => setImmediate(resolve));
-    world.setState({ ...engaged, revision: 2, enemyHealth: 7 });
+    world.setState({ ...engaged, revision: 2, enemyHealth: 7, defending: false });
     fixture.frame(16);
     assert.equal(fixture.rendered.at(-1).gesture, null);
+    assert.equal(fixture.rendered.at(-1).counter.kind, 'strike');
     world.setState({ ...engaged, revision: 3, enemyHealth: 5,
       strike: { revision: 3, weaponSkill: true, weapon: 'CLUB' } });
     fixture.frame(32);
