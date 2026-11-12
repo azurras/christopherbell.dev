@@ -326,3 +326,7 @@ keyboard and mouse in ordinary windows at any viewport width.
 
 In the Survive viewport, Escape and controller B close the focused Main Menu panel
 one level at a time and return focus to the row that opened it.
+
+While the Survive item list has focus, controller D-pad Up and Down browse
+items and update their details. At either end, the next press moves focus to
+the neighboring menu control.
