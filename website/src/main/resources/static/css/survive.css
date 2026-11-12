@@ -205,8 +205,8 @@
   box-shadow: 0 2px 7px #0009;
 }
 .survive-main-menu > summary { width: max-content; margin-left: auto; padding: .55rem .7rem; cursor: pointer; }
-.survive-main-menu-list { margin-top: .25rem; max-height: min(49vh, 360px); overflow: auto; padding: .25rem; }
-.survive-main-menu-list .survive-section { background: none; border: 0; border-radius: 0; }
+.survive-main-menu-list { margin-top: .25rem; max-height: min(49vh, 360px); overflow: auto; padding: .25rem; scrollbar-color: #8795b1 #172249; }
+.survive-main-menu-list .survive-section { padding: 0; background: none; border: 0; border-radius: 0; }
 .survive-main-menu-list .survive-section > summary { padding: .45rem .6rem; color: #f2f3ff; }
 .survive-main-menu-list .survive-section > summary::before, .survive-world-actions button::before {
   content: '';
