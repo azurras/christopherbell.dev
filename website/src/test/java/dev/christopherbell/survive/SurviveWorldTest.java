@@ -57,6 +57,28 @@ class SurviveWorldTest {
   }
 
   @Test
+  void sharedFightRestoresIndependentWeaponDeadlines() {
+    var guard = startSkillchainFight();
+    var restored = SurviveWorld.restore(world.saveState(0L));
+    var barehanded = restored.players.get(player.survivorId);
+    var armed = restored.players.get(guard.survivorId);
+
+    assertEquals(DAY.plusMillis(3000), barehanded.nextStrikeAt);
+    assertEquals(DAY.plusMillis(3200), armed.nextStrikeAt);
+
+    restored.settleCombatUntil(DAY.plusMillis(3000));
+    assertEquals(150, barehanded.tacticalPoints);
+    assertEquals(DAY.plusMillis(6000), barehanded.nextStrikeAt);
+    assertEquals(100, armed.tacticalPoints);
+
+    restored.settleCombatUntil(DAY.plusMillis(3200));
+    assertEquals(150, barehanded.tacticalPoints);
+    assertEquals(150, armed.tacticalPoints);
+    assertEquals(DAY.plusMillis(6400), armed.nextStrikeAt);
+    assertEquals(barehanded.enemyHealth, armed.enemyHealth);
+  }
+
+  @Test
   void waystationCreditsAContributingPartyAndRewardsEachSurvivorOnce() {
     var guard = startSkillchainFight();
     for (var survivor : List.of(player, guard)) {
