@@ -292,3 +292,40 @@ test('graphics loss cannot resurrect the target HUD after disposal', () => {
   assert.equal(fixture.documentRoot.getElementById('surviveWorldCombat').hidden, true);
   assert.equal(fixture.frames.size, 0);
 });
+
+test('Escape closes the weapon picker, then Equipment, then Main Menu', () => {
+  const fixture = worldFixture();
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({}), () => {}, () => fixture.renderer);
+  const shell = fixture.documentRoot.getElementById('surviveWorld');
+  const mainMenu = fixture.documentRoot.getElementById('surviveMainMenu');
+  const canvas = fixture.documentRoot.getElementById('surviveWorldCanvas');
+  const equipment = { open: true, parentElement: { closest: () => mainMenu } };
+  const picker = { open: true, parentElement: { closest: () => equipment } };
+  const menuPanels = [equipment, picker];
+  let focused;
+  for (const panel of menuPanels) {
+    panel.querySelector = () => ({ focus: () => { focused = panel; } });
+  }
+  mainMenu.open = true;
+  mainMenu.contains = panel => menuPanels.includes(panel);
+  canvas.focus = () => { focused = canvas; };
+  const cancel = panel => shell.emit('keydown', { code: 'Escape', preventDefault() {},
+    target: { closest: selector => selector === 'details[open]' ? (panel.open ? panel : panel.parentElement.closest()) : null },
+  });
+  try {
+    cancel(picker);
+    assert.equal(picker.open, false);
+    assert.equal(equipment.open, true);
+    assert.equal(mainMenu.open, true);
+    assert.equal(focused, picker);
+    cancel(picker);
+    assert.equal(equipment.open, false);
+    assert.equal(mainMenu.open, true);
+    assert.equal(focused, equipment);
+    cancel(mainMenu);
+    assert.equal(mainMenu.open, false);
+    assert.equal(focused, canvas);
+  } finally {
+    world.dispose();
+  }
+});

@@ -347,13 +347,23 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     } else if (event.code === 'Escape' && !event.target.closest('.survive-game-log')
         && (mainMenu.open || !actionList.hidden)) {
       event.preventDefault();
+      if (mainMenu.open) {
+        const panel = event.target.closest('details[open]');
+        if (panel && panel !== mainMenu && mainMenu.contains(panel)) {
+          panel.open = false;
+          panel.querySelector(':scope > summary').focus({ preventScroll: true });
+          return;
+        }
+      }
       mainMenu.open = false;
       closeCommands();
       canvas.focus({ preventScroll: true });
     } else if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
       const list = event.target.closest('#surviveWorldActions, .survive-main-menu-list');
       if (!list) return;
-      const options = [...(list === actionList ? actionList.children : list.querySelectorAll(':scope > details > summary'))];
+      const rows = list === actionList ? actionList.children
+        : list.querySelectorAll(':scope > button, :scope > details > summary');
+      const options = [...rows].filter(row => !row.disabled && row.getClientRects().length > 0);
       const index = options.indexOf(event.target);
       if (index < 0) return;
       event.preventDefault();

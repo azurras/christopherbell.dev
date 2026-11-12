@@ -320,3 +320,6 @@ right stick turns the camera, and the D-pad and face buttons reuse menu controls
 Leaving fullscreen or disconnecting stops phone input and movement pulses.
 Desktop and laptop browsers support the same controller mapping alongside
 keyboard and mouse in ordinary windows at any viewport width.
+
+In the Survive viewport, Escape and controller B close the focused Main Menu panel
+one level at a time and return focus to the row that opened it.
