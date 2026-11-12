@@ -206,7 +206,6 @@
 }
 .survive-main-menu > summary { width: max-content; margin-left: auto; padding: .55rem .7rem; cursor: pointer; }
 .survive-main-menu-list { margin-top: .25rem; max-height: min(49vh, 360px); overflow: auto; padding: .25rem; }
-.survive-main-menu-list:has(.survive-map-section[open]) > details:not(.survive-map-section) { display: none; }
 .survive-main-menu-list .survive-section { background: none; border: 0; border-radius: 0; }
 .survive-main-menu-list .survive-section > summary { padding: .45rem .6rem; color: #f2f3ff; }
 .survive-main-menu-list .survive-section > summary::before, .survive-world-actions button::before {
@@ -217,9 +216,10 @@
   border-right: 0;
   border-left: .4em solid #e8da9e;
 }
-.survive-main-menu-list .survive-section > :not(summary) { margin-left: .6rem; margin-right: .6rem; }
-.survive-main-menu-list .survive-section[open] { padding-bottom: .6rem; }
-.survive-main-menu-list summary:hover, .survive-main-menu-list summary:focus-visible,
+.survive-main-menu-panel { padding: .65rem; }
+.survive-main-menu-panel .survive-island-map { width: 100%; }
+.survive-main-menu-list .survive-section[open] { padding-bottom: 0; }
+.survive-main-menu-list .survive-section[open] > summary, .survive-main-menu-list summary:hover, .survive-main-menu-list summary:focus-visible,
 .survive-world .survive-world-actions button:hover, .survive-world .survive-world-actions button:focus-visible { background: #485c91; }
 .survive-main-menu summary:focus-visible { outline: 2px solid #f3d392; outline-offset: -2px; }
 .survive-world-actions { display: grid; max-height: 12rem; overflow: auto; margin-top: .25rem; padding: .2rem; }
@@ -239,6 +239,23 @@
 .survive-world .survive-game-log button { min-height: 1.8rem; padding: .1rem .35rem; border-color: #7480a6; background: #273960; font-size: .75rem; }
 .survive-game-log .survive-recent li { padding: .12rem 0; line-height: 1.35; }
 .survive-world[data-active] .survive-main-menu { position: absolute; z-index: 8; top: .6rem; right: .6rem; width: min(18rem, calc(100% - 1.2rem)); }
+@media (min-width: 720px) and (min-height: 480px) {
+  .survive-world[data-active] .survive-main-menu { width: 12rem; }
+  .survive-world[data-active] .survive-main-menu-list { position: relative; max-height: none; overflow: visible; }
+  .survive-world[data-active] .survive-main-menu-panel {
+    position: absolute;
+    right: calc(100% + .35rem);
+    top: 0;
+    width: 20rem;
+    max-height: min(57vh, 27rem);
+    overflow: auto;
+    margin: 0;
+    background: var(--window-fill);
+    border: 2px ridge var(--window-edge);
+    border-radius: .35rem;
+    box-shadow: 0 2px 7px #0009;
+  }
+}
 .survive-world[data-active] .survive-command-window { position: absolute; z-index: 6; left: .6rem; bottom: 6.65rem; }
 .survive-world[data-active] .survive-game-log { position: absolute; z-index: 4; bottom: .6rem; left: .6rem; width: min(28rem, 57%); }
 .survive-world[data-active] .survive-game-log[data-expanded="true"] { z-index: 7; width: min(38rem, calc(100% - 1.2rem)); }
