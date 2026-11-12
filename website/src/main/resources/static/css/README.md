@@ -131,3 +131,7 @@ the existing HUD and game menus in view.
 
 The Survive viewport vitals panel shows enemy attention during shared combat,
 using the private enmity leader from the survivor snapshot.
+
+The Survive Main Menu keeps its category list visible while the selected panel
+opens beside it in the desktop world view. Narrow viewports and page view show
+the same panel beneath its category.

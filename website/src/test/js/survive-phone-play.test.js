@@ -122,6 +122,32 @@ test('a desktop controller works in a normal window and never locks mouse or key
     assert.equal(documentRoot.getElementById('surviveGame').inert, undefined);
     assert.equal(documentRoot.getElementById('survivePhoneGate').hidden, true);
     assert.deepEqual(axes.at(-1), [0.55, -0, -0.7, 0]);
+    const menu = documentRoot.getElementById('surviveMainMenu');
+    const items = { tagName: 'SELECT', size: 5, options: [{}, {}], selectedIndex: 0,
+      getAttribute: () => null, getClientRects: () => [{}],
+      dispatchEvent(event) { changes.push(event.type); },
+    };
+    const nextRow = {
+      getAttribute: () => null, getClientRects: () => [{}],
+      focus() { documentRoot.activeElement = this; }, scrollIntoView() {},
+    };
+    const changes = [];
+    menu.open = true;
+    menu.querySelectorAll = () => [items, nextRow];
+    documentRoot.defaultView.Event = Event;
+    documentRoot.activeElement = items;
+    gamepad.buttons[13].pressed = true;
+    nextFrame();
+    assert.equal(items.selectedIndex, 1);
+    assert.equal(documentRoot.activeElement, items);
+    assert.deepEqual(changes, ['change']);
+    gamepad.buttons[13].pressed = false;
+    nextFrame();
+    gamepad.buttons[13].pressed = true;
+    nextFrame();
+    assert.equal(documentRoot.activeElement, nextRow);
+    menu.open = false;
+
     gamepad = null;
     nextFrame();
     assert.deepEqual(axes.at(-1), [0, 0, 0, 0]);
