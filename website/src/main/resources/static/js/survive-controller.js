@@ -86,19 +86,28 @@ export function mountSurviveController(documentRoot, world, onResume) {
     next?.scrollIntoView({ block: 'nearest' });
   }
 
+  function stepSelect(select, step) {
+    const choice = select.selectedIndex + step;
+    if (choice < 0 || choice >= select.options.length) return false;
+    select.selectedIndex = choice;
+    select.dispatchEvent(new view.Event('change', { bubbles: true }));
+    return true;
+  }
+
+  function moveVertical(focused, step) {
+    if (focused?.tagName === 'SELECT' && focused.size > 1 && stepSelect(focused, step)) return;
+    moveMenuFocus(step);
+  }
+
   function useButtons(buttons) {
     const pressed = index => buttons[index]?.pressed && !lastButtons[index];
     const focused = documentRoot.activeElement;
-    if (pressed(UP)) moveMenuFocus(-1);
-    if (pressed(DOWN)) moveMenuFocus(1);
+    if (pressed(UP)) moveVertical(focused, -1);
+    if (pressed(DOWN)) moveVertical(focused, 1);
     if (pressed(LEFT) || pressed(RIGHT)) {
       const step = pressed(LEFT) ? -1 : 1;
       if (focused?.tagName === 'SELECT') {
-        const choice = focused.selectedIndex + step;
-        if (choice >= 0 && choice < focused.options.length) {
-          focused.selectedIndex = choice;
-          focused.dispatchEvent(new view.Event('change', { bubbles: true }));
-        }
+        stepSelect(focused, step);
       } else if (join.hidden && !game.hidden && !currentMenu() && focused === canvas) {
         key(canvas, step > 0 ? 'Numpad0' : 'NumpadDecimal');
       } else moveMenuFocus(step);
