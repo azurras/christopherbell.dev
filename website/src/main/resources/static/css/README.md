@@ -128,3 +128,7 @@ Wildlife labels distinguish hostile and passive animals by wording and color.
 On phones the play shell hides the game until fullscreen and controller setup
 are complete. Fullscreen uses the available viewport for the canvas and leaves
 the existing HUD and game menus in view.
+
+The Survive Main Menu keeps its category list visible while the selected panel
+opens beside it in the desktop world view. Narrow viewports and page view show
+the same panel beneath its category.
