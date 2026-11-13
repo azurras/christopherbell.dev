@@ -45,6 +45,36 @@ class SurviveServiceTest {
   }
 
   @Test
+  void packExpansionAndDiscardRequireOwnedItemsAndCurrentRevision() {
+    var repository = new InMemorySurviveWorldRepository();
+    var day = Clock.fixed(SurviveClock.WORLD_EPOCH, ZoneOffset.UTC);
+    var service = new SurviveService(day, () -> 25, 10, repository);
+    var joined = service.join(null, "Packer");
+    for (int count = 0; count < 4; count++) {
+      act(service, joined.token(), SurviveAction.GATHER);
+    }
+    act(service, joined.token(), SurviveAction.GATHER_STONE);
+    var supplies = act(service, joined.token(), SurviveAction.GATHER_STONE);
+    var expanded = service.act(joined.token(), SurviveAction.EXPAND_PACK, supplies.revision());
+    assertEquals(15, expanded.inventoryCapacity());
+    assertEquals(0, expanded.wood());
+    assertEquals(0, expanded.stone());
+
+    var gathered = act(service, joined.token(), SurviveAction.GATHER);
+    assertThrows(ResponseStatusException.class, () -> service.actForOwner(joined.token(), null,
+        SurviveAction.DROP_ITEM, gathered.revision(), "food"));
+    var discarded = service.actForOwner(joined.token(), null, SurviveAction.DROP_ITEM, gathered.revision(), "wood");
+    assertEquals(0, discarded.wood());
+    assertThrows(ResponseStatusException.class, () -> service.actForOwner(joined.token(), null,
+        SurviveAction.DROP_ITEM, gathered.revision(), "wood"));
+
+    var restarted = new SurviveService(day, () -> 25, 10, repository);
+    var restored = restarted.find(joined.token()).orElseThrow();
+    assertEquals(15, restored.inventoryCapacity());
+    assertEquals(0, restored.wood());
+  }
+
+  @Test
   void fullnessUsesActiveTimeAcrossRestartsAndIgnoresTimeAway() {
     var joinedAt = SurviveClock.WORLD_EPOCH;
     var mutableClock = mock(Clock.class);

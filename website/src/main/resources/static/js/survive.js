@@ -201,6 +201,13 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const itemList = documentRoot.getElementById('surviveItemList');
   const itemSort = documentRoot.getElementById('surviveItemSort');
   const itemUse = documentRoot.getElementById('surviveItemUse');
+  const itemDrop = documentRoot.getElementById('surviveItemDrop');
+  const dropConfirm = documentRoot.getElementById('surviveDropConfirm');
+  const dropPrompt = documentRoot.getElementById('surviveDropPrompt');
+  const confirmDrop = documentRoot.getElementById('surviveConfirmDrop');
+  const cancelDrop = documentRoot.getElementById('surviveCancelDrop');
+  const expandPack = documentRoot.getElementById('surviveExpandPack');
+  let pendingDrop;
   const playShell = documentRoot.getElementById('survivePlayShell');
   const gameViewToggle = documentRoot.getElementById('surviveGameViewToggle');
   const game = documentRoot.getElementById('surviveGame');
@@ -334,6 +341,35 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   };
   itemList?.addEventListener('change', updateItems);
   itemSort?.addEventListener('click', sortItems);
+  function closeDrop() {
+    pendingDrop = undefined;
+    dropConfirm.hidden = true;
+    itemList.focus({ preventScroll: true });
+  }
+
+  function openDrop() {
+    if (mutationPending || !state?.actions.includes('DROP_ITEM') || !itemList.value) return;
+    pendingDrop = { id: itemList.value, survivorId: state.survivorId };
+    dropPrompt.textContent = 'Permanently discard one ' + itemList.selectedOptions[0].textContent.split(' ×')[0] + '?';
+    dropConfirm.hidden = false;
+    cancelDrop.focus({ preventScroll: true });
+  }
+
+  function dropItem() {
+    const selected = pendingDrop;
+    closeDrop();
+    if (selected && selected.survivorId === state?.survivorId && selected.id === itemList.value
+        && state?.actions.includes('DROP_ITEM') && !mutationPending) performAction('DROP_ITEM', selected.id);
+  }
+
+  function upgradePack() {
+    if (!mutationPending && state?.actions.includes('EXPAND_PACK')) performAction('EXPAND_PACK');
+  }
+
+  itemDrop?.addEventListener('click', openDrop);
+  confirmDrop?.addEventListener('click', dropItem);
+  cancelDrop?.addEventListener('click', closeDrop);
+  expandPack?.addEventListener('click', upgradePack);
   itemUse?.addEventListener('click', useItem);
   const toggleGameView = () => {
     const showPage = playShell.dataset.windowed !== 'true';
@@ -416,6 +452,10 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       equipment?.removeEventListener('click', useEquipment);
       itemList?.removeEventListener('change', updateItems);
       itemSort?.removeEventListener('click', sortItems);
+      itemDrop?.removeEventListener('click', openDrop);
+      confirmDrop?.removeEventListener('click', dropItem);
+      cancelDrop?.removeEventListener('click', closeDrop);
+      expandPack?.removeEventListener('click', upgradePack);
       itemUse?.removeEventListener('click', useItem);
       gameViewToggle?.removeEventListener('click', toggleGameView);
       controller.dispose();

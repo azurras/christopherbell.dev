@@ -40,7 +40,8 @@ import java.util.function.Supplier;
  * loads the world, in the order they happened.
  */
 final class SurviveWorld {
-  static final int INVENTORY_CAPACITY = 10;
+  private static final int PACK_UPGRADE_WOOD = 4;
+  private static final int PACK_UPGRADE_STONE = 2;
   static final int BEDS_PER_SHELTER = 2;
   private static final int MAX_EVENTS = 30;
   private static final int MAX_STRUCTURES = 1000;
@@ -114,6 +115,7 @@ final class SurviveWorld {
       player.combatOutcome = stored.combatOutcome();
       player.weapon = stored.weapon();
       player.weaponDurability = stored.weaponDurability();
+      player.packExpansions = stored.packExpansions();
       player.packedWeapons.addAll(stored.packedWeapons());
       player.fishing = stored.fishing();
       player.guarding = stored.guarding();
@@ -135,7 +137,7 @@ final class SurviveWorld {
           player.status, player.revision, player.message, player.stone, player.hunger, player.enemy,
           player.weapon, player.weaponDurability, player.guarding, player.sleptAt, player.struckFirst,
           player.nextStrikeAt, player.tacticalPoints, player.defending, player.combatOutcome,
-          player.activeFullnessMilliseconds, player.waystationAssignment, player.packedWeapons, player.lastStrike, player.fishing);
+          player.activeFullnessMilliseconds, player.waystationAssignment, player.packedWeapons, player.lastStrike, player.fishing, player.packExpansions);
     }).toList();
     return new SurviveSavedWorld("shared", storageVersion, revision, shelters, boats, List.copyOf(events),
         storedPlayers, settledBoundaries, activeRaidNight, parties.save(), List.copyOf(fieldFights.values()));
@@ -144,7 +146,7 @@ final class SurviveWorld {
   SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline) {
     return new SurviveSnapshot(player.name, player.health, player.strength, player.stamina,
         player.experience, player.experienceToNextLevel, player.wood, player.food,
-        INVENTORY_CAPACITY, player.enemyHealth, player.status, player.revision, revision,
+        player.inventoryCapacity(), player.enemyHealth, player.status, player.revision, revision,
         shelters, boats, players.values().stream().filter(survivor -> survivor.lastSeen.isAfter(activeDeadline)).map(survivor -> survivor.name).toList(),
         List.copyOf(events), actionsFor(player, now), player.message, player.survivorId,
         player.status == Status.EXPLORING ? players.values().stream()
@@ -258,6 +260,17 @@ final class SurviveWorld {
     recordEvent(sender.name + " gave " + supplies + " to " + recipient.name + ".");
   }
 
+  /** Discard one previously validated pack entry and publish the result. */
+  void dropItem(SurvivePlayer player, SurviveResource resource, SurvivePackedWeapon weapon) {
+    if (resource != null) {
+      addSupplies(player, resource, -1);
+      recordAction(player, "You dropped one " + resource.name().toLowerCase(Locale.ROOT) + ".", false);
+    } else {
+      player.packedWeapons.remove(weapon);
+      recordAction(player, "You dropped your " + weapon.weapon().displayName() + ".", false);
+    }
+  }
+
   /** Supplies a survivor holds of one resource. */
   static int suppliesOf(SurvivePlayer player, SurviveResource resource) {
     return switch (resource) {
@@ -307,6 +320,13 @@ final class SurviveWorld {
       case TALK_WAYSTATION -> talkAtWaystation(player);
       case EQUIP_WEAPON -> equipWeapon(player, selectedWeapon);
       case STOW_WEAPON -> stowWeapon(player);
+      case EXPAND_PACK -> {
+        player.wood -= PACK_UPGRADE_WOOD;
+        player.stone -= PACK_UPGRADE_STONE;
+        player.packExpansions++;
+        yield "Your pack now holds " + player.inventoryCapacity() + " items.";
+      }
+      case DROP_ITEM -> throw new IllegalArgumentException("Drop requires a selected item.");
     };
     if (action == SurviveAction.FLEE) {
       removeFromFieldFight(player);
@@ -360,6 +380,13 @@ final class SurviveWorld {
     }
     if (!player.packedWeapons.isEmpty()) {
       actions.add(SurviveAction.EQUIP_WEAPON);
+    }
+    if (player.inventoryCount() > 0) {
+      actions.add(SurviveAction.DROP_ITEM);
+    }
+    if (player.packExpansions < SurviveSavedWorld.Player.MAX_PACK_EXPANSIONS
+        && player.wood >= PACK_UPGRADE_WOOD && player.stone >= PACK_UPGRADE_STONE) {
+      actions.add(SurviveAction.EXPAND_PACK);
     }
     if (player.wood >= 5 && shelters < MAX_STRUCTURES) {
       actions.add(SurviveAction.BUILD_SHELTER);
@@ -849,7 +876,7 @@ final class SurviveWorld {
       }
       case ACTIVE -> "North Gate Patrol: Land a hit and survive a victory in a shared party fight.";
       case RETURN -> {
-        if (INVENTORY_CAPACITY - survivor.inventoryCount() < 2) {
+        if (survivor.inventoryCapacity() - survivor.inventoryCount() < 2) {
           yield "North Gate Patrol: Free two inventory slots to claim your reward.";
         }
         survivor.food += 2;
@@ -862,7 +889,7 @@ final class SurviveWorld {
   }
 
   private static int awardFieldFood(SurvivePlayer player, int availableFood) {
-    int food = Math.min(availableFood, INVENTORY_CAPACITY - player.inventoryCount());
+    int food = Math.min(availableFood, player.inventoryCapacity() - player.inventoryCount());
     player.food += food;
     return food;
   }
@@ -947,7 +974,7 @@ final class SurviveWorld {
       return hit + damage + " damage." + biteNote + weaponNote;
     }
     player.stopFighting();
-    int foodGained = Math.min(enemy.foodReward(), INVENTORY_CAPACITY - player.inventoryCount());
+    int foodGained = Math.min(enemy.foodReward(), player.inventoryCapacity() - player.inventoryCount());
     player.food += foodGained;
     String reward = enemy == SurviveEnemy.RAIDER ? "" : foodGained == 0
         ? " Your full inventory could not hold its food."

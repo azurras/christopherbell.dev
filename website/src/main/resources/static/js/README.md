@@ -340,3 +340,6 @@ keeps its encounter heading.
 
 Shared combat uses the acknowledged enemy position for both fighters.
 Personal encounters retain the local approach animation.
+
+The Items panel confirms a permanent discard and shows the camp pack upgrade.
+The server owns the pack capacity and validates the selected item.

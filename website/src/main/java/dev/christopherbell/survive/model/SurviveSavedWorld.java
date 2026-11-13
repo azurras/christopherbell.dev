@@ -75,8 +75,15 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       SurviveWeapon weapon, Integer weaponDurability, Boolean guarding, Instant sleptAt, Boolean struckFirst,
       Instant nextStrikeAt, Integer tacticalPoints, Boolean defending, String combatOutcome,
       Integer activeFullnessMilliseconds, SurviveWaystation.Assignment waystationAssignment,
-      List<SurvivePackedWeapon> packedWeapons, SurviveStrike lastStrike, SurviveFishing fishing) {
+      List<SurvivePackedWeapon> packedWeapons, SurviveStrike lastStrike, SurviveFishing fishing, Integer packExpansions) {
+    public static final int MAX_PACK_EXPANSIONS = 4;
+
+    public static int packCapacity(int expansions) {
+      return 10 + 5 * expansions;
+    }
+
     public Player {
+      packExpansions = packExpansions == null ? 0 : packExpansions;
       stone = stone == null ? 0 : stone;
       hunger = hunger == null ? 10 : hunger;
       enemy = enemy == null && status == Status.COMBAT ? SurviveEnemy.HOG : enemy;
@@ -103,7 +110,8 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
           || health < 0 || health > 10 || strength < 2 || strength > 20
           || stamina != strength + 8 || experience < 0 || experienceToNextLevel < 1
           || experienceToNextLevel != (1 << (strength - 2)) || experience >= experienceToNextLevel
-          || wood < 0 || food < 0 || stone < 0 || wood + food + stone + packedWeapons.size() > 10
+          || wood < 0 || food < 0 || stone < 0 || packExpansions < 0 || packExpansions > MAX_PACK_EXPANSIONS
+          || (long) wood + food + stone + packedWeapons.size() > packCapacity(packExpansions)
           || packedWeapons.stream().map(SurvivePackedWeapon::id).distinct().count() != packedWeapons.size()
           || hunger < 0 || hunger > 10 || status == null || (status == Status.DEAD) != (health == 0)
           || activeFullnessMilliseconds < 0 || activeFullnessMilliseconds >= 300_000

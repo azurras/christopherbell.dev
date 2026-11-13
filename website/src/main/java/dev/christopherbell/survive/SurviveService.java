@@ -136,11 +136,16 @@ public class SurviveService {
     boolean fieldEngage = targetId != null && action == SurviveAction.ENGAGE && player.status == Status.EXPLORING;
     boolean talkAtWaystation = action == SurviveAction.TALK_WAYSTATION && player.status == Status.EXPLORING;
     boolean equipping = action == SurviveAction.EQUIP_WEAPON;
-    if (action == null || targetId != null && !fieldEngage && !equipping
+    boolean dropping = action == SurviveAction.DROP_ITEM;
+    if (action == null || targetId != null && !fieldEngage && !equipping && !dropping
         || !fieldEngage && !talkAtWaystation && !world.actionsFor(player, now).contains(action)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That action is unavailable in the current state.");
     }
-    var selectedWeapon = equipping ? player.packedWeapons.stream().filter(weapon -> weapon.id().equals(targetId))
+    var dropResource = dropping ? dropResource(targetId) : null;
+    if (dropResource != null && SurviveWorld.suppliesOf(player, dropResource) == 0) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That supply is no longer in your pack.");
+    }
+    var selectedWeapon = equipping || dropping && dropResource == null ? player.packedWeapons.stream().filter(weapon -> weapon.id().equals(targetId))
         .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "That weapon is no longer in your pack.")) : null;
     if (!presence.permits(player.survivorId, action, now)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Walk to the action's landmark first.");
@@ -177,6 +182,8 @@ public class SurviveService {
         world.startPartyFight(player, partyId, hunted, now, false);
       } else if (fieldEngage) {
         world.engageFieldTarget(player, hunted.kind(), now);
+      } else if (dropping) {
+        world.dropItem(player, dropResource, selectedWeapon);
       } else {
         world.perform(action, player, now, rollPercent, pose != null, hunted == null ? null : hunted.kind(), selectedWeapon);
       }
@@ -189,6 +196,19 @@ public class SurviveService {
       presence.returnToCamp(player.survivorId);
     }
     return snapshotFor(player);
+  }
+
+  private static SurviveResource dropResource(String itemId) {
+    if ("wood".equals(itemId)) {
+      return SurviveResource.WOOD;
+    }
+    if ("food".equals(itemId)) {
+      return SurviveResource.FOOD;
+    }
+    if ("stone".equals(itemId)) {
+      return SurviveResource.STONE;
+    }
+    return null;
   }
 
   /** Acknowledges movement and commits a new hostile encounter only after verified proximity. */
@@ -315,7 +335,7 @@ public class SurviveService {
     if (sender.revision != expectedRevision) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "Your survivor changed. Refresh before giving supplies.");
     }
-    if (resource == null || quantity < 1 || quantity > SurviveWorld.INVENTORY_CAPACITY) {
+    if (resource == null || quantity < 1 || quantity > 10) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Give 1 to 10 wood, food or stone.");
     }
     var recipient = world.players.values().stream()
@@ -327,7 +347,7 @@ public class SurviveService {
     if (SurviveWorld.suppliesOf(sender, resource) < quantity) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "You do not have enough supplies to give.");
     }
-    if (recipient.inventoryCount() + quantity > SurviveWorld.INVENTORY_CAPACITY) {
+    if (recipient.inventoryCount() + quantity > recipient.inventoryCapacity()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That survivor's inventory has no room for this gift.");
     }
     world.observeActivity(sender, clock.instant());

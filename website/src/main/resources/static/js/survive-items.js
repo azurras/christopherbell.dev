@@ -39,6 +39,13 @@ export function renderSurviveItems(documentRoot, state, pending) {
   }
   const selected = entries.find(item => item.id === list.value);
   documentRoot.getElementById('surviveItemDetail').textContent = selected?.detail ?? 'Your pack is empty.';
+  const drop = documentRoot.getElementById('surviveItemDrop');
+  if (drop) drop.hidden = !selected || !state.actions.includes('DROP_ITEM');
+  const expand = documentRoot.getElementById('surviveExpandPack');
+  if (expand) {
+    expand.hidden = state.inventoryCapacity >= 30;
+    expand.disabled = pending || !state.actions.includes('EXPAND_PACK');
+  }
   const use = documentRoot.getElementById('surviveItemUse');
   const wasFocused = documentRoot.activeElement === use;
   use.hidden = selected?.id !== 'food';

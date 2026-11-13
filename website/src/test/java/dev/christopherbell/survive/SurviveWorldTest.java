@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveEnemy;
+import dev.christopherbell.survive.model.SurviveResource;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveWeapon;
 import java.time.Duration;
@@ -165,6 +166,25 @@ class SurviveWorldTest {
     world.startPartyFight(player, UUID.randomUUID().toString(), bear, DAY, false);
     world.joinPartyFight(guard, world.fieldFightAt(bear.id()), DAY);
     return guard;
+  }
+
+  @Test
+  void expandingAndDroppingUpdateTheSavedPack() {
+    world.players.put(player.survivorId, player);
+    player.wood = 8;
+    player.stone = 2;
+    world.perform(SurviveAction.EXPAND_PACK, player, DAY, () -> 50);
+    assertEquals(15, player.inventoryCapacity());
+    assertEquals(4, player.wood);
+    assertEquals(0, player.stone);
+
+    world.dropItem(player, SurviveResource.WOOD, null);
+    assertEquals(3, player.wood);
+    assertTrue(player.message.contains("dropped"));
+    var restored = SurviveWorld.restore(world.saveState(0L));
+    var restoredPlayer = restored.players.get(player.survivorId);
+    assertEquals(15, restoredPlayer.inventoryCapacity());
+    assertEquals(3, restoredPlayer.wood);
   }
 
   @Test
