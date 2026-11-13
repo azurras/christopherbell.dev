@@ -12,6 +12,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 
 import dev.christopherbell.survive.model.SurviveSavedWorld;
+import dev.christopherbell.survive.model.SurviveResource;
+import dev.christopherbell.survive.model.SurviveTrade;
 import dev.christopherbell.survive.model.SurviveEnemy;
 import dev.christopherbell.survive.model.SurviveEnmity;
 import dev.christopherbell.survive.model.SurviveFieldFight;
@@ -74,19 +76,22 @@ class SurviveWorldMongoCodecTest {
         "Alice", Instant.parse("2026-10-06T12:00:00Z"), 8, 3, 11, 1, 2, 2, 1, 5,
         Status.COMBAT, 19, "A hog blocks your path.", null, null, null, null, null, null, null, null,
         Instant.parse("2026-10-06T12:00:03Z"), 150, true, "Previous fight ended.", 123_000, null, null,
-        new SurviveStrike(19, Instant.parse("2026-10-06T12:00:00Z"), SurviveWeapon.CLUB, true), null);
+        new SurviveStrike(19, Instant.parse("2026-10-06T12:00:00Z"), SurviveWeapon.CLUB, true), null, 2);
     var guest = new SurviveSavedWorld.Player(null, UUID.randomUUID().toString(),
         UUID.randomUUID().toString(), "Guest", alice.lastSeen(), 10, 2, 10,
         0, 1, 0, 0, 0, Status.EXPLORING, 0, "At camp.", 1, 6, null, SurviveWeapon.CLUB, 5, true, null, false,
-        null, null, null, null, null, null, null, null, SurviveFishing.castAt(alice.lastSeen()));
+        null, null, null, null, null, null, null, null, SurviveFishing.castAt(alice.lastSeen()), null);
     var party = new SurviveParty(UUID.randomUUID().toString(),
         alice.survivorId(), guest.survivorId(), null);
     var fight = new SurviveFieldFight("meadow-hog", UUID.randomUUID().toString(), party.id(), SurviveEnemy.HOG,
         -34, 24, 0, 5, List.of(alice.survivorId()), null,
         new SurviveFieldFight.SkillOpening(alice.survivorId(), alice.lastSeen()),
         Map.of(alice.survivorId(), SurviveEnmity.emptyAt(alice.lastSeen()).afterDamageDealt(2, alice.lastSeen())));
+    var trade = new SurviveTrade(UUID.randomUUID().toString(), alice.survivorId(), guest.survivorId(),
+        new SurviveTrade.Lot(SurviveResource.WOOD, 1), new SurviveTrade.Lot(SurviveResource.STONE, 1),
+        alice.lastSeen().plusSeconds(120));
     var saved = new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of("Shared journal"),
-        List.of(alice, guest), 43L, 21L, List.of(party), List.of(fight));
+        List.of(alice, guest), 43L, 21L, List.of(party), List.of(fight), List.of(trade));
     var envelope = codec.encode(saved);
     assertEquals(party.id(), envelope.get("payload", Document.class)
         .getList("parties", Document.class).getFirst().getString("_id"));
@@ -94,6 +99,8 @@ class SurviveWorldMongoCodecTest {
     assertEquals(saved, codec.decode(envelope));
     envelope.get("payload", Document.class).getList("fieldFights", Document.class).getFirst().remove("enmity");
     assertEquals(Map.of(), codec.decode(envelope).fieldFights().getFirst().enmity());
+    envelope.get("payload", Document.class).remove("trades");
+    assertTrue(codec.decode(envelope).trades().isEmpty());
     assertTrue(DomainCollectionManifest.forKind("survive_world").isEmpty());
     assertThrows(IllegalArgumentException.class, () -> new SurviveSavedWorld("shared", 0L, 0, 0, 0,
         List.of(), List.of(alice, alice), null, null, List.of(), List.of()));
@@ -108,7 +115,7 @@ class SurviveWorldMongoCodecTest {
     var codec = new DomainDocumentCodec<>(kind, mongo.getConverter());
     var fighter = new SurviveSavedWorld.Player("account-a", null, UUID.randomUUID().toString(),
         "Alice", Instant.parse("2026-10-06T12:00:00Z"), 8, 3, 11, 1, 2, 2, 1, 5,
-        Status.COMBAT, 19, "A hog blocks your path.", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        Status.COMBAT, 19, "A hog blocks your path.", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     var envelope = codec.encode(new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of(), List.of(fighter), null, null,
         List.of(), List.of()));
     var newFields = List.of("stone", "hunger", "enemy", "weapon", "weaponDurability", "guarding", "sleptAt", "struckFirst", "nextStrikeAt", "tacticalPoints", "defending", "combatOutcome", "activeFullnessMilliseconds", "waystationAssignment");
