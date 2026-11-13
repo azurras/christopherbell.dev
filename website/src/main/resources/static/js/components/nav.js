@@ -48,16 +48,15 @@ export function toolsMenuItems({
     hasMusicRead = false,
     hasSharedFolderRead = false,
     isAdmin = false,
-} = {}, currentPath) {
-    const showRestrictedTools = currentPath !== '/';
+} = {}) {
     return [
-        ...(showRestrictedTools && isAdmin ? [
+        ...(isAdmin ? [
             { href: '/back-office', label: 'Back Office' },
             { href: '/command-center', label: 'Command Center' },
         ] : []),
-        ...(showRestrictedTools && (isAdmin || hasMusicRead) ? [{ href: '/music', label: 'Music' }] : []),
+        ...(isAdmin || hasMusicRead ? [{ href: '/music', label: 'Music' }] : []),
         { href: '/canes-box-tracker', label: 'Raising Canes Box Index' },
-        ...(showRestrictedTools && hasSharedFolderRead ? [{ href: '/shared', label: 'Shared Folder' }] : []),
+        ...(hasSharedFolderRead ? [{ href: '/shared', label: 'Shared Folder' }] : []),
         { href: '/site-monitor', label: 'Website Monitor' },
         { href: '/survive', label: 'Survive' },
         { href: '/vin-decoder', label: 'VIN Decoder' },
@@ -325,7 +324,7 @@ class AppNav extends HTMLElement {
             this.navigationAccess || accountNavigationAccess(null);
         const unread = Number(this.unreadNotifications || 0);
         const currentPath = window.location.pathname;
-        const toolsItems = toolsMenuItems({ hasMusicRead, hasSharedFolderRead, isAdmin }, currentPath);
+        const toolsItems = toolsMenuItems({ hasMusicRead, hasSharedFolderRead, isAdmin });
         const toolsActive = toolsItems.some(item => isActiveNavHref(item.href, currentPath));
         this.innerHTML = `
 <nav class="navbar navbar-expand-lg navbar-dark void-console-nav">
