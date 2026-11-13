@@ -182,6 +182,27 @@
                       <button id="surviveGive" type="submit">Give supplies</button>
                       <p id="surviveGiftHint" class="survive-muted"></p>
                     </form>
+                    <details id="surviveTrade" class="survive-gift">
+                      <summary>Trade</summary>
+                      <form id="surviveTradeOffer">
+                        <label for="surviveTradePartner">Trade with</label>
+                        <select id="surviveTradePartner" name="recipientId" required></select>
+                        <div class="survive-gift-amount">
+                          <div><label for="surviveTradeOffered">You offer</label><select id="surviveTradeOffered" name="offered"><option value="WOOD">Wood</option><option value="FOOD">Food</option><option value="STONE">Stone</option></select></div>
+                          <div><label for="surviveTradeOfferedQuantity">Amount</label><input id="surviveTradeOfferedQuantity" name="offeredQuantity" type="number" min="1" max="30" value="1" required /></div>
+                        </div>
+                        <div class="survive-gift-amount">
+                          <div><label for="surviveTradeRequested">You request</label><select id="surviveTradeRequested" name="requested"><option value="FOOD">Food</option><option value="WOOD">Wood</option><option value="STONE">Stone</option></select></div>
+                          <div><label for="surviveTradeRequestedQuantity">Amount</label><input id="surviveTradeRequestedQuantity" name="requestedQuantity" type="number" min="1" max="30" value="1" required /></div>
+                        </div>
+                        <button id="surviveTradeSend" type="submit">Send offer</button>
+                      </form>
+                      <div id="surviveTradePending" hidden>
+                        <p id="surviveTradeTerms"></p>
+                        <button type="button" id="surviveTradeAccept" data-trade-reply="accept">Accept trade</button>
+                        <button type="button" id="surviveTradeEnd" data-trade-reply="end">Decline offer</button>
+                      </div>
+                    </details>
                     <p class="survive-muted">Camp updates every 5 seconds while this page is visible.</p>
                   </div>
                 </details>

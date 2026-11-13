@@ -12,6 +12,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 
 import dev.christopherbell.survive.model.SurviveSavedWorld;
+import dev.christopherbell.survive.model.SurviveResource;
+import dev.christopherbell.survive.model.SurviveTrade;
 import dev.christopherbell.survive.model.SurviveEnemy;
 import dev.christopherbell.survive.model.SurviveEnmity;
 import dev.christopherbell.survive.model.SurviveFieldFight;
@@ -85,8 +87,11 @@ class SurviveWorldMongoCodecTest {
         -34, 24, 0, 5, List.of(alice.survivorId()), null,
         new SurviveFieldFight.SkillOpening(alice.survivorId(), alice.lastSeen()),
         Map.of(alice.survivorId(), SurviveEnmity.emptyAt(alice.lastSeen()).afterDamageDealt(2, alice.lastSeen())));
+    var trade = new SurviveTrade(UUID.randomUUID().toString(), alice.survivorId(), guest.survivorId(),
+        new SurviveTrade.Lot(SurviveResource.WOOD, 1), new SurviveTrade.Lot(SurviveResource.STONE, 1),
+        alice.lastSeen().plusSeconds(120));
     var saved = new SurviveSavedWorld("shared", 7L, 37, 1, 2, List.of("Shared journal"),
-        List.of(alice, guest), 43L, 21L, List.of(party), List.of(fight));
+        List.of(alice, guest), 43L, 21L, List.of(party), List.of(fight), List.of(trade));
     var envelope = codec.encode(saved);
     assertEquals(party.id(), envelope.get("payload", Document.class)
         .getList("parties", Document.class).getFirst().getString("_id"));
@@ -94,6 +99,8 @@ class SurviveWorldMongoCodecTest {
     assertEquals(saved, codec.decode(envelope));
     envelope.get("payload", Document.class).getList("fieldFights", Document.class).getFirst().remove("enmity");
     assertEquals(Map.of(), codec.decode(envelope).fieldFights().getFirst().enmity());
+    envelope.get("payload", Document.class).remove("trades");
+    assertTrue(codec.decode(envelope).trades().isEmpty());
     assertTrue(DomainCollectionManifest.forKind("survive_world").isEmpty());
     assertThrows(IllegalArgumentException.class, () -> new SurviveSavedWorld("shared", 0L, 0, 0, 0,
         List.of(), List.of(alice, alice), null, null, List.of(), List.of()));

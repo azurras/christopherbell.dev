@@ -15,7 +15,16 @@ import dev.christopherbell.survive.model.SurviveSnapshot.Status;
  */
 public record SurviveSavedWorld(@Id String id, @Version Long version, long revision,
     int shelters, int boats, List<String> events, List<Player> players, Long settledBoundaries,
-    Long activeRaidNight, List<SurviveParty> parties, List<SurviveFieldFight> fieldFights) {
+    Long activeRaidNight, List<SurviveParty> parties, List<SurviveFieldFight> fieldFights,
+    List<SurviveTrade> trades) {
+  /** Compatibility constructor for callers with no saved trades. */
+  public SurviveSavedWorld(String id, Long version, long revision, int shelters, int boats, List<String> events,
+      List<Player> players, Long settledBoundaries, Long activeRaidNight, List<SurviveParty> parties,
+      List<SurviveFieldFight> fieldFights) {
+    this(id, version, revision, shelters, boats, events, players, settledBoundaries, activeRaidNight, parties,
+        fieldFights, List.of());
+  }
+
   public SurviveSavedWorld {
     if (!"shared".equals(id) || version != null && version < 0 || revision < 0
         || shelters < 0 || shelters > 1000 || boats < 0 || boats > 1000) {
@@ -25,6 +34,13 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
     players = List.copyOf(players);
     parties = parties == null ? List.of() : List.copyOf(parties);
     fieldFights = fieldFights == null ? List.of() : List.copyOf(fieldFights);
+    trades = trades == null ? List.of() : List.copyOf(trades);
+    var tradeParticipants = new HashSet<String>();
+    var tradeIds = new HashSet<String>();
+    if (trades.size() > 500 || trades.stream().anyMatch(trade -> !tradeIds.add(trade.id())
+        || !tradeParticipants.add(trade.senderId()) || !tradeParticipants.add(trade.recipientId()))) {
+      throw new IllegalArgumentException("Saved trades exceed their bounds or overlap.");
+    }
     var fieldRoutes = new HashSet<String>();
     var fieldFighters = new HashSet<String>();
     if (fieldFights.size() > 5 || fieldFights.stream().anyMatch(fight -> !fieldRoutes.add(fight.routeId())

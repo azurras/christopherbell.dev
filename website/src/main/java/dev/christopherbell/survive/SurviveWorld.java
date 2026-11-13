@@ -14,6 +14,7 @@ import dev.christopherbell.survive.model.SurviveSnapshot.Phase;
 import dev.christopherbell.survive.model.SurviveSnapshot.Recipient;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveStrike;
+import dev.christopherbell.survive.model.SurviveTrade;
 import dev.christopherbell.survive.model.SurviveWeapon;
 import dev.christopherbell.survive.model.SurviveWaystation;
 import dev.christopherbell.survive.model.SurviveWaystation.Assignment;
@@ -62,6 +63,7 @@ final class SurviveWorld {
   private static final Duration RAID_WINDOW = Duration.ofSeconds(60);
   final Map<String, SurvivePlayer> players = new LinkedHashMap<>();
   final SurviveParties parties = new SurviveParties();
+  final Map<String, SurviveTrade> trades = new LinkedHashMap<>();
   private final Map<String, SurviveFieldFight> fieldFights = new LinkedHashMap<>();
   private final ArrayDeque<String> events = new ArrayDeque<>();
   private int shelters;
@@ -88,6 +90,7 @@ final class SurviveWorld {
     world.activeRaidNight = saved.activeRaidNight();
     world.events.addAll(saved.events());
     world.parties.restore(saved.parties());
+    saved.trades().forEach(trade -> world.trades.put(trade.id(), trade));
     for (var fight : saved.fieldFights()) {
       world.fieldFights.put(fight.routeId(), fight);
     }
@@ -139,7 +142,7 @@ final class SurviveWorld {
           player.activeFullnessMilliseconds, player.waystationAssignment, player.packedWeapons, player.lastStrike, player.fishing, player.packExpansions);
     }).toList();
     return new SurviveSavedWorld("shared", storageVersion, revision, shelters, boats, List.copyOf(events),
-        storedPlayers, settledBoundaries, activeRaidNight, parties.save(), List.copyOf(fieldFights.values()));
+        storedPlayers, settledBoundaries, activeRaidNight, parties.save(), List.copyOf(fieldFights.values()), List.copyOf(trades.values()));
   }
 
   SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline) {
@@ -159,7 +162,8 @@ final class SurviveWorld {
         weaponSkillFor(player.weapon), SurviveWaystation.KEEPER, player.waystationAssignment,
         player.packedWeapons.stream().map(SurviveSnapshot.WeaponChoice::from).toList(),
         player.fishing == null ? null : player.fishing.timingAt(now), player.attackDelayMilliseconds(),
-        player.lastStrike != null && player.lastStrike.visibleAt(now) ? player.lastStrike : null, enemyAttentionFor(player, now));
+        player.lastStrike != null && player.lastStrike.visibleAt(now) ? player.lastStrike : null, enemyAttentionFor(player, now),
+        tradeView(player, now));
   }
 
   /** Settles elapsed fights even when their participants did not send any requests. */
@@ -245,6 +249,33 @@ final class SurviveWorld {
       }
       raidAtNightfall(night);
     }
+  }
+
+  private SurviveTrade.View tradeView(SurvivePlayer player, Instant now) {
+    return trades.values().stream()
+        .filter(offer -> offer.involves(player.survivorId) && now.isBefore(offer.expiresAt()))
+        .findFirst().flatMap(offer -> players.values().stream()
+            .filter(other -> other != player && offer.involves(other.survivorId))
+            .findFirst().map(other -> new SurviveTrade.View(offer, other.name, other.survivorId.equals(offer.senderId()))))
+        .orElse(null);
+  }
+
+  void recordTradeMessage(SurvivePlayer player, String message) {
+    player.message = message;
+    player.revision++;
+  }
+
+  /** Swaps both stacks after the service validates both packs. */
+  void completeTrade(SurviveTrade offer, SurvivePlayer sender, SurvivePlayer recipient) {
+    addSupplies(sender, offer.offered().resource(), -offer.offered().quantity());
+    addSupplies(recipient, offer.requested().resource(), -offer.requested().quantity());
+    addSupplies(sender, offer.requested().resource(), offer.requested().quantity());
+    addSupplies(recipient, offer.offered().resource(), offer.offered().quantity());
+    trades.remove(offer.id());
+    recordTradeMessage(sender, "You traded " + offer.offered().description() + " for " + offer.requested().description()
+        + " with " + recipient.name + ".");
+    recordTradeMessage(recipient, "You traded " + offer.requested().description() + " for " + offer.offered().description()
+        + " with " + sender.name + ".");
   }
 
   /** Applies a previously validated gift while the service holds the world's monitor. */

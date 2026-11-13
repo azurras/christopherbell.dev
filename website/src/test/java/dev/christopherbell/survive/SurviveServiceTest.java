@@ -3,6 +3,7 @@ package dev.christopherbell.survive;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -10,11 +11,13 @@ import static org.mockito.Mockito.when;
 
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveResource;
+import dev.christopherbell.survive.model.SurviveRequests;
 import dev.christopherbell.survive.model.SurviveSnapshot;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -126,6 +129,46 @@ class SurviveServiceTest {
         service.find(alice.token()).orElseThrow().revision());
     assertEquals(0, foodGiven.food());
     assertEquals(1, service.find(bob.token()).orElseThrow().food());
+  }
+
+  @Test
+  void tradeSurvivesRestartAndOnlyRecipientCanAcceptExactTerms() {
+    var tradeClock = Clock.fixed(SurviveClock.WORLD_EPOCH, ZoneOffset.UTC);
+    var repository = new InMemorySurviveWorldRepository();
+    var service = new SurviveService(tradeClock, () -> 25, 10, repository);
+    var alice = service.join(null, "Alice");
+    var bob = service.join(null, "Bob");
+    var stranger = service.join(null, "Stranger");
+    var wood = act(service, alice.token(), SurviveAction.GATHER);
+    act(service, bob.token(), SurviveAction.GATHER_STONE);
+    var sent = service.offerTrade(alice.token(), null, new SurviveRequests.TradeOffer(
+        UUID.fromString(bob.state().survivorId()), SurviveResource.WOOD, 1, SurviveResource.STONE, 1, wood.revision()));
+    var offerId = UUID.fromString(sent.trade().offer().id());
+    assertEquals(1, sent.wood());
+    var restarted = new SurviveService(tradeClock, () -> 25, 10, repository);
+    var incoming = restarted.find(bob.token()).orElseThrow();
+    assertTrue(incoming.trade().incoming());
+    assertEquals(sent.trade().offer(), incoming.trade().offer());
+    assertNull(restarted.find(stranger.token()).orElseThrow().trade());
+    assertEquals(403, assertThrows(ResponseStatusException.class, () -> restarted.replyToTrade(alice.token(), null,
+        new SurviveRequests.TradeReply(offerId, true, sent.revision()))).getStatusCode().value());
+    assertEquals(404, assertThrows(ResponseStatusException.class, () -> restarted.replyToTrade(stranger.token(), null,
+        new SurviveRequests.TradeReply(offerId, true, stranger.state().revision()))).getStatusCode().value());
+    repository.failNextSave = true;
+    assertThrows(org.springframework.dao.DataAccessResourceFailureException.class, () -> restarted.replyToTrade(bob.token(), null,
+        new SurviveRequests.TradeReply(offerId, true, incoming.revision())));
+    assertEquals(1, restarted.find(alice.token()).orElseThrow().wood());
+    assertEquals(1, restarted.find(bob.token()).orElseThrow().stone());
+    var accepted = restarted.replyToTrade(bob.token(), null,
+        new SurviveRequests.TradeReply(offerId, true, incoming.revision()));
+    assertEquals(1, accepted.wood());
+    assertEquals(0, accepted.stone());
+    var settled = service.find(alice.token()).orElseThrow();
+    assertEquals(0, settled.wood());
+    assertEquals(1, settled.stone());
+    assertNull(settled.trade());
+    assertEquals(404, assertThrows(ResponseStatusException.class, () -> restarted.replyToTrade(bob.token(), null,
+        new SurviveRequests.TradeReply(offerId, true, accepted.revision()))).getStatusCode().value());
   }
 
   @Test

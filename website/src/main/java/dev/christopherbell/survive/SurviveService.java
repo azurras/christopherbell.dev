@@ -6,6 +6,7 @@ import dev.christopherbell.survive.model.SurviveParty;
 import dev.christopherbell.survive.model.SurviveSnapshot;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveResource;
+import dev.christopherbell.survive.model.SurviveTrade;
 import dev.christopherbell.survive.model.SurviveRequests;
 import java.time.Clock;
 import dev.christopherbell.survive.model.SurviveSavedWorld;
@@ -356,6 +357,101 @@ public class SurviveService {
     }
     commitWorld();
     return snapshotFor(sender);
+  }
+
+  /** Records the sender's consent to one exact exchange without moving items. */
+  public synchronized SurviveSnapshot offerTrade(String token, String accountId, SurviveRequests.TradeOffer request) {
+    var sender = loadTradeActor(token, accountId, request.revision());
+    var now = clock.instant();
+    var recipient = activeTradePartner(request.recipientId().toString(), now);
+    requireTradeLocation(sender, recipient, now);
+    if (request.offered() == request.requested()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose different supplies to trade.");
+    }
+    var offered = new SurviveTrade.Lot(request.offered(), request.offeredQuantity());
+    var requested = new SurviveTrade.Lot(request.requested(), request.requestedQuantity());
+    requireTradeStock(sender, offered);
+    world.trades.values().removeIf(offer -> !now.isBefore(offer.expiresAt()));
+    if (world.trades.values().stream().anyMatch(offer -> offer.involves(sender.survivorId)
+        || offer.involves(recipient.survivorId))) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "One of you already has a pending trade.");
+    }
+    var offer = new SurviveTrade(UUID.randomUUID().toString(), sender.survivorId, recipient.survivorId,
+        offered, requested, now.plus(Duration.ofMinutes(2)));
+    world.trades.put(offer.id(), offer);
+    world.recordTradeMessage(sender, "You offered " + offered.description() + " for " + requested.description()
+        + " to " + recipient.name + ".");
+    world.recordTradeMessage(recipient, sender.name + " offered you " + offered.description() + " for "
+        + requested.description() + ". Open Trade in the camp menu to respond.");
+    commitWorld();
+    return snapshotFor(sender);
+  }
+
+  /** Only the recipient can accept; either participant can end an offer. */
+  public synchronized SurviveSnapshot replyToTrade(String token, String accountId, SurviveRequests.TradeReply request) {
+    var player = loadTradeActor(token, accountId, request.revision());
+    var now = clock.instant();
+    var offer = world.trades.get(request.offerId().toString());
+    if (offer == null || !offer.involves(player.survivorId) || !now.isBefore(offer.expiresAt())) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "That trade offer is unavailable.");
+    }
+    if (request.accept()) {
+      if (!offer.recipientId().equals(player.survivorId)) {
+        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the recipient can accept this trade.");
+      }
+      var sender = activeTradePartner(offer.senderId(), now);
+      requireTradeLocation(sender, player, now);
+      requireTradeStock(sender, offer.offered());
+      requireTradeStock(player, offer.requested());
+      requireTradeSpace(sender, offer.offered(), offer.requested());
+      requireTradeSpace(player, offer.requested(), offer.offered());
+      world.completeTrade(offer, sender, player);
+    } else {
+      world.trades.remove(offer.id());
+      world.players.values().stream().filter(participant -> offer.involves(participant.survivorId))
+          .forEach(participant -> world.recordTradeMessage(participant, player.name + " ended the trade offer."));
+    }
+    commitWorld();
+    return snapshotFor(player);
+  }
+
+  private SurvivePlayer loadTradeActor(String token, String accountId, long revision) {
+    loadSettledWorld();
+    expireInactivePlayers();
+    var player = world.players.get(ownerKey(token, accountId));
+    if (player == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Your survivor expired. Join the camp again.");
+    }
+    if (player.revision != revision) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "Your survivor changed. Refresh before trading.");
+    }
+    return player;
+  }
+
+  private SurvivePlayer activeTradePartner(String survivorId, Instant now) {
+    return world.players.values().stream()
+        .filter(player -> player.survivorId.equals(survivorId) && player.lastSeen.isAfter(now.minus(IDLE_TIMEOUT)))
+        .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "That survivor left camp."));
+  }
+
+  private void requireTradeLocation(SurvivePlayer sender, SurvivePlayer recipient, Instant now) {
+    if (sender == recipient || sender.status != Status.EXPLORING || recipient.status != Status.EXPLORING
+        || !presence.permits(sender.survivorId, SurviveAction.EXPAND_PACK, now)
+        || !presence.permits(recipient.survivorId, SurviveAction.EXPAND_PACK, now)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Both survivors must be free to trade at camp.");
+    }
+  }
+
+  private static void requireTradeStock(SurvivePlayer player, SurviveTrade.Lot lot) {
+    if (SurviveWorld.suppliesOf(player, lot.resource()) < lot.quantity()) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, player.name + " no longer has the supplies for this trade.");
+    }
+  }
+
+  private static void requireTradeSpace(SurvivePlayer player, SurviveTrade.Lot outgoing, SurviveTrade.Lot incoming) {
+    if (player.inventoryCount() - outgoing.quantity() + incoming.quantity() > player.inventoryCapacity()) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, player.name + " needs more pack space for this trade.");
+    }
   }
 
   /** Applies a party command using the private owner identity and the exact invitation or target ID. */
