@@ -17,6 +17,7 @@ import java.util.Map;
 final class SurvivePresence {
   private static final Duration VISIBLE_TIMEOUT = Duration.ofSeconds(30);
   private static final Duration SESSION_TIMEOUT = Duration.ofHours(2);
+  private static final double TRADE_RANGE_METRES = 5;
   private static final int CAPACITY = 1000;
   private static final double SPEED_PER_SECOND = 6.5;
   // The renderer draws players out to 60 m. This margin lets it interpolate boundary crossings.
@@ -85,6 +86,17 @@ final class SurvivePresence {
 
   boolean tracks(String survivorId) {
     return poses.containsKey(survivorId);
+  }
+
+  /** Spatial trades require two recent poses. Text-mode players share the camp. */
+  boolean withinTradeRange(String senderId, String recipientId, Instant now) {
+    if (!tracks(senderId) && !tracks(recipientId)) {
+      return true;
+    }
+    var sender = activePose(senderId, now);
+    var recipient = activePose(recipientId, now);
+    return sender != null && recipient != null
+        && near(sender.x(), sender.z(), recipient.x(), recipient.z(), TRADE_RANGE_METRES);
   }
 
   /** Older text clients retain their rules; spatial sessions execute at their last verified landmark. */
