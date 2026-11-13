@@ -308,3 +308,14 @@ test('adventurer gait changes geometry and the follow camera anchors to each lan
     assert.equal(projectPoint(matrix, [landmark.x, elevation + 2.5, landmark.z]).visible, true);
   }
 });
+
+test('the sky material covers the dome above and below the water horizon', () => {
+  const { vertices } = islandMesh();
+  const skyElevations = [];
+  for (let index = 0; index < vertices.length; index += MESH_VERTEX_FLOATS) {
+    if (vertices[index + 6] === 15) skyElevations.push(vertices[index + 1]);
+  }
+  assert.equal(skyElevations.length, 28 * 18 * 3);
+  assert.ok(skyElevations.some(elevation => elevation > 0));
+  assert.ok(skyElevations.some(elevation => elevation < -0.66));
+});

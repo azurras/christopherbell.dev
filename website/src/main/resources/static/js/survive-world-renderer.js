@@ -1,5 +1,5 @@
 /** Native WebGL renderer for the island terrain, adventurers and landmarks. */
-import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from './survive-world-art.js';
+import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS, SKY_MATERIAL } from './survive-world-art.js';
 import { createIslandMaterials } from './survive-world-materials.js';
 import { drawBoat, drawCampFlame, drawShelter } from './survive-world-props.js';
 import { actionPose, combatStance } from './survive-action-pose.js';
@@ -90,7 +90,7 @@ void main() {
     gl_FragColor = vec4(tint, (1.0 - uv.x) * 0.48);
     return;
   }
-  if (length(surface.xz) > 100.0 && surface.y > 0.0 || surface.y > 34.0) {
+  if (surfaceMaterial > ${(SKY_MATERIAL - 0.5).toFixed(1)}) {
     float elevation = smoothstep(0.0, 105.0, surface.y);
     vec3 zenith = sky * vec3(0.60, 0.79, 1.08);
     vec2 cloudPosition = surface.xz * 0.025 + vec2(0.008, -0.004) * time;

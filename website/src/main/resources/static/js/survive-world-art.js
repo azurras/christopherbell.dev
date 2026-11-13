@@ -5,6 +5,7 @@ import { addFishingBank, addResourceProps, drawQuarryRock } from './survive-worl
 
 const TAU = Math.PI * 2;
 export const MESH_VERTEX_FLOATS = 9;
+export const SKY_MATERIAL = 15;
 const STONE_MATERIAL = 2.5;
 const BARK_MATERIAL = 3.5;
 const FOLIAGE_MATERIAL = 4.5;
@@ -97,7 +98,7 @@ function woodland() {
 export function islandMesh() {
   const mesh = meshBuilder();
   const trees = woodland();
-  mesh.ellipsoid(0, 0, 0, 174, 135, 174, [1, 1, 1], 28, 10);
+  mesh.ellipsoid(0, 0, 0, 174, 135, 174, [1, 1, 1], 28, 10, 0, SKY_MATERIAL);
   mesh.disk(0, -0.66, 0, 380, [0.19, 0.34, 0.39], 72);
   const sectors = 144;
   const rings = 52;
