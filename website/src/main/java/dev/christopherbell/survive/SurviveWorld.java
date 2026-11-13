@@ -49,7 +49,6 @@ final class SurviveWorld {
   private static final int NIGHTS_PER_RAID_WEEK = 7;
   private static final int RAID_INJURY_TO_SLEEPERS = 2;
   private static final Duration SLEEP_PER_HEALTH = Duration.ofMinutes(2);
-  private static final Duration STRIKE_INTERVAL = Duration.ofSeconds(3);
   private static final int SKILL_COST = 100;
   private static final String HEAVY_STRIKE = "Heavy Strike";
   private static final String CRUSHING_BLOW = "Crushing Blow";
@@ -159,7 +158,7 @@ final class SurviveWorld {
         player.tacticalPoints, player.defending, player.combatOutcome, parties.viewFor(player, players.values(), now),
         weaponSkillFor(player.weapon), SurviveWaystation.KEEPER, player.waystationAssignment,
         player.packedWeapons.stream().map(SurviveSnapshot.WeaponChoice::from).toList(),
-        player.fishing == null ? null : player.fishing.timingAt(now),
+        player.fishing == null ? null : player.fishing.timingAt(now), player.attackDelayMilliseconds(),
         player.lastStrike != null && player.lastStrike.visibleAt(now) ? player.lastStrike : null, enemyAttentionFor(player, now));
   }
 
@@ -173,9 +172,9 @@ final class SurviveWorld {
       for (int round = 0; round < MAX_ELAPSED_ROUNDS && player.nextStrikeAt != null
           && !player.nextStrikeAt.isAfter(now); round++) {
         var strikeAt = player.nextStrikeAt;
-        player.nextStrikeAt = strikeAt.plus(STRIKE_INTERVAL);
         player.tacticalPoints = Math.min(MAX_TACTICAL_POINTS, player.tacticalPoints + 50);
         String outcome = attack(player, (player.attackDamage() + 1) / 2, null, strikeAt);
+        scheduleNextStrike(player, strikeAt);
         recordAction(player, outcome, true);
         changed = true;
       }
@@ -720,9 +719,9 @@ final class SurviveWorld {
           break;
         }
         var strikeAt = attacker.nextStrikeAt;
-        attacker.nextStrikeAt = strikeAt.plus(STRIKE_INTERVAL);
         attacker.tacticalPoints = Math.min(MAX_TACTICAL_POINTS, attacker.tacticalPoints + 50);
         recordAction(attacker, strikeFieldEnemy(fight, attacker, (attacker.attackDamage() + 1) / 2, null, strikeAt), true);
+        scheduleNextStrike(attacker, strikeAt);
         changed = true;
       }
     }
@@ -906,7 +905,7 @@ final class SurviveWorld {
   }
 
   private static String engage(SurvivePlayer player, Instant now) {
-    player.nextStrikeAt = now.plus(STRIKE_INTERVAL);
+    player.nextStrikeAt = now.plusMillis(player.attackDelayMilliseconds());
     player.combatOutcome = null;
     return "You engage the " + player.enemy.displayName() + ". Attacks continue while you are away.";
   }
@@ -928,8 +927,16 @@ final class SurviveWorld {
   private String useWeaponSkill(SurvivePlayer player, Instant now) {
     String skill = weaponSkillFor(player.weapon);
     player.tacticalPoints -= SKILL_COST;
-    player.nextStrikeAt = now.plus(STRIKE_INTERVAL);
-    return attack(player, player.attackDamage() + 2, skill, now);
+    String outcome = attack(player, player.attackDamage() + 2, skill, now);
+    scheduleNextStrike(player, now);
+    return outcome;
+  }
+
+  /** Recompute after impact so a broken weapon uses the unarmed delay on the next round. */
+  private static void scheduleNextStrike(SurvivePlayer player, Instant strikeAt) {
+    if (player.nextStrikeAt != null) {
+      player.nextStrikeAt = strikeAt.plusMillis(player.attackDelayMilliseconds());
+    }
   }
 
   private static String weaponSkillFor(SurviveWeapon weapon) {

@@ -85,6 +85,10 @@ final class SurvivePlayer {
     return 1 + strength + (weapon == null ? 0 : weapon.damageBonus());
   }
 
+  int attackDelayMilliseconds() {
+    return weapon == null ? 3000 : weapon.attackDelayMilliseconds();
+  }
+
   void gainExperience() {
     // Bound exponential thresholds and attack strength without changing early progression.
     if (strength >= 20) {

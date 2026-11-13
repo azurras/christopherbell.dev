@@ -3,7 +3,7 @@ import { API } from './lib/api.js';
 import { fetchJson } from './lib/util.js';
 import { appendSurviveLogMessage, syncSurviveLog } from './survive-log.js';
 import { mountSurviveController } from './survive-controller.js';
-import { renderSurviveItems } from './survive-items.js';
+import { attackDelayLabel, renderSurviveItems } from './survive-items.js';
 import { keepFocusInActionBar, mountActionMenus, syncActionMenus } from './survive-menus.js';
 import { mountPanelSections, summarizeCamp } from './survive-panel.js';
 import { mountSurviveParty } from './survive-party.js';
@@ -83,8 +83,8 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveInventoryCount', `${carried} / ${state.inventoryCapacity}`);
   renderSurviveItems(documentRoot, state, mutationPending);
   setText('surviveWeapon', state.weapon
-    ? `${WEAPON_LABELS[state.weapon] || state.weapon} · ${state.weaponDurability} uses left`
-    : 'Bare hands');
+    ? `${WEAPON_LABELS[state.weapon] || state.weapon}${attackDelayLabel(state.attackDelayMilliseconds)} · ${state.weaponDurability} uses left`
+    : `Bare hands${attackDelayLabel(state.attackDelayMilliseconds)}`);
   renderWeaponChoices(documentRoot, packedWeapons, state.actions, mutationPending);
   setText('surviveShelters', state.shelters);
   setText('surviveBeds', `${state.bedsInUse} / ${state.beds}`);
@@ -160,7 +160,7 @@ function renderWeaponChoices(documentRoot, weapons, actions, pending) {
       button.type = 'button';
       button.dataset.equipmentAction = 'EQUIP_WEAPON';
       button.dataset.itemId = weapon.id;
-      button.textContent = `Equip ${weapon.name} · +${weapon.damageBonus} damage · ${weapon.durability} uses left`;
+      button.textContent = `Equip ${weapon.name} · +${weapon.damageBonus} damage${attackDelayLabel(weapon.attackDelayMilliseconds)} · ${weapon.durability} uses left`;
       row.append(button);
       return row;
     });

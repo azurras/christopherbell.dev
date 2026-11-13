@@ -15,12 +15,13 @@ public record SurviveSnapshot(
     Instant nextStrikeAt, long millisecondsUntilStrike, int tacticalPoints, boolean defending, String combatOutcome,
     SurviveParty.View party, String weaponSkill, SurviveWaystation.Keeper waystationKeeper,
     SurviveWaystation.Assignment waystationAssignment, List<WeaponChoice> packedWeapons, SurviveFishing.Timing fishing,
-    SurviveStrike strike, EnemyAttention enemyAttention) {
+    int attackDelayMilliseconds, SurviveStrike strike, EnemyAttention enemyAttention) {
 
   /** Owned weapon choice and the stats shown in Main before equipping. */
-  public record WeaponChoice(String id, String name, int damageBonus, int durability) {
+  public record WeaponChoice(String id, String name, int damageBonus, int durability, int attackDelayMilliseconds) {
     public static WeaponChoice from(SurvivePackedWeapon item) {
-      return new WeaponChoice(item.id(), item.weapon().displayName(), item.weapon().damageBonus(), item.durability());
+      return new WeaponChoice(item.id(), item.weapon().displayName(), item.weapon().damageBonus(), item.durability(),
+          item.weapon().attackDelayMilliseconds());
     }
   }
 

@@ -4,6 +4,11 @@ const MATERIALS = [
   { id: 'stone', name: 'Stone', detail: 'Material for crafting a stone axe or spear.' },
 ];
 
+/** Old snapshots can omit delay while the browser and server update independently. */
+export function attackDelayLabel(milliseconds) {
+  return Number.isFinite(milliseconds) && milliseconds > 0 ? ` · ${milliseconds / 1000}s delay` : '';
+}
+
 /** Render the carried items from a confirmed snapshot without replacing the focused list control. */
 export function renderSurviveItems(documentRoot, state, pending) {
   const list = documentRoot.getElementById('surviveItemList');
@@ -15,7 +20,7 @@ export function renderSurviveItems(documentRoot, state, pending) {
       id: weapon.id,
       name: weapon.name.charAt(0).toUpperCase() + weapon.name.slice(1),
       quantity: 1,
-      detail: `+${weapon.damageBonus} damage · ${weapon.durability} uses left. Equip from Equipment → Main.`,
+      detail: `+${weapon.damageBonus} damage${attackDelayLabel(weapon.attackDelayMilliseconds)} · ${weapon.durability} uses left. Equip from Equipment → Main.`,
     });
   }
   const sortByName = list.dataset.sort === 'name';

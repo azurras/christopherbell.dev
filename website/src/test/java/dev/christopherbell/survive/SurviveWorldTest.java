@@ -30,6 +30,56 @@ class SurviveWorldTest {
   private final SurvivePlayer player = new SurvivePlayer("Chris", Instant.EPOCH);
 
   @Test
+  void weaponDelaySchedulesAutomaticStrikesAndChangesAfterBreakage() {
+    world.players.put("scout", player);
+    for (var weapon : SurviveWeapon.values()) {
+      player.weapon = weapon;
+      player.weaponDurability = 2;
+      player.startFighting(SurviveEnemy.BEAR);
+      world.perform(SurviveAction.ENGAGE, player, DAY, () -> 50);
+      var firstStrike = DAY.plusMillis(weapon.attackDelayMilliseconds());
+      assertEquals(firstStrike, player.nextStrikeAt);
+      world.settleCombatUntil(firstStrike.minusMillis(1));
+      assertEquals(0, player.tacticalPoints);
+      world.settleCombatUntil(firstStrike);
+      assertEquals(50, player.tacticalPoints);
+      assertEquals(firstStrike.plusMillis(weapon.attackDelayMilliseconds()), player.nextStrikeAt);
+      player.stopFighting();
+      player.tacticalPoints = 0;
+      player.health = 10;
+    }
+    player.weapon = SurviveWeapon.CLUB;
+    player.weaponDurability = 1;
+    player.startFighting(SurviveEnemy.BEAR);
+    world.perform(SurviveAction.ENGAGE, player, DAY, () -> 50);
+    world.settleCombatUntil(DAY.plusMillis(3200));
+    assertNull(player.weapon);
+    assertEquals(DAY.plusMillis(6200), player.nextStrikeAt);
+  }
+
+  @Test
+  void sharedFightRestoresIndependentWeaponDeadlines() {
+    var guard = startSkillchainFight();
+    var restored = SurviveWorld.restore(world.saveState(0L));
+    var barehanded = restored.players.get(player.survivorId);
+    var armed = restored.players.get(guard.survivorId);
+
+    assertEquals(DAY.plusMillis(3000), barehanded.nextStrikeAt);
+    assertEquals(DAY.plusMillis(3200), armed.nextStrikeAt);
+
+    restored.settleCombatUntil(DAY.plusMillis(3000));
+    assertEquals(150, barehanded.tacticalPoints);
+    assertEquals(DAY.plusMillis(6000), barehanded.nextStrikeAt);
+    assertEquals(100, armed.tacticalPoints);
+
+    restored.settleCombatUntil(DAY.plusMillis(3200));
+    assertEquals(150, barehanded.tacticalPoints);
+    assertEquals(150, armed.tacticalPoints);
+    assertEquals(DAY.plusMillis(6400), armed.nextStrikeAt);
+    assertEquals(barehanded.enemyHealth, armed.enemyHealth);
+  }
+
+  @Test
   void waystationCreditsAContributingPartyAndRewardsEachSurvivorOnce() {
     var guard = startSkillchainFight();
     for (var survivor : List.of(player, guard)) {
