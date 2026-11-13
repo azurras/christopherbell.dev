@@ -340,3 +340,6 @@ keeps its encounter heading.
 
 Shared combat uses the acknowledged enemy position for both fighters.
 Personal encounters retain the local approach animation.
+
+Check stays available on a selected target during automatic combat. It writes
+the enemy's current health and threat description to the chat log.
