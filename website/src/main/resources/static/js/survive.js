@@ -153,9 +153,33 @@ function renderRecipientOptions(documentRoot, recipientPicker, recipients) {
     ? previousRecipient : '';
 }
 
+function tradeOption(documentRoot, value, label) {
+  const option = documentRoot.createElement('option');
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
+function tradeLotLabel(lot) {
+  return lot.description ?? `${lot.quantity} ${lot.resource.toLowerCase()}`;
+}
+
 function renderTrade(documentRoot, state, pending) {
   const picker = documentRoot.getElementById('surviveTradePartner');
   if (!picker) return;
+  const offeredItems = documentRoot.getElementById('surviveTradeOffered');
+  const weapons = state.packedWeapons ?? [];
+  const weaponSignature = JSON.stringify(weapons);
+  if (offeredItems.dataset.weapons !== weaponSignature) {
+    const selection = offeredItems.value;
+    const options = ['Wood', 'Food', 'Stone'].map(name => tradeOption(documentRoot, name.toUpperCase(), name));
+    options.push(...weapons.map(weapon =>
+      tradeOption(documentRoot, weapon.id, `${weapon.name} (${weapon.durability} uses left)`)));
+    offeredItems.replaceChildren(...options);
+    offeredItems.value = options.some(option => option.value === selection) ? selection : 'WOOD';
+    offeredItems.dataset.weapons = weaponSignature;
+    documentRoot.getElementById('surviveTradeOfferedQuantity').disabled = weapons.some(weapon => weapon.id === offeredItems.value);
+  }
   const offer = state.trade;
   const offerForm = documentRoot.getElementById('surviveTradeOffer');
   offerForm.hidden = Boolean(offer);
@@ -167,7 +191,7 @@ function renderTrade(documentRoot, state, pending) {
   const give = offer.incoming ? requested : offered;
   const receive = offer.incoming ? offered : requested;
   documentRoot.getElementById('surviveTradeTerms').textContent =
-    `Trade with ${offer.partner}. Give ${give.quantity} ${give.resource.toLowerCase()} and receive ${receive.quantity} ${receive.resource.toLowerCase()}.`;
+    `Trade with ${offer.partner}. Give ${tradeLotLabel(give)} and receive ${tradeLotLabel(receive)}.`;
   const accept = documentRoot.getElementById('surviveTradeAccept');
   accept.hidden = !offer.incoming;
   accept.disabled = pending;
@@ -300,7 +324,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       if (previous?.survivorId === state.survivorId) {
         if (state.trade && state.trade.offer.id !== previous.trade?.offer.id) {
           const { offered, requested } = state.trade.offer;
-          const terms = `${offered.quantity} ${offered.resource.toLowerCase()} for ${requested.quantity} ${requested.resource.toLowerCase()}`;
+          const terms = `${tradeLotLabel(offered)} for ${tradeLotLabel(requested)}`;
           appendSurviveLogMessage(documentRoot, state.trade.incoming
             ? `${state.trade.partner} offered ${terms}. Open Trade in the camp menu to respond.`
             : `You offered ${terms} to ${state.trade.partner}.`);
@@ -453,11 +477,14 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
     event.preventDefault();
     if (!state || pending || state.trade) return;
     const fields = new FormData(tradeOfferForm);
+    const offered = fields.get('offered');
+    const packedWeapon = state.packedWeapons?.find(weapon => weapon.id === offered);
     void sendRequest(API.survive.trades, {
       method: 'POST', body: JSON.stringify({
         recipientId: fields.get('recipientId'),
-        offered: fields.get('offered'),
-        offeredQuantity: Number(fields.get('offeredQuantity')),
+        offered: packedWeapon ? null : offered,
+        offeredWeaponId: packedWeapon?.id,
+        offeredQuantity: packedWeapon ? 1 : Number(fields.get('offeredQuantity')),
         requested: fields.get('requested'),
         requestedQuantity: Number(fields.get('requestedQuantity')),
         revision: state.revision,
@@ -475,6 +502,13 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       }),
     });
   };
+  const syncTradeQuantity = () => {
+    const offered = documentRoot.getElementById('surviveTradeOffered').value;
+    const quantity = documentRoot.getElementById('surviveTradeOfferedQuantity');
+    quantity.disabled = Boolean(state?.packedWeapons?.some(weapon => weapon.id === offered));
+    if (quantity.disabled) quantity.value = '1';
+  };
+  tradeOfferForm?.addEventListener('change', syncTradeQuantity);
   tradeOfferForm?.addEventListener('submit', sendTrade);
   tradePanel?.addEventListener('click', replyToTrade);
   giftForm.addEventListener('submit', give);
@@ -539,6 +573,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       refresh.removeEventListener('click', readWorld);
       logToggle.removeEventListener('click', toggleLog);
       game.removeEventListener('keydown', useLogShortcut);
+      tradeOfferForm?.removeEventListener('change', syncTradeQuantity);
       tradeOfferForm?.removeEventListener('submit', sendTrade);
       tradePanel?.removeEventListener('click', replyToTrade);
       giftForm.removeEventListener('submit', give);

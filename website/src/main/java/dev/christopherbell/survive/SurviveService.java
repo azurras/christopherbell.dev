@@ -367,10 +367,19 @@ public class SurviveService {
     var now = clock.instant();
     var recipient = activeTradePartner(request.recipientId().toString(), now);
     requireTradeLocation(sender, recipient, now);
+    if ((request.offered() == null) == (request.offeredWeaponId() == null)
+        || request.offeredWeaponId() != null && request.offeredQuantity() != 1) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Offer one supply stack or one packed weapon.");
+    }
     if (request.offered() == request.requested()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose different supplies to trade.");
     }
-    var offered = new SurviveTrade.Lot(request.offered(), request.offeredQuantity());
+    var offered = request.offeredWeaponId() == null
+        ? new SurviveTrade.Lot(request.offered(), request.offeredQuantity())
+        : new SurviveTrade.Lot(null, 1, sender.packedWeapons.stream()
+            .filter(weapon -> weapon.id().equals(request.offeredWeaponId().toString()))
+            .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
+                "That weapon is no longer in your pack.")));
     var requested = new SurviveTrade.Lot(request.requested(), request.requestedQuantity());
     requireTradeStock(sender, offered);
     if (world.trades.values().stream().anyMatch(offer -> offer.involves(sender.survivorId)
@@ -444,8 +453,11 @@ public class SurviveService {
   }
 
   private static void requireTradeStock(SurvivePlayer player, SurviveTrade.Lot lot) {
-    if (SurviveWorld.suppliesOf(player, lot.resource()) < lot.quantity()) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, player.name + " no longer has the supplies for this trade.");
+    boolean hasStock = lot.packedWeapon() == null
+        ? SurviveWorld.suppliesOf(player, lot.resource()) >= lot.quantity()
+        : player.packedWeapons.contains(lot.packedWeapon());
+    if (!hasStock) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, player.name + " no longer has the items for this trade.");
     }
   }
 

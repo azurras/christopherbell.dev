@@ -1,5 +1,6 @@
 package dev.christopherbell.survive.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Objects;
@@ -14,21 +15,31 @@ public record SurviveTrade(String id, String senderId, String recipientId, Lot o
     Objects.requireNonNull(offered);
     Objects.requireNonNull(requested);
     Objects.requireNonNull(expiresAt);
-    if (senderId.equals(recipientId) || offered.resource() == requested.resource()) {
+    if (senderId.equals(recipientId) || offered.resource() != null && offered.resource() == requested.resource()) {
       throw new IllegalArgumentException("A trade requires two survivors and different supplies.");
     }
   }
 
-  /** One stack of supplies in the exchange. */
-  public record Lot(SurviveResource resource, int quantity) {
+  /** One supply stack or one exact packed weapon, including its condition. */
+  public record Lot(SurviveResource resource, int quantity, SurvivePackedWeapon packedWeapon) {
+    public Lot(SurviveResource resource, int quantity) {
+      this(resource, quantity, null);
+    }
+
     public Lot {
-      Objects.requireNonNull(resource);
+      if ((resource == null) == (packedWeapon == null) || packedWeapon != null && quantity != 1) {
+        throw new IllegalArgumentException("A trade lot must contain supplies or a single packed weapon.");
+      }
       if (quantity < 1 || quantity > 30) {
         throw new IllegalArgumentException("Trade quantities must be between 1 and 30.");
       }
     }
 
+    @JsonProperty("description")
     public String description() {
+      if (packedWeapon != null) {
+        return packedWeapon.weapon().displayName() + " (" + packedWeapon.durability() + " uses left)";
+      }
       return quantity + " " + resource.name().toLowerCase(Locale.ROOT);
     }
   }

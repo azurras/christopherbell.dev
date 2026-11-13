@@ -293,15 +293,23 @@ final class SurviveWorld {
 
   /** Swaps both stacks after the service validates both packs. */
   void completeTrade(SurviveTrade offer, SurvivePlayer sender, SurvivePlayer recipient) {
-    addSupplies(sender, offer.offered().resource(), -offer.offered().quantity());
-    addSupplies(recipient, offer.requested().resource(), -offer.requested().quantity());
-    addSupplies(sender, offer.requested().resource(), offer.requested().quantity());
-    addSupplies(recipient, offer.offered().resource(), offer.offered().quantity());
+    transferTradeLot(sender, recipient, offer.offered());
+    transferTradeLot(recipient, sender, offer.requested());
     trades.remove(offer.id());
     recordTradeMessage(sender, "You traded " + offer.offered().description() + " for " + offer.requested().description()
         + " with " + recipient.name + ".");
     recordTradeMessage(recipient, "You traded " + offer.requested().description() + " for " + offer.offered().description()
         + " with " + sender.name + ".");
+  }
+
+  private static void transferTradeLot(SurvivePlayer sender, SurvivePlayer recipient, SurviveTrade.Lot lot) {
+    if (lot.packedWeapon() == null) {
+      addSupplies(sender, lot.resource(), -lot.quantity());
+      addSupplies(recipient, lot.resource(), lot.quantity());
+    } else {
+      sender.packedWeapons.remove(lot.packedWeapon());
+      recipient.packedWeapons.add(lot.packedWeapon());
+    }
   }
 
   /** Applies a previously validated gift while the service holds the world's monitor. */
