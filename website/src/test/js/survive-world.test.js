@@ -356,3 +356,29 @@ test('shared enemies face the server-selected survivor by identity', () => {
   assert.equal(enemyFacing(enemy, local, others, { self: true, survivorId: 'scout' }), 0);
   assert.equal(enemyFacing(enemy, local, others, null), 0);
 });
+
+test('a shared enemy stays at its acknowledged position as the local fighter engages', async () => {
+  const fixture = worldFixture();
+  const encounter = { id: 'ridge-bear', x: -4, z: -4, claimed: true };
+  const drawn = [];
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({
+    self: { survivorId: 'alice', x: 0, z: 0, heading: 0, sequence: 1, status: 'COMBAT' },
+    others: [], accepted: true, encounter,
+  }), () => {}, () => ({
+    ...fixture.renderer,
+    draw(_position, _yaw, _state, _others, _time, _wildlife, enemy) {
+      drawn.push(enemy);
+      return { project: () => ({ visible: false }) };
+    },
+  }));
+  try {
+    world.setState({ ...worldState, status: 'COMBAT', enemy: 'BEAR', nextStrikeAt: '2026-11-05T14:00:00Z' });
+    fixture.frame(0);
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.frame(16);
+    fixture.frame(1800);
+    assert.deepEqual(drawn.at(-1), encounter);
+  } finally {
+    world.dispose();
+  }
+});

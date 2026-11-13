@@ -337,3 +337,6 @@ Survive menu panel, including the Main weapon picker.
 Shared enemies use the attention leader's survivor ID to face that fighter's
 interpolated pose. If the ally's pose is outside the visible area, the enemy
 keeps its encounter heading.
+
+Shared combat uses the acknowledged enemy position for both fighters.
+Personal encounters retain the local approach animation.
