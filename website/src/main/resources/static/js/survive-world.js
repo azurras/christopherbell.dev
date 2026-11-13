@@ -532,6 +532,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
 
   function encounterPosition(player, cameraYaw, timestamp) {
     if (!encounter) return combatPosition(player, cameraYaw);
+    if (encounter.claimed) return encounter;
     if (state.nextStrikeAt) approachStartedAt ??= timestamp;
     const dx = player.x - encounter.x;
     const dz = player.z - encounter.z;

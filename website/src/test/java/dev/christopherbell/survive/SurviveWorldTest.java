@@ -89,6 +89,7 @@ class SurviveWorldTest {
     var guardAttention = world.snapshotFor(guard, DAY, Instant.MIN).enemyAttention();
     assertEquals("Chris", scoutAttention.name());
     assertTrue(scoutAttention.self());
+    assertEquals(player.survivorId, guardAttention.survivorId());
     assertEquals("Chris", guardAttention.name());
     assertFalse(guardAttention.self());
     assertNull(world.snapshotFor(new SurvivePlayer("Observer", DAY), DAY, Instant.MIN).enemyAttention());
