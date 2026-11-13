@@ -17,6 +17,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -253,6 +254,42 @@ class SurviveServiceTest {
         new SurviveRequests.TradeReply(UUID.fromString(sent.trade().offer().id()), true, ready.revision()));
     assertEquals(replacement, accepted.packedWeapons().getFirst());
     assertTrue(service.find(alice.token()).orElseThrow().packedWeapons().isEmpty());
+  }
+
+  @Test
+  void counterofferReplacesOldConsentAndAllowsBothPlayersToOfferWeapons() {
+    var service = new SurviveService(Clock.fixed(SurviveClock.WORLD_EPOCH, ZoneOffset.UTC), () -> 25, 10,
+        new InMemorySurviveWorldRepository());
+    var alice = service.join(null, "Alice");
+    var bob = service.join(null, "Bob");
+    for (var player : List.of(alice, bob)) {
+      for (int index = 0; index < 4; index++) {
+        act(service, player.token(), SurviveAction.GATHER);
+      }
+      act(service, player.token(), SurviveAction.CRAFT_CLUB);
+      act(service, player.token(), SurviveAction.CRAFT_CLUB);
+    }
+    var alicePack = service.find(alice.token()).orElseThrow();
+    var aliceWeapon = alicePack.packedWeapons().getFirst();
+    var original = service.offerTrade(alice.token(), null, new SurviveRequests.TradeOffer(
+        UUID.fromString(bob.state().survivorId()), null, 1, SurviveResource.STONE, 1, alicePack.revision(),
+        UUID.fromString(aliceWeapon.id())));
+    var bobPack = service.find(bob.token()).orElseThrow();
+    var bobWeapon = bobPack.packedWeapons().getFirst();
+    var originalId = UUID.fromString(original.trade().offer().id());
+    var counter = service.offerTrade(bob.token(), null, new SurviveRequests.TradeOffer(
+        UUID.fromString(alice.state().survivorId()), null, 1, null, null, bobPack.revision(),
+        UUID.fromString(bobWeapon.id()), originalId));
+    var incoming = service.find(alice.token()).orElseThrow();
+    assertTrue(incoming.trade().incoming());
+    assertEquals(aliceWeapon, incoming.packedWeapons().getFirst());
+    assertEquals(bobWeapon, counter.packedWeapons().getFirst());
+    assertEquals(404, assertThrows(ResponseStatusException.class, () -> service.replyToTrade(bob.token(), null,
+        new SurviveRequests.TradeReply(originalId, true, counter.revision()))).getStatusCode().value());
+    var accepted = service.replyToTrade(alice.token(), null, new SurviveRequests.TradeReply(
+        UUID.fromString(counter.trade().offer().id()), true, incoming.revision()));
+    assertEquals(bobWeapon, accepted.packedWeapons().getFirst());
+    assertEquals(aliceWeapon, service.find(bob.token()).orElseThrow().packedWeapons().getFirst());
   }
 
   @Test
