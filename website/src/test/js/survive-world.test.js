@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advancePosition, actionsAt, cameraMatrix, LANDMARKS, projectPoint, targetActionsFor } from '../../main/resources/static/js/survive-world-model.js';
+import { advancePosition, actionsAt, cameraMatrix, enemyFacing, LANDMARKS, projectPoint, targetActionsFor } from '../../main/resources/static/js/survive-world-model.js';
 
 test('the island offers Check and Engage after selection and weapon skills only when confirmed', () => {
   const encounter = { status: 'COMBAT', actions: ['ATTACK', 'ENGAGE', 'DEFEND', 'FLEE'] };
@@ -325,6 +325,59 @@ test('Escape closes the weapon picker, then Equipment, then Main Menu', () => {
     cancel(mainMenu);
     assert.equal(mainMenu.open, false);
     assert.equal(focused, canvas);
+  } finally {
+    world.dispose();
+  }
+});
+
+test('Arrow Down moves from the Main weapon row to an available weapon choice', () => {
+  const fixture = worldFixture();
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({}), () => {}, () => fixture.renderer);
+  const shell = fixture.documentRoot.getElementById('surviveWorld');
+  const disabled = { disabled: true, getClientRects: () => [{}] };
+  let focused;
+  const weapon = { getClientRects: () => [{}], focus: () => { focused = weapon; } };
+  const main = { getClientRects: () => [{}], closest: selector => selector === '.survive-main-menu-panel' ? panel : null };
+  const panel = { querySelectorAll: () => [main, disabled, weapon] };
+  try {
+    shell.emit('keydown', { code: 'ArrowDown', target: main, preventDefault() {} });
+    assert.equal(focused, weapon);
+  } finally {
+    world.dispose();
+  }
+});
+
+test('shared enemies face the server-selected survivor by identity', () => {
+  const enemy = { x: 0, z: 0, heading: Math.PI };
+  const local = { x: 0, z: 4 };
+  const others = [{ survivorId: 'other', x: 4, z: 0 }, { survivorId: 'guard', x: -4, z: 0 }];
+  assert.equal(enemyFacing(enemy, local, others, { self: false, survivorId: 'guard' }), -Math.PI / 2);
+  assert.equal(enemyFacing(enemy, local, [], { self: false, survivorId: 'guard' }), Math.PI);
+  assert.equal(enemyFacing(enemy, local, others, { self: true, survivorId: 'scout' }), 0);
+  assert.equal(enemyFacing(enemy, local, others, null), 0);
+});
+
+test('a shared enemy stays at its acknowledged position as the local fighter engages', async () => {
+  const fixture = worldFixture();
+  const encounter = { id: 'ridge-bear', x: -4, z: -4, claimed: true };
+  const drawn = [];
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({
+    self: { survivorId: 'alice', x: 0, z: 0, heading: 0, sequence: 1, status: 'COMBAT' },
+    others: [], accepted: true, encounter,
+  }), () => {}, () => ({
+    ...fixture.renderer,
+    draw(_position, _yaw, _state, _others, _time, _wildlife, enemy) {
+      drawn.push(enemy);
+      return { project: () => ({ visible: false }) };
+    },
+  }));
+  try {
+    world.setState({ ...worldState, status: 'COMBAT', enemy: 'BEAR', nextStrikeAt: '2026-11-05T14:00:00Z' });
+    fixture.frame(0);
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.frame(16);
+    fixture.frame(1800);
+    assert.deepEqual(drawn.at(-1), encounter);
   } finally {
     world.dispose();
   }

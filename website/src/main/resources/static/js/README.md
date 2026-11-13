@@ -327,3 +327,17 @@ keyboard and mouse in ordinary windows at any viewport width.
 
 In the Survive viewport, Escape and controller B close the focused Main Menu panel
 one level at a time and return focus to the row that opened it.
+
+While the Survive item list has focus, controller D-pad Up and Down browse
+items and update their details. At either end, the next press moves focus to
+the neighboring menu control.
+
+Arrow keys move between available buttons and summaries within the active
+Survive menu panel, including the Main weapon picker.
+
+Shared enemies use the attention leader's survivor ID to face that fighter's
+interpolated pose. If the ally's pose is outside the visible area, the enemy
+keeps its encounter heading.
+
+Shared combat uses the acknowledged enemy position for both fighters.
+Personal encounters retain the local approach animation.

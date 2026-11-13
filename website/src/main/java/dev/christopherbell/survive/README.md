@@ -332,3 +332,8 @@ an acknowledged position at the bank. A reel has a 60% chance to add one food
 if there is inventory space. Leaving the bank, entering combat, cancelling
 or missing the window ends the cast. Chat reports the result. Older saves
 start with no line out. The text fallback keeps one-command fishing.
+
+Active shared fighters receive the current enmity leader in their private
+snapshot once the encounter has recorded damage. The viewport shows that
+fighter in the vitals panel. The label reflects current enmity and may change
+as it fades or a fighter leaves.
