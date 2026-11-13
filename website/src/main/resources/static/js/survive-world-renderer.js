@@ -2,7 +2,7 @@
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from './survive-world-art.js';
 import { createIslandMaterials } from './survive-world-materials.js';
 import { drawBoat, drawCampFlame, drawShelter } from './survive-world-props.js';
-import { actionPose, combatStance } from './survive-action-pose.js';
+import { actionPose, combatStance, hitRecoil } from './survive-action-pose.js';
 import { prepareActorArt } from './survive-authored-actors.js';
 import { createDynamicMesh } from './survive-dynamic-mesh.js';
 import { cameraMatrix, enemyFacing, fishingHeading, projectPoint } from './survive-world-model.js';
@@ -256,9 +256,12 @@ export function createWorldRenderer(canvas) {
             ageSeconds: animationSeconds - other.strike.receivedAtSeconds,
           }) : null;
           const pose = strike || combatStance(other.appearance?.engaged, other.appearance?.defending);
+          const recoil = position.animate && Number.isFinite(other.hitAtSeconds)
+            ? hitRecoil(animationSeconds - other.hitAtSeconds) : 0;
+          const combatPose = recoil ? { ...pose, recoil } : pose;
           const weapon = strike ? other.strike.weapon : other.appearance?.weapon;
           actors.avatar(other.x, other.z, other.heading, [0.34, 0.43, 0.45], other.status,
-            pose ? 0 : stride(other), weapon, pose,
+            combatPose ? 0 : stride(other), weapon, combatPose,
             index < 6 && distance < 13, animationSeconds);
         }
         const keeper = state.waystationKeeper;

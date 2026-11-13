@@ -7,6 +7,10 @@ license, which is served at `/licenses/survive-MIT.txt`. No Python process is us
 
 ## One authoritative world
 
+Nearby player appearances include confirmed health so observers can show a brief torso recoil
+when consecutive combat updates report damage. First appearance, reconnect and noncombat
+health changes establish a baseline instead of replaying a hit. This adds no saved state or write.
+
 The private party view carries the accepted partner's confirmed HP and TP for the
 viewport vitals panel. Invitations carry no vitals. The existing game snapshot poll
 updates the row even when the partner is beyond nearby pose distance.

@@ -5,7 +5,7 @@ import { prepareActorArt } from '../../main/resources/static/js/survive-authored
 import { createDynamicMesh } from '../../main/resources/static/js/survive-dynamic-mesh.js';
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
 import { cameraMatrix, fishingFloat, fishingPhase, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
-import { acceptRemoteStrike, actionPose, combatStance, enemyCountered, enemyCounterPose, enemyDefeated, enemyFallPose } from '../../main/resources/static/js/survive-action-pose.js';
+import { acceptRemoteStrike, actionPose, combatStance, enemyCountered, enemyCounterPose, enemyDefeated, enemyFallPose, receivedCombatDamage, hitRecoil } from '../../main/resources/static/js/survive-action-pose.js';
 import { drawBoat, drawCampFlame, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
 
 test('dynamic frames upload the same vertices while reusing their allocated capacity', () => {
@@ -123,6 +123,25 @@ test('a remote strike is played once despite repeated or out-of-order presence r
   assert.equal(acceptRemoteStrike(observed, { revision: 12 }, 11), observed);
   assert.equal(acceptRemoteStrike(observed, null, 11.5), observed);
   assert.equal(acceptRemoteStrike(observed, { ...strike, revision: 15 }, 12).receivedAtSeconds, 12);
+});
+
+test('only a consecutive confirmed combat health loss starts a remote hit reaction', () => {
+  const before = { survivorId: 'fighter', status: 'COMBAT', appearance: { health: 10 } };
+  const hit = { ...before, appearance: { health: 8 } };
+  assert.equal(receivedCombatDamage(before, hit), true);
+  assert.equal(receivedCombatDamage(hit, hit), false);
+  assert.equal(receivedCombatDamage(hit, before), false);
+  assert.equal(receivedCombatDamage(null, hit), false);
+  assert.equal(receivedCombatDamage({ ...before, survivorId: 'other' }, hit), false);
+  assert.equal(receivedCombatDamage({ ...before, status: 'EXPLORING' }, hit), false);
+  assert.equal(receivedCombatDamage(before, { ...hit, status: 'EXPLORING' }), false);
+  for (const health of [undefined, null, '8', NaN, -1, 8.5]) {
+    assert.equal(receivedCombatDamage(before, { ...hit, appearance: { health } }), false);
+    assert.equal(receivedCombatDamage({ ...before, appearance: { health } }, hit), false);
+  }
+  assert.ok(hitRecoil(0.25) > 0.8);
+  assert.equal(hitRecoil(0), 0);
+  for (const age of [-1, 0.65, 10, undefined, NaN]) assert.equal(hitRecoil(age), 0);
 });
 
 test('a landed bite moves the authored torso without sliding the feet', () => {

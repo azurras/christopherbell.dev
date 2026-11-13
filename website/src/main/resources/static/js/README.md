@@ -8,6 +8,11 @@ Owns browser-side behavior for server-rendered pages.
 - The viewport vitals card shows an accepted partner's HP and TP from the same game snapshot. Invitations, ended parties and older snapshots without vitals clear the partner row.
 - `survive-world-materials.js` paints the adventurer's eyes, brows and lips on the mirrored face chart when staging the shared actor atlas. Keep the paint coordinates paired with `adventurer.json` and `authored-actors.jpg` when changing those assets.
 
+- Nearby fighters briefly recoil after a confirmed combat health decrease. The world retains
+  the receipt time across identical pulses, clears it with lost presence, and tolerates missing
+  health on older servers. The renderer overlays recoil on the current strike or stance and
+  suppresses it with reduced motion. Damage between polls can coalesce into one visible response.
+
 - Page entry modules such as `home-feed.js`, `messages.js`, `profile.js`,
   `post.js`, `user-feed.js`, `vin-decoder.js`, `zip-coordinates.js`, and
   `whats-for-lunch.js`.

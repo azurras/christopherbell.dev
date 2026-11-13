@@ -267,7 +267,7 @@ public class SurviveService {
       }
       var strike = player.lastStrike;
       var appearance = new SurvivePresence.Appearance(player.weapon, engaged, player.defending,
-          strike != null && strike.visibleAt(now) ? strike : null);
+          strike != null && strike.visibleAt(now) ? strike : null, player.health);
       describedPlayers.add(new SurvivePresence.Pose(pose.survivorId(), pose.name(), pose.x(), pose.z(),
           heading, pose.sequence(), player.status, appearance));
     }
