@@ -259,7 +259,11 @@ shared routes. Hunt can reveal the nearest unclaimed animal within five metres.
 The animal stays claimed until the encounter ends and then respawns after 35
 seconds. Solo field routes and claims are process-local. The older text adventure still
 uses its hunt and ambush rolls. Select the target, Check it, or Engage. Engaging starts a server-timed
-exchange every three seconds. Each automatic attack builds 50 TP up to 300.
+exchange using the held weapon's delay. Bare hands take 3 seconds, clubs 3.2,
+stone axes 3.8 and spears 4.2. Each automatic attack builds 50 TP up to 300.
+Equipment and packed weapon details show the delay. Existing saved strike
+deadlines finish at their saved time, then use the current weapon's cadence.
+A weapon that breaks uses the bare-hand delay for the next strike.
 Weapon skills spend 100 TP and restart the attack interval. Defend guards the
 next exchange. Disengage stops automatic attacks and leaves the animal in place.
 Flee ends the encounter at the existing cost. The text controls expose the same
