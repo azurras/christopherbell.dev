@@ -340,6 +340,3 @@ keeps its encounter heading.
 
 Shared combat uses the acknowledged enemy position for both fighters.
 Personal encounters retain the local approach animation.
-
-The follow camera pulls in when a quarry rock blocks the view of the survivor.
-The obstacle bounds are built once with the static scenery.

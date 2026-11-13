@@ -382,13 +382,3 @@ test('a shared enemy stays at its acknowledged position as the local fighter eng
     world.dispose();
   }
 });
-
-test('the follow camera clears a quarry rock between the survivor and camera', () => {
-  const player = { x: 0, z: 0 };
-  const rock = { x: 0, z: 3, radius: 0.8, top: 3 };
-  const clear = cameraMatrix(player, 0, 16 / 9);
-  const adjusted = cameraMatrix(player, 0, 16 / 9, 0, 1, undefined, [rock]);
-  assert.notDeepEqual(adjusted, clear);
-  assert.ok(projectPoint(adjusted, [0, 1.65, 0]).visible);
-  assert.deepEqual(cameraMatrix(player, 0, 16 / 9, 0, 1, undefined, [{ ...rock, x: 4 }]), clear);
-});

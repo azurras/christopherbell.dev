@@ -219,8 +219,7 @@ export function createWorldRenderer(canvas) {
         const height = Math.max(1, Math.round(canvas.clientHeight * pixelRatio));
         if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
         gl.viewport(0, 0, width, height);
-        const matrix = cameraMatrix(position, yaw, width / height, groundHeight(position.x, position.z), cameraZoom,
-          groundHeight, scenery.cameraObstacles);
+        const matrix = cameraMatrix(position, yaw, width / height, groundHeight(position.x, position.z), cameraZoom, groundHeight);
         const sky = state.phase === 'NIGHT' ? [0.09, 0.13, 0.20]
           : state.phase === 'DUSK' ? [0.61, 0.46, 0.39] : [0.58, 0.70, 0.83];
         gl.clearColor(...sky, 1);

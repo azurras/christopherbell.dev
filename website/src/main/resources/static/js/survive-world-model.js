@@ -71,26 +71,12 @@ export function actionsAt(position, allowedActions, wildlife = []) {
 }
 
 /** Column-major perspective/view matrix for the third-person follow camera. */
-export function cameraMatrix(position, yaw, aspectRatio, elevation = 0, zoom = 1, terrainHeight, obstacles = []) {
+export function cameraMatrix(position, yaw, aspectRatio, elevation = 0, zoom = 1, terrainHeight) {
   const wideView = aspectRatio >= 1.3;
   const distance = (wideView ? 5.7 : 12) * zoom;
   const height = wideView ? 1.8 + distance * 0.15 : 1.38 + distance * 0.44;
-  const offsetX = Math.sin(yaw);
-  const offsetZ = Math.cos(yaw);
-  const targetHeight = elevation + (wideView ? 1.65 : 1.38);
-  let clearance = distance;
-  for (const rock of obstacles) {
-    const dx = rock.x - position.x;
-    const dz = rock.z - position.z;
-    const along = dx * offsetX + dz * offsetZ;
-    const across = dx * offsetZ - dz * offsetX;
-    if (Math.abs(across) >= rock.radius || along <= 0) continue;
-    const edge = Math.max(0, along - Math.sqrt(rock.radius ** 2 - across ** 2));
-    const rayHeight = targetHeight + (elevation + height - targetHeight) * edge / distance;
-    if (edge < clearance && rock.top + 0.25 >= rayHeight) clearance = Math.max(0.8, edge - 0.25);
-  }
-  const cameraX = position.x + offsetX * clearance;
-  const cameraZ = position.z + offsetZ * clearance;
+  const cameraX = position.x + Math.sin(yaw) * distance;
+  const cameraZ = position.z + Math.cos(yaw) * distance;
   const cameraGround = terrainHeight?.(cameraX, cameraZ) ?? elevation;
   const eye = [cameraX, Math.max(elevation + height, cameraGround + 0.5), cameraZ];
   const back = normalize([eye[0] - position.x, eye[1] - elevation - (wideView ? 1.65 : 1.38), eye[2] - position.z]);

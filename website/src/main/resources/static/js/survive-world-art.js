@@ -97,7 +97,6 @@ function woodland() {
 export function islandMesh() {
   const mesh = meshBuilder();
   const trees = woodland();
-  const cameraObstacles = [];
   mesh.ellipsoid(0, 0, 0, 174, 135, 174, [1, 1, 1], 28, 10);
   mesh.disk(0, -0.66, 0, 380, [0.19, 0.34, 0.39], 72);
   const sectors = 144;
@@ -139,9 +138,7 @@ export function islandMesh() {
     const z = -15 + Math.sin(angle) * radius;
     if (trailDistance(x, z) > 2.5) {
       const size = 0.9 + (index * 7 % 13) * 0.21;
-      const ground = groundHeight(x, z);
-      drawQuarryRock(mesh, x, ground, z, size, angle, index % 4 === 0);
-      cameraObstacles.push({ x, z, radius: size * 1.1, top: ground + size * 0.96 });
+      drawQuarryRock(mesh, x, groundHeight(x, z), z, size, angle, index % 4 === 0);
     }
   }
   for (let index = 0; index < 780; index++) {
@@ -213,7 +210,7 @@ export function islandMesh() {
   buildRuinedGate(mesh);
   buildGateCrossing(mesh);
   plantNorthGateVerge(mesh);
-  return { ...mesh, cameraObstacles };
+  return mesh;
 }
 
 /** Cluster plants along the road's edges, leaving the gate and bridge deck clear. */
