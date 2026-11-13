@@ -345,4 +345,4 @@ Personal encounters retain the local approach animation.
 The Items panel confirms a permanent discard and shows the camp pack upgrade.
 The server owns the pack capacity and validates the selected item.
 
-The Survive camp menu lets players offer, review, and respond to supply trades. Trade terms arrive through the normal survivor snapshot, and trade feedback goes to the participant's in-world chat log.
+The Survive camp menu lets players offer, review, and respond to supply trades. Trade terms arrive through the normal survivor snapshot, and trade feedback goes to the participant's in-world chat log, including expiry or a partner leaving the camp roster.
