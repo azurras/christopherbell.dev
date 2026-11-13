@@ -589,7 +589,7 @@ public class SurviveService {
 
   private SurviveSnapshot snapshotFor(SurvivePlayer player) {
     var now = clock.instant();
-    return world.snapshotFor(player, now, now.minus(IDLE_TIMEOUT));
+    return world.snapshotFor(player, now, now.minus(IDLE_TIMEOUT), presence);
   }
 
   /** Internal join result: the controller writes the credential only to a private cookie. */
