@@ -21,7 +21,8 @@ export const ACTION_LABELS = {
 /** The island's target menu reveals commands in the order the player can use them. */
 export function targetActionsFor(state, selected) {
   if (state.nextStrikeAt) {
-    return ['WEAPON_SKILL', 'DEFEND', 'DISENGAGE', 'FLEE'].filter(action => state.actions.includes(action));
+    return ['WEAPON_SKILL', 'DEFEND', 'CHECK_TARGET', 'DISENGAGE', 'FLEE']
+      .filter(action => action === 'CHECK_TARGET' ? selected : state.actions.includes(action));
   }
   if (!selected) return ['SELECT_TARGET', 'FLEE'];
   return ['CHECK_TARGET', 'ENGAGE', 'FLEE'];
