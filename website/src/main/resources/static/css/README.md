@@ -34,8 +34,8 @@ Owns site styling for server-rendered pages and frontend components.
   row, Void brand mark, compact nav pills, auth actions, dark dropdowns, and
   notification/profile menu styling. The green `.void-signal-dot` uses a slow
   blink animation to read like an old router status light.
-- The home page uses `.home-void-*` classes for the Void-first gateway, primary
-  `/void` call to action, and live five-item Signal Rail.
+- The homepage uses `.home-tools` and `.home-tool-*` classes for its responsive
+  public tools grid and `.home-feed-link` for its secondary Void link.
 - The Void feed composer uses `.composer-preview-*` classes for the live draft
   preview, including mention links, clickable URLs, and shared rich media embeds.
 - Void survival messaging uses `.void-rules`; feed cards use

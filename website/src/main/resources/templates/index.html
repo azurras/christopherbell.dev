@@ -1,55 +1,79 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="author" content="Christopher Bell" />
-    <meta name="keywords" content="cbell,blog" />
-    <th:block th:replace="~{fragments/social-preview :: socialPreview('christopherbell.dev', 'A working corner of the internet for Void posts, lunch picks, and practical utilities.', 'https://www.christopherbell.dev/', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
-
-    <title>CB | Home</title>
-
+    <th:block th:replace="~{fragments/social-preview :: socialPreview('christopherbell.dev', 'Find lunch, look up vehicle and ZIP data, monitor a website, or play Survive.', 'https://www.christopherbell.dev/', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'christopherbell.dev site preview')}"></th:block>
+    <title>CB | Tools</title>
     <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}"/>
 </head>
 
 <body class="site-page void-shell-page home-page">
     <div id="nav"></div>
-    <main role="main" class="site-main home-void-gateway">
-        <section class="home-void-shell" aria-labelledby="homeTitle">
-            <div class="container home-void-hero">
-                <div class="home-void-copy">
-                    <p class="home-kicker">christopherbell.dev</p>
-                    <h1 id="homeTitle">Drop into the Void.</h1>
-                    <p class="home-intro">
-                        The Void is the front door here: short posts, replies, signals, and the latest noise from the feed.
-                    </p>
-                    <a class="btn btn-primary home-void-primary" href="/void">
-                        Enter Void
-                        <i class="fa fa-arrow-right" aria-hidden="true"></i>
-                    </a>
-                </div>
+    <main class="site-main">
+        <div class="container home-tools">
+            <header class="home-tools-heading">
+                <p class="home-kicker">christopherbell.dev</p>
+                <h1 id="homeTitle">Tools</h1>
+                <p>Pick a lunch spot, look up a VIN or ZIP code, monitor a website, or take a break in Survive.</p>
+            </header>
 
-                <aside class="home-void-signal-panel" aria-label="Void signals">
-                    <div class="home-void-panel-header">
-                        <span class="thread-status-pill is-live">Live</span>
-                        <span>Signal Rail</span>
-                    </div>
-                    <div id="homeActivePost" class="home-void-active" aria-live="polite">
-                        <div class="home-void-empty">
-                            <span class="home-void-eyebrow">Finding signal</span>
-                            <strong>Loading the most active post.</strong>
-                            <span>The rail updates every few seconds.</span>
-                        </div>
-                    </div>
-                </aside>
-            </div>
-        </section>
+            <ul class="home-tools-grid" role="list" aria-labelledby="homeTitle">
+                <li>
+                    <a class="home-tool-card" href="/wfl" th:href="@{/wfl}">
+                        <span class="home-tool-icon" aria-hidden="true"><i class="fa fa-cutlery"></i></span>
+                        <span class="home-tool-name">What’s For Lunch</span>
+                        <span class="home-tool-description">Find a nearby restaurant when nobody can decide where to eat.</span>
+                        <i class="fa fa-arrow-right home-tool-arrow" aria-hidden="true"></i>
+                    </a>
+                </li>
+                <li>
+                    <a class="home-tool-card" href="/canes-box-tracker" th:href="@{/canes-box-tracker}">
+                        <span class="home-tool-icon" aria-hidden="true"><i class="fa fa-line-chart"></i></span>
+                        <span class="home-tool-name">Raising Canes Box Index</span>
+                        <span class="home-tool-description">Compare weekly Box Combo prices across major metro areas.</span>
+                        <i class="fa fa-arrow-right home-tool-arrow" aria-hidden="true"></i>
+                    </a>
+                </li>
+                <li>
+                    <a class="home-tool-card" href="/vin-decoder" th:href="@{/vin-decoder}">
+                        <span class="home-tool-icon" aria-hidden="true"><i class="fa fa-car"></i></span>
+                        <span class="home-tool-name">VIN Decoder</span>
+                        <span class="home-tool-description">Look up vehicle details using a VIN and NHTSA data.</span>
+                        <i class="fa fa-arrow-right home-tool-arrow" aria-hidden="true"></i>
+                    </a>
+                </li>
+                <li>
+                    <a class="home-tool-card" href="/zip-coordinates" th:href="@{/zip-coordinates}">
+                        <span class="home-tool-icon" aria-hidden="true"><i class="fa fa-map-marker"></i></span>
+                        <span class="home-tool-name">ZIP Coordinates</span>
+                        <span class="home-tool-description">Look up latitude and longitude for U.S. ZIP codes.</span>
+                        <i class="fa fa-arrow-right home-tool-arrow" aria-hidden="true"></i>
+                    </a>
+                </li>
+                <li>
+                    <a class="home-tool-card" href="/site-monitor" th:href="@{/site-monitor}">
+                        <span class="home-tool-icon" aria-hidden="true"><i class="fa fa-heartbeat"></i></span>
+                        <span class="home-tool-name">Website Monitor</span>
+                        <span class="home-tool-description">Set up daily checks for website availability and HTTPS.</span>
+                        <i class="fa fa-arrow-right home-tool-arrow" aria-hidden="true"></i>
+                    </a>
+                </li>
+                <li>
+                    <a class="home-tool-card" href="/survive" th:href="@{/survive}">
+                        <span class="home-tool-icon" aria-hidden="true"><i class="fa fa-gamepad"></i></span>
+                        <span class="home-tool-name">Survive</span>
+                        <span class="home-tool-description">Explore a shared survival world and fight alongside other players.</span>
+                        <i class="fa fa-arrow-right home-tool-arrow" aria-hidden="true"></i>
+                    </a>
+                </li>
+            </ul>
+
+            <p class="home-feed-link"><a href="/void" th:href="@{/void}">Visit the Void feed <span aria-hidden="true">→</span></a></p>
+        </div>
     </main>
     <footer id="footer"></footer>
+    <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
 </body>
-
-<script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
-<script type="module" src="/js/home.js" th:src="@{/js/home.js}"></script>
-
 </html>

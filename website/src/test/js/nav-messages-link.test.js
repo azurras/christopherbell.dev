@@ -90,6 +90,12 @@ test('Tools keeps public entries and Shared Folder effective-read gating', () =>
   );
 });
 
+test('homepage Tools menu offers the public catalog to an admin with every capability', () => {
+  const adminAccess = accountNavigationAccess({ role: 'ADMIN' });
+
+  assert.deepEqual(toolsMenuItems(adminAccess, '/'), toolsMenuItems());
+});
+
 test('Tools gates moved destinations and sorts every visible item alphabetically', () => {
   assert.equal(toolsMenuItems().some((item) => item.href === '/music'), false);
   assert.deepEqual(
