@@ -192,10 +192,17 @@ function renderTrade(documentRoot, state, pending) {
   documentRoot.getElementById('surviveTradeRequestedFields').hidden = countering;
   picker.disabled = countering;
   documentRoot.getElementById('surviveTradeOfferedLabel').textContent = countering ? 'Offer instead' : 'You offer';
-  renderRecipientOptions(documentRoot, picker, state.recipients);
+  const nearby = state.recipients.filter(recipient => recipient.withinTradeRange);
+  const partnerInRange = !offer || nearby.some(recipient => recipient.survivorId ===
+    (offer.incoming ? offer.offer.senderId : offer.offer.recipientId));
+  renderRecipientOptions(documentRoot, picker, nearby);
+  const hint = documentRoot.getElementById('surviveTradeRange');
+  hint.hidden = offer ? partnerInRange : nearby.length > 0;
+  hint.textContent = offer ? 'Move within five metres of your trade partner.'
+    : 'Move within five metres of another survivor to trade.';
   const send = documentRoot.getElementById('surviveTradeSend');
   send.textContent = countering ? 'Send counteroffer' : 'Send offer';
-  send.disabled = pending || (!countering && state.recipients.length === 0);
+  send.disabled = pending || (countering ? !partnerInRange : nearby.length === 0);
   documentRoot.getElementById('surviveTradePending').hidden = !offer;
   if (!offer) return;
   const { offered, requested, additionalOffered, additionalRequested } = offer.offer;
@@ -207,7 +214,7 @@ function renderTrade(documentRoot, state, pending) {
     `Trade with ${offer.partner}. Give ${give} and receive ${receive}.`;
   const accept = documentRoot.getElementById('surviveTradeAccept');
   accept.hidden = !offer.incoming;
-  accept.disabled = pending;
+  accept.disabled = pending || !partnerInRange;
   const end = documentRoot.getElementById('surviveTradeEnd');
   end.textContent = offer.incoming ? 'Decline offer' : 'Withdraw offer';
   end.disabled = pending;

@@ -346,3 +346,5 @@ The Items panel confirms a permanent discard and shows the camp pack upgrade.
 The server owns the pack capacity and validates the selected item.
 
 The Survive camp menu lets players offer, review, and counter trades for supplies or packed weapons. Trade terms arrive through the normal survivor snapshot, and trade feedback goes to the participant's in-world chat log, including expiry or a partner leaving the camp roster.
+
+The Trade menu uses the server-confirmed range flags in the survivor snapshot to filter recipients and to show when an open trade partner is out of range.

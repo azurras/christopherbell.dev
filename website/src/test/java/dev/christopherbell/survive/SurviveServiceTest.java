@@ -353,6 +353,9 @@ class SurviveServiceTest {
 
     when(tradeClock.instant()).thenReturn(now.plusSeconds(1));
     assertEquals(6, service.pulseForOwner(bob.token(), null, new SurviveMovement(6, 0, 0, 1)).self().x());
+    var distant = service.find(alice.token()).orElseThrow().recipients().getFirst();
+    assertEquals(bob.state().survivorId(), distant.survivorId());
+    assertFalse(distant.withinTradeRange());
     assertEquals(400, assertThrows(ResponseStatusException.class,
         () -> service.replyToTrade(bob.token(), null, reply)).getStatusCode().value());
     assertEquals(1, service.find(alice.token()).orElseThrow().wood());
@@ -360,6 +363,7 @@ class SurviveServiceTest {
 
     when(tradeClock.instant()).thenReturn(now.plusSeconds(2));
     service.pulseForOwner(bob.token(), null, new SurviveMovement(5, 0, 0, 2));
+    assertTrue(service.find(alice.token()).orElseThrow().recipients().getFirst().withinTradeRange());
     assertEquals(1, service.replyToTrade(bob.token(), null, reply).wood());
   }
 

@@ -145,7 +145,7 @@ final class SurviveWorld {
         storedPlayers, settledBoundaries, activeRaidNight, parties.save(), List.copyOf(fieldFights.values()), List.copyOf(trades.values()));
   }
 
-  SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline) {
+  SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline, SurvivePresence presence) {
     return new SurviveSnapshot(player.name, player.health, player.strength, player.stamina,
         player.experience, player.experienceToNextLevel, player.wood, player.food,
         player.inventoryCapacity(), player.enemyHealth, player.status, player.revision, revision,
@@ -153,7 +153,8 @@ final class SurviveWorld {
         List.copyOf(events), actionsFor(player, now), player.message, player.survivorId,
         player.status == Status.EXPLORING ? players.values().stream()
             .filter(recipient -> recipient != player && recipient.status == Status.EXPLORING && recipient.lastSeen.isAfter(activeDeadline))
-            .map(recipient -> new Recipient(recipient.survivorId, recipient.name)).toList() : List.of(), player.accountId != null,
+            .map(recipient -> new Recipient(recipient.survivorId, recipient.name,
+                presence.withinTradeRange(player.survivorId, recipient.survivorId, now))).toList() : List.of(), player.accountId != null,
         SurviveClock.phaseAt(now), SurviveClock.dayAt(now), SurviveClock.secondsToNextPhaseAt(now),
         player.hunger, player.stone, player.weapon, player.weaponDurability, player.enemy,
         bedsInUse(), shelters * BEDS_PER_SHELTER, player.guarding,

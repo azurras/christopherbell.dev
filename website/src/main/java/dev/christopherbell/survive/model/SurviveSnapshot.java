@@ -29,7 +29,7 @@ public record SurviveSnapshot(
   public record EnemyAttention(String survivorId, String name, boolean self) {}
 
   /** Public targeting identity only; it never authorizes control of the survivor. */
-  public record Recipient(String survivorId, String name) {}
+  public record Recipient(String survivorId, String name, boolean withinTradeRange) {}
 
   /** Terminal states keep a survivor visible but prevent further gameplay mutations. */
   public enum Status { EXPLORING, COMBAT, SLEEPING, DEAD, ESCAPED }
