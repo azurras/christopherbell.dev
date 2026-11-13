@@ -293,6 +293,44 @@ class SurviveServiceTest {
   }
 
   @Test
+  void bundledTradeValidatesEveryLotBeforeChangingEitherPack() {
+    var repository = new InMemorySurviveWorldRepository();
+    var service = new SurviveService(Clock.fixed(SurviveClock.WORLD_EPOCH, ZoneOffset.UTC), () -> 25, 10, repository);
+    var alice = service.join(null, "Alice");
+    var bob = service.join(null, "Bob");
+    for (int index = 0; index < 5; index++) {
+      act(service, alice.token(), SurviveAction.GATHER);
+    }
+    act(service, alice.token(), SurviveAction.CRAFT_CLUB);
+    var pack = act(service, alice.token(), SurviveAction.CRAFT_CLUB);
+    var weapon = pack.packedWeapons().getFirst();
+    act(service, bob.token(), SurviveAction.GATHER_STONE);
+    var bobId = UUID.fromString(bob.state().survivorId());
+    var extraWood = new SurviveRequests.TradeItem(SurviveResource.WOOD, 1, null);
+    var weaponId = UUID.fromString(weapon.id());
+    assertEquals(400, assertThrows(ResponseStatusException.class, () -> service.offerTrade(alice.token(), null,
+        new SurviveRequests.TradeOffer(bobId, null, 1, SurviveResource.STONE, 1, pack.revision(), weaponId, null,
+            List.of(extraWood, extraWood)))).getStatusCode().value());
+    var sent = service.offerTrade(alice.token(), null,
+        new SurviveRequests.TradeOffer(bobId, null, 1, SurviveResource.STONE, 1, pack.revision(), weaponId, null,
+            List.of(extraWood)));
+    var incoming = service.find(bob.token()).orElseThrow();
+    var offerId = UUID.fromString(sent.trade().offer().id());
+    service.actForOwner(alice.token(), null, SurviveAction.DROP_ITEM, sent.revision(), "wood");
+    var reply = new SurviveRequests.TradeReply(offerId, true, incoming.revision());
+    assertEquals(409, assertThrows(ResponseStatusException.class,
+        () -> service.replyToTrade(bob.token(), null, reply)).getStatusCode().value());
+    assertEquals(weapon, service.find(alice.token()).orElseThrow().packedWeapons().getFirst());
+    assertEquals(1, service.find(bob.token()).orElseThrow().stone());
+
+    act(service, alice.token(), SurviveAction.GATHER);
+    var accepted = service.replyToTrade(bob.token(), null, reply);
+    assertEquals(1, accepted.wood());
+    assertEquals(0, accepted.stone());
+    assertEquals(weapon, accepted.packedWeapons().getFirst());
+  }
+
+  @Test
   void rejectedGiftsDoNotChangeEitherInventoryOrRevision() {
     var service = new SurviveService(clock, () -> 50, 10, new InMemorySurviveWorldRepository());
     var alice = service.join(null, "Alice");

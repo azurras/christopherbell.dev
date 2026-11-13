@@ -367,39 +367,53 @@ public class SurviveService {
     var now = clock.instant();
     var recipient = activeTradePartner(request.recipientId().toString(), now);
     requireTradeLocation(sender, recipient, now);
-    if ((request.offered() == null) == (request.offeredWeaponId() == null)
-        || request.offeredWeaponId() != null && request.offeredQuantity() != 1) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Offer one supply stack or one packed weapon.");
-    }
-    var offered = request.offeredWeaponId() == null
-        ? new SurviveTrade.Lot(request.offered(), request.offeredQuantity())
-        : new SurviveTrade.Lot(null, 1, sender.packedWeapons.stream()
-            .filter(weapon -> weapon.id().equals(request.offeredWeaponId().toString()))
-            .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
-                "That weapon is no longer in your pack.")));
+    var offered = tradeLot(sender, request.offered(), request.offeredQuantity(), request.offeredWeaponId());
+    var additionalOffered = request.additionalOffered() == null ? List.<SurviveTrade.Lot>of()
+        : request.additionalOffered().stream()
+            .map(item -> tradeLot(sender, item.resource(), item.quantity(), item.weaponId())).toList();
     var counteredOffer = request.counterOfferId() == null ? null
         : requireCounteredOffer(request.counterOfferId(), sender, recipient);
     var requested = counteredOffer == null ? requestedSupplyLot(request) : counteredOffer.offered();
-    if (offered.resource() != null && offered.resource() == requested.resource()) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose different supplies to trade.");
+    var additionalRequested = counteredOffer == null ? List.<SurviveTrade.Lot>of() : counteredOffer.additionalOffered();
+    SurviveTrade offer;
+    try {
+      offer = new SurviveTrade(UUID.randomUUID().toString(), sender.survivorId, recipient.survivorId,
+          offered, requested, now.plus(Duration.ofMinutes(2)), additionalOffered, additionalRequested);
+    } catch (IllegalArgumentException invalid) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
     }
-    requireTradeStock(sender, offered);
+    var requestedKeys = offer.requestedLots().stream().map(SurviveTrade.Lot::itemKey).collect(Collectors.toSet());
+    if (offer.offeredLots().stream().anyMatch(lot -> requestedKeys.contains(lot.itemKey()))) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Each item can appear on only one side of the trade.");
+    }
+    offer.offeredLots().forEach(lot -> requireTradeStock(sender, lot));
     if (counteredOffer != null) {
-      requireTradeStock(recipient, requested);
+      offer.requestedLots().forEach(lot -> requireTradeStock(recipient, lot));
       world.trades.remove(counteredOffer.id());
-    } else if (world.trades.values().stream().anyMatch(offer -> offer.involves(sender.survivorId)
-        || offer.involves(recipient.survivorId))) {
+    } else if (world.trades.values().stream().anyMatch(pending -> pending.involves(sender.survivorId)
+        || pending.involves(recipient.survivorId))) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "One of you already has a pending trade.");
     }
-    var offer = new SurviveTrade(UUID.randomUUID().toString(), sender.survivorId, recipient.survivorId,
-        offered, requested, now.plus(Duration.ofMinutes(2)));
     world.trades.put(offer.id(), offer);
-    world.recordTradeMessage(sender, "You offered " + offered.description() + " for " + requested.description()
+    world.recordTradeMessage(sender, "You offered " + SurviveTrade.describe(offer.offeredLots()) + " for " + SurviveTrade.describe(offer.requestedLots())
         + " to " + recipient.name + ".");
-    world.recordTradeMessage(recipient, sender.name + " offered you " + offered.description() + " for "
-        + requested.description() + ". Open Trade in the camp menu to respond.");
+    world.recordTradeMessage(recipient, sender.name + " offered you " + SurviveTrade.describe(offer.offeredLots()) + " for "
+        + SurviveTrade.describe(offer.requestedLots()) + ". Open Trade in the camp menu to respond.");
     commitWorld();
     return snapshotFor(sender);
+  }
+
+  private static SurviveTrade.Lot tradeLot(SurvivePlayer owner, SurviveResource resource, int quantity, UUID weaponId) {
+    if ((resource == null) == (weaponId == null) || weaponId != null && quantity != 1) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Offer a supply stack or a single packed weapon per slot.");
+    }
+    if (weaponId == null) {
+      return new SurviveTrade.Lot(resource, quantity);
+    }
+    var weapon = owner.packedWeapons.stream().filter(item -> item.id().equals(weaponId.toString()))
+        .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
+            "That weapon is no longer in your pack."));
+    return new SurviveTrade.Lot(null, 1, weapon);
   }
 
   private SurviveTrade requireCounteredOffer(UUID offerId, SurvivePlayer countering, SurvivePlayer originalSender) {
@@ -432,10 +446,10 @@ public class SurviveService {
       }
       var sender = activeTradePartner(offer.senderId(), now);
       requireTradeLocation(sender, player, now);
-      requireTradeStock(sender, offer.offered());
-      requireTradeStock(player, offer.requested());
-      requireTradeSpace(sender, offer.offered(), offer.requested());
-      requireTradeSpace(player, offer.requested(), offer.offered());
+      offer.offeredLots().forEach(lot -> requireTradeStock(sender, lot));
+      offer.requestedLots().forEach(lot -> requireTradeStock(player, lot));
+      requireTradeSpace(sender, offer.offeredLots(), offer.requestedLots());
+      requireTradeSpace(player, offer.requestedLots(), offer.offeredLots());
       world.completeTrade(offer, sender, player);
     } else {
       world.trades.remove(offer.id());
@@ -482,8 +496,10 @@ public class SurviveService {
     }
   }
 
-  private static void requireTradeSpace(SurvivePlayer player, SurviveTrade.Lot outgoing, SurviveTrade.Lot incoming) {
-    if (player.inventoryCount() - outgoing.quantity() + incoming.quantity() > player.inventoryCapacity()) {
+  private static void requireTradeSpace(SurvivePlayer player, List<SurviveTrade.Lot> outgoing, List<SurviveTrade.Lot> incoming) {
+    int outgoingCount = outgoing.stream().mapToInt(SurviveTrade.Lot::quantity).sum();
+    int incomingCount = incoming.stream().mapToInt(SurviveTrade.Lot::quantity).sum();
+    if (player.inventoryCount() - outgoingCount + incomingCount > player.inventoryCapacity()) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, player.name + " needs more pack space for this trade.");
     }
   }

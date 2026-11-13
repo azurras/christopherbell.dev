@@ -293,12 +293,12 @@ final class SurviveWorld {
 
   /** Swaps both stacks after the service validates both packs. */
   void completeTrade(SurviveTrade offer, SurvivePlayer sender, SurvivePlayer recipient) {
-    transferTradeLot(sender, recipient, offer.offered());
-    transferTradeLot(recipient, sender, offer.requested());
+    offer.offeredLots().forEach(lot -> transferTradeLot(sender, recipient, lot));
+    offer.requestedLots().forEach(lot -> transferTradeLot(recipient, sender, lot));
     trades.remove(offer.id());
-    recordTradeMessage(sender, "You traded " + offer.offered().description() + " for " + offer.requested().description()
+    recordTradeMessage(sender, "You traded " + SurviveTrade.describe(offer.offeredLots()) + " for " + SurviveTrade.describe(offer.requestedLots())
         + " with " + recipient.name + ".");
-    recordTradeMessage(recipient, "You traded " + offer.requested().description() + " for " + offer.offered().description()
+    recordTradeMessage(recipient, "You traded " + SurviveTrade.describe(offer.requestedLots()) + " for " + SurviveTrade.describe(offer.offeredLots())
         + " with " + sender.name + ".");
   }
 
