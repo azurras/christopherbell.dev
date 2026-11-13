@@ -5,7 +5,7 @@ import { drawBoat, drawCampFlame, drawShelter } from './survive-world-props.js';
 import { actionPose, combatStance } from './survive-action-pose.js';
 import { prepareActorArt } from './survive-authored-actors.js';
 import { createDynamicMesh } from './survive-dynamic-mesh.js';
-import { cameraMatrix, fishingHeading, projectPoint } from './survive-world-model.js';
+import { cameraMatrix, enemyFacing, fishingHeading, projectPoint } from './survive-world-model.js';
 import { fetchJson } from './lib/util.js';
 
 const VERTEX_SHADER = `
@@ -292,7 +292,7 @@ export function createWorldRenderer(canvas) {
           const radius = scale * 0.86;
           const ringColor = state.nextStrikeAt ? [0.67, 0.23, 0.15] : [0.64, 0.48, 0.21];
           drawTargetRing(actors, enemy, radius, ringColor);
-          const facing = Math.atan2(position.x - enemy.x, position.z - enemy.z);
+          const facing = enemyFacing(enemy, position, others, state.enemyAttention);
           const enemyX = enemy.x + Math.sin(facing) * (counter?.forward ?? 0);
           const enemyZ = enemy.z + Math.cos(facing) * (counter?.forward ?? 0);
           if (state.enemy === 'RAIDER') {

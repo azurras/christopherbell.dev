@@ -25,7 +25,7 @@ public record SurviveSnapshot(
   }
 
   /** Current enmity leader from the requesting fighter's perspective. */
-  public record EnemyAttention(String name, boolean self) {}
+  public record EnemyAttention(String survivorId, String name, boolean self) {}
 
   /** Public targeting identity only; it never authorizes control of the survivor. */
   public record Recipient(String survivorId, String name) {}

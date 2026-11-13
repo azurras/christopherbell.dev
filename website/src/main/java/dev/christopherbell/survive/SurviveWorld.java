@@ -778,7 +778,7 @@ final class SurviveWorld {
       return null;
     }
     return leadingFighter(fight, fighters, fight.enmity(), now)
-        .map(leader -> new SurviveSnapshot.EnemyAttention(leader.name, leader == viewer)).orElse(null);
+        .map(leader -> new SurviveSnapshot.EnemyAttention(leader.survivorId, leader.name, leader == viewer)).orElse(null);
   }
 
   private static Optional<SurvivePlayer> leadingFighter(

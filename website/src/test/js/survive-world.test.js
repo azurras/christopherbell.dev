@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advancePosition, actionsAt, cameraMatrix, LANDMARKS, projectPoint, targetActionsFor } from '../../main/resources/static/js/survive-world-model.js';
+import { advancePosition, actionsAt, cameraMatrix, enemyFacing, LANDMARKS, projectPoint, targetActionsFor } from '../../main/resources/static/js/survive-world-model.js';
 
 test('the island offers Check and Engage after selection and weapon skills only when confirmed', () => {
   const encounter = { status: 'COMBAT', actions: ['ATTACK', 'ENGAGE', 'DEFEND', 'FLEE'] };
@@ -345,4 +345,14 @@ test('Arrow Down moves from the Main weapon row to an available weapon choice', 
   } finally {
     world.dispose();
   }
+});
+
+test('shared enemies face the server-selected survivor by identity', () => {
+  const enemy = { x: 0, z: 0, heading: Math.PI };
+  const local = { x: 0, z: 4 };
+  const others = [{ survivorId: 'other', x: 4, z: 0 }, { survivorId: 'guard', x: -4, z: 0 }];
+  assert.equal(enemyFacing(enemy, local, others, { self: false, survivorId: 'guard' }), -Math.PI / 2);
+  assert.equal(enemyFacing(enemy, local, [], { self: false, survivorId: 'guard' }), Math.PI);
+  assert.equal(enemyFacing(enemy, local, others, { self: true, survivorId: 'scout' }), 0);
+  assert.equal(enemyFacing(enemy, local, others, null), 0);
 });
