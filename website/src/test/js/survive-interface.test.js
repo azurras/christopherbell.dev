@@ -19,3 +19,12 @@ test('the Main Menu groups its categories and gives each a separate panel', () =
   assert.equal([...menu.matchAll(/<div class="survive-main-menu-panel">/g)].length, 7);
   assert.match(menu, /id="surviveEquipment"[\s\S]*?<div class="survive-main-menu-panel">\s*<details>/);
 });
+
+test('the in-game guide explains timed fishing, fullness and weapon swaps', () => {
+  const template = readFileSync(new URL('../../main/resources/templates/survive.html', import.meta.url), 'utf8');
+  const guide = template.slice(template.indexOf('id="surviveSectionGuide"'), template.indexOf('id="surviveGameViewToggle"'));
+  assert.match(guide, /Cast line.*Reel in/);
+  assert.match(guide, /Five minutes of awake, active play/);
+  assert.match(guide, /Equipment → Main to swap weapons/);
+  assert.match(guide, /choose Engage to start automatic attacks/);
+});
