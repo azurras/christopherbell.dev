@@ -92,8 +92,8 @@ function worldFixture() {
   documentRoot.getElementById('surviveJoin').hidden = true;
   const rendered = [];
   let disposals = 0;
-  const renderer = { draw(position, yaw, _state, _others, _time, _wildlife, _enemy, _gesture, zoom) {
-    rendered.push({ ...position, yaw, zoom, gesture: _gesture });
+  const renderer = { draw(position, yaw, _state, _others, _time, _wildlife, _enemy, gesture, zoom, counter) {
+    rendered.push({ ...position, yaw, zoom, gesture, counter });
     return { project: () => ({ visible: false, x: 0, y: 0 }) };
   },
     dispose() { disposals++; } };
@@ -150,14 +150,15 @@ test('an ally hit does not animate the local fighter, while their own confirmed 
     others: [], accepted: true, wildlife: [],
   }), () => {}, () => fixture.renderer);
   const engaged = { ...worldState, status: 'COMBAT', enemy: 'BEAR', enemyHealth: 10,
-    nextStrikeAt: '2026-11-05T14:00:00Z', revision: 1, strike: null };
+    nextStrikeAt: '2026-11-05T14:00:00Z', revision: 1, health: 10, defending: true, strike: null };
   try {
     world.setState(engaged);
     fixture.frame(0);
     await new Promise(resolve => setImmediate(resolve));
-    world.setState({ ...engaged, revision: 2, enemyHealth: 7 });
+    world.setState({ ...engaged, revision: 2, enemyHealth: 7, defending: false });
     fixture.frame(16);
     assert.equal(fixture.rendered.at(-1).gesture, null);
+    assert.equal(fixture.rendered.at(-1).counter.kind, 'strike');
     world.setState({ ...engaged, revision: 3, enemyHealth: 5,
       strike: { revision: 3, weaponSkill: true, weapon: 'CLUB' } });
     fixture.frame(32);
@@ -326,4 +327,58 @@ test('graphics loss cannot resurrect the target HUD after disposal', () => {
   world.setState({ ...worldState, revision: 2, status: 'COMBAT', enemy: 'HOG', enemyHealth: 5, health: 10 });
   assert.equal(fixture.documentRoot.getElementById('surviveWorldCombat').hidden, true);
   assert.equal(fixture.frames.size, 0);
+});
+
+test('Escape closes the weapon picker, then Equipment, then Main Menu', () => {
+  const fixture = worldFixture();
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({}), () => {}, () => fixture.renderer);
+  const shell = fixture.documentRoot.getElementById('surviveWorld');
+  const mainMenu = fixture.documentRoot.getElementById('surviveMainMenu');
+  const canvas = fixture.documentRoot.getElementById('surviveWorldCanvas');
+  const equipment = { open: true, parentElement: { closest: () => mainMenu } };
+  const picker = { open: true, parentElement: { closest: () => equipment } };
+  const menuPanels = [equipment, picker];
+  let focused;
+  for (const panel of menuPanels) {
+    panel.querySelector = () => ({ focus: () => { focused = panel; } });
+  }
+  mainMenu.open = true;
+  mainMenu.contains = panel => menuPanels.includes(panel);
+  canvas.focus = () => { focused = canvas; };
+  const cancel = panel => shell.emit('keydown', { code: 'Escape', preventDefault() {},
+    target: { closest: selector => selector === 'details[open]' ? (panel.open ? panel : panel.parentElement.closest()) : null },
+  });
+  try {
+    cancel(picker);
+    assert.equal(picker.open, false);
+    assert.equal(equipment.open, true);
+    assert.equal(mainMenu.open, true);
+    assert.equal(focused, picker);
+    cancel(picker);
+    assert.equal(equipment.open, false);
+    assert.equal(mainMenu.open, true);
+    assert.equal(focused, equipment);
+    cancel(mainMenu);
+    assert.equal(mainMenu.open, false);
+    assert.equal(focused, canvas);
+  } finally {
+    world.dispose();
+  }
+});
+
+test('Arrow Down moves from the Main weapon row to an available weapon choice', () => {
+  const fixture = worldFixture();
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({}), () => {}, () => fixture.renderer);
+  const shell = fixture.documentRoot.getElementById('surviveWorld');
+  const disabled = { disabled: true, getClientRects: () => [{}] };
+  let focused;
+  const weapon = { getClientRects: () => [{}], focus: () => { focused = weapon; } };
+  const main = { getClientRects: () => [{}], closest: selector => selector === '.survive-main-menu-panel' ? panel : null };
+  const panel = { querySelectorAll: () => [main, disabled, weapon] };
+  try {
+    shell.emit('keydown', { code: 'ArrowDown', target: main, preventDefault() {} });
+    assert.equal(focused, weapon);
+  } finally {
+    world.dispose();
+  }
 });

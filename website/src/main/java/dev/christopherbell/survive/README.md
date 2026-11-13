@@ -11,6 +11,10 @@ Nearby player appearances include confirmed health so observers can show a brief
 when consecutive combat updates report damage. First appearance, reconnect and noncombat
 health changes establish a baseline instead of replaying a hit. This adds no saved state or write.
 
+The private party view carries the accepted partner's confirmed HP and TP for the
+viewport vitals panel. Invitations carry no vitals. The existing game snapshot poll
+updates the row even when the partner is beyond nearby pose distance.
+
 `SurviveService` restores one shared durable world for every operation and commits
 a versioned replacement after successful commands. Movement pulses can reuse
 the last immutable snapshot after Mongo confirms the document still has that
@@ -197,6 +201,13 @@ Check reports its threat in chat. Engage within five metres to start timed
 combat with the chosen creature. If it moves away or another player claims it,
 the command fails without switching targets. Untargeted Hunt remains available
 through the existing action path.
+In a shared roaming fight, damage adds durable and fading enmity to the striker.
+The next surviving exchange counters the living fighter with the highest combined
+score. Ties favor the earlier participant. The target's guard can block the bite,
+and taking damage reduces durable enmity. Fading points are evaluated at the actual
+strike deadline, including catch-up. Both players get the counter result in chat.
+The saved fight retains enmity and drops it when a fighter leaves or the enemy falls.
+Old saves start with empty scores. Personal encounters retain their existing exchange.
 Existing hunger, combat, weapons, day/night, raids, gifts and durable progress remain
 Java-owned. Rendering does not award supplies. Saved characters and inventory retain
 the existing Mongo representation; no position schema is added.
@@ -321,3 +332,8 @@ an acknowledged position at the bank. A reel has a 60% chance to add one food
 if there is inventory space. Leaving the bank, entering combat, cancelling
 or missing the window ends the cast. Chat reports the result. Older saves
 start with no line out. The text fallback keeps one-command fishing.
+
+Active shared fighters receive the current enmity leader in their private
+snapshot once the encounter has recorded damage. The viewport shows that
+fighter in the vitals panel. The label reflects current enmity and may change
+as it fades or a fighter leaves.

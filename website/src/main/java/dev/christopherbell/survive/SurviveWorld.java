@@ -2,6 +2,7 @@ package dev.christopherbell.survive;
 
 import dev.christopherbell.survive.model.SurviveAction;
 import dev.christopherbell.survive.model.SurviveEnemy;
+import dev.christopherbell.survive.model.SurviveEnmity;
 import dev.christopherbell.survive.model.SurviveFieldFight;
 import dev.christopherbell.survive.model.SurviveFishing;
 import dev.christopherbell.survive.model.SurviveParty;
@@ -25,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.IntSupplier;
@@ -156,7 +158,7 @@ final class SurviveWorld {
         weaponSkillFor(player.weapon), SurviveWaystation.KEEPER, player.waystationAssignment,
         player.packedWeapons.stream().map(SurviveSnapshot.WeaponChoice::from).toList(),
         player.fishing == null ? null : player.fishing.timingAt(now),
-        player.lastStrike != null && player.lastStrike.visibleAt(now) ? player.lastStrike : null);
+        player.lastStrike != null && player.lastStrike.visibleAt(now) ? player.lastStrike : null, enemyAttentionFor(player, now));
   }
 
   /** Settles elapsed fights even when their participants did not send any requests. */
@@ -643,7 +645,7 @@ final class SurviveWorld {
 
   void startPartyFight(SurvivePlayer player, String partyId, SurviveWildlife.Animal animal, Instant now, boolean aggro) {
     var fight = new SurviveFieldFight(animal.id(), UUID.randomUUID().toString(), partyId, animal.kind(),
-        animal.x(), animal.z(), animal.heading(), animal.kind().health(), List.of(player.survivorId), null, null);
+        animal.x(), animal.z(), animal.heading(), animal.kind().health(), List.of(player.survivorId), null, null, Map.of());
     fieldFights.put(animal.id(), fight);
     if (aggro) {
       aggro(player, animal.kind(), now);
@@ -725,8 +727,7 @@ final class SurviveWorld {
       recordEvent(attacker.name + " closed the Impact skillchain with Crushing Blow for " + IMPACT_BONUS + " bonus damage.");
     }
     var weapon = attacker.weapon;
-    boolean blocked = attacker.defending || !attacker.struckFirst && weapon != null && weapon.keepsFirstBiteAway();
-    attacker.defending = false;
+    boolean spearReach = !attacker.struckFirst && weapon != null && weapon.keepsFirstBiteAway();
     attacker.struckFirst = true;
     String weaponNote = attacker.wearWeaponAndReportBreak() ? " Your " + weapon.displayName() + " broke." : "";
     String strike = (skill == null ? "You dealt " : skill + " dealt ") + damage + " damage.";
@@ -734,17 +735,62 @@ final class SurviveWorld {
       return finishPartyFight(fight, attacker, now, strike + weaponNote);
     }
 
+    var enmity = new LinkedHashMap<>(fight.enmity());
+    var attackerEnmity = enmity.getOrDefault(attacker.survivorId, SurviveEnmity.emptyAt(now));
+    enmity.put(attacker.survivorId, attackerEnmity.afterDamageDealt(fight.health() - health, now));
+    var counterTarget = leadingFighter(fight, livingFighters(fight), enmity, now).orElse(attacker);
+    boolean blocked = counterTarget.defending || counterTarget == attacker && spearReach;
+    counterTarget.defending = false;
     int bite = blocked ? 0 : fight.enemy().bite();
-    attacker.takeDamage(bite);
+    int healthBeforeBite = counterTarget.health;
+    counterTarget.takeDamage(bite);
+    var targetEnmity = enmity.getOrDefault(counterTarget.survivorId, SurviveEnmity.emptyAt(now));
+    enmity.put(counterTarget.survivorId, targetEnmity.afterDamageTaken(healthBeforeBite - counterTarget.health));
     for (var fighter : livingFighters(fight)) {
       fighter.enemyHealth = health;
     }
-    retainLivingFighters(fight.withProgress(health, fight.fighters(), null));
+    retainLivingFighters(fight.withEnmity(enmity).withProgress(health, fight.fighters(), null));
     if (skill != null) {
       updateSkillOpening(fight.routeId(), attacker, skill, now);
     }
-    return strike + (blocked ? " You blocked the bite." : " The " + fight.enemy().displayName()
-        + " bit you for " + bite + " damage.") + weaponNote;
+    String enemy = fight.enemy().displayName();
+    String incoming = blocked ? "You blocked the bite." : "The " + enemy + " bit you for " + bite + " damage.";
+    if (counterTarget == attacker) {
+      return strike + " " + incoming + weaponNote;
+    }
+    recordAction(counterTarget, incoming, true);
+    String allyCounter = blocked ? counterTarget.name + " blocked the bite."
+        : "The " + enemy + " bit " + counterTarget.name + " for " + bite + " damage.";
+    return strike + " " + allyCounter + weaponNote;
+  }
+
+  /** Share the current enmity leader only with participants of an active group encounter. */
+  private SurviveSnapshot.EnemyAttention enemyAttentionFor(SurvivePlayer viewer, Instant now) {
+    if (viewer.status != Status.COMBAT) {
+      return null;
+    }
+    var fight = fieldFightFor(viewer);
+    if (fight == null || fight.enmity().isEmpty()) {
+      return null;
+    }
+    var fighters = livingFighters(fight);
+    if (fighters.size() < 2) {
+      return null;
+    }
+    return leadingFighter(fight, fighters, fight.enmity(), now)
+        .map(leader -> new SurviveSnapshot.EnemyAttention(leader.name, leader == viewer)).orElse(null);
+  }
+
+  private static Optional<SurvivePlayer> leadingFighter(
+      SurviveFieldFight fight, List<SurvivePlayer> fighters, Map<String, SurviveEnmity> enmity, Instant now) {
+    return fighters.stream()
+        .max(Comparator.comparingInt((SurvivePlayer fighter) -> enmityScore(enmity, fighter, now))
+            .thenComparingInt(fighter -> -fight.fighters().indexOf(fighter.survivorId)));
+  }
+
+  private static int enmityScore(Map<String, SurviveEnmity> enmity, SurvivePlayer fighter, Instant at) {
+    var score = enmity.get(fighter.survivorId);
+    return score == null ? 0 : score.scoreAt(at);
   }
 
   private static boolean closesImpact(SurviveFieldFight.SkillOpening opening, SurvivePlayer attacker, String skill,

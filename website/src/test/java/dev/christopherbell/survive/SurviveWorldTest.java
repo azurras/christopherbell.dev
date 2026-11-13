@@ -59,6 +59,74 @@ class SurviveWorldTest {
   }
 
   @Test
+  void sharedCounterUsesSavedEnmityAndConsumesTheTargetsGuard() {
+    var guard = startSkillchainFight();
+    world.perform(SurviveAction.WEAPON_SKILL, player, DAY, () -> 1);
+    var restored = SurviveWorld.restore(world.saveState(0L));
+    var scout = restored.players.get(player.survivorId);
+    var striker = restored.players.get(guard.survivorId);
+    striker.nextStrikeAt = null;
+
+    restored.perform(SurviveAction.DEFEND, scout, DAY.plusSeconds(1), () -> 1);
+    long beforeBiteRevision = scout.revision;
+    restored.perform(SurviveAction.ATTACK, striker, DAY.plusSeconds(1), () -> 1);
+
+    assertEquals(7, scout.health);
+    assertEquals(10, striker.health);
+    assertFalse(scout.defending);
+    assertEquals(beforeBiteRevision + 1, scout.revision);
+    assertTrue(scout.message.contains("You blocked"), scout.message);
+    assertTrue(striker.message.contains("Chris blocked"), striker.message);
+  }
+
+  @Test
+  void sharedFightShowsAttentionOnlyToItsCurrentFighters() {
+    var guard = startSkillchainFight();
+    assertNull(world.snapshotFor(player, DAY, Instant.MIN).enemyAttention());
+
+    world.perform(SurviveAction.WEAPON_SKILL, player, DAY, () -> 1);
+    var scoutAttention = world.snapshotFor(player, DAY, Instant.MIN).enemyAttention();
+    var guardAttention = world.snapshotFor(guard, DAY, Instant.MIN).enemyAttention();
+    assertEquals("Chris", scoutAttention.name());
+    assertTrue(scoutAttention.self());
+    assertEquals("Chris", guardAttention.name());
+    assertFalse(guardAttention.self());
+    assertNull(world.snapshotFor(new SurvivePlayer("Observer", DAY), DAY, Instant.MIN).enemyAttention());
+
+    world.perform(SurviveAction.FLEE, player, DAY.plusSeconds(1), () -> 1);
+    assertNull(world.snapshotFor(guard, DAY.plusSeconds(1), Instant.MIN).enemyAttention());
+  }
+
+  @Test
+  void fadedEnmityLetsAnotherPartyMemberDrawTheCounter() {
+    var guard = startSkillchainFight();
+    world.perform(SurviveAction.WEAPON_SKILL, player, DAY, () -> 1);
+    var saved = world.saveState(0L);
+    for (int seconds : List.of(1, 16)) {
+      var restored = SurviveWorld.restore(saved);
+      var scout = restored.players.get(player.survivorId);
+      var striker = restored.players.get(guard.survivorId);
+      striker.nextStrikeAt = null;
+      restored.perform(SurviveAction.ATTACK, striker, DAY.plusSeconds(seconds), () -> 1);
+      assertEquals(seconds == 1 ? 4 : 7, scout.health);
+      assertEquals(seconds == 1 ? 10 : 7, striker.health);
+    }
+  }
+
+  @Test
+  void leavingSharedCombatRemovesTheDepartingFightersEnmity() {
+    var guard = startSkillchainFight();
+    world.perform(SurviveAction.WEAPON_SKILL, player, DAY, () -> 1);
+    assertTrue(world.fieldFightAt("ridge-bear").enmity().containsKey(player.survivorId));
+
+    world.perform(SurviveAction.FLEE, player, DAY.plusSeconds(1), () -> 1);
+
+    var fight = world.fieldFightAt("ridge-bear");
+    assertEquals(List.of(guard.survivorId), fight.fighters());
+    assertFalse(fight.enmity().containsKey(player.survivorId));
+  }
+
+  @Test
   void differentPartyMemberClosesAStoredOpeningForBonusDamage() {
     var guard = startSkillchainFight();
     world.perform(SurviveAction.WEAPON_SKILL, player, DAY, () -> 1);

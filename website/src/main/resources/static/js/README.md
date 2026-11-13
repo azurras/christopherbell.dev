@@ -5,6 +5,7 @@ Owns browser-side behavior for server-rendered pages.
 ## What Lives Here
 
 - `survive.js` renders the Java-owned shared survival world and serializes commands; it owns no game rules. See the `survive` Java package README for the API and lifetime contract.
+- The viewport vitals card shows an accepted partner's HP and TP from the same game snapshot. Invitations, ended parties and older snapshots without vitals clear the partner row.
 - `survive-world-materials.js` paints the adventurer's eyes, brows and lips on the mirrored face chart when staging the shared actor atlas. Keep the paint coordinates paired with `adventurer.json` and `authored-actors.jpg` when changing those assets.
 
 - Nearby fighters briefly recoil after a confirmed combat health decrease. The world retains
@@ -273,6 +274,9 @@ once on load and preserves hard edges between steeply angled faces.
 `survive-world-actors.js` supplies
 the fallback models. `survive-world-props.js`
 builds the shelters, boats and resource-site props used by the same renderer.
+The fishing bank groups textured rocks, driftwood and bent reeds around the dock,
+leaving the central approach open. These props share the static scenery buffer.
+Sand extends below the ocean surface and darkens near the waterline.
 `survive-world-renderer.js` owns WebGL buffers, lighting, fog and disposal.
 The starting campfire uses one camera-facing quad for soft flames and embers.
 Local firelight falls off around the pit, and reduced motion freezes the effect.
@@ -324,3 +328,13 @@ right stick turns the camera, and the D-pad and face buttons reuse menu controls
 Leaving fullscreen or disconnecting stops phone input and movement pulses.
 Desktop and laptop browsers support the same controller mapping alongside
 keyboard and mouse in ordinary windows at any viewport width.
+
+In the Survive viewport, Escape and controller B close the focused Main Menu panel
+one level at a time and return focus to the row that opened it.
+
+While the Survive item list has focus, controller D-pad Up and Down browse
+items and update their details. At either end, the next press moves focus to
+the neighboring menu control.
+
+Arrow keys move between available buttons and summaries within the active
+Survive menu panel, including the Main weapon picker.

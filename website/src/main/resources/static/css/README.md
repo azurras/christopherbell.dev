@@ -5,6 +5,7 @@ Owns site styling for server-rendered pages and frontend components.
 ## What Lives Here
 
 - `survive.css` owns the desktop play view, responsive shared-world adventure, target markers, survivor stats, camp, Items list and chat log.
+- The viewport vitals card uses the same responsive bounds for its optional party row.
 
 - `main.css` is the primary shared stylesheet for the current site, Void feed,
   tools, auth, profile, messages, post cards, and responsive layout.
@@ -127,3 +128,10 @@ Wildlife labels distinguish hostile and passive animals by wording and color.
 On phones the play shell hides the game until fullscreen and controller setup
 are complete. Fullscreen uses the available viewport for the canvas and leaves
 the existing HUD and game menus in view.
+
+The Survive viewport vitals panel shows enemy attention during shared combat,
+using the private enmity leader from the survivor snapshot.
+
+The Survive Main Menu keeps its category list visible while the selected panel
+opens beside it in the desktop world view. Narrow viewports and page view show
+the same panel beneath its category.
