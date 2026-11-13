@@ -15,7 +15,7 @@ public record SurviveSnapshot(
     Instant nextStrikeAt, long millisecondsUntilStrike, int tacticalPoints, boolean defending, String combatOutcome,
     SurviveParty.View party, String weaponSkill, SurviveWaystation.Keeper waystationKeeper,
     SurviveWaystation.Assignment waystationAssignment, List<WeaponChoice> packedWeapons, SurviveFishing.Timing fishing,
-    SurviveStrike strike) {
+    SurviveStrike strike, EnemyAttention enemyAttention) {
 
   /** Owned weapon choice and the stats shown in Main before equipping. */
   public record WeaponChoice(String id, String name, int damageBonus, int durability) {
@@ -23,6 +23,9 @@ public record SurviveSnapshot(
       return new WeaponChoice(item.id(), item.weapon().displayName(), item.weapon().damageBonus(), item.durability());
     }
   }
+
+  /** Current enmity leader from the requesting fighter's perspective. */
+  public record EnemyAttention(String name, boolean self) {}
 
   /** Public targeting identity only; it never authorizes control of the survivor. */
   public record Recipient(String survivorId, String name) {}

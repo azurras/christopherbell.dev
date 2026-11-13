@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.IntSupplier;
@@ -157,7 +158,7 @@ final class SurviveWorld {
         weaponSkillFor(player.weapon), SurviveWaystation.KEEPER, player.waystationAssignment,
         player.packedWeapons.stream().map(SurviveSnapshot.WeaponChoice::from).toList(),
         player.fishing == null ? null : player.fishing.timingAt(now),
-        player.lastStrike != null && player.lastStrike.visibleAt(now) ? player.lastStrike : null);
+        player.lastStrike != null && player.lastStrike.visibleAt(now) ? player.lastStrike : null, enemyAttentionFor(player, now));
   }
 
   /** Settles elapsed fights even when their participants did not send any requests. */
@@ -737,10 +738,7 @@ final class SurviveWorld {
     var enmity = new LinkedHashMap<>(fight.enmity());
     var attackerEnmity = enmity.getOrDefault(attacker.survivorId, SurviveEnmity.emptyAt(now));
     enmity.put(attacker.survivorId, attackerEnmity.afterDamageDealt(fight.health() - health, now));
-    var counterTarget = livingFighters(fight).stream()
-        .max(Comparator.comparingInt((SurvivePlayer fighter) -> enmityScore(enmity, fighter, now))
-            .thenComparingInt(fighter -> -fight.fighters().indexOf(fighter.survivorId)))
-        .orElse(attacker);
+    var counterTarget = leadingFighter(fight, livingFighters(fight), enmity, now).orElse(attacker);
     boolean blocked = counterTarget.defending || counterTarget == attacker && spearReach;
     counterTarget.defending = false;
     int bite = blocked ? 0 : fight.enemy().bite();
@@ -764,6 +762,30 @@ final class SurviveWorld {
     String allyCounter = blocked ? counterTarget.name + " blocked the bite."
         : "The " + enemy + " bit " + counterTarget.name + " for " + bite + " damage.";
     return strike + " " + allyCounter + weaponNote;
+  }
+
+  /** Share the current enmity leader only with participants of an active group encounter. */
+  private SurviveSnapshot.EnemyAttention enemyAttentionFor(SurvivePlayer viewer, Instant now) {
+    if (viewer.status != Status.COMBAT) {
+      return null;
+    }
+    var fight = fieldFightFor(viewer);
+    if (fight == null || fight.enmity().isEmpty()) {
+      return null;
+    }
+    var fighters = livingFighters(fight);
+    if (fighters.size() < 2) {
+      return null;
+    }
+    return leadingFighter(fight, fighters, fight.enmity(), now)
+        .map(leader -> new SurviveSnapshot.EnemyAttention(leader.name, leader == viewer)).orElse(null);
+  }
+
+  private static Optional<SurvivePlayer> leadingFighter(
+      SurviveFieldFight fight, List<SurvivePlayer> fighters, Map<String, SurviveEnmity> enmity, Instant now) {
+    return fighters.stream()
+        .max(Comparator.comparingInt((SurvivePlayer fighter) -> enmityScore(enmity, fighter, now))
+            .thenComparingInt(fighter -> -fight.fighters().indexOf(fighter.survivorId)));
   }
 
   private static int enmityScore(Map<String, SurviveEnmity> enmity, SurvivePlayer fighter, Instant at) {
