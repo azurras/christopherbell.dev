@@ -480,10 +480,11 @@ public class SurviveService {
   }
 
   private void requireTradeLocation(SurvivePlayer sender, SurvivePlayer recipient, Instant now) {
-    if (sender == recipient || sender.status != Status.EXPLORING || recipient.status != Status.EXPLORING
-        || !presence.permits(sender.survivorId, SurviveAction.EXPAND_PACK, now)
-        || !presence.permits(recipient.survivorId, SurviveAction.EXPAND_PACK, now)) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Both survivors must be free to trade at camp.");
+    if (sender == recipient || sender.status != Status.EXPLORING || recipient.status != Status.EXPLORING) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Both survivors must be free to trade.");
+    }
+    if (!presence.withinTradeRange(sender.survivorId, recipient.survivorId, now)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Move within five metres of your trade partner.");
     }
   }
 

@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.survive.model.SurviveAction;
+import dev.christopherbell.survive.model.SurviveMovement;
 import dev.christopherbell.survive.model.SurviveResource;
 import dev.christopherbell.survive.model.SurviveRequests;
 import dev.christopherbell.survive.model.SurviveSnapshot;
@@ -328,6 +329,38 @@ class SurviveServiceTest {
     assertEquals(1, accepted.wood());
     assertEquals(0, accepted.stone());
     assertEquals(weapon, accepted.packedWeapons().getFirst());
+  }
+
+  @Test
+  void islandTradeChecksProximityAgainAtAcceptance() {
+    var tradeClock = mock(Clock.class);
+    var now = SurviveClock.WORLD_EPOCH;
+    when(tradeClock.instant()).thenReturn(now);
+    var service = new SurviveService(tradeClock, () -> 25, 10, new InMemorySurviveWorldRepository());
+    var alice = service.join(null, "Alice");
+    var bob = service.join(null, "Bob");
+    var wood = act(service, alice.token(), SurviveAction.GATHER);
+    act(service, bob.token(), SurviveAction.GATHER_STONE);
+    service.pulseForOwner(alice.token(), null, new SurviveMovement(0, 0, 0, 0));
+    var offer = new SurviveRequests.TradeOffer(UUID.fromString(bob.state().survivorId()), SurviveResource.WOOD,
+        1, SurviveResource.STONE, 1, wood.revision());
+    assertEquals(400, assertThrows(ResponseStatusException.class,
+        () -> service.offerTrade(alice.token(), null, offer)).getStatusCode().value());
+    service.pulseForOwner(bob.token(), null, new SurviveMovement(0, 0, 0, 0));
+    var sent = service.offerTrade(alice.token(), null, offer);
+    var incoming = service.find(bob.token()).orElseThrow();
+    var reply = new SurviveRequests.TradeReply(UUID.fromString(sent.trade().offer().id()), true, incoming.revision());
+
+    when(tradeClock.instant()).thenReturn(now.plusSeconds(1));
+    assertEquals(6, service.pulseForOwner(bob.token(), null, new SurviveMovement(6, 0, 0, 1)).self().x());
+    assertEquals(400, assertThrows(ResponseStatusException.class,
+        () -> service.replyToTrade(bob.token(), null, reply)).getStatusCode().value());
+    assertEquals(1, service.find(alice.token()).orElseThrow().wood());
+    assertEquals(1, service.find(bob.token()).orElseThrow().stone());
+
+    when(tradeClock.instant()).thenReturn(now.plusSeconds(2));
+    service.pulseForOwner(bob.token(), null, new SurviveMovement(5, 0, 0, 2));
+    assertEquals(1, service.replyToTrade(bob.token(), null, reply).wood());
   }
 
   @Test
