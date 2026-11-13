@@ -223,6 +223,39 @@ class SurviveServiceTest {
   }
 
   @Test
+  void packedWeaponTradeMovesTheExactCopyAndRejectsAnEquippedCopy() {
+    var service = new SurviveService(Clock.fixed(SurviveClock.WORLD_EPOCH, ZoneOffset.UTC), () -> 25, 10,
+        new InMemorySurviveWorldRepository());
+    var alice = service.join(null, "Alice");
+    var bob = service.join(null, "Bob");
+    for (int index = 0; index < 4; index++) {
+      act(service, alice.token(), SurviveAction.GATHER);
+    }
+    act(service, alice.token(), SurviveAction.CRAFT_CLUB);
+    var spare = act(service, alice.token(), SurviveAction.CRAFT_CLUB);
+    var weapon = spare.packedWeapons().getFirst();
+    act(service, bob.token(), SurviveAction.GATHER_STONE);
+    var bobId = UUID.fromString(bob.state().survivorId());
+    var first = service.offerTrade(alice.token(), null, new SurviveRequests.TradeOffer(
+        bobId, null, 1, SurviveResource.STONE, 1, spare.revision(), UUID.fromString(weapon.id())));
+    var swapped = service.actForOwner(alice.token(), null, SurviveAction.EQUIP_WEAPON, first.revision(), weapon.id());
+    var incoming = service.find(bob.token()).orElseThrow();
+    var offerId = UUID.fromString(incoming.trade().offer().id());
+    assertEquals(409, assertThrows(ResponseStatusException.class, () -> service.replyToTrade(bob.token(), null,
+        new SurviveRequests.TradeReply(offerId, true, incoming.revision()))).getStatusCode().value());
+    assertEquals(1, service.find(bob.token()).orElseThrow().stone());
+    var withdrawn = service.replyToTrade(alice.token(), null, new SurviveRequests.TradeReply(offerId, false, swapped.revision()));
+    var replacement = withdrawn.packedWeapons().getFirst();
+    var sent = service.offerTrade(alice.token(), null, new SurviveRequests.TradeOffer(
+        bobId, null, 1, SurviveResource.STONE, 1, withdrawn.revision(), UUID.fromString(replacement.id())));
+    var ready = service.find(bob.token()).orElseThrow();
+    var accepted = service.replyToTrade(bob.token(), null,
+        new SurviveRequests.TradeReply(UUID.fromString(sent.trade().offer().id()), true, ready.revision()));
+    assertEquals(replacement, accepted.packedWeapons().getFirst());
+    assertTrue(service.find(alice.token()).orElseThrow().packedWeapons().isEmpty());
+  }
+
+  @Test
   void rejectedGiftsDoNotChangeEitherInventoryOrRevision() {
     var service = new SurviveService(clock, () -> 50, 10, new InMemorySurviveWorldRepository());
     var alice = service.join(null, "Alice");
