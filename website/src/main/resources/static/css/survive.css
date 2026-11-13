@@ -227,6 +227,7 @@
 .survive-world-actions button::before { margin-right: .5rem; }
 .survive-game-vitals { display: flex; flex-wrap: wrap; gap: .15rem .65rem; padding: .35rem .55rem; font-variant-numeric: tabular-nums; }
 .survive-game-vitals strong { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.survive-enemy-attention { width: 100%; color: #f3d392; }
 .survive-party-vitals {
   display: flex; flex-wrap: wrap; gap: inherit; width: 100%; min-width: 0;
   border-top: 1px solid rgba(225, 232, 255, .28); margin-top: .15rem; padding-top: .25rem;
