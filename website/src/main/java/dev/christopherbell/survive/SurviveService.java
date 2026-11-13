@@ -371,18 +371,23 @@ public class SurviveService {
         || request.offeredWeaponId() != null && request.offeredQuantity() != 1) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Offer one supply stack or one packed weapon.");
     }
-    if (request.offered() == request.requested()) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose different supplies to trade.");
-    }
     var offered = request.offeredWeaponId() == null
         ? new SurviveTrade.Lot(request.offered(), request.offeredQuantity())
         : new SurviveTrade.Lot(null, 1, sender.packedWeapons.stream()
             .filter(weapon -> weapon.id().equals(request.offeredWeaponId().toString()))
             .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
                 "That weapon is no longer in your pack.")));
-    var requested = new SurviveTrade.Lot(request.requested(), request.requestedQuantity());
+    var counteredOffer = request.counterOfferId() == null ? null
+        : requireCounteredOffer(request.counterOfferId(), sender, recipient);
+    var requested = counteredOffer == null ? requestedSupplyLot(request) : counteredOffer.offered();
+    if (offered.resource() != null && offered.resource() == requested.resource()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose different supplies to trade.");
+    }
     requireTradeStock(sender, offered);
-    if (world.trades.values().stream().anyMatch(offer -> offer.involves(sender.survivorId)
+    if (counteredOffer != null) {
+      requireTradeStock(recipient, requested);
+      world.trades.remove(counteredOffer.id());
+    } else if (world.trades.values().stream().anyMatch(offer -> offer.involves(sender.survivorId)
         || offer.involves(recipient.survivorId))) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "One of you already has a pending trade.");
     }
@@ -395,6 +400,22 @@ public class SurviveService {
         + requested.description() + ". Open Trade in the camp menu to respond.");
     commitWorld();
     return snapshotFor(sender);
+  }
+
+  private SurviveTrade requireCounteredOffer(UUID offerId, SurvivePlayer countering, SurvivePlayer originalSender) {
+    var offer = world.trades.get(offerId.toString());
+    if (offer == null || !offer.recipientId().equals(countering.survivorId)
+        || !offer.senderId().equals(originalSender.survivorId)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "That incoming trade offer is unavailable.");
+    }
+    return offer;
+  }
+
+  private static SurviveTrade.Lot requestedSupplyLot(SurviveRequests.TradeOffer request) {
+    if (request.requested() == null || request.requestedQuantity() == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose the supplies you want to receive.");
+    }
+    return new SurviveTrade.Lot(request.requested(), request.requestedQuantity());
   }
 
   /** Only the recipient can accept; either participant can end an offer. */

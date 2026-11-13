@@ -182,9 +182,16 @@ function renderTrade(documentRoot, state, pending) {
   }
   const offer = state.trade;
   const offerForm = documentRoot.getElementById('surviveTradeOffer');
-  offerForm.hidden = Boolean(offer);
+  const countering = Boolean(offer?.incoming);
+  offerForm.hidden = Boolean(offer) && !countering;
+  documentRoot.getElementById('surviveTradePartnerFields').hidden = countering;
+  documentRoot.getElementById('surviveTradeRequestedFields').hidden = countering;
+  picker.disabled = countering;
+  documentRoot.getElementById('surviveTradeOfferedLabel').textContent = countering ? 'Offer instead' : 'You offer';
   renderRecipientOptions(documentRoot, picker, state.recipients);
-  documentRoot.getElementById('surviveTradeSend').disabled = pending || state.recipients.length === 0;
+  const send = documentRoot.getElementById('surviveTradeSend');
+  send.textContent = countering ? 'Send counteroffer' : 'Send offer';
+  send.disabled = pending || (!countering && state.recipients.length === 0);
   documentRoot.getElementById('surviveTradePending').hidden = !offer;
   if (!offer) return;
   const { offered, requested } = offer.offer;
@@ -475,18 +482,20 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const tradeOfferForm = documentRoot.getElementById('surviveTradeOffer');
   const sendTrade = event => {
     event.preventDefault();
-    if (!state || pending || state.trade) return;
+    if (!state || pending || (state.trade && !state.trade.incoming)) return;
+    const incoming = state.trade?.offer;
     const fields = new FormData(tradeOfferForm);
     const offered = fields.get('offered');
     const packedWeapon = state.packedWeapons?.find(weapon => weapon.id === offered);
     void sendRequest(API.survive.trades, {
       method: 'POST', body: JSON.stringify({
-        recipientId: fields.get('recipientId'),
+        recipientId: incoming?.senderId ?? fields.get('recipientId'),
+        counterOfferId: incoming?.id,
         offered: packedWeapon ? null : offered,
         offeredWeaponId: packedWeapon?.id,
         offeredQuantity: packedWeapon ? 1 : Number(fields.get('offeredQuantity')),
-        requested: fields.get('requested'),
-        requestedQuantity: Number(fields.get('requestedQuantity')),
+        requested: incoming ? null : fields.get('requested'),
+        requestedQuantity: incoming ? null : Number(fields.get('requestedQuantity')),
         revision: state.revision,
       }),
     });
