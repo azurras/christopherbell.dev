@@ -113,3 +113,11 @@ function normalize(vector) {
   const length = Math.hypot(...vector);
   return vector.map(component => component / length);
 }
+
+/** Face the confirmed shared target, retaining the encounter heading if their pose is unavailable. */
+export function enemyFacing(enemy, local, others, attention) {
+  const target = attention && !attention.self
+    ? others.find(other => other.survivorId === attention.survivorId)
+    : local;
+  return target ? Math.atan2(target.x - enemy.x, target.z - enemy.z) : enemy.heading;
+}
