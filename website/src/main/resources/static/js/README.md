@@ -25,9 +25,8 @@ Owns browser-side behavior for server-rendered pages.
 - Templates load one page entry module after `app.js`.
 - Page modules should own DOM selectors for that page and delegate reusable work
   to `lib` or `components`.
-- `home.js` renders the `/` homepage Signal Rail. It polls the public Void feed
-  every five seconds, picks the five posts with the highest likes plus direct
-  replies, and links each snapshot to that post page.
+- The homepage tool cards render in Thymeleaf. The shared nav shows only
+  public tools at `/` and applies account capabilities on other routes.
 - Shared modules should not assume a specific page exists. They should accept
   selectors, callbacks, or small context objects from page modules.
 - `messages.js` renders the `/messages` Signal Bridge interactions: conversation
