@@ -22,6 +22,7 @@ import dev.christopherbell.permission.PermissionService;
 import jakarta.servlet.http.Cookie;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -55,6 +56,27 @@ class SurviveControllerTest {
   @MockitoBean(name = "permissionService") private PermissionService permissionService;
   @MockitoBean private AccountRepository accounts;
   @MockitoBean private BrowserSessionService browserSessions;
+
+  @Test
+  @org.springframework.test.annotation.DirtiesContext(methodMode = org.springframework.test.annotation.DirtiesContext.MethodMode.AFTER_METHOD)
+  void tradeEndpointsRequireCsrfAndPrivateSurvivorOwnership() throws Exception {
+    var recipient = UUID.randomUUID();
+    String offer = """
+        {"recipientId":"%s","offered":"WOOD","offeredQuantity":1,"requested":"FOOD","requestedQuantity":1,"revision":0}
+        """.formatted(recipient);
+    String reply = """
+        {"offerId":"%s","accept":true,"revision":0}
+        """.formatted(recipient);
+    mvc.perform(post("/api/survive/v1/trades").contentType("application/json").content(offer))
+        .andExpect(status().isForbidden());
+    mvc.perform(post("/api/survive/v1/trades").with(csrf()).contentType("application/json").content(offer))
+        .andExpect(status().isNotFound());
+    mvc.perform(post("/api/survive/v1/trades/reply").with(csrf()).contentType("application/json").content(reply))
+        .andExpect(status().isNotFound());
+    mvc.perform(post("/api/survive/v1/trades").with(csrf()).contentType("application/json")
+        .content(offer.replace("\"offeredQuantity\":1", "\"offeredQuantity\":31")))
+        .andExpect(status().isBadRequest());
+  }
 
   @Test
   @org.springframework.test.annotation.DirtiesContext(methodMode = org.springframework.test.annotation.DirtiesContext.MethodMode.AFTER_METHOD)

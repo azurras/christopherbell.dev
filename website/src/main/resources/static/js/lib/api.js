@@ -18,6 +18,8 @@ export const API = {
     game: '/api/survive/v1/game',
     actions: '/api/survive/v1/actions',
     gifts: '/api/survive/v1/gifts',
+    trades: '/api/survive/v1/trades',
+    tradeReply: '/api/survive/v1/trades/reply',
     party: '/api/survive/v1/party',
   },
   siteMonitor: {

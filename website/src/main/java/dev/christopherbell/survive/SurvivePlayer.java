@@ -2,6 +2,7 @@ package dev.christopherbell.survive;
 
 import dev.christopherbell.survive.model.SurviveEnemy;
 import dev.christopherbell.survive.model.SurviveFishing;
+import dev.christopherbell.survive.model.SurviveSavedWorld;
 import dev.christopherbell.survive.model.SurviveSnapshot.Status;
 import dev.christopherbell.survive.model.SurviveStrike;
 import dev.christopherbell.survive.model.SurviveWeapon;
@@ -25,6 +26,7 @@ final class SurvivePlayer {
   int stamina = 10;
   int experience;
   int experienceToNextLevel = 1;
+  int packExpansions;
   int wood;
   int food;
   int stone;
@@ -66,12 +68,16 @@ final class SurvivePlayer {
     lastSeen = joinedAt;
   }
 
+  int inventoryCapacity() {
+    return SurviveSavedWorld.Player.packCapacity(packExpansions);
+  }
+
   int inventoryCount() {
     return wood + food + stone + packedWeapons.size();
   }
 
   boolean hasInventorySpace() {
-    return inventoryCount() < SurviveWorld.INVENTORY_CAPACITY;
+    return inventoryCount() < inventoryCapacity();
   }
 
   /** Damage of one attack, which is also this survivor's share of a raid defense. */

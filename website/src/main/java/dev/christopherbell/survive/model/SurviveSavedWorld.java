@@ -15,7 +15,16 @@ import dev.christopherbell.survive.model.SurviveSnapshot.Status;
  */
 public record SurviveSavedWorld(@Id String id, @Version Long version, long revision,
     int shelters, int boats, List<String> events, List<Player> players, Long settledBoundaries,
-    Long activeRaidNight, List<SurviveParty> parties, List<SurviveFieldFight> fieldFights) {
+    Long activeRaidNight, List<SurviveParty> parties, List<SurviveFieldFight> fieldFights,
+    List<SurviveTrade> trades) {
+  /** Compatibility constructor for callers with no saved trades. */
+  public SurviveSavedWorld(String id, Long version, long revision, int shelters, int boats, List<String> events,
+      List<Player> players, Long settledBoundaries, Long activeRaidNight, List<SurviveParty> parties,
+      List<SurviveFieldFight> fieldFights) {
+    this(id, version, revision, shelters, boats, events, players, settledBoundaries, activeRaidNight, parties,
+        fieldFights, List.of());
+  }
+
   public SurviveSavedWorld {
     if (!"shared".equals(id) || version != null && version < 0 || revision < 0
         || shelters < 0 || shelters > 1000 || boats < 0 || boats > 1000) {
@@ -25,6 +34,13 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
     players = List.copyOf(players);
     parties = parties == null ? List.of() : List.copyOf(parties);
     fieldFights = fieldFights == null ? List.of() : List.copyOf(fieldFights);
+    trades = trades == null ? List.of() : List.copyOf(trades);
+    var tradeParticipants = new HashSet<String>();
+    var tradeIds = new HashSet<String>();
+    if (trades.size() > 500 || trades.stream().anyMatch(trade -> !tradeIds.add(trade.id())
+        || !tradeParticipants.add(trade.senderId()) || !tradeParticipants.add(trade.recipientId()))) {
+      throw new IllegalArgumentException("Saved trades exceed their bounds or overlap.");
+    }
     var fieldRoutes = new HashSet<String>();
     var fieldFighters = new HashSet<String>();
     if (fieldFights.size() > 5 || fieldFights.stream().anyMatch(fight -> !fieldRoutes.add(fight.routeId())
@@ -75,8 +91,15 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
       SurviveWeapon weapon, Integer weaponDurability, Boolean guarding, Instant sleptAt, Boolean struckFirst,
       Instant nextStrikeAt, Integer tacticalPoints, Boolean defending, String combatOutcome,
       Integer activeFullnessMilliseconds, SurviveWaystation.Assignment waystationAssignment,
-      List<SurvivePackedWeapon> packedWeapons, SurviveStrike lastStrike, SurviveFishing fishing) {
+      List<SurvivePackedWeapon> packedWeapons, SurviveStrike lastStrike, SurviveFishing fishing, Integer packExpansions) {
+    public static final int MAX_PACK_EXPANSIONS = 4;
+
+    public static int packCapacity(int expansions) {
+      return 10 + 5 * expansions;
+    }
+
     public Player {
+      packExpansions = packExpansions == null ? 0 : packExpansions;
       stone = stone == null ? 0 : stone;
       hunger = hunger == null ? 10 : hunger;
       enemy = enemy == null && status == Status.COMBAT ? SurviveEnemy.HOG : enemy;
@@ -103,7 +126,8 @@ public record SurviveSavedWorld(@Id String id, @Version Long version, long revis
           || health < 0 || health > 10 || strength < 2 || strength > 20
           || stamina != strength + 8 || experience < 0 || experienceToNextLevel < 1
           || experienceToNextLevel != (1 << (strength - 2)) || experience >= experienceToNextLevel
-          || wood < 0 || food < 0 || stone < 0 || wood + food + stone + packedWeapons.size() > 10
+          || wood < 0 || food < 0 || stone < 0 || packExpansions < 0 || packExpansions > MAX_PACK_EXPANSIONS
+          || (long) wood + food + stone + packedWeapons.size() > packCapacity(packExpansions)
           || packedWeapons.stream().map(SurvivePackedWeapon::id).distinct().count() != packedWeapons.size()
           || hunger < 0 || hunger > 10 || status == null || (status == Status.DEAD) != (health == 0)
           || activeFullnessMilliseconds < 0 || activeFullnessMilliseconds >= 300_000

@@ -337,3 +337,12 @@ Active shared fighters receive the current enmity leader in their private
 snapshot once the encounter has recorded damage. The viewport shows that
 fighter in the vitals panel. The label reflects current enmity and may change
 as it fades or a fighter leaves.
+
+Items can permanently discard one supply or packed weapon after confirmation.
+Camp pack upgrades cost four wood and two stone for five slots, up to thirty.
+Older saves start with ten slots. Gathering, rewards and gifts use the
+recipient's current capacity.
+
+### Player trade
+
+Open **Camp & sharing → Trade** to offer one stack of wood, food or stone for a different supply. The recipient sees the exact quantities and can accept or decline. The sender can withdraw. An offer lasts two minutes and does not reserve stock. Each survivor can have one pending offer. Both players must be free to trade at camp, and the server checks both inventories and their space after outgoing items are removed. Acceptance transfers both stacks in one versioned save. Offers and results appear in the participants' chat logs. Gifts remain available for one-way transfers.

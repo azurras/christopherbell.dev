@@ -116,6 +116,13 @@
                           aria-describedby="surviveItemDetail"></select>
                     <p id="surviveItemDetail" class="survive-muted"></p>
                     <button id="surviveItemUse" type="button" hidden>Use Food</button>
+                    <button id="surviveItemDrop" type="button" hidden>Drop one…</button>
+                    <div id="surviveDropConfirm" hidden>
+                      <p id="surviveDropPrompt"></p>
+                      <button id="surviveConfirmDrop" type="button">Drop item</button>
+                      <button id="surviveCancelDrop" type="button">Cancel</button>
+                    </div>
+                    <button id="surviveExpandPack" type="button">Expand pack (+5) · 4 wood, 2 stone</button>
                   </div>
                 </details>
                 <details name="survive-main-category" id="surviveEquipment" class="survive-panel survive-section">
@@ -175,6 +182,27 @@
                       <button id="surviveGive" type="submit">Give supplies</button>
                       <p id="surviveGiftHint" class="survive-muted"></p>
                     </form>
+                    <details id="surviveTrade" class="survive-gift">
+                      <summary>Trade</summary>
+                      <form id="surviveTradeOffer">
+                        <label for="surviveTradePartner">Trade with</label>
+                        <select id="surviveTradePartner" name="recipientId" required></select>
+                        <div class="survive-gift-amount">
+                          <div><label for="surviveTradeOffered">You offer</label><select id="surviveTradeOffered" name="offered"><option value="WOOD">Wood</option><option value="FOOD">Food</option><option value="STONE">Stone</option></select></div>
+                          <div><label for="surviveTradeOfferedQuantity">Amount</label><input id="surviveTradeOfferedQuantity" name="offeredQuantity" type="number" min="1" max="30" value="1" required /></div>
+                        </div>
+                        <div class="survive-gift-amount">
+                          <div><label for="surviveTradeRequested">You request</label><select id="surviveTradeRequested" name="requested"><option value="FOOD">Food</option><option value="WOOD">Wood</option><option value="STONE">Stone</option></select></div>
+                          <div><label for="surviveTradeRequestedQuantity">Amount</label><input id="surviveTradeRequestedQuantity" name="requestedQuantity" type="number" min="1" max="30" value="1" required /></div>
+                        </div>
+                        <button id="surviveTradeSend" type="submit">Send offer</button>
+                      </form>
+                      <div id="surviveTradePending" hidden>
+                        <p id="surviveTradeTerms"></p>
+                        <button type="button" id="surviveTradeAccept" data-trade-reply="accept">Accept trade</button>
+                        <button type="button" id="surviveTradeEnd" data-trade-reply="end">Decline offer</button>
+                      </div>
+                    </details>
                     <p class="survive-muted">Camp updates every 5 seconds while this page is visible.</p>
                   </div>
                 </details>
@@ -189,7 +217,7 @@
                     <p>Every effort outside camp, every combat move and every guard shift costs 1 fullness, and a night's sleep costs 2. Food restores 5 fullness and 2 health. At 0 fullness every effort costs 1 health and sleep does not heal.</p>
                     <p>Each shelter has two beds. Sleep at dusk or night to recover 1 health for every 2 minutes asleep, or fully if you sleep until dawn. If raiders burn your shelter while you sleep, you wake with 2 damage.</p>
                     <p>Share supplies chooses another survivor by name and camp ID. Give 1–10 wood, food or stone while both of you are at camp. Gifts move items directly into their inventory, which must have room; both survivors and the chat log receive an update.</p>
-                    <p>Gather wood to improve strength and stamina. Your inventory holds 10 items. Five wood builds a shelter everyone can rest in; ten wood builds a boat any survivor can use to escape.</p>
+                    <p>Gather wood to improve strength and stamina. Your pack starts with 10 slots. At camp, open Items to spend 4 wood and 2 stone for 5 more slots, up to 30. Use Drop one to discard a carried item permanently. Five wood builds a shelter everyone can rest in; ten wood builds a boat any survivor can use to escape.</p>
                     <p>Your attack deals 1 + strength + weapon damage, and the animal bites back on every attack, even the final blow. Defend blocks one bite. Defeating a hog or wolf gives 1 food and a bear up to 3, as your inventory allows. A shared shelter restores 2 health per rest.</p>
                     <p>Sail away to survive, or start again after death. New survivor replaces only your character. Saved account characters can start again after death or escape; joining again resumes a living character. Shelters, boats, and other players remain in the shared world. Names and recent actions are visible to other players; use a nickname.</p>
                     <p>Your logged-in account has one saved survivor. Moves, supplies, combat and the shared camp are saved after each successful command and survive server restarts. Log in again to resume. Guests use a temporary browser session and expire after two idle hours. Saved survivors keep their progress while inactive and return to the active camp when resumed. Guest progress stays separate from your account character. This version has no chat or matchmaking.</p>
