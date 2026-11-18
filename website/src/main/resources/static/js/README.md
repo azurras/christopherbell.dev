@@ -7,6 +7,7 @@ Owns browser-side behavior for server-rendered pages.
 - `survive.js` renders the Java-owned shared survival world and serializes commands; it owns no game rules. See the `survive` Java package README for the API and lifetime contract.
 - The viewport vitals card shows an accepted partner's HP and TP from the same game snapshot. Invitations, ended parties and older snapshots without vitals clear the partner row.
 - `adventurer.json` bakes the sculpted brow, nose, jaw and swept-back hair into every adventurer animation frame. The face shares its edge vertices across cheeks and neck. `survive-authored-actors.js` softens the lighting over that skin chart. `survive-world-materials.js` paints those features on the mirrored face chart when staging the shared actor atlas. Keep the paint and shade coordinates paired with `adventurer.json` and `authored-actors.jpg` when changing those assets.
+- The same asset bakes tapered shoulder shells over smaller plates and a wider boot forefoot. The plate rims and boot welt sample painted colors in the atlas gutter. Keep the gutter swatches paired with the baked UVs.
 
 - Page entry modules such as `home-feed.js`, `messages.js`, `profile.js`,
   `post.js`, `user-feed.js`, `vin-decoder.js`, `zip-coordinates.js`, and
