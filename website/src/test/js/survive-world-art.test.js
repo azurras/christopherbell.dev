@@ -221,6 +221,32 @@ test('the gate route has raised banks and a walkable bridge over rendered water'
   assert.ok(materials.includes(13.5));
 });
 
+test('North Gate face joints reveal recessed mortar and the passage stays open', () => {
+  const { vertices } = islandMesh();
+  const stride = MESH_VERTEX_FLOATS;
+  const spring = groundHeight(0, -18) + 3.2;
+  const frontDepthAt = (x, y) => {
+    let depth = -Infinity;
+    for (let start = 0; start < vertices.length; start += stride * 3) {
+      if (vertices[start + 6] !== 2.5) continue;
+      const [ax, ay, az] = vertices.slice(start, start + 3);
+      if (az < -19.5 || az > -16.5) continue;
+      const [bx, by, bz] = vertices.slice(start + stride, start + stride + 3);
+      const [cx, cy, cz] = vertices.slice(start + 2 * stride, start + 2 * stride + 3);
+      const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+      if (Math.abs(area) < 1e-9) continue;
+      const u = ((x - ax) * (cy - ay) - (y - ay) * (cx - ax)) / area;
+      const v = ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / area;
+      if (u >= 0 && v >= 0 && u + v <= 1) depth = Math.max(depth, az + (bz - az) * u + (cz - az) * v);
+    }
+    return depth;
+  };
+  const joint = 6 * Math.PI / 13;
+  assert.ok(Math.abs(frontDepthAt(2.8 * Math.cos(joint), spring + 2.8 * Math.sin(joint)) - (-17.17)) < 1e-6);
+  assert.ok(frontDepthAt(0, spring + 2.8) > -17);
+  assert.equal(frontDepthAt(0, spring + 1.25), -Infinity);
+});
+
 test('animated adventurers and each animal use bounded local texture coordinates', () => {
   const meshes = ['HOG', 'WOLF', 'BEAR'].map(kind => {
     const mesh = meshBuilder();

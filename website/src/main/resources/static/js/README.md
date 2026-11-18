@@ -226,6 +226,10 @@ bounded coverage, dashboard-only results and deferred billing/email delivery.
 
 ### Survive island
 
+The North Gate ruin uses a continuous arch behind its face stones. Recessed joints
+and staggered wall courses give the masonry visible depth without adding a texture
+or changing the opening over the trail.
+
 The desktop Main Menu switches between the browser-filling game and the site
 page view without resetting the session.
 The North Gate waystation uses roof courses and a cloth pennant to mark the
