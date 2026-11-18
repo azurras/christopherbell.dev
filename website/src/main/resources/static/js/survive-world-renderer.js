@@ -1,5 +1,5 @@
 /** Native WebGL renderer for the island terrain, adventurers and landmarks. */
-import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from './survive-world-art.js';
+import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS, WAYSTATION_LANTERN } from './survive-world-art.js';
 import { createIslandMaterials } from './survive-world-materials.js';
 import { drawBoat, drawCampFlame, drawShelter } from './survive-world-props.js';
 import { actionPose, combatStance } from './survive-action-pose.js';
@@ -38,7 +38,9 @@ varying float depth;
 varying float surfaceMaterial;
 varying vec2 uv;
 uniform float daylight;
+uniform float night;
 uniform vec3 sky;
+uniform vec3 waystationLantern;
 uniform float time;
 uniform float fireTime;
 uniform sampler2D grassTile;
@@ -71,6 +73,9 @@ float spark(vec2 point, float seed) {
   return (1.0 - smoothstep(0.004, 0.022, length((point - ember) * vec2(1.0, 1.6))))
     * sin(rise * 3.14159);
 }
+vec3 lightBySky(vec3 color) {
+  return color * daylight * mix(vec3(1.0), vec3(0.73, 0.91, 1.28), night);
+}
 vec3 shadeGateStream() {
   // Advance both wave layers downstream and keep their phase continuous across the clock wrap.
   float cycle = time * (6.283185 / 120.0);
@@ -89,7 +94,7 @@ vec3 shadeGateStream() {
   float crests = (longCrest * 0.39 + shortCrest * 0.18) * (1.0 - smoothstep(12.0, 28.0, depth));
   float reflectedSky = 0.10 + crests * (1.0 - shallow * 0.55);
   float bankFroth = shallow * shallow * smoothstep(0.48, 0.77, eddies) * (0.08 + 0.3 * longCrest);
-  water = mix(water * daylight, sky, reflectedSky + bankFroth);
+  water = mix(lightBySky(water), sky, reflectedSky + bankFroth);
   // The timber deck dims both the bed and the glints where it covers the channel.
   float underDeck = 1.0 - smoothstep(1.42, 2.30, abs(surface.x + 0.36));
   return water * (1.0 - underDeck * 0.46);
@@ -120,7 +125,15 @@ void main() {
     float cloudShape = cloudNoise(cloudPosition) * 0.73 + cloudNoise(cloudPosition * 2.3) * 0.27;
     float cloud = smoothstep(0.52, 0.74, cloudShape) * smoothstep(0.0, 28.0, surface.y);
     vec3 cloudColor = mix(sky, vec3(0.91, 0.93, 0.94), smoothstep(0.62, 1.06, daylight));
-    gl_FragColor = vec4(mix(mix(sky, zenith, elevation), cloudColor, cloud * 0.85), 1.0);
+    vec3 skyGradient = mix(sky, zenith, elevation);
+    float horizonHaze = (1.0 - smoothstep(2.0, 46.0, surface.y)) * night;
+    skyGradient += vec3(0.032, 0.042, 0.067) * horizonHaze;
+    gl_FragColor = vec4(mix(skyGradient, cloudColor, cloud * 0.85), 1.0);
+    return;
+  }
+  if (surfaceMaterial > 14.0) {
+    vec3 lamp = mix(tint * daylight, vec3(0.98, 0.67, 0.30), night);
+    gl_FragColor = vec4(mix(lamp, sky, smoothstep(36.0, 144.0, depth)), 1.0);
     return;
   }
   if (surfaceMaterial > 13.0) {
@@ -156,17 +169,25 @@ void main() {
     float wetSand = smoothstep(75.8, 79.0, length(surface.xz));
     albedo *= mix(vec3(1.0), vec3(0.58, 0.64, 0.65), wetSand);
   }
-  vec3 lit = albedo * daylight;
+  vec3 lit = lightBySky(albedo);
   if (abs(surface.x - 4.0) < 3.4 && abs(surface.z) < 3.4 && surface.y < 2.6) {
     float firelight = 1.0 - smoothstep(0.35, 3.4, distance(surface, vec3(4.0, 0.45, 0.0)));
     float flicker = 0.90 + 0.10 * sin(fireTime * 6.0);
     lit += albedo * vec3(0.82, 0.37, 0.11) * firelight * flicker * (1.42 - daylight);
   }
+  if (night > 0.5) {
+    // The wall stops the lantern from lighting the back of the building.
+    vec3 fromLamp = surface - waystationLantern;
+    if (fromLamp.z >= -0.28 && all(lessThan(abs(fromLamp), vec3(5.6)))) {
+      float lamplight = 1.0 - smoothstep(0.2, 5.6, length(fromLamp));
+      lit += (albedo + vec3(0.14, 0.10, 0.07)) * vec3(0.74, 0.35, 0.11) * lamplight;
+    }
+  }
   if (surface.y < -0.64) {
     float ripple = sin(surface.x * 1.6 + surface.z * 0.7 + time * 2.4)
       * sin(surface.z * 1.2 - surface.x * 0.4 - time * 1.8);
     float foam = (1.0 - smoothstep(0.1, 1.6, abs(length(surface.xz) - 78.8))) * (0.4 + ripple * 0.3);
-    lit = mix(lit * (1.0 + ripple * 0.12), vec3(0.62, 0.70, 0.68) * daylight, foam);
+    lit = mix(lit * (1.0 + ripple * 0.12), lightBySky(vec3(0.62, 0.70, 0.68)), foam);
   }
   gl_FragColor = vec4(mix(lit, sky, smoothstep(36.0, 144.0, depth)), 1.0);
 }`;
@@ -220,6 +241,8 @@ export function createWorldRenderer(canvas) {
     const uvAttribute = gl.getAttribLocation(program, 'texCoord');
     const cameraUniform = gl.getUniformLocation(program, 'camera');
     const daylightUniform = gl.getUniformLocation(program, 'daylight');
+    const nightUniform = gl.getUniformLocation(program, 'night');
+    gl.uniform3fv(gl.getUniformLocation(program, 'waystationLantern'), WAYSTATION_LANTERN);
     const skyUniform = gl.getUniformLocation(program, 'sky');
     const timeUniform = gl.getUniformLocation(program, 'time');
     const fireTimeUniform = gl.getUniformLocation(program, 'fireTime');
@@ -245,13 +268,15 @@ export function createWorldRenderer(canvas) {
         if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
         gl.viewport(0, 0, width, height);
         const matrix = cameraMatrix(position, yaw, width / height, groundHeight(position.x, position.z), cameraZoom, groundHeight);
-        const sky = state.phase === 'NIGHT' ? [0.09, 0.13, 0.20]
+        const night = state.phase === 'NIGHT';
+        const sky = night ? [0.09, 0.13, 0.20]
           : state.phase === 'DUSK' ? [0.61, 0.46, 0.39] : [0.58, 0.70, 0.83];
         gl.clearColor(...sky, 1);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         gl.useProgram(program);
         gl.uniformMatrix4fv(cameraUniform, false, matrix);
-        gl.uniform1f(daylightUniform, state.phase === 'NIGHT' ? 0.57 : state.phase === 'DUSK' ? 0.79 : 1.13);
+        gl.uniform1f(daylightUniform, night ? 0.57 : state.phase === 'DUSK' ? 0.79 : 1.13);
+        gl.uniform1f(nightUniform, Number(night));
         gl.uniform3fv(skyUniform, sky);
         gl.uniform1f(timeUniform, animationSeconds % 120);
         gl.uniform1f(fireTimeUniform, position.animate ? animationSeconds % 120 : 0);
