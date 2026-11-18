@@ -78,7 +78,7 @@ export function createIslandMaterials(gl, documentRoot, program) {
   }
 }
 
-/** Fill the atlas gutter with colors sampled by the baked metal rims and the boot welt. */
+/** Fill the atlas gutter with colors sampled by the baked armor, belt and boot welt. */
 function paintAdventurerGear(paint) {
   for (const [top, height, color] of [
     [43, 17, '#78858c'],
@@ -86,6 +86,13 @@ function paintAdventurerGear(paint) {
     [85, 23, '#5b696c'],
     [119, 21, '#6a5140'],
     [140, 22, '#3e3027'],
+    [172, 17, '#60717b'],
+    [189, 16, '#455259'],
+    [205, 14, '#344048'],
+    [219, 12, '#604932'],
+    [231, 13, '#423027'],
+    [244, 12, '#a58960'],
+    [256, 18, '#746046'],
   ]) {
     paint.fillStyle = color;
     paint.fillRect(508, top, 8, height);
