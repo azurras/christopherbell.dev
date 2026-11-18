@@ -597,6 +597,8 @@ export function meshBuilder(actorArt, appendVertex) {
         triangle(shoulder, right, tip, rootColor, TRUNK_MATERIAL, [shoulderUv, ru, tipUv]);
       }
     }
+    const canopyCard = (center, size, direction, color, tilt) =>
+      foliageCard(center, size, direction, color, tilt, broadleaf);
     for (let branch = 0; branch < 6; branch++) {
       const branchAngle = angle + branch * 2.39996 + Math.sin(branch + angle) * 0.32;
       const level = (broadleaf ? 0.36 : 0.43) + branch * 0.065 + growth * 0.045;
@@ -609,28 +611,36 @@ export function meshBuilder(actorArt, appendVertex) {
       const twig = radial(0.84, 0.13, branchAngle + 0.55);
       beam(trunk, fork, height * 0.017, height * 0.009, BARK, 4, BARK_MATERIAL);
       beam(fork, tip, height * 0.009, 0.013, BARK, 3, BARK_MATERIAL);
-      const foliage = tint(broadleaf ? [0.70, 0.91, 0.60] : [0.56, 0.76, 0.61], 0.76 + branch * 0.045);
-      const clusterSize = height * (broadleaf ? 0.46 : 0.38);
-      foliageCard(fork, clusterSize, branchAngle + 0.52, foliage, 0.32);
-      foliageCard(tip, clusterSize, branchAngle - 0.70, tint(foliage, 1.12), 0.40);
-      foliageCard(tip, clusterSize * 0.90, branchAngle + 0.86, foliage, -0.35);
-      foliageCard(twig, clusterSize * 0.88, branchAngle + 0.45, tint(foliage, 1.23), 0.25);
-      foliageCard(twig, clusterSize * 0.76, branchAngle + 1.90, foliage);
+      const foliage = tint(broadleaf ? [0.70, 0.91, 0.60] : [0.58, 0.85, 0.72], 0.76 + branch * 0.045);
+      const clusterSize = height * (broadleaf ? 0.46 : 0.41 - branch * 0.020);
+      canopyCard(fork, clusterSize, branchAngle + 0.52, foliage, 0.32);
+      canopyCard(tip, clusterSize, branchAngle - 0.70, tint(foliage, 1.12), 0.40);
+      canopyCard(tip, clusterSize * 0.90, branchAngle + 0.86, foliage, -0.35);
+      canopyCard(twig, clusterSize * 0.88, branchAngle + 0.45, tint(foliage, 1.23), 0.25);
+      canopyCard(twig, clusterSize * 0.76, branchAngle + 1.90, foliage);
     }
     const crown = trunkAt(0.83);
     for (let spray = 0; spray < 5; spray++) {
-      foliageCard(crown, height * (0.29 + spray * 0.015), angle + spray * 2.39996, [0.67, 0.86, 0.59], 0.23);
+      const size = height * (broadleaf ? 0.29 + spray * 0.015 : 0.24 - spray * 0.012);
+      canopyCard(crown, size, angle + spray * 2.39996, [0.67, 0.86, 0.59], 0.23);
     }
   }
-  function foliageCard([x, y, z], size, angle, color, tilt = 0) {
+  function foliageCard([x, y, z], size, angle, color, tilt = 0, broadleaf = true) {
     const dx = Math.cos(angle) * size * 0.5;
     const dz = Math.sin(angle) * size * 0.5;
-    const a = [x - dx, y - size * 0.15, z - dz];
-    const b = [x + dx, y - size * 0.15, z + dz];
-    const c = [x + dx * 0.78 - dz * tilt, y + size * 0.65, z + dz * 0.78 + dx * tilt];
-    const d = [x - dx * 0.78 - dz * tilt, y + size * 0.65, z - dz * 0.78 + dx * tilt];
-    triangle(a, b, c, color, FOLIAGE_MATERIAL, [[0, 1], [1, 1], [1, 0]]);
-    triangle(a, c, d, color, FOLIAGE_MATERIAL, [[0, 1], [1, 0], [0, 0]]);
+    const cardHeight = size * (broadleaf ? 1 : 0.68);
+    const a = [x - dx, y - cardHeight * 0.15, z - dz];
+    const b = [x + dx, y - cardHeight * 0.15, z + dz];
+    const c = [x + dx * 0.78 - dz * tilt, y + cardHeight * 0.65, z + dz * 0.78 + dx * tilt];
+    const d = [x - dx * 0.78 - dz * tilt, y + cardHeight * 0.65, z - dz * 0.78 + dx * tilt];
+    // Each tile has a four-pixel alpha border around the cutout.
+    const tile = broadleaf ? 0 : 256;
+    const left = (tile + 4) / 512;
+    const right = (tile + 252) / 512;
+    const top = 4 / 256;
+    const bottom = 252 / 256;
+    triangle(a, b, c, color, FOLIAGE_MATERIAL, [[left, bottom], [right, bottom], [right, top]]);
+    triangle(a, c, d, color, FOLIAGE_MATERIAL, [[left, bottom], [right, top], [left, top]]);
   }
   function underbrush(x, z, angle) {
     const base = [x, groundHeight(x, z) + 0.14, z];

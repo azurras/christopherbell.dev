@@ -213,6 +213,24 @@ test('terrain, ruin masonry, bark and cutout foliage are represented in the same
   assert.ok(materials.has(4.5));
 });
 
+test('pine and broadleaf crowns use separate padded regions of the foliage atlas', () => {
+  const foliageCoordinates = broadleaf => {
+    const mesh = meshBuilder();
+    mesh.tree(-22, -14, 7, 1.2, broadleaf);
+    const coordinates = [];
+    for (let index = 6; index < mesh.vertices.length; index += MESH_VERTEX_FLOATS) {
+      if (mesh.vertices[index] === 4.5) coordinates.push([mesh.vertices[index + 1], mesh.vertices[index + 2]]);
+    }
+    return coordinates;
+  };
+  const pine = foliageCoordinates(false);
+  const broadleaf = foliageCoordinates(true);
+  assert.equal(pine.length, broadleaf.length);
+  assert.ok(pine.length > 0);
+  assert.ok(pine.every(([u, v]) => u > 0.5 && u < 1 && v > 0 && v < 1));
+  assert.ok(broadleaf.every(([u, v]) => u > 0 && u < 0.5 && v > 0 && v < 1));
+});
+
 test('woodland trunks share bark coordinates at their joints and meet the ground across their roots', () => {
   const [x, z, height, angle] = [-22, -14, 7, 1.2];
   const trunk = broadleaf => {
