@@ -31,8 +31,14 @@ function terrainHeight(x, z) {
   const ridge = 3.4 * Math.exp(-((x - 34) ** 2 + (z + 19) ** 2) / 220);
   const base = (rollingGround + ridge) * inland * outsideCamp - (1 - inland) * 0.52;
   const banks = 3.8 * Math.exp(-((Math.abs(x) - 8) ** 2 / 17 + (z + 13) ** 2 / 35));
-  const channel = clampUnit((15 - Math.abs(x)) / 4) * clampUnit((2.7 - Math.abs(z - streamCenter(x))) / 1.5);
-  return base + banks + (-0.60 - base - banks) * channel;
+  const distanceFromStream = Math.abs(z - streamCenter(x));
+  const streamReach = clampUnit((15 - Math.abs(x)) / 4);
+  const channel = streamReach * clampUnit((2.7 - distanceFromStream) / 1.5);
+  const bankReach = streamReach * clampUnit((4.1 - distanceFromStream) / 1.4);
+  const uphillBank = base + banks;
+  // Fill low spots beside the cutting so the water ends against earth.
+  const bankHeight = uphillBank + Math.max(0, 0.08 - uphillBank) * bankReach;
+  return bankHeight + (-0.60 - bankHeight) * channel;
 }
 
 /** Anchors walking and rendering to the surface, including the bridge deck. */
@@ -231,17 +237,33 @@ function plantNorthGateVerge(mesh) {
   }
 }
 
+/** Give the water shader a cross-current coordinate and bed depth in meters. */
+function buildGateStream(mesh) {
+  const waterLevel = -0.33;
+  const bankOffsets = [-2.7, -2.1, -1.65, -1.2, -0.6, 0, 0.6, 1.2, 1.65, 2.1, 2.7];
+  function crossSection(x) {
+    return bankOffsets.map(offset => {
+      const z = streamCenter(x) + offset;
+      const waterDepth = Math.max(0, waterLevel - terrainHeight(x, z));
+      return { point: [x, waterLevel, z], coordinates: [offset, waterDepth] };
+    });
+  }
+  let upstream = crossSection(-13);
+  for (let x = -12; x <= 13; x++) {
+    const downstream = crossSection(x);
+    const paint = (a, b, c) => mesh.triangle(a.point, b.point, c.point,
+      [0.19, 0.37, 0.36], STREAM_MATERIAL, [a.coordinates, b.coordinates, c.coordinates]);
+    for (let bank = 0; bank < bankOffsets.length - 1; bank++) {
+      paint(upstream[bank], downstream[bank], downstream[bank + 1]);
+      paint(upstream[bank], downstream[bank + 1], upstream[bank + 1]);
+    }
+    upstream = downstream;
+  }
+}
+
 /** The old gate leads to a timber crossing and a stone waystation. */
 function buildGateCrossing(mesh) {
-  for (let x = -13; x < 13; x++) {
-    const river = (across, bank) => [across, -0.33, streamCenter(across) + bank * 2.1];
-    const a = river(x, -1);
-    const b = river(x + 1, -1);
-    const c = river(x + 1, 1);
-    const d = river(x, 1);
-    mesh.triangle(a, b, c, [0.19, 0.37, 0.36], STREAM_MATERIAL);
-    mesh.triangle(a, c, d, [0.19, 0.37, 0.36], STREAM_MATERIAL);
-  }
+  buildGateStream(mesh);
   for (let board = 0; board < 15; board++) {
     const z = -30.55 + board * 0.65;
     mesh.box(0, groundHeight(0, z) - 0.08, z, 3.35, 0.15, 0.61,
@@ -249,6 +271,8 @@ function buildGateCrossing(mesh) {
   }
   for (const side of [-1, 1]) {
     const x = side * 1.62;
+    // Recess the lengthwise supports under the edges of the deck.
+    mesh.box(side * 1.37, BRIDGE_HEIGHT - 0.22, -26, 0.18, 0.21, 7.3, tint(BARK, 0.84), BARK_MATERIAL);
     for (const z of [-28.7, -26, -23.3]) {
       mesh.beam([x, -0.54, z], [x, BRIDGE_HEIGHT + 0.75, z], 0.13, 0.12, BARK, 5, BARK_MATERIAL);
     }

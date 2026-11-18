@@ -217,8 +217,16 @@ test('the gate route has raised banks and a walkable bridge over rendered water'
   const { vertices } = islandMesh();
   assert.ok(groundHeight(-8, -13) > groundHeight(0, -13) + 2.2);
   assert.ok(groundHeight(0, -26) > groundHeight(4, -26) + 0.8);
-  const materials = vertices.filter((_, index) => index % MESH_VERTEX_FLOATS === 6);
-  assert.ok(materials.includes(13.5));
+  const stream = [];
+  for (let index = 0; index < vertices.length; index += MESH_VERTEX_FLOATS) {
+    if (vertices[index + 6] === 13.5) stream.push(vertices.slice(index, index + MESH_VERTEX_FLOATS));
+  }
+  const underBridge = stream.filter(([x]) => x === 0);
+  assert.ok(underBridge.length > 0);
+  assert.ok(stream.every(([, y]) => Math.abs(y + 0.33) < 1e-6));
+  assert.ok(underBridge.some(vertex => vertex[7] === 0 && vertex[8] > 0.26));
+  assert.ok(underBridge.some(vertex => vertex[7] < -1 && vertex[8] < 0.06));
+  assert.ok(underBridge.some(vertex => vertex[7] > 1 && vertex[8] < 0.06));
 });
 
 test('North Gate face joints reveal recessed mortar and the passage stays open', () => {
