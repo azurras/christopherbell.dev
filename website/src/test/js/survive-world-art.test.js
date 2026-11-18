@@ -63,7 +63,7 @@ test('authored actors draw bounded texture coordinates and animate with the equi
     assert.ok(mining[index + 1] >= 0 && mining[index + 1] <= 1);
     assert.ok(mining[index + 2] >= 0 && mining[index + 2] <= 1);
   }
-  assert.equal(texturedCorners, (2251 + 1144 + 1348 + 929) * 3);
+  assert.equal(texturedCorners, (2335 + 1144 + 1348 + 929) * 3);
 });
 
 test('the adventurer reshaping keeps clip topology and hand attachments', () => {
@@ -118,6 +118,24 @@ test('the adventurer has layered shoulder rims and full boot soles', () => {
   for (const frames of Object.values(asset.poses)) {
     assert.ok(frames.every(frame => frame.length === rest.length));
   }
+});
+
+test('contoured torso plates and belt stay attached through baked clips', () => {
+  const url = new URL('../../main/resources/static/images/survive/adventurer.json', import.meta.url);
+  const asset = JSON.parse(readFileSync(url, 'utf8'));
+  const firstTorsoDetail = 1225;
+  const rest = asset.poses.idle[0];
+  const firstBandCenter = (firstTorsoDetail + 2) * 3;
+  assert.ok(rest[firstBandCenter + 2] > 200);
+  assert.ok(rest[firstBandCenter + 1] > 1470 && rest[firstBandCenter + 1] < 1730);
+  const chartSize = asset.uv.length / 2;
+  assert.equal(chartSize, asset.faces.length);
+  assert.ok(asset.faces.some(vertex => vertex >= firstTorsoDetail));
+  for (const frames of Object.values(asset.poses)) {
+    assert.ok(frames.every(frame => frame.length === rest.length && Number.isInteger(frame[firstBandCenter])));
+  }
+  assert.notDeepEqual(asset.poses.idle[0].slice(firstBandCenter, firstBandCenter + 3),
+    asset.poses.fish[2].slice(firstBandCenter, firstBandCenter + 3));
 });
 
 test('authored lighting interpolates across triangle corners without adding vertices', () => {
