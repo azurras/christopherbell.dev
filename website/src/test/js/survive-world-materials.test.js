@@ -23,7 +23,9 @@ test('the authored face is painted before uploading the existing shared actor at
       return { operations, getContext: () => ({
         drawImage: image => operations.push(image.src),
         createRadialGradient: () => ({ addColorStop() {} }),
-        fillRect: () => operations.push('skin shading'),
+        fillRect(x, y, width, height) {
+          operations.push(x === 508 ? { x, y, width, height, color: this.fillStyle } : 'skin shading');
+        },
         fill: () => operations.push('face paint'),
       }) };
     },
@@ -41,6 +43,7 @@ test('the authored face is painted before uploading the existing shared actor at
     assert.equal(uploads[1].operations[0], '/images/survive/authored-actors.jpg');
     assert.equal(uploads[1].operations[1], 'skin shading');
     assert.ok(uploads[1].operations.slice(1).includes('face paint'));
+    assert.deepEqual(uploads[1].operations.at(-1), { x: 508, y: 140, width: 8, height: 22, color: '#3e3027' });
     assert.equal(materials.authoredActorsReady, true);
   } finally { materials.dispose(); }
 });

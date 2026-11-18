@@ -63,7 +63,7 @@ test('authored actors draw bounded texture coordinates and animate with the equi
     assert.ok(mining[index + 1] >= 0 && mining[index + 1] <= 1);
     assert.ok(mining[index + 2] >= 0 && mining[index + 2] <= 1);
   }
-  assert.equal(texturedCorners, (2179 + 1144 + 1348 + 929) * 3);
+  assert.equal(texturedCorners, (2251 + 1144 + 1348 + 929) * 3);
 });
 
 test('the adventurer reshaping keeps clip topology and hand attachments', () => {
@@ -99,6 +99,24 @@ test('the adventurer face has nose and chin relief in each baked animation', () 
     for (const frame of frames) {
       assert.ok(Math.abs(distance(position(frame, chin), position(frame, noseTip)) - chinToNose) < 22);
     }
+  }
+});
+
+test('the adventurer has layered shoulder rims and full boot soles', () => {
+  const url = new URL('../../main/resources/static/images/survive/adventurer.json', import.meta.url);
+  const asset = JSON.parse(readFileSync(url, 'utf8'));
+  const rest = asset.poses.idle[0];
+  const coordinate = (vertex, axis) => rest[vertex * 3 + axis];
+  assert.ok(Math.max(...Array.from({ length: 256 }, (_, index) => Math.abs(coordinate(919 + index, 0)))) < 596);
+  assert.ok(coordinate(115, 2) > 242);
+  assert.equal(coordinate(115, 1), 1);
+  const atlasUVs = Array.from({ length: asset.uv.length / 2 }, (_, corner) =>
+    [asset.uv[corner * 2], asset.uv[corner * 2 + 1]].map(axis => Math.round(axis * 1024 / 32767)));
+  assert.ok(atlasUVs.some(([u, v]) => u === 512 && v === 52));
+  assert.ok(atlasUVs.some(([u, v]) => u === 512 && v === 132));
+  assert.ok(asset.faces.some(vertex => vertex >= 1189));
+  for (const frames of Object.values(asset.poses)) {
+    assert.ok(frames.every(frame => frame.length === rest.length));
   }
 });
 

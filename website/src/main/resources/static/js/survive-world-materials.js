@@ -65,13 +65,30 @@ export function createIslandMaterials(gl, documentRoot, program) {
     load('/images/survive/actor-materials.jpg', image => upload(image, 5, null, 1024));
     let authoredActorsReady = false;
     load('/images/survive/authored-actors.jpg', image => {
-      upload(image, 6, null, 1024, paint => paintAdventurerFace(paint, documentRoot.defaultView.Path2D));
+      upload(image, 6, null, 1024, paint => {
+        paintAdventurerFace(paint, documentRoot.defaultView.Path2D);
+        paintAdventurerGear(paint);
+      });
       authoredActorsReady = true;
     });
     return { dispose, get authoredActorsReady() { return authoredActorsReady; } };
   } catch (error) {
     dispose();
     throw error;
+  }
+}
+
+/** Fill the atlas gutter with colors sampled by the baked metal rims and the boot welt. */
+function paintAdventurerGear(paint) {
+  for (const [top, height, color] of [
+    [43, 17, '#78858c'],
+    [60, 22, '#3d474c'],
+    [85, 23, '#5b696c'],
+    [119, 21, '#6a5140'],
+    [140, 22, '#3e3027'],
+  ]) {
+    paint.fillStyle = color;
+    paint.fillRect(508, top, 8, height);
   }
 }
 
