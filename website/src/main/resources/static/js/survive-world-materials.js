@@ -31,18 +31,18 @@ export function createIslandMaterials(gl, documentRoot, program) {
       gl.uniform1i(gl.getUniformLocation(program, name), index);
     });
 
-    function upload(image, index, tile, tileSize = tile ? 512 : 256, paintDetail) {
+    function upload(image, index, tile, [canvasWidth, canvasHeight] = tile ? [512, 512] : [256, 256], paintDetail) {
       const canvas = documentRoot.createElement('canvas');
-      canvas.width = tileSize;
-      canvas.height = tileSize;
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
       const paint = canvas.getContext('2d');
       if (!paint) return;
       if (tile) {
         const width = Math.floor(image.width / 2);
         const height = Math.floor(image.height / 2);
-        paint.drawImage(image, tile[0] * width, tile[1] * height, width, height, 0, 0, tileSize, tileSize);
+        paint.drawImage(image, tile[0] * width, tile[1] * height, width, height, 0, 0, canvasWidth, canvasHeight);
       } else {
-        paint.drawImage(image, 0, 0, tileSize, tileSize);
+        paint.drawImage(image, 0, 0, canvasWidth, canvasHeight);
       }
       paintDetail?.(paint);
       bindTexture(index);
@@ -61,11 +61,11 @@ export function createIslandMaterials(gl, documentRoot, program) {
     load('/images/survive/island-materials.jpg', image => {
       definitions.forEach(([, tile], index) => { if (tile) upload(image, index, tile); });
     });
-    load('/images/survive/foliage.png', image => upload(image, 4, null));
-    load('/images/survive/actor-materials.jpg', image => upload(image, 5, null, 1024));
+    load('/images/survive/foliage-atlas.png', image => upload(image, 4, null, [512, 256]));
+    load('/images/survive/actor-materials.jpg', image => upload(image, 5, null, [1024, 1024]));
     let authoredActorsReady = false;
     load('/images/survive/authored-actors.jpg', image => {
-      upload(image, 6, null, 1024, paint => paintAdventurerFace(paint, documentRoot.defaultView.Path2D));
+      upload(image, 6, null, [1024, 1024], paint => paintAdventurerFace(paint, documentRoot.defaultView.Path2D));
       authoredActorsReady = true;
     });
     return { dispose, get authoredActorsReady() { return authoredActorsReady; } };
