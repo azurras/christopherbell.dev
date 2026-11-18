@@ -31,8 +31,14 @@ function terrainHeight(x, z) {
   const ridge = 3.4 * Math.exp(-((x - 34) ** 2 + (z + 19) ** 2) / 220);
   const base = (rollingGround + ridge) * inland * outsideCamp - (1 - inland) * 0.52;
   const banks = 3.8 * Math.exp(-((Math.abs(x) - 8) ** 2 / 17 + (z + 13) ** 2 / 35));
-  const channel = clampUnit((15 - Math.abs(x)) / 4) * clampUnit((2.7 - Math.abs(z - streamCenter(x))) / 1.5);
-  return base + banks + (-0.60 - base - banks) * channel;
+  const distanceFromStream = Math.abs(z - streamCenter(x));
+  const streamReach = clampUnit((15 - Math.abs(x)) / 4);
+  const channel = streamReach * clampUnit((2.7 - distanceFromStream) / 1.5);
+  const bankReach = streamReach * clampUnit((4.1 - distanceFromStream) / 1.4);
+  const uphillBank = base + banks;
+  // Fill low spots beside the cutting so the water ends against earth.
+  const bankHeight = uphillBank + Math.max(0, 0.08 - uphillBank) * bankReach;
+  return bankHeight + (-0.60 - bankHeight) * channel;
 }
 
 /** Anchors walking and rendering to the surface, including the bridge deck. */
@@ -231,17 +237,33 @@ function plantNorthGateVerge(mesh) {
   }
 }
 
+/** Give the water shader a cross-current coordinate and bed depth in meters. */
+function buildGateStream(mesh) {
+  const waterLevel = -0.33;
+  const bankOffsets = [-2.7, -2.1, -1.65, -1.2, -0.6, 0, 0.6, 1.2, 1.65, 2.1, 2.7];
+  function crossSection(x) {
+    return bankOffsets.map(offset => {
+      const z = streamCenter(x) + offset;
+      const waterDepth = Math.max(0, waterLevel - terrainHeight(x, z));
+      return { point: [x, waterLevel, z], coordinates: [offset, waterDepth] };
+    });
+  }
+  let upstream = crossSection(-13);
+  for (let x = -12; x <= 13; x++) {
+    const downstream = crossSection(x);
+    const paint = (a, b, c) => mesh.triangle(a.point, b.point, c.point,
+      [0.19, 0.37, 0.36], STREAM_MATERIAL, [a.coordinates, b.coordinates, c.coordinates]);
+    for (let bank = 0; bank < bankOffsets.length - 1; bank++) {
+      paint(upstream[bank], downstream[bank], downstream[bank + 1]);
+      paint(upstream[bank], downstream[bank + 1], upstream[bank + 1]);
+    }
+    upstream = downstream;
+  }
+}
+
 /** The old gate leads to a timber crossing and a stone waystation. */
 function buildGateCrossing(mesh) {
-  for (let x = -13; x < 13; x++) {
-    const river = (across, bank) => [across, -0.33, streamCenter(across) + bank * 2.1];
-    const a = river(x, -1);
-    const b = river(x + 1, -1);
-    const c = river(x + 1, 1);
-    const d = river(x, 1);
-    mesh.triangle(a, b, c, [0.19, 0.37, 0.36], STREAM_MATERIAL);
-    mesh.triangle(a, c, d, [0.19, 0.37, 0.36], STREAM_MATERIAL);
-  }
+  buildGateStream(mesh);
   for (let board = 0; board < 15; board++) {
     const z = -30.55 + board * 0.65;
     mesh.box(0, groundHeight(0, z) - 0.08, z, 3.35, 0.15, 0.61,
@@ -249,6 +271,8 @@ function buildGateCrossing(mesh) {
   }
   for (const side of [-1, 1]) {
     const x = side * 1.62;
+    // Recess the lengthwise supports under the edges of the deck.
+    mesh.box(side * 1.37, BRIDGE_HEIGHT - 0.22, -26, 0.18, 0.21, 7.3, tint(BARK, 0.84), BARK_MATERIAL);
     for (const z of [-28.7, -26, -23.3]) {
       mesh.beam([x, -0.54, z], [x, BRIDGE_HEIGHT + 0.75, z], 0.13, 0.12, BARK, 5, BARK_MATERIAL);
     }
@@ -324,45 +348,79 @@ function buildRuinedGate(mesh) {
   const z = -18;
   const foundation = groundHeight(0, z) - 0.35;
   const masonry = [0.53, 0.53, 0.43];
+  const moss = [0.32, 0.40, 0.24];
+  const mortar = [0.28, 0.30, 0.23];
   for (const side of [-1, 1]) {
     const x = side * 3.18;
-    mesh.box(x, foundation + 0.35, z, 2.1, 0.70, 3.1, tint(masonry, 0.85), STONE_MATERIAL);
-    mesh.box(x, foundation + 2.12, z, 1.55, 3.56, 2.05, masonry, STONE_MATERIAL);
-    mesh.box(x, foundation + 3.83, z, 1.9, 0.43, 2.35, tint(masonry, 1.13), STONE_MATERIAL);
-    for (let section = 0; section < 5; section++) {
-      const wallX = side * (4.5 + section * 1.45);
-      const wallY = groundHeight(wallX, z) - 0.25;
-      const height = [2.7, 2.35, 1.95, 1.65, 1.1][section];
-      mesh.box(wallX, wallY + height / 2, z, 1.51, height, 1.38, tint(masonry, 0.83 + section * 0.025), STONE_MATERIAL);
-      mesh.box(wallX, wallY + height + 0.10, z, 1.55, 0.20, 1.65, [0.37, 0.43, 0.25], STONE_MATERIAL);
+    mesh.box(x, foundation + 0.20, z, 2.28, 0.60, 3.05, tint(masonry, 0.78), STONE_MATERIAL);
+    mesh.box(x, foundation + 2.10, z, 1.56, 3.56, 2.05, mortar, STONE_MATERIAL);
+    for (let course = 0; course < 6; course++) {
+      const y = foundation + 0.72 + course * 0.53;
+      const color = tint(masonry, 0.88 + (course * 3 % 5) * 0.06);
+      mesh.box(x + side * (course % 2) * 0.035, y, z, 1.61, 0.51, 2.17 + (course % 3) * 0.06,
+        color, STONE_MATERIAL);
+    }
+    mesh.box(x, foundation + 3.53, z, 1.89, 0.23, 2.40, tint(masonry, 1.08), STONE_MATERIAL);
+    mesh.box(x, foundation + 3.68, z, 1.73, 0.14, 2.28, tint(masonry, 0.91), STONE_MATERIAL);
+
+    // The two wing walls have different breaks, with staggered blocks over a dark mortar bed.
+    const blockHeights = side < 0 ? [6, 6, 4, 3, 2] : [5, 4, 4, 2, 1];
+    for (let section = 0; section < blockHeights.length; section++) {
+      const wallX = side * (4.48 + section * 1.43);
+      const wallY = groundHeight(wallX, z) - 0.37;
+      const courses = blockHeights[section];
+      const height = courses * 0.43;
+      mesh.box(wallX, wallY + height / 2, z, 1.47, height, 1.28, mortar, STONE_MATERIAL);
+      for (let course = 0; course < courses; course++) {
+        const unevenFace = 0.06 * ((section * 3 + course * 7) % 5);
+        const offset = side * ((course % 2) - 0.5) * 0.15;
+        const age = 0.74 + ((section * 5 + course * 3) % 7) * 0.045;
+        const color = course === 0 || (course === courses - 1 && section > 1)
+          ? mix(tint(masonry, age), moss, 0.48) : tint(masonry, age);
+        mesh.box(wallX + offset, wallY + (course + 0.5) * 0.43, z,
+          1.49, 0.41, 1.37 + unevenFace, color, STONE_MATERIAL);
+      }
     }
   }
-  const center = foundation + 3.55;
-  const innerRadius = 2.37;
-  const outerRadius = 3.30;
-  for (let index = 0; index < 11; index++) {
-    const from = index * Math.PI / 11 + 0.013;
-    const to = (index + 1) * Math.PI / 11 - 0.013;
-    const arc = (angle, radius, face) => [Math.cos(angle) * radius, center + Math.sin(angle) * radius, z + face];
-    const faces = [-0.96, 0.96].map(face => [arc(from, innerRadius, face), arc(from, outerRadius, face),
-      arc(to, outerRadius, face), arc(to, innerRadius, face)]);
+
+  const spring = foundation + 3.55;
+  const inner = 2.37;
+  const outer = 3.30;
+  const arc = (angle, radius, depth) => [Math.cos(angle) * radius, spring + Math.sin(angle) * radius, z + depth];
+  function wedge(from, to, inside, outside, near, far, color) {
+    const faces = [near, far].map(depth => [arc(from, inside, depth), arc(from, outside, depth),
+      arc(to, outside, depth), arc(to, inside, depth)]);
     for (const [a, b, c, d] of faces) {
-      const color = tint(masonry, index === 5 ? 1.15 : 0.9 + index % 4 * 0.04);
       mesh.triangle(a, b, c, color, STONE_MATERIAL);
       mesh.triangle(a, c, d, color, STONE_MATERIAL);
     }
     for (let edge = 0; edge < 4; edge++) {
       const next = (edge + 1) % 4;
-      mesh.triangle(faces[0][edge], faces[1][edge], faces[1][next], masonry, STONE_MATERIAL);
-      mesh.triangle(faces[0][edge], faces[1][next], faces[0][next], masonry, STONE_MATERIAL);
+      mesh.triangle(faces[0][edge], faces[1][edge], faces[1][next], color, STONE_MATERIAL);
+      mesh.triangle(faces[0][edge], faces[1][next], faces[0][next], color, STONE_MATERIAL);
     }
+  }
+  // A continuous barrel sits behind the visible joints between the face stones.
+  for (let segment = 0; segment < 12; segment++) {
+    wedge(segment * Math.PI / 12, (segment + 1) * Math.PI / 12, inner + 0.015, outer - 0.08,
+      0.83, -0.83, mortar);
+  }
+  for (let block = 0; block < 13; block++) {
+    const from = block * Math.PI / 13 + 0.006;
+    const to = (block + 1) * Math.PI / 13 - 0.006;
+    const keystone = block === 6;
+    const depth = keystone ? 1.27 : 1.09 + block % 3 * 0.045;
+    const edge = outer + (keystone ? 0.20 : (block % 3 - 1) * 0.06);
+    const color = tint(masonry, keystone ? 1.22 : 0.88 + (block * 3 % 7) * 0.045);
+    wedge(from, to, inner, edge, depth, 0.80, color);
+    wedge(from, to, inner, edge, -0.80, -depth, color);
   }
   for (let paving = 0; paving < 10; paving++) {
     const pavingZ = z + 4.1 - paving * 0.84;
     const pavingY = groundHeight(0, pavingZ);
     for (const side of [-1, 1]) {
       mesh.box(side * 1.04, pavingY + 0.025, pavingZ, 1.99, 0.14, 0.77,
-        tint(masonry, 0.91 + paving % 3 * 0.05), STONE_MATERIAL);
+        mix(tint(masonry, 0.86 + (paving * 3 % 7) * 0.04), moss, paving % 3 * 0.12), STONE_MATERIAL);
     }
   }
 }
