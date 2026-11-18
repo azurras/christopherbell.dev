@@ -246,6 +246,9 @@ The desktop Main Menu switches between the browser-filling game and the site
 page view without resetting the session.
 The North Gate waystation uses roof courses and a cloth pennant to mark the
 staffed building. The keeper wears a mantle and cap distinct from the player.
+At night, the waystation lantern lights the entrance with a warm pool of light.
+Cool ambient lighting and horizon haze distinguish night from dusk across the
+terrain and water.
 The North Gate road has grouped verge plants outside the walking line.
 Enemy counter animation follows a confirmed hit or spent guard in the combat
 snapshot. The player's attack pose stays separate, and reduced motion disables
