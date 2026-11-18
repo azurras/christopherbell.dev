@@ -208,15 +208,20 @@ export function createWorldRenderer(canvas) {
         .then(data => { actorArt[kind] = prepareActorArt(data, { adventurer: kind === 'adventurer' }); })
         .catch(() => { /* The procedural model remains available. */ });
     }
-    const scenery = islandMesh();
     const staticBuffer = gl.createBuffer();
     const actorBuffer = gl.createBuffer();
     const dynamicMesh = createDynamicMesh(gl, actorBuffer);
     const fallbackActors = meshBuilder(undefined, dynamicMesh.append);
     const authoredActors = meshBuilder(actorArt, dynamicMesh.append);
     buffers.push(staticBuffer, actorBuffer);
-    gl.bindBuffer(gl.ARRAY_BUFFER, staticBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(scenery.vertices), gl.STATIC_DRAW);
+    let sceneryVertexCount;
+    {
+      const { vertices } = islandMesh();
+      gl.bindBuffer(gl.ARRAY_BUFFER, staticBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+      // The draw loop only needs the count once WebGL owns the static mesh.
+      sceneryVertexCount = vertices.length / MESH_VERTEX_FLOATS;
+    }
     const positionAttribute = gl.getAttribLocation(program, 'position');
     const colorAttribute = gl.getAttribLocation(program, 'color');
     const materialAttribute = gl.getAttribLocation(program, 'material');
@@ -258,7 +263,7 @@ export function createWorldRenderer(canvas) {
         gl.uniform3fv(skyUniform, sky);
         gl.uniform1f(timeUniform, animationSeconds % 120);
         gl.uniform1f(fireTimeUniform, position.animate ? animationSeconds % 120 : 0);
-        drawBuffer(staticBuffer, scenery.vertices.length / MESH_VERTEX_FLOATS);
+        drawBuffer(staticBuffer, sceneryVertexCount);
         dynamicMesh.reset();
         const actors = materials.authoredActorsReady ? authoredActors : fallbackActors;
         const stride = avatar => avatar.moving ? Math.sin(animationSeconds * 11) : 0;
