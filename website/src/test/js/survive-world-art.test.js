@@ -63,7 +63,7 @@ test('authored actors draw bounded texture coordinates and animate with the equi
     assert.ok(mining[index + 1] >= 0 && mining[index + 1] <= 1);
     assert.ok(mining[index + 2] >= 0 && mining[index + 2] <= 1);
   }
-  assert.equal(texturedCorners, (2151 + 1144 + 1348 + 929) * 3);
+  assert.equal(texturedCorners, (2179 + 1144 + 1348 + 929) * 3);
 });
 
 test('the adventurer reshaping keeps clip topology and hand attachments', () => {
@@ -79,6 +79,27 @@ test('the adventurer reshaping keeps clip topology and hand attachments', () => 
   assert.ok(feet >= 0);
   assert.equal(refined.poses.idle[0][feet], 0);
   assert.ok(refined.hands.strike[0][1] > baseline.hands.strike[0][1]);
+});
+
+test('the adventurer face has nose and chin relief in each baked animation', () => {
+  const asset = JSON.parse(readFileSync(new URL('../../main/resources/static/images/survive/adventurer.json', import.meta.url), 'utf8'));
+  const noseTip = 466;
+  const chin = 1175;
+  const lowerLip = 1176;
+  const underNose = 1177;
+  const position = (frame, index) => frame.slice(index * 3, index * 3 + 3);
+  const distance = (a, b) => Math.hypot(...a.map((coordinate, axis) => coordinate - b[axis]));
+  const rest = asset.poses.idle[0];
+  assert.ok(rest[noseTip * 3 + 2] - rest[underNose * 3 + 2] >= 40);
+  assert.ok(rest[lowerLip * 3 + 1] - rest[chin * 3 + 1] >= 65);
+  const corners = asset.faces.filter(vertex => vertex === underNose);
+  assert.ok(corners.length >= 4);
+  const chinToNose = distance(position(rest, chin), position(rest, noseTip));
+  for (const frames of Object.values(asset.poses)) {
+    for (const frame of frames) {
+      assert.ok(Math.abs(distance(position(frame, chin), position(frame, noseTip)) - chinToNose) < 22);
+    }
+  }
 });
 
 test('authored lighting interpolates across triangle corners without adding vertices', () => {
@@ -98,6 +119,17 @@ test('authored lighting interpolates across triangle corners without adding vert
   assert.equal(flat.shades[0], tilted.shades[1]);
   assert.equal(flat.shades[1], tilted.shades[0]);
   assert.notEqual(flat.shades[0], crease.shades[0]);
+});
+
+test('adventurer skin has continuous shading across the nose and jaw', () => {
+  const asset = JSON.parse(readFileSync(new URL('../../main/resources/static/images/survive/adventurer.json', import.meta.url), 'utf8'));
+  const model = prepareActorArt(asset, { adventurer: true });
+  for (const vertex of [466, 1175, 1177]) {
+    const shades = model.triangles.flatMap(triangle =>
+      triangle.indices.flatMap((index, corner) => index === vertex ? [triangle.shades[corner]] : []));
+    assert.ok(shades.length > 2);
+    assert.ok(shades.every(shade => shade === shades[0] && shade >= 0.85 && shade <= 1));
+  }
 });
 
 test('enemy motion requires a confirmed bite or guard and winds back before lunging', () => {

@@ -39,18 +39,23 @@ function bakeAdventurerShading({ triangles, poses }) {
   });
   triangles.forEach((triangle, index) => {
     const [nx, ny, nz] = faceNormals[index];
-    triangle.shades = triangle.indices.map(vertex => {
+    triangle.shades = triangle.indices.map((vertex, corner) => {
+      const [u, v] = triangle.uv[corner];
+      // The mirrored skin chart uses soft shading through the jaw and orbital creases.
+      const faceSkin = u >= 616 / 1024 && u <= 754 / 1024 && v >= 356 / 1024 && v <= 427 / 1024;
       let x = 0;
       let y = 0;
       let z = 0;
       for (const [ax, ay, az] of adjacentNormals[vertex]) {
-        if (nx * ax + ny * ay + nz * az < 0.64) continue;
+        if (!faceSkin && nx * ax + ny * ay + nz * az < 0.64) continue;
         x += ax;
         y += ay;
         z += az;
       }
+      const length = Math.hypot(x, y, z) || 1;
+      if (faceSkin) return 0.85 + 0.15 * Math.max(0, (-0.30 * x + 0.86 * y + 0.37 * z) / length);
       // Broad overhead light avoids a different brightness on each small triangle.
-      return 0.76 + 0.24 * Math.abs(y) / (Math.hypot(x, y, z) || 1);
+      return 0.76 + 0.24 * Math.abs(y) / length;
     });
   });
 }
