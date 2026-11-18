@@ -235,6 +235,10 @@ shallows show stone beneath the surface, ripples flow along the channel, and a
 shadow dims the water under the bridge's planks and timber supports. The
 material reuses the island's stone texture.
 
+Woodland trees use continuous bark across bent trunk rings. The roots sink into
+the terrain, with greener bark at the base and exposed root ridges on broadleaf
+trees. Branch heights and spread vary deterministically with each tree.
+
 The desktop Main Menu switches between the browser-filling game and the site
 page view without resetting the session.
 The North Gate waystation uses roof courses and a cloth pennant to mark the

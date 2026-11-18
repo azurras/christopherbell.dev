@@ -213,6 +213,40 @@ test('terrain, ruin masonry, bark and cutout foliage are represented in the same
   assert.ok(materials.has(4.5));
 });
 
+test('woodland trunks share bark coordinates at their joints and meet the ground across their roots', () => {
+  const [x, z, height, angle] = [-22, -14, 7, 1.2];
+  const trunk = broadleaf => {
+    const mesh = meshBuilder();
+    mesh.tree(x, z, height, angle, broadleaf);
+    const corners = [];
+    for (let index = 0; index < mesh.vertices.length; index += MESH_VERTEX_FLOATS) {
+      const corner = mesh.vertices.slice(index, index + MESH_VERTEX_FLOATS);
+      if (corner[6] === 3.75) corners.push(corner);
+    }
+    return corners;
+  };
+  const broadleaf = trunk(true);
+  const pine = trunk(false);
+  assert.ok(broadleaf.length > 0 && pine.length > 0);
+  const roots = corners => corners.filter(corner => corner[8] === 0);
+  for (const tree of [broadleaf, pine]) {
+    const base = roots(tree);
+    assert.ok(base.length >= 16);
+    assert.ok(base.every(([px, py, pz]) => py < groundHeight(px, pz) && py > groundHeight(px, pz) - 0.5));
+    const chartByPoint = new Map();
+    for (const corner of tree) {
+      const key = corner.slice(0, 3).join(',');
+      const u = corner[7];
+      if (chartByPoint.has(key)) assert.ok(Math.abs(chartByPoint.get(key) - u - Math.round(chartByPoint.get(key) - u)) < 1e-9);
+      chartByPoint.set(key, u);
+    }
+  }
+  const rootRadius = corners => Math.max(...roots(corners).map(([px, , pz]) => Math.hypot(px - x, pz - z)));
+  assert.ok(rootRadius(broadleaf) > 1.3 * rootRadius(pine));
+  assert.ok(broadleaf.some(([px, py, pz]) =>
+    Math.hypot(px - x, pz - z) > rootRadius(broadleaf) && py < groundHeight(px, pz)));
+});
+
 test('the gate route has raised banks and a walkable bridge over rendered water', () => {
   const { vertices } = islandMesh();
   assert.ok(groundHeight(-8, -13) > groundHeight(0, -13) + 2.2);

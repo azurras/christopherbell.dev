@@ -7,6 +7,7 @@ const TAU = Math.PI * 2;
 export const MESH_VERTEX_FLOATS = 9;
 const STONE_MATERIAL = 2.5;
 const BARK_MATERIAL = 3.5;
+const TRUNK_MATERIAL = 3.75;
 const FOLIAGE_MATERIAL = 4.5;
 const STREAM_MATERIAL = 13.5;
 const BRIDGE_HEIGHT = 0.43;
@@ -524,16 +525,82 @@ export function meshBuilder(actorArt, appendVertex) {
   }
   function tree(x, z, height, angle, broadleaf) {
     const y = groundHeight(x, z);
-    const leanX = Math.cos(angle) * height * 0.085;
-    const leanZ = Math.sin(angle) * height * 0.085;
-    const trunkAt = level => [x + leanX * level ** 1.5, y + height * level, z + leanZ * level ** 1.5];
-    beam(trunkAt(0), trunkAt(0.28), height * 0.072, height * 0.043, BARK, 9, BARK_MATERIAL);
-    beam(trunkAt(0.28), trunkAt(0.64), height * 0.043, height * 0.022, BARK, 8, BARK_MATERIAL);
-    beam(trunkAt(0.64), trunkAt(1), height * 0.022, 0.025, BARK, 6, BARK_MATERIAL);
+    const growth = 0.5 + 0.5 * Math.sin(angle * 1.87 + x * 0.11);
+    const lean = height * (broadleaf ? 0.13 : 0.065) * (0.66 + growth * 0.58);
+    const trunkAt = level => {
+      const bend = lean * level ** 1.45;
+      return [x + Math.cos(angle) * bend, y + height * level, z + Math.sin(angle) * bend];
+    };
+    const levels = [0, broadleaf ? 0.16 : 0.11, 0.54, 1];
+    const radii = broadleaf ? [0.110, 0.058, 0.032, 0.004] : [0.073, 0.046, 0.023, 0.003];
+    const sides = 7;
+    const bark = broadleaf ? [0.30, 0.28, 0.23] : [0.34, 0.28, 0.21];
+    const rootColor = mix(bark, [0.19, 0.29, 0.13], 0.55 + growth * 0.20);
+    // The same rings carry the bark across joints and bury each root lobe on sloped ground.
+    const rings = levels.map((level, ring) => {
+      const [cx, cy, cz] = trunkAt(level);
+      return Array.from({ length: sides }, (_, index) => {
+        const azimuth = angle + index / sides * TAU;
+        const lobe = Math.cos(index * TAU * 3 / sides + angle);
+        const radius = height * radii[ring] * (0.91 + growth * 0.16)
+          * (1 + lobe * (ring === 0 ? 0.29 : 0.07));
+        const px = cx + Math.cos(azimuth) * radius;
+        const pz = cz + Math.sin(azimuth) * radius;
+        const brightness = 0.70 + 0.30 * Math.max(0, Math.cos(azimuth + 2.38));
+        return { point: [px, ring === 0 ? groundHeight(px, pz) - 0.19 : cy, pz],
+          color: tint(mix(rootColor, bark, Math.min(1, level * 3.8)), brightness) };
+      });
+    });
+    const repeats = Math.max(1, Math.round(height * (broadleaf ? 0.33 : 0.24)));
+    const uvAt = (sector, ring) => [growth + sector / sides * repeats, levels[ring] * height * 0.36];
+    for (let ring = 0; ring < rings.length - 1; ring++) {
+      for (let sector = 0; sector < sides; sector++) {
+        const next = (sector + 1) % sides;
+        const a = rings[ring][sector];
+        const b = rings[ring][next];
+        const c = rings[ring + 1][next];
+        const d = rings[ring + 1][sector];
+        const auv = uvAt(sector, ring);
+        const buv = uvAt(sector + 1, ring);
+        const cuv = uvAt(sector + 1, ring + 1);
+        const duv = uvAt(sector, ring + 1);
+        triangle(a.point, b.point, c.point, [a.color, b.color, c.color], TRUNK_MATERIAL, [auv, buv, cuv], [1, 1, 1]);
+        triangle(a.point, c.point, d.point, [a.color, c.color, d.color], TRUNK_MATERIAL, [auv, cuv, duv], [1, 1, 1]);
+      }
+    }
+    if (broadleaf) {
+      for (let root = 0; root < 3; root++) {
+        const direction = angle + root * TAU / 3 + growth * 0.42;
+        const dx = Math.cos(direction);
+        const dz = Math.sin(direction);
+        const reach = height * (0.17 + 0.07 * Math.cos(direction * 1.7 + z));
+        const width = height * 0.036;
+        const onSlope = (along, across, rise) => {
+          const px = x + dx * along - dz * across;
+          const pz = z + dz * along + dx * across;
+          return [px, groundHeight(px, pz) + rise, pz];
+        };
+        const start = height * 0.042;
+        const left = onSlope(start, -width, -0.13);
+        const right = onSlope(start, width, -0.13);
+        const ridge = onSlope(start, 0, height * 0.066);
+        const shoulder = onSlope(reach * 0.58, 0, height * 0.028);
+        const tip = onSlope(reach, 0, -0.07);
+        const lu = [growth, 0.26];
+        const ru = [growth + 0.39, 0.26];
+        const ridgeUv = [growth + 0.20, 0.42];
+        const shoulderUv = [growth + 0.20, 0.62];
+        const tipUv = [growth + 0.20, 0.88];
+        triangle(left, ridge, shoulder, [rootColor, bark, rootColor], TRUNK_MATERIAL, [lu, ridgeUv, shoulderUv]);
+        triangle(ridge, right, shoulder, [bark, rootColor, rootColor], TRUNK_MATERIAL, [ridgeUv, ru, shoulderUv]);
+        triangle(left, shoulder, tip, rootColor, TRUNK_MATERIAL, [lu, shoulderUv, tipUv]);
+        triangle(shoulder, right, tip, rootColor, TRUNK_MATERIAL, [shoulderUv, ru, tipUv]);
+      }
+    }
     for (let branch = 0; branch < 6; branch++) {
-      const branchAngle = angle + branch * 2.39996;
-      const level = 0.40 + branch * 0.068;
-      const spread = height * (broadleaf ? 0.34 - branch * 0.024 : 0.29 - branch * 0.028);
+      const branchAngle = angle + branch * 2.39996 + Math.sin(branch + angle) * 0.32;
+      const level = (broadleaf ? 0.36 : 0.43) + branch * 0.065 + growth * 0.045;
+      const spread = height * (broadleaf ? 0.36 - branch * 0.025 : 0.26 - branch * 0.024) * (0.87 + growth * 0.25);
       const trunk = trunkAt(level);
       const radial = (length, rise, direction) => [trunk[0] + Math.cos(direction) * spread * length,
         trunk[1] + height * rise, trunk[2] + Math.sin(direction) * spread * length];
