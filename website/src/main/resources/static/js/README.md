@@ -288,6 +288,8 @@ The fishing bank groups textured rocks, driftwood and bent reeds around the dock
 leaving the central approach open. These props share the static scenery buffer.
 Sand extends below the ocean surface and darkens near the waterline.
 `survive-world-renderer.js` owns WebGL buffers, lighting, fog and disposal.
+After uploading the scenery it keeps the GPU buffer and its vertex count.
+Renderer initialization rebuilds the scenery when a new context is needed.
 The starting campfire uses one camera-facing quad for soft flames and embers.
 Local firelight falls off around the pit, and reduced motion freezes the effect.
 `survive-dynamic-mesh.js` reuses typed vertex and GPU buffer capacity across frames.
