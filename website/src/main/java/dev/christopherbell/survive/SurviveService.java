@@ -81,6 +81,7 @@ public class SurviveService {
     if (replacingPlayer) {
       presence.remove(world.players.get(ownerKey).survivorId);
       world.players.remove(ownerKey);
+      world.settleTradesUntil(clock.instant());
     }
     String token = UUID.randomUUID().toString();
     var player = new SurvivePlayer(name, clock.instant(), accountId, UUID.randomUUID().toString());
@@ -314,6 +315,7 @@ public class SurviveService {
     var idleDeadline = clock.instant().minus(IDLE_TIMEOUT);
     boolean removed = world.players.values().removeIf(player -> player.accountId == null && !player.lastSeen.isAfter(idleDeadline));
     if (removed) {
+      world.settleTradesUntil(clock.instant());
       world.recordEvent("Inactive survivors left camp.");
     }
   }
@@ -371,7 +373,6 @@ public class SurviveService {
     var offered = new SurviveTrade.Lot(request.offered(), request.offeredQuantity());
     var requested = new SurviveTrade.Lot(request.requested(), request.requestedQuantity());
     requireTradeStock(sender, offered);
-    world.trades.values().removeIf(offer -> !now.isBefore(offer.expiresAt()));
     if (world.trades.values().stream().anyMatch(offer -> offer.involves(sender.survivorId)
         || offer.involves(recipient.survivorId))) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "One of you already has a pending trade.");
@@ -498,7 +499,8 @@ public class SurviveService {
     boolean worldAdvanced = world.settleUntil(now);
     boolean combatAdvanced = world.settleCombatUntil(now);
     boolean fishingAdvanced = world.settleFishingUntil(now);
-    if (worldAdvanced || combatAdvanced || fishingAdvanced) {
+    boolean tradesAdvanced = world.settleTradesUntil(now);
+    if (worldAdvanced || combatAdvanced || fishingAdvanced || tradesAdvanced) {
       commitWorld();
     }
   }

@@ -172,6 +172,57 @@ class SurviveServiceTest {
   }
 
   @Test
+  void replacingATradePartnerReleasesTheRemainingSurvivorToMakeAnotherOffer() {
+    var repository = new InMemorySurviveWorldRepository();
+    var service = new SurviveService(Clock.fixed(SurviveClock.WORLD_EPOCH, ZoneOffset.UTC), () -> 25, 10, repository);
+    var alice = service.join(null, "Alice");
+    var bob = service.join(null, "Bob");
+    var carol = service.join(null, "Carol");
+    var wood = act(service, alice.token(), SurviveAction.GATHER);
+    var sent = service.offerTrade(alice.token(), null, new SurviveRequests.TradeOffer(
+        UUID.fromString(bob.state().survivorId()), SurviveResource.WOOD, 1, SurviveResource.STONE, 1, wood.revision()));
+
+    service.join(bob.token(), "New Bob");
+    var updated = service.find(alice.token()).orElseThrow();
+    assertNull(updated.trade());
+    assertTrue(updated.message().contains("left camp"));
+    assertEquals(1, updated.wood());
+    assertTrue(repository.load().orElseThrow().trades().isEmpty());
+    assertEquals(404, assertThrows(ResponseStatusException.class, () -> service.replyToTrade(alice.token(), null,
+        new SurviveRequests.TradeReply(UUID.fromString(sent.trade().offer().id()), false, updated.revision())))
+        .getStatusCode().value());
+    var newOffer = service.offerTrade(alice.token(), null, new SurviveRequests.TradeOffer(
+        UUID.fromString(carol.state().survivorId()), SurviveResource.WOOD, 1, SurviveResource.STONE, 1, updated.revision()));
+    assertEquals("Carol", newOffer.trade().partner());
+  }
+
+  @Test
+  void expiredTradeReleasesBothSurvivorsWithoutMovingEitherStack() {
+    var tradeClock = mock(Clock.class);
+    var now = SurviveClock.WORLD_EPOCH;
+    when(tradeClock.instant()).thenReturn(now);
+    var repository = new InMemorySurviveWorldRepository();
+    var service = new SurviveService(tradeClock, () -> 25, 10, repository);
+    var alice = service.join(null, "Alice");
+    var bob = service.join(null, "Bob");
+    var wood = act(service, alice.token(), SurviveAction.GATHER);
+    act(service, bob.token(), SurviveAction.GATHER_STONE);
+    service.offerTrade(alice.token(), null, new SurviveRequests.TradeOffer(
+        UUID.fromString(bob.state().survivorId()), SurviveResource.WOOD, 1, SurviveResource.STONE, 1, wood.revision()));
+
+    when(tradeClock.instant()).thenReturn(now.plusSeconds(120));
+    var aliceAfterExpiry = service.find(alice.token()).orElseThrow();
+    var bobAfterExpiry = service.find(bob.token()).orElseThrow();
+    assertNull(aliceAfterExpiry.trade());
+    assertNull(bobAfterExpiry.trade());
+    assertEquals("The trade offer expired.", aliceAfterExpiry.message());
+    assertEquals("The trade offer expired.", bobAfterExpiry.message());
+    assertEquals(1, aliceAfterExpiry.wood());
+    assertEquals(1, bobAfterExpiry.stone());
+    assertTrue(repository.load().orElseThrow().trades().isEmpty());
+  }
+
+  @Test
   void rejectedGiftsDoNotChangeEitherInventoryOrRevision() {
     var service = new SurviveService(clock, () -> 50, 10, new InMemorySurviveWorldRepository());
     var alice = service.join(null, "Alice");

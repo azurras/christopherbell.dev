@@ -305,7 +305,9 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
             ? `${state.trade.partner} offered ${terms}. Open Trade in the camp menu to respond.`
             : `You offered ${terms} to ${state.trade.partner}.`);
         } else if (previous.trade && !state.trade) {
-          const tradeResult = state.message?.startsWith('You traded ') || state.message?.endsWith(' ended the trade offer.');
+          const tradeResult = state.message?.startsWith('You traded ') || state.message?.endsWith(' ended the trade offer.')
+            || state.message === 'Your trade partner left camp. The trade offer ended.'
+            || state.message === 'The trade offer expired.';
           appendSurviveLogMessage(documentRoot, tradeResult ? state.message : 'The trade offer is no longer available.');
         }
       }

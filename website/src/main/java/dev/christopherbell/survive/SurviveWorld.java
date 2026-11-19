@@ -251,6 +251,32 @@ final class SurviveWorld {
     }
   }
 
+  /** Releases expired offers and offers whose participants no longer exist. */
+  boolean settleTradesUntil(Instant now) {
+    if (trades.isEmpty()) {
+      return false;
+    }
+    var survivorsById = new LinkedHashMap<String, SurvivePlayer>();
+    players.values().forEach(player -> survivorsById.put(player.survivorId, player));
+    return trades.values().removeIf(offer -> {
+      var sender = survivorsById.get(offer.senderId());
+      var recipient = survivorsById.get(offer.recipientId());
+      if (sender == null || recipient == null) {
+        var remaining = sender == null ? recipient : sender;
+        if (remaining != null) {
+          recordTradeMessage(remaining, "Your trade partner left camp. The trade offer ended.");
+        }
+        return true;
+      }
+      if (!now.isBefore(offer.expiresAt())) {
+        recordTradeMessage(sender, "The trade offer expired.");
+        recordTradeMessage(recipient, "The trade offer expired.");
+        return true;
+      }
+      return false;
+    });
+  }
+
   private SurviveTrade.View tradeView(SurvivePlayer player, Instant now) {
     return trades.values().stream()
         .filter(offer -> offer.involves(player.survivorId) && now.isBefore(offer.expiresAt()))
