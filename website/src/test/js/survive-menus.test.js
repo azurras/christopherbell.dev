@@ -4,6 +4,34 @@ import {
   keepFocusInActionBar, mountActionMenus, syncActionMenus,
 } from '../../main/resources/static/js/survive-menus.js';
 import { createFakeDocument } from './support/fake-dom.js';
+import { mountMainMenu } from '../../main/resources/static/js/survive-main-menu.js';
+
+test('horizontal navigation switches main menu pages and restores each page cursor', () => {
+  const { documentRoot, h } = createFakeDocument();
+  const status = h('summary'), items = h('summary'), map = h('summary');
+  const itemEntry = h('details', {}, items);
+  const mapEntry = h('details', { 'data-menu-page': '2' }, map);
+  const pageLabel = h('span'), next = h('button');
+  const pager = h('div', { class: 'survive-menu-pages' }, pageLabel, next);
+  const menu = h('details', { id: 'surviveMainMenu' }, h('div', { class: 'survive-main-menu-list' },
+    h('details', {}, status), itemEntry, mapEntry, pager));
+  documentRoot.body.appendChild(menu);
+  const dispose = mountMainMenu(documentRoot);
+  menu.open = true;
+  items.dispatch('focusin');
+  items.dispatch('keydown', { key: 'ArrowRight' });
+  assert.equal(mapEntry.hidden, false);
+  assert.equal(itemEntry.hidden, true);
+  assert.equal(pageLabel.textContent, '2 / 2');
+  assert.equal(documentRoot.activeElement, map);
+  next.click();
+  assert.equal(pageLabel.textContent, '1 / 2');
+  assert.equal(documentRoot.activeElement, items);
+  dispose();
+  next.click();
+  assert.equal(mapEntry.hidden, false);
+  assert.equal(pager.hidden, true);
+});
 
 function actionBarFixture() {
   const { documentRoot, h } = createFakeDocument();
