@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createIslandMaterials } from '../../main/resources/static/js/survive-world-materials.js';
 
-test('the authored face is painted before uploading the existing shared actor atlas', () => {
+test('the authored atlas includes face and gear paint and preserves the separate actor atlas', () => {
   const images = [];
   const uploads = [];
   let textureUnit;
@@ -25,7 +25,9 @@ test('the authored face is painted before uploading the existing shared actor at
       return { operations, getContext: () => ({
         drawImage: image => operations.push(image.src),
         createRadialGradient: () => ({ addColorStop() {} }),
-        fillRect: () => operations.push('skin shading'),
+        fillRect(x, y, width, height) {
+          operations.push(x === 508 ? { x, y, width, height, color: this.fillStyle } : 'skin shading');
+        },
         fill: () => operations.push('face paint'),
       }) };
     },
@@ -47,6 +49,7 @@ test('the authored face is painted before uploading the existing shared actor at
     assert.equal(uploads[2].operations[0], '/images/survive/authored-actors.jpg');
     assert.equal(uploads[2].operations[1], 'skin shading');
     assert.ok(uploads[2].operations.slice(1).includes('face paint'));
+    assert.deepEqual(uploads[2].operations.at(-1), { x: 508, y: 256, width: 8, height: 18, color: '#746046' });
     assert.equal(materials.authoredActorsReady, true);
   } finally { materials.dispose(); }
 });
