@@ -226,6 +226,12 @@ bounded coverage, dashboard-only results and deferred billing/email delivery.
 
 ### Survive island
 
+`survive-main-menu.js` manages the two Main Menu pages and remembers the cursor on each.
+Left and Right change pages from the category list. Up and Down browse the active window.
+Confirm enters a category or advances from a carried item to its available commands.
+Cancel backs out one level, including the item drop confirmation. The controller uses the
+same navigation as the keyboard. The page arrows also support the mouse.
+
 The North Gate ruin uses a continuous arch behind its face stones. Recessed joints
 and staggered wall courses give the masonry visible depth without adding a texture
 or changing the opening over the trail.

@@ -135,7 +135,7 @@
                     </details>
                   </div>
                 </details>
-                <details name="survive-main-category" id="surviveMapSection" class="survive-panel survive-section survive-map-section">
+                <details name="survive-main-category" data-menu-page="2" id="surviveMapSection" class="survive-panel survive-section survive-map-section">
                   <summary>Map</summary>
                   <div class="survive-main-menu-panel">
                     <svg class="survive-island-map" role="img" aria-labelledby="surviveMapTitle surviveMapDescription" viewBox="-82 -82 164 164">
@@ -164,7 +164,7 @@
                     </svg>
                   </div>
                 </details>
-                <details name="survive-main-category" id="surviveSectionCamp" class="survive-panel survive-section">
+                <details name="survive-main-category" data-menu-page="2" id="surviveSectionCamp" class="survive-panel survive-section">
                   <summary>Camp &amp; sharing</summary>
                   <div class="survive-main-menu-panel">
                     <h3 class="survive-panel-title">Shared camp</h3>
@@ -206,7 +206,7 @@
                     <p class="survive-muted">Camp updates every 5 seconds while this page is visible.</p>
                   </div>
                 </details>
-                <details name="survive-main-category" id="surviveSectionGuide" class="survive-panel survive-section survive-guide">
+                <details name="survive-main-category" data-menu-page="2" id="surviveSectionGuide" class="survive-panel survive-section survive-guide">
                   <summary>Guide</summary>
                   <div class="survive-main-menu-panel">
                     <p>The camp picture shows the shared world as it is now. Click the trees to gather wood, the rocks for stone, the dark forest edge to hunt, the fire to stand guard or rest, a tent to sleep or wake, a boat to sail away, and an animal to attack it. Glowing places are the moves you can make now; every move is also in the menus below the picture.</p>
@@ -223,11 +223,16 @@
                     <p>Your logged-in account has one saved survivor. Moves, supplies, combat and the shared camp are saved after each successful command and survive server restarts. Log in again to resume. Guests use a temporary browser session and expire after two idle hours. Saved survivors keep their progress while inactive and return to the active camp when resumed. Guest progress stays separate from your account character. This version has no chat or matchmaking.</p>
                   </div>
                 </details>
-                <button id="surviveGameViewToggle" type="button">Show page view</button>
+                <button id="surviveGameViewToggle" data-menu-page="2" type="button">Show page view</button>
+                <div class="survive-menu-pages" hidden>
+                  <button type="button" aria-label="Previous menu page">‹</button>
+                  <span aria-live="polite">1 / 2</span>
+                  <button type="button" aria-label="Next menu page">›</button>
+                </div>
               </div>
             </details>
           </div>
-          <p id="surviveWorldHelp" class="survive-muted">Walk with WASD or arrows. Drag or use Q / R to turn the camera, use the wheel or Page Up / Page Down to zoom, and press Home to reset. Click a creature’s name or cycle targets with Tab or keypad 0. Enter opens Commands and L or keypad * locks onto a combat target. Minus opens Main Menu, plus opens Chat log, and Escape closes a window. On a controller, use the D-pad to select targets and menu items. The sticks walk, turn and zoom. Click the left stick to lock on and the right stick to reset. A confirms, B cancels, X opens Main Menu, and Y opens Chat log.</p>
+          <p id="surviveWorldHelp" class="survive-muted">Walk with WASD or arrows. Drag or use Q / R to turn the camera, use the wheel or Page Up / Page Down to zoom, and press Home to reset. Click a creature’s name or cycle targets with Tab or keypad 0. Enter opens Commands and L or keypad * locks onto a combat target. Minus opens Main Menu. Up and Down select a row, Left and Right switch pages, Enter opens a selection, and Escape goes back one window. Plus opens Chat log. On a controller, use the D-pad to select targets and menu items. The sticks walk, turn and zoom. Click the left stick to lock on and the right stick to reset. A confirms, B cancels, X opens Main Menu, and Y opens Chat log.</p>
         </div>
         <svg id="surviveCampScene" class="survive-scene" role="img" aria-label="The camp" viewBox="0 0 960 540"></svg>
         <h2 id="surviveScene">At the edge of the wilderness</h2>

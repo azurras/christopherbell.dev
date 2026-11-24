@@ -3,6 +3,7 @@ import { API } from './lib/api.js';
 import { fetchJson } from './lib/util.js';
 import { appendSurviveLogMessage, syncSurviveLog } from './survive-log.js';
 import { mountSurviveController } from './survive-controller.js';
+import { mountMainMenu } from './survive-main-menu.js';
 import { attackDelayLabel, renderSurviveItems } from './survive-items.js';
 import { keepFocusInActionBar, mountActionMenus, syncActionMenus } from './survive-menus.js';
 import { mountPanelSections, summarizeCamp } from './survive-panel.js';
@@ -243,6 +244,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const logToggle = documentRoot.getElementById('surviveLogToggle');
   const logScrollback = documentRoot.getElementById('surviveLogScrollback');
   const world = mountSurviveWorld(documentRoot, requestJson, performAction, undefined, () => readWorld());
+  const removeMainMenu = mountMainMenu(documentRoot);
   const controller = mountSurviveController(documentRoot, world, () => { if (state) readWorld(); });
   const party = mountSurviveParty(documentRoot, (command, targetId) => {
     void sendRequest(API.survive.party, { method: 'POST', body: JSON.stringify({ command, targetId }) });
@@ -530,6 +532,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       itemUse?.removeEventListener('click', useItem);
       gameViewToggle?.removeEventListener('click', toggleGameView);
       controller.dispose();
+      removeMainMenu();
       world.dispose();
       documentRoot.getElementById('surviveCampScene').removeEventListener('click', act);
       restart.removeEventListener('click', showJoin);

@@ -217,6 +217,13 @@
   border-left: .4em solid #e8da9e;
 }
 .survive-main-menu-panel { padding: .65rem; }
+.survive-menu-pages:not([hidden]) { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--window-edge); }
+.survive-menu-pages button { padding: .2rem .7rem; font-size: 1.1rem; }
+.survive-menu-pages span { font-variant-numeric: tabular-nums; }
+.survive-main-menu[data-paged] .survive-main-menu-list :is(summary, button, select, input):focus {
+  outline: 2px solid #f3d392;
+  outline-offset: -2px;
+}
 .survive-main-menu-panel .survive-island-map { width: 100%; }
 .survive-main-menu-list .survive-section[open] { padding-bottom: 0; }
 .survive-main-menu-list .survive-section[open] > summary, .survive-main-menu-list summary:hover, .survive-main-menu-list summary:focus-visible,
