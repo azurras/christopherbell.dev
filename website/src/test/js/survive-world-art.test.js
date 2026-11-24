@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { prepareActorArt } from '../../main/resources/static/js/survive-authored-actors.js';
 import { createDynamicMesh } from '../../main/resources/static/js/survive-dynamic-mesh.js';
-import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS } from '../../main/resources/static/js/survive-world-art.js';
+import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS, SKY_MATERIAL, WAYSTATION_LANTERN } from '../../main/resources/static/js/survive-world-art.js';
 import { cameraMatrix, fishingFloat, fishingPhase, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
 import { acceptRemoteStrike, actionPose, combatStance, enemyCountered, enemyCounterPose, enemyDefeated, enemyFallPose } from '../../main/resources/static/js/survive-action-pose.js';
 import { drawBoat, drawCampFlame, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
@@ -313,6 +313,20 @@ test('the gate route has raised banks and a walkable bridge over rendered water'
   assert.ok(underBridge.some(vertex => vertex[7] > 1 && vertex[8] < 0.06));
 });
 
+test('the waystation light is centered inside the lantern glass by the door', () => {
+  const { vertices } = islandMesh();
+  const glass = [];
+  for (let offset = 0; offset < vertices.length; offset += MESH_VERTEX_FLOATS) {
+    if (vertices[offset + 6] === 14.5) glass.push(vertices.slice(offset, offset + 3));
+  }
+  assert.equal(glass.length, 36);
+  for (const [axis, center] of WAYSTATION_LANTERN.entries()) {
+    const coordinates = glass.map(point => point[axis]);
+    assert.ok(Math.abs((Math.min(...coordinates) + Math.max(...coordinates)) / 2 - center) < 1e-8);
+  }
+  assert.ok(WAYSTATION_LANTERN[1] > groundHeight(WAYSTATION_LANTERN[0], WAYSTATION_LANTERN[2]) + 1);
+});
+
 test('North Gate face joints reveal recessed mortar and the passage stays open', () => {
   const { vertices } = islandMesh();
   const stride = MESH_VERTEX_FLOATS;
@@ -425,4 +439,15 @@ test('adventurer gait changes geometry and the follow camera anchors to each lan
     const matrix = cameraMatrix(landmark, 0, 16 / 9, elevation);
     assert.equal(projectPoint(matrix, [landmark.x, elevation + 2.5, landmark.z]).visible, true);
   }
+});
+
+test('the sky material covers the dome above and below the water horizon', () => {
+  const { vertices } = islandMesh();
+  const skyElevations = [];
+  for (let index = 0; index < vertices.length; index += MESH_VERTEX_FLOATS) {
+    if (vertices[index + 6] === SKY_MATERIAL) skyElevations.push(vertices[index + 1]);
+  }
+  assert.equal(skyElevations.length, 28 * 18 * 3);
+  assert.ok(skyElevations.some(elevation => elevation > 0));
+  assert.ok(skyElevations.some(elevation => elevation < -0.66));
 });

@@ -255,6 +255,9 @@ The desktop Main Menu switches between the browser-filling game and the site
 page view without resetting the session.
 The North Gate waystation uses roof courses and a cloth pennant to mark the
 staffed building. The keeper wears a mantle and cap distinct from the player.
+At night, the waystation lantern lights the entrance with a warm pool of light.
+Cool ambient lighting and horizon haze distinguish night from dusk across the
+terrain and water.
 The North Gate road has grouped verge plants outside the walking line.
 Enemy counter animation follows a confirmed hit or spent guard in the combat
 snapshot. The player's attack pose stays separate, and reduced motion disables
@@ -283,7 +286,7 @@ same request path as game actions. Its roster and chat notices come from the
 requesting survivor's snapshot. Polls preserve the selected invite recipient.
 
 `survive-world-model.js` owns display-only landmark filtering, camera projection and
-movement prediction. `survive-world-art.js` generates terrain, layered tree
+movement prediction. The sky dome has its own material so its lower hemisphere uses the same horizon color as the upper sky. `survive-world-art.js` generates terrain, layered tree
 crowns, underbrush and actor
 meshes. `survive-world-materials.js` loads original grass, path, mossy stone,
 bark and foliage images from `static/images/survive` into WebGL textures.
