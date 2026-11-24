@@ -316,7 +316,7 @@ does not make the local adventurer swing.
 constants in `lib/api.js`; it never computes survival rewards. The SVG scene remains
 the fallback for unavailable/lost WebGL. Labels use text nodes, never HTML.
 
-`survive-world-feedback.js` renders the current enemy name, health and marker.
+`survive-world-feedback.js` renders the current enemy name, health and marker. Its heading distinguishes an available Engage from active automatic attacks.
 The Chat log is the only surface for command results. Roaming animals interpolate
 between server poses and approach the player visually on engagement.
 `survive-action-pose.js` maps confirmed commands to timed body and tool poses.
@@ -365,6 +365,9 @@ keeps its encounter heading.
 
 Shared combat uses the acknowledged enemy position for both fighters.
 Personal encounters retain the local approach animation.
+
+Check stays available on a selected target during automatic combat. It reports
+the enemy's current health and threat description in the chat log.
 
 The Items panel confirms a permanent discard and shows the camp pack upgrade.
 The server owns the pack capacity and validates the selected item.
