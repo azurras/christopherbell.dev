@@ -96,6 +96,10 @@ export function mountSurviveController(documentRoot, world, onResume) {
 
   function moveVertical(focused, step) {
     if (focused?.tagName === 'SELECT' && focused.size > 1 && stepSelect(focused, step)) return;
+    if (mainMenu.open && mainMenu.dataset.paged && mainMenu.contains(focused)) {
+      key(focused, step > 0 ? 'ArrowDown' : 'ArrowUp');
+      return;
+    }
     moveMenuFocus(step);
   }
 
@@ -108,13 +112,16 @@ export function mountSurviveController(documentRoot, world, onResume) {
       const step = pressed(LEFT) ? -1 : 1;
       if (focused?.tagName === 'SELECT') {
         stepSelect(focused, step);
+      } else if (mainMenu.open && mainMenu.dataset.paged && mainMenu.contains(focused)) {
+        key(focused, step > 0 ? 'ArrowRight' : 'ArrowLeft');
       } else if (join.hidden && !game.hidden && !currentMenu() && focused === canvas) {
         key(canvas, step > 0 ? 'Numpad0' : 'NumpadDecimal');
       } else moveMenuFocus(step);
     }
     if (pressed(CONFIRM)) {
       const target = documentRoot.activeElement;
-      if (target !== canvas && (game.contains(target) || join.contains(target))) target.click();
+      if (mainMenu.open && mainMenu.dataset.paged && target?.tagName === 'SELECT' && target.size > 1) key(target, 'Enter');
+      else if (target !== canvas && (game.contains(target) || join.contains(target))) target.click();
       else if (!game.hidden && !startOver.hidden && !currentMenu()) startOver.click();
       else if (!game.hidden) key(canvas, 'Enter');
     }
