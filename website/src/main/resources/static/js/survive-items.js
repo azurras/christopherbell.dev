@@ -43,6 +43,8 @@ export function renderSurviveItems(documentRoot, state, pending) {
     list.dataset.owner = state.survivorId;
   }
   const selected = entries.find(item => item.id === list.value);
+  const heading = documentRoot.getElementById('surviveSelectedItem');
+  if (heading) heading.textContent = selected?.name ?? 'Empty pack';
   documentRoot.getElementById('surviveItemDetail').textContent = selected?.detail ?? 'Your pack is empty.';
   const drop = documentRoot.getElementById('surviveItemDrop');
   if (drop) drop.hidden = !selected || !state.actions.includes('DROP_ITEM');

@@ -140,6 +140,9 @@ function matchesSimple(element, selector) {
   if (selector.startsWith('#')) {
     return element.id === selector.slice(1);
   }
+  if (/^\.[\w-]+$/.test(selector)) {
+    return (element.getAttribute('class') ?? '').split(/\s+/).includes(selector.slice(1));
+  }
   return element.tagName === selector.toUpperCase();
 }
 
