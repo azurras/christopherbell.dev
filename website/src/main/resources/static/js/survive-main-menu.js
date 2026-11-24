@@ -68,6 +68,11 @@ export function mountMainMenu(documentRoot) {
   function onKey(event) {
     if (!menu.open || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
     const target = event.target;
+    if (event.key === 'Enter' && target.matches('summary') && list.contains(target)) {
+      event.preventDefault();
+      if (!event.repeat) target.click();
+      return;
+    }
     if (event.key === 'Escape') {
       const drop = documentRoot.getElementById('surviveDropConfirm');
       if (drop && !drop.hidden && list.contains(drop) && drop.getClientRects().length) {
