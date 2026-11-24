@@ -71,6 +71,29 @@ float spark(vec2 point, float seed) {
   return (1.0 - smoothstep(0.004, 0.022, length((point - ember) * vec2(1.0, 1.6))))
     * sin(rise * 3.14159);
 }
+vec3 shadeGateStream() {
+  // Advance both wave layers downstream and keep their phase continuous across the clock wrap.
+  float cycle = time * (6.283185 / 120.0);
+  float crossCurrent = uv.x;
+  float waterDepth = uv.y;
+  float eddies = cloudNoise(vec2(surface.x * 0.75, crossCurrent * 2.2));
+  float longRipple = sin(7.1 * surface.x + 4.2 * crossCurrent + eddies * 1.65 - cycle * 61.0);
+  float shortRipple = sin(13.6 * surface.x - 2.4 * crossCurrent - cycle * 103.0);
+  float longCrest = smoothstep(0.70, 0.98, longRipple) * (0.24 + eddies * 0.76);
+  float shortCrest = smoothstep(0.77, 0.99, shortRipple) * smoothstep(0.31, 0.75, eddies);
+  float shallow = 1.0 - smoothstep(0.02, 0.23, waterDepth);
+  vec2 refraction = vec2(longRipple, shortRipple) * 0.035;
+  vec3 bed = texture2D(stoneTile, (surface.xz + refraction) * 0.52).rgb;
+  vec3 water = mix(vec3(0.065, 0.213, 0.205), bed * vec3(0.67, 0.85, 0.75), shallow * 0.82);
+  water *= 0.90 + eddies * 0.21 + longRipple * 0.08;
+  float crests = (longCrest * 0.39 + shortCrest * 0.18) * (1.0 - smoothstep(12.0, 28.0, depth));
+  float reflectedSky = 0.10 + crests * (1.0 - shallow * 0.55);
+  float bankFroth = shallow * shallow * smoothstep(0.48, 0.77, eddies) * (0.08 + 0.3 * longCrest);
+  water = mix(water * daylight, sky, reflectedSky + bankFroth);
+  // The timber deck dims both the bed and the glints where it covers the channel.
+  float underDeck = 1.0 - smoothstep(1.42, 2.30, abs(surface.x + 0.36));
+  return water * (1.0 - underDeck * 0.46);
+}
 void main() {
   if (surfaceMaterial > 10.0 && surfaceMaterial < 11.0) {
     vec2 point = vec2(uv.x - 0.5, uv.y);
@@ -100,11 +123,13 @@ void main() {
     gl_FragColor = vec4(mix(mix(sky, zenith, elevation), cloudColor, cloud * 0.85), 1.0);
     return;
   }
+  if (surfaceMaterial > 13.0) {
+    gl_FragColor = vec4(mix(shadeGateStream(), sky, smoothstep(36.0, 144.0, depth)), 1.0);
+    return;
+  }
   float textureDetail = grain(floor(surface * 9.0)) * 0.14 + grain(floor(surface * 2.5)) * 0.13;
   vec3 albedo = tint * (0.88 + textureDetail);
-  if (surfaceMaterial > 13.0) {
-    albedo = vec3(0.14, 0.31, 0.30);
-  } else if (surfaceMaterial > 11.0) {
+  if (surfaceMaterial > 11.0) {
     albedo = tint * texture2D(authoredActorAtlas, uv).rgb;
   } else if (surfaceMaterial > 5.0) {
     float index = floor(surfaceMaterial) - 5.0;
@@ -116,6 +141,9 @@ void main() {
     vec4 leaves = texture2D(foliageCard, uv);
     if (leaves.a < 0.45) discard;
     albedo = leaves.rgb * (vec3(0.38, 0.46, 0.40) + tint * 0.67);
+  } else if (surfaceMaterial > 3.7) {
+    vec3 bark = texture2D(barkTile, uv).rgb;
+    albedo = bark * (vec3(0.35) + tint * 2.40);
   } else if (surfaceMaterial > 3.0) {
     albedo = mix(albedo, texture2D(barkTile, uv * vec2(0.73, 0.32)).rgb, 0.70);
   } else if (surfaceMaterial > 2.0) {
@@ -137,7 +165,7 @@ void main() {
     float flicker = 0.90 + 0.10 * sin(fireTime * 6.0);
     lit += albedo * vec3(0.82, 0.37, 0.11) * firelight * flicker * (1.42 - daylight);
   }
-  if (surface.y < -0.64 || surfaceMaterial > 13.0) {
+  if (surface.y < -0.64) {
     float ripple = sin(surface.x * 1.6 + surface.z * 0.7 + time * 2.4)
       * sin(surface.z * 1.2 - surface.x * 0.4 - time * 1.8);
     float foam = (1.0 - smoothstep(0.1, 1.6, abs(length(surface.xz) - 78.8))) * (0.4 + ripple * 0.3);

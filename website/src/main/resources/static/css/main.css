@@ -580,32 +580,14 @@ body {
     }
 }
 
-.home-page {
-    overflow-x: hidden;
+.home-tools {
+    max-width: 1120px;
+    padding-top: clamp(2.75rem, 7vw, 6rem);
+    padding-bottom: clamp(2.5rem, 6vw, 4.5rem);
 }
 
-.home-void-gateway {
-    background:
-        linear-gradient(180deg, rgba(7, 11, 16, 0.92), rgba(7, 11, 16, 0.96)),
-        url("/images/photos/IMG_0390.jpeg") center center / cover fixed no-repeat;
-}
-
-.home-void-shell {
-    min-height: calc(100vh - 56px);
-    display: flex;
-    align-items: center;
-    padding: 5.25rem 0 3rem;
-}
-
-.home-void-hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.74fr);
-    gap: 2rem;
-    align-items: center;
-}
-
-.home-void-copy {
-    max-width: 760px;
+.home-tools-heading {
+    margin-bottom: 2rem;
 }
 
 .home-kicker {
@@ -617,191 +599,93 @@ body {
     margin-bottom: 0.75rem;
 }
 
-.home-void-copy h1 {
-    max-width: 760px;
-    font-size: 5.9rem;
-    line-height: 0.92;
-    font-weight: 900;
-    color: #ffffff;
-    text-shadow: 0 4px 0 rgba(61, 78, 94, 0.55);
-    margin-bottom: 1.25rem;
-}
-
-.home-intro {
-    max-width: 630px;
-    color: rgba(229, 238, 240, 0.82);
-    font-size: 1.25rem;
-    line-height: 1.55;
-    margin-bottom: 1.75rem;
-}
-
-.home-void-primary {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.65rem;
-    min-height: 3.1rem;
-    padding: 0.75rem 1.15rem;
-    border-color: rgba(117, 202, 187, 0.82);
-    background: #75cab9;
-    color: #071016;
-    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.34);
-}
-
-.home-void-primary:hover,
-.home-void-primary:focus-visible {
-    border-color: #a5e3d8;
-    background: #a5e3d8;
-    color: #071016;
-}
-
-.home-void-signal-panel {
-    border: 1px solid rgba(128, 190, 185, 0.22);
-    border-radius: 0.5rem;
-    background: rgba(5, 9, 14, 0.74);
-    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.34);
-    backdrop-filter: blur(12px);
-    overflow: hidden;
-}
-
-.home-void-panel-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
-    padding: 1rem 1.1rem;
-    border-bottom: 1px solid rgba(128, 190, 185, 0.18);
-    color: rgba(229, 238, 240, 0.7);
-    font-size: 0.78rem;
+.home-tools-heading h1 {
+    margin: 0 0 0.65rem;
+    font-size: clamp(3rem, 8vw, 5.5rem);
+    line-height: 1;
     font-weight: 800;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    color: #fff;
 }
 
-.home-void-active {
-    padding: 1rem;
+.home-tools-heading p:last-child {
+    max-width: 46rem;
+    margin: 0;
+    color: #b7c9d1;
+    font-size: 1.1rem;
 }
 
-.home-void-signal-list,
-.home-void-empty {
+.home-tools-grid {
     display: grid;
-    gap: 0.65rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+    gap: 1rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
 }
 
-.home-void-signal-item,
-.home-void-empty {
-    border: 1px solid rgba(128, 190, 185, 0.14);
-    border-radius: 0.45rem;
-    color: rgba(229, 238, 240, 0.82);
-    background: rgba(8, 16, 20, 0.82);
+.home-tool-card {
+    position: relative;
+    display: grid;
+    align-content: start;
+    gap: 0.55rem;
+    height: 100%;
+    padding: 1.15rem;
+    border: 1px solid #365456;
+    border-radius: 0.6rem;
+    background: #101d23;
+    color: #f1f7f8;
     text-decoration: none;
 }
 
-.home-void-signal-item {
+.home-tool-card:hover,
+.home-tool-card:focus-visible {
+    border-color: #92d9cb;
+    background: #152930;
+    color: #fff;
+}
+
+.home-tool-card:focus-visible,
+.home-feed-link a:focus-visible {
+    outline: 2px solid #92d9cb;
+    outline-offset: 3px;
+}
+
+.home-tool-icon {
     display: grid;
-    grid-template-columns: 1fr;
-    align-items: start;
-    min-height: 5.1rem;
-    padding: 0.75rem;
+    place-items: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    margin-bottom: 0.35rem;
+    border-radius: 0.45rem;
+    background: #1c393e;
+    color: #a8e9dc;
 }
 
-.home-void-empty {
-    display: grid;
-    gap: 0.7rem;
-    min-height: 18rem;
-    align-content: center;
-    padding: 1.15rem;
+.home-tool-name {
+    font-size: 1.15rem;
+    font-weight: 700;
 }
 
-.home-void-signal-item:hover,
-.home-void-signal-item:focus-visible {
-    border-color: rgba(117, 202, 187, 0.52);
-    color: #ffffff;
-    background: rgba(12, 25, 29, 0.9);
+.home-tool-description {
+    color: #b7c9d1;
+    line-height: 1.5;
 }
 
-.home-void-eyebrow {
-    color: rgba(222, 177, 95, 0.9);
-    font-size: 0.78rem;
-    font-weight: 900;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+.home-tool-arrow {
+    position: absolute;
+    top: 1.75rem;
+    right: 1.15rem;
+    color: #a8e9dc;
 }
 
-.home-void-signal-copy {
-    min-width: 0;
+.home-feed-link {
+    margin: 1.5rem 0 0;
 }
 
-.home-void-signal-item strong,
-.home-void-empty strong {
-    color: #ffffff;
-    display: block;
-    font-size: 1rem;
-    line-height: 1.1;
-    margin-bottom: 0.25rem;
-}
-
-.home-void-active-text {
-    color: rgba(229, 238, 240, 0.84);
-    display: -webkit-box;
-    font-size: 0.92rem;
-    line-height: 1.35;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-}
-
-.home-void-active-stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.55rem;
-    margin-top: 0.55rem;
-}
-
-.home-void-active-stats span {
-    border: 1px solid rgba(117, 202, 187, 0.28);
-    border-radius: 999px;
-    color: #d8f3ed;
-    font-size: 0.82rem;
-    font-weight: 800;
-    padding: 0.3rem 0.62rem;
-}
-
-@media (max-width: 992px) {
-    .home-void-shell {
-        min-height: auto;
-        padding-top: 4rem;
-    }
-
-    .home-void-hero {
-        grid-template-columns: 1fr;
-    }
-
-    .home-void-copy h1 {
-        font-size: 4.3rem;
-    }
-}
-
-@media (max-width: 576px) {
-    .home-void-gateway {
-        background-attachment: scroll;
-    }
-
-    .home-void-shell {
-        padding: 3rem 0 2rem;
-    }
-
-    .home-void-copy h1 {
-        font-size: 3.15rem;
-        text-shadow: 0 3px 0 rgba(61, 78, 94, 0.48);
-    }
-
-    .home-intro {
-        font-size: 1.08rem;
-    }
-
-    .home-void-empty {
-        min-height: 14rem;
-    }
+.home-feed-link a {
+    color: #a8e9dc;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
 }
 
 .site-page {

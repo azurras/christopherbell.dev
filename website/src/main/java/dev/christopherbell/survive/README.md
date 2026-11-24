@@ -259,7 +259,11 @@ shared routes. Hunt can reveal the nearest unclaimed animal within five metres.
 The animal stays claimed until the encounter ends and then respawns after 35
 seconds. Solo field routes and claims are process-local. The older text adventure still
 uses its hunt and ambush rolls. Select the target, Check it, or Engage. Engaging starts a server-timed
-exchange every three seconds. Each automatic attack builds 50 TP up to 300.
+exchange using the held weapon's delay. Bare hands take 3 seconds, clubs 3.2,
+stone axes 3.8 and spears 4.2. Each automatic attack builds 50 TP up to 300.
+Equipment and packed weapon details show the delay. Existing saved strike
+deadlines finish at their saved time, then use the current weapon's cadence.
+A weapon that breaks uses the bare-hand delay for the next strike.
 Weapon skills spend 100 TP and restart the attack interval. Defend guards the
 next exchange. Disengage stops automatic attacks and leaves the animal in place.
 Flee ends the encounter at the existing cost. The text controls expose the same
@@ -333,3 +337,12 @@ Active shared fighters receive the current enmity leader in their private
 snapshot once the encounter has recorded damage. The viewport shows that
 fighter in the vitals panel. The label reflects current enmity and may change
 as it fades or a fighter leaves.
+
+Items can permanently discard one supply or packed weapon after confirmation.
+Camp pack upgrades cost four wood and two stone for five slots, up to thirty.
+Older saves start with ten slots. Gathering, rewards and gifts use the
+recipient's current capacity.
+
+### Player trade
+
+Open **Camp & sharing → Trade** to offer one stack of wood, food or stone for a different supply. The recipient sees the exact quantities and can accept or decline. The sender can withdraw. An offer lasts two minutes and does not reserve stock. Each survivor can have one pending offer. Both players must be free to trade at camp, and the server checks both inventories and their space after outgoing items are removed. Acceptance transfers both stacks in one versioned save. Offers and results appear in the participants' chat logs. Gifts remain available for one-way transfers.

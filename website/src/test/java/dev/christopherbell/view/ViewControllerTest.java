@@ -138,24 +138,23 @@ public class ViewControllerTest {
   }
 
   @Test
-  @DisplayName("Home page renders social preview metadata")
-  public void getHomePage_rendersSocialPreviewMetadata() throws Exception {
-    mockMvc
-        .perform(get("/"))
+  @DisplayName("Home page renders public tools and a secondary Void link")
+  void homePageRendersPublicTools() throws Exception {
+    mockMvc.perform(get("/"))
         .andExpect(status().isOk())
         .andExpect(content().string(containsString("summary_large_image")))
-        .andExpect(
-            content()
-                .string(
-                    containsString(
-                        "https://www.christopherbell.dev/images/previews/christopherbell-dev.png")))
-        .andExpect(content().string(containsString("The Void preview for christopherbell.dev")))
-        .andExpect(content().string(containsString("Drop into the Void.")))
-        .andExpect(content().string(containsString("Enter Void")))
-        .andExpect(content().string(containsString("home-void-gateway")))
-        .andExpect(content().string(containsString("homeActivePost")))
-        .andExpect(content().string(containsString("Signal Rail")))
-        .andExpect(content().string(not(containsString("Secondary signals"))));
+        .andExpect(content().string(containsString("href=\"/wfl\"")))
+        .andExpect(content().string(containsString("href=\"/canes-box-tracker\"")))
+        .andExpect(content().string(containsString("href=\"/vin-decoder\"")))
+        .andExpect(content().string(containsString("href=\"/zip-coordinates\"")))
+        .andExpect(content().string(containsString("href=\"/site-monitor\"")))
+        .andExpect(content().string(containsString("href=\"/survive\"")))
+        .andExpect(content().string(containsString("href=\"/void\"")))
+        .andExpect(content().string(not(containsString("href=\"/back-office\""))))
+        .andExpect(content().string(not(containsString("href=\"/command-center\""))))
+        .andExpect(content().string(not(containsString("href=\"/shared\""))))
+        .andExpect(content().string(not(containsString("href=\"/music\""))))
+        .andExpect(content().string(not(containsString("/js/home.js"))));
   }
 
   @Test

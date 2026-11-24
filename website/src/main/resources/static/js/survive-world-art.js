@@ -7,6 +7,7 @@ const TAU = Math.PI * 2;
 export const MESH_VERTEX_FLOATS = 9;
 const STONE_MATERIAL = 2.5;
 const BARK_MATERIAL = 3.5;
+const TRUNK_MATERIAL = 3.75;
 const FOLIAGE_MATERIAL = 4.5;
 const STREAM_MATERIAL = 13.5;
 const BRIDGE_HEIGHT = 0.43;
@@ -31,8 +32,14 @@ function terrainHeight(x, z) {
   const ridge = 3.4 * Math.exp(-((x - 34) ** 2 + (z + 19) ** 2) / 220);
   const base = (rollingGround + ridge) * inland * outsideCamp - (1 - inland) * 0.52;
   const banks = 3.8 * Math.exp(-((Math.abs(x) - 8) ** 2 / 17 + (z + 13) ** 2 / 35));
-  const channel = clampUnit((15 - Math.abs(x)) / 4) * clampUnit((2.7 - Math.abs(z - streamCenter(x))) / 1.5);
-  return base + banks + (-0.60 - base - banks) * channel;
+  const distanceFromStream = Math.abs(z - streamCenter(x));
+  const streamReach = clampUnit((15 - Math.abs(x)) / 4);
+  const channel = streamReach * clampUnit((2.7 - distanceFromStream) / 1.5);
+  const bankReach = streamReach * clampUnit((4.1 - distanceFromStream) / 1.4);
+  const uphillBank = base + banks;
+  // Fill low spots beside the cutting so the water ends against earth.
+  const bankHeight = uphillBank + Math.max(0, 0.08 - uphillBank) * bankReach;
+  return bankHeight + (-0.60 - bankHeight) * channel;
 }
 
 /** Anchors walking and rendering to the surface, including the bridge deck. */
@@ -231,17 +238,33 @@ function plantNorthGateVerge(mesh) {
   }
 }
 
+/** Give the water shader a cross-current coordinate and bed depth in meters. */
+function buildGateStream(mesh) {
+  const waterLevel = -0.33;
+  const bankOffsets = [-2.7, -2.1, -1.65, -1.2, -0.6, 0, 0.6, 1.2, 1.65, 2.1, 2.7];
+  function crossSection(x) {
+    return bankOffsets.map(offset => {
+      const z = streamCenter(x) + offset;
+      const waterDepth = Math.max(0, waterLevel - terrainHeight(x, z));
+      return { point: [x, waterLevel, z], coordinates: [offset, waterDepth] };
+    });
+  }
+  let upstream = crossSection(-13);
+  for (let x = -12; x <= 13; x++) {
+    const downstream = crossSection(x);
+    const paint = (a, b, c) => mesh.triangle(a.point, b.point, c.point,
+      [0.19, 0.37, 0.36], STREAM_MATERIAL, [a.coordinates, b.coordinates, c.coordinates]);
+    for (let bank = 0; bank < bankOffsets.length - 1; bank++) {
+      paint(upstream[bank], downstream[bank], downstream[bank + 1]);
+      paint(upstream[bank], downstream[bank + 1], upstream[bank + 1]);
+    }
+    upstream = downstream;
+  }
+}
+
 /** The old gate leads to a timber crossing and a stone waystation. */
 function buildGateCrossing(mesh) {
-  for (let x = -13; x < 13; x++) {
-    const river = (across, bank) => [across, -0.33, streamCenter(across) + bank * 2.1];
-    const a = river(x, -1);
-    const b = river(x + 1, -1);
-    const c = river(x + 1, 1);
-    const d = river(x, 1);
-    mesh.triangle(a, b, c, [0.19, 0.37, 0.36], STREAM_MATERIAL);
-    mesh.triangle(a, c, d, [0.19, 0.37, 0.36], STREAM_MATERIAL);
-  }
+  buildGateStream(mesh);
   for (let board = 0; board < 15; board++) {
     const z = -30.55 + board * 0.65;
     mesh.box(0, groundHeight(0, z) - 0.08, z, 3.35, 0.15, 0.61,
@@ -249,6 +272,8 @@ function buildGateCrossing(mesh) {
   }
   for (const side of [-1, 1]) {
     const x = side * 1.62;
+    // Recess the lengthwise supports under the edges of the deck.
+    mesh.box(side * 1.37, BRIDGE_HEIGHT - 0.22, -26, 0.18, 0.21, 7.3, tint(BARK, 0.84), BARK_MATERIAL);
     for (const z of [-28.7, -26, -23.3]) {
       mesh.beam([x, -0.54, z], [x, BRIDGE_HEIGHT + 0.75, z], 0.13, 0.12, BARK, 5, BARK_MATERIAL);
     }
@@ -324,45 +349,79 @@ function buildRuinedGate(mesh) {
   const z = -18;
   const foundation = groundHeight(0, z) - 0.35;
   const masonry = [0.53, 0.53, 0.43];
+  const moss = [0.32, 0.40, 0.24];
+  const mortar = [0.28, 0.30, 0.23];
   for (const side of [-1, 1]) {
     const x = side * 3.18;
-    mesh.box(x, foundation + 0.35, z, 2.1, 0.70, 3.1, tint(masonry, 0.85), STONE_MATERIAL);
-    mesh.box(x, foundation + 2.12, z, 1.55, 3.56, 2.05, masonry, STONE_MATERIAL);
-    mesh.box(x, foundation + 3.83, z, 1.9, 0.43, 2.35, tint(masonry, 1.13), STONE_MATERIAL);
-    for (let section = 0; section < 5; section++) {
-      const wallX = side * (4.5 + section * 1.45);
-      const wallY = groundHeight(wallX, z) - 0.25;
-      const height = [2.7, 2.35, 1.95, 1.65, 1.1][section];
-      mesh.box(wallX, wallY + height / 2, z, 1.51, height, 1.38, tint(masonry, 0.83 + section * 0.025), STONE_MATERIAL);
-      mesh.box(wallX, wallY + height + 0.10, z, 1.55, 0.20, 1.65, [0.37, 0.43, 0.25], STONE_MATERIAL);
+    mesh.box(x, foundation + 0.20, z, 2.28, 0.60, 3.05, tint(masonry, 0.78), STONE_MATERIAL);
+    mesh.box(x, foundation + 2.10, z, 1.56, 3.56, 2.05, mortar, STONE_MATERIAL);
+    for (let course = 0; course < 6; course++) {
+      const y = foundation + 0.72 + course * 0.53;
+      const color = tint(masonry, 0.88 + (course * 3 % 5) * 0.06);
+      mesh.box(x + side * (course % 2) * 0.035, y, z, 1.61, 0.51, 2.17 + (course % 3) * 0.06,
+        color, STONE_MATERIAL);
+    }
+    mesh.box(x, foundation + 3.53, z, 1.89, 0.23, 2.40, tint(masonry, 1.08), STONE_MATERIAL);
+    mesh.box(x, foundation + 3.68, z, 1.73, 0.14, 2.28, tint(masonry, 0.91), STONE_MATERIAL);
+
+    // The two wing walls have different breaks, with staggered blocks over a dark mortar bed.
+    const blockHeights = side < 0 ? [6, 6, 4, 3, 2] : [5, 4, 4, 2, 1];
+    for (let section = 0; section < blockHeights.length; section++) {
+      const wallX = side * (4.48 + section * 1.43);
+      const wallY = groundHeight(wallX, z) - 0.37;
+      const courses = blockHeights[section];
+      const height = courses * 0.43;
+      mesh.box(wallX, wallY + height / 2, z, 1.47, height, 1.28, mortar, STONE_MATERIAL);
+      for (let course = 0; course < courses; course++) {
+        const unevenFace = 0.06 * ((section * 3 + course * 7) % 5);
+        const offset = side * ((course % 2) - 0.5) * 0.15;
+        const age = 0.74 + ((section * 5 + course * 3) % 7) * 0.045;
+        const color = course === 0 || (course === courses - 1 && section > 1)
+          ? mix(tint(masonry, age), moss, 0.48) : tint(masonry, age);
+        mesh.box(wallX + offset, wallY + (course + 0.5) * 0.43, z,
+          1.49, 0.41, 1.37 + unevenFace, color, STONE_MATERIAL);
+      }
     }
   }
-  const center = foundation + 3.55;
-  const innerRadius = 2.37;
-  const outerRadius = 3.30;
-  for (let index = 0; index < 11; index++) {
-    const from = index * Math.PI / 11 + 0.013;
-    const to = (index + 1) * Math.PI / 11 - 0.013;
-    const arc = (angle, radius, face) => [Math.cos(angle) * radius, center + Math.sin(angle) * radius, z + face];
-    const faces = [-0.96, 0.96].map(face => [arc(from, innerRadius, face), arc(from, outerRadius, face),
-      arc(to, outerRadius, face), arc(to, innerRadius, face)]);
+
+  const spring = foundation + 3.55;
+  const inner = 2.37;
+  const outer = 3.30;
+  const arc = (angle, radius, depth) => [Math.cos(angle) * radius, spring + Math.sin(angle) * radius, z + depth];
+  function wedge(from, to, inside, outside, near, far, color) {
+    const faces = [near, far].map(depth => [arc(from, inside, depth), arc(from, outside, depth),
+      arc(to, outside, depth), arc(to, inside, depth)]);
     for (const [a, b, c, d] of faces) {
-      const color = tint(masonry, index === 5 ? 1.15 : 0.9 + index % 4 * 0.04);
       mesh.triangle(a, b, c, color, STONE_MATERIAL);
       mesh.triangle(a, c, d, color, STONE_MATERIAL);
     }
     for (let edge = 0; edge < 4; edge++) {
       const next = (edge + 1) % 4;
-      mesh.triangle(faces[0][edge], faces[1][edge], faces[1][next], masonry, STONE_MATERIAL);
-      mesh.triangle(faces[0][edge], faces[1][next], faces[0][next], masonry, STONE_MATERIAL);
+      mesh.triangle(faces[0][edge], faces[1][edge], faces[1][next], color, STONE_MATERIAL);
+      mesh.triangle(faces[0][edge], faces[1][next], faces[0][next], color, STONE_MATERIAL);
     }
+  }
+  // A continuous barrel sits behind the visible joints between the face stones.
+  for (let segment = 0; segment < 12; segment++) {
+    wedge(segment * Math.PI / 12, (segment + 1) * Math.PI / 12, inner + 0.015, outer - 0.08,
+      0.83, -0.83, mortar);
+  }
+  for (let block = 0; block < 13; block++) {
+    const from = block * Math.PI / 13 + 0.006;
+    const to = (block + 1) * Math.PI / 13 - 0.006;
+    const keystone = block === 6;
+    const depth = keystone ? 1.27 : 1.09 + block % 3 * 0.045;
+    const edge = outer + (keystone ? 0.20 : (block % 3 - 1) * 0.06);
+    const color = tint(masonry, keystone ? 1.22 : 0.88 + (block * 3 % 7) * 0.045);
+    wedge(from, to, inner, edge, depth, 0.80, color);
+    wedge(from, to, inner, edge, -0.80, -depth, color);
   }
   for (let paving = 0; paving < 10; paving++) {
     const pavingZ = z + 4.1 - paving * 0.84;
     const pavingY = groundHeight(0, pavingZ);
     for (const side of [-1, 1]) {
       mesh.box(side * 1.04, pavingY + 0.025, pavingZ, 1.99, 0.14, 0.77,
-        tint(masonry, 0.91 + paving % 3 * 0.05), STONE_MATERIAL);
+        mix(tint(masonry, 0.86 + (paving * 3 % 7) * 0.04), moss, paving % 3 * 0.12), STONE_MATERIAL);
     }
   }
 }
@@ -466,16 +525,84 @@ export function meshBuilder(actorArt, appendVertex) {
   }
   function tree(x, z, height, angle, broadleaf) {
     const y = groundHeight(x, z);
-    const leanX = Math.cos(angle) * height * 0.085;
-    const leanZ = Math.sin(angle) * height * 0.085;
-    const trunkAt = level => [x + leanX * level ** 1.5, y + height * level, z + leanZ * level ** 1.5];
-    beam(trunkAt(0), trunkAt(0.28), height * 0.072, height * 0.043, BARK, 9, BARK_MATERIAL);
-    beam(trunkAt(0.28), trunkAt(0.64), height * 0.043, height * 0.022, BARK, 8, BARK_MATERIAL);
-    beam(trunkAt(0.64), trunkAt(1), height * 0.022, 0.025, BARK, 6, BARK_MATERIAL);
+    const growth = 0.5 + 0.5 * Math.sin(angle * 1.87 + x * 0.11);
+    const lean = height * (broadleaf ? 0.13 : 0.065) * (0.66 + growth * 0.58);
+    const trunkAt = level => {
+      const bend = lean * level ** 1.45;
+      return [x + Math.cos(angle) * bend, y + height * level, z + Math.sin(angle) * bend];
+    };
+    const levels = [0, broadleaf ? 0.16 : 0.11, 0.54, 1];
+    const radii = broadleaf ? [0.110, 0.058, 0.032, 0.004] : [0.073, 0.046, 0.023, 0.003];
+    const sides = 7;
+    const bark = broadleaf ? [0.30, 0.28, 0.23] : [0.34, 0.28, 0.21];
+    const rootColor = mix(bark, [0.19, 0.29, 0.13], 0.55 + growth * 0.20);
+    // The same rings carry the bark across joints and bury each root lobe on sloped ground.
+    const rings = levels.map((level, ring) => {
+      const [cx, cy, cz] = trunkAt(level);
+      return Array.from({ length: sides }, (_, index) => {
+        const azimuth = angle + index / sides * TAU;
+        const lobe = Math.cos(index * TAU * 3 / sides + angle);
+        const radius = height * radii[ring] * (0.91 + growth * 0.16)
+          * (1 + lobe * (ring === 0 ? 0.29 : 0.07));
+        const px = cx + Math.cos(azimuth) * radius;
+        const pz = cz + Math.sin(azimuth) * radius;
+        const brightness = 0.70 + 0.30 * Math.max(0, Math.cos(azimuth + 2.38));
+        return { point: [px, ring === 0 ? groundHeight(px, pz) - 0.19 : cy, pz],
+          color: tint(mix(rootColor, bark, Math.min(1, level * 3.8)), brightness) };
+      });
+    });
+    const repeats = Math.max(1, Math.round(height * (broadleaf ? 0.33 : 0.24)));
+    const uvAt = (sector, ring) => [growth + sector / sides * repeats, levels[ring] * height * 0.36];
+    for (let ring = 0; ring < rings.length - 1; ring++) {
+      for (let sector = 0; sector < sides; sector++) {
+        const next = (sector + 1) % sides;
+        const a = rings[ring][sector];
+        const b = rings[ring][next];
+        const c = rings[ring + 1][next];
+        const d = rings[ring + 1][sector];
+        const auv = uvAt(sector, ring);
+        const buv = uvAt(sector + 1, ring);
+        const cuv = uvAt(sector + 1, ring + 1);
+        const duv = uvAt(sector, ring + 1);
+        triangle(a.point, b.point, c.point, [a.color, b.color, c.color], TRUNK_MATERIAL, [auv, buv, cuv], [1, 1, 1]);
+        triangle(a.point, c.point, d.point, [a.color, c.color, d.color], TRUNK_MATERIAL, [auv, cuv, duv], [1, 1, 1]);
+      }
+    }
+    if (broadleaf) {
+      for (let root = 0; root < 3; root++) {
+        const direction = angle + root * TAU / 3 + growth * 0.42;
+        const dx = Math.cos(direction);
+        const dz = Math.sin(direction);
+        const reach = height * (0.17 + 0.07 * Math.cos(direction * 1.7 + z));
+        const width = height * 0.036;
+        const onSlope = (along, across, rise) => {
+          const px = x + dx * along - dz * across;
+          const pz = z + dz * along + dx * across;
+          return [px, groundHeight(px, pz) + rise, pz];
+        };
+        const start = height * 0.042;
+        const left = onSlope(start, -width, -0.13);
+        const right = onSlope(start, width, -0.13);
+        const ridge = onSlope(start, 0, height * 0.066);
+        const shoulder = onSlope(reach * 0.58, 0, height * 0.028);
+        const tip = onSlope(reach, 0, -0.07);
+        const lu = [growth, 0.26];
+        const ru = [growth + 0.39, 0.26];
+        const ridgeUv = [growth + 0.20, 0.42];
+        const shoulderUv = [growth + 0.20, 0.62];
+        const tipUv = [growth + 0.20, 0.88];
+        triangle(left, ridge, shoulder, [rootColor, bark, rootColor], TRUNK_MATERIAL, [lu, ridgeUv, shoulderUv]);
+        triangle(ridge, right, shoulder, [bark, rootColor, rootColor], TRUNK_MATERIAL, [ridgeUv, ru, shoulderUv]);
+        triangle(left, shoulder, tip, rootColor, TRUNK_MATERIAL, [lu, shoulderUv, tipUv]);
+        triangle(shoulder, right, tip, rootColor, TRUNK_MATERIAL, [shoulderUv, ru, tipUv]);
+      }
+    }
+    const canopyCard = (center, size, direction, color, tilt) =>
+      foliageCard(center, size, direction, color, tilt, broadleaf);
     for (let branch = 0; branch < 6; branch++) {
-      const branchAngle = angle + branch * 2.39996;
-      const level = 0.40 + branch * 0.068;
-      const spread = height * (broadleaf ? 0.34 - branch * 0.024 : 0.29 - branch * 0.028);
+      const branchAngle = angle + branch * 2.39996 + Math.sin(branch + angle) * 0.32;
+      const level = (broadleaf ? 0.36 : 0.43) + branch * 0.065 + growth * 0.045;
+      const spread = height * (broadleaf ? 0.36 - branch * 0.025 : 0.26 - branch * 0.024) * (0.87 + growth * 0.25);
       const trunk = trunkAt(level);
       const radial = (length, rise, direction) => [trunk[0] + Math.cos(direction) * spread * length,
         trunk[1] + height * rise, trunk[2] + Math.sin(direction) * spread * length];
@@ -484,28 +611,36 @@ export function meshBuilder(actorArt, appendVertex) {
       const twig = radial(0.84, 0.13, branchAngle + 0.55);
       beam(trunk, fork, height * 0.017, height * 0.009, BARK, 4, BARK_MATERIAL);
       beam(fork, tip, height * 0.009, 0.013, BARK, 3, BARK_MATERIAL);
-      const foliage = tint(broadleaf ? [0.70, 0.91, 0.60] : [0.56, 0.76, 0.61], 0.76 + branch * 0.045);
-      const clusterSize = height * (broadleaf ? 0.46 : 0.38);
-      foliageCard(fork, clusterSize, branchAngle + 0.52, foliage, 0.32);
-      foliageCard(tip, clusterSize, branchAngle - 0.70, tint(foliage, 1.12), 0.40);
-      foliageCard(tip, clusterSize * 0.90, branchAngle + 0.86, foliage, -0.35);
-      foliageCard(twig, clusterSize * 0.88, branchAngle + 0.45, tint(foliage, 1.23), 0.25);
-      foliageCard(twig, clusterSize * 0.76, branchAngle + 1.90, foliage);
+      const foliage = tint(broadleaf ? [0.70, 0.91, 0.60] : [0.58, 0.85, 0.72], 0.76 + branch * 0.045);
+      const clusterSize = height * (broadleaf ? 0.46 : 0.41 - branch * 0.020);
+      canopyCard(fork, clusterSize, branchAngle + 0.52, foliage, 0.32);
+      canopyCard(tip, clusterSize, branchAngle - 0.70, tint(foliage, 1.12), 0.40);
+      canopyCard(tip, clusterSize * 0.90, branchAngle + 0.86, foliage, -0.35);
+      canopyCard(twig, clusterSize * 0.88, branchAngle + 0.45, tint(foliage, 1.23), 0.25);
+      canopyCard(twig, clusterSize * 0.76, branchAngle + 1.90, foliage);
     }
     const crown = trunkAt(0.83);
     for (let spray = 0; spray < 5; spray++) {
-      foliageCard(crown, height * (0.29 + spray * 0.015), angle + spray * 2.39996, [0.67, 0.86, 0.59], 0.23);
+      const size = height * (broadleaf ? 0.29 + spray * 0.015 : 0.24 - spray * 0.012);
+      canopyCard(crown, size, angle + spray * 2.39996, [0.67, 0.86, 0.59], 0.23);
     }
   }
-  function foliageCard([x, y, z], size, angle, color, tilt = 0) {
+  function foliageCard([x, y, z], size, angle, color, tilt = 0, broadleaf = true) {
     const dx = Math.cos(angle) * size * 0.5;
     const dz = Math.sin(angle) * size * 0.5;
-    const a = [x - dx, y - size * 0.15, z - dz];
-    const b = [x + dx, y - size * 0.15, z + dz];
-    const c = [x + dx * 0.78 - dz * tilt, y + size * 0.65, z + dz * 0.78 + dx * tilt];
-    const d = [x - dx * 0.78 - dz * tilt, y + size * 0.65, z - dz * 0.78 + dx * tilt];
-    triangle(a, b, c, color, FOLIAGE_MATERIAL, [[0, 1], [1, 1], [1, 0]]);
-    triangle(a, c, d, color, FOLIAGE_MATERIAL, [[0, 1], [1, 0], [0, 0]]);
+    const cardHeight = size * (broadleaf ? 1 : 0.68);
+    const a = [x - dx, y - cardHeight * 0.15, z - dz];
+    const b = [x + dx, y - cardHeight * 0.15, z + dz];
+    const c = [x + dx * 0.78 - dz * tilt, y + cardHeight * 0.65, z + dz * 0.78 + dx * tilt];
+    const d = [x - dx * 0.78 - dz * tilt, y + cardHeight * 0.65, z - dz * 0.78 + dx * tilt];
+    // Each tile has a four-pixel alpha border around the cutout.
+    const tile = broadleaf ? 0 : 256;
+    const left = (tile + 4) / 512;
+    const right = (tile + 252) / 512;
+    const top = 4 / 256;
+    const bottom = 252 / 256;
+    triangle(a, b, c, color, FOLIAGE_MATERIAL, [[left, bottom], [right, bottom], [right, top]]);
+    triangle(a, c, d, color, FOLIAGE_MATERIAL, [[left, bottom], [right, top], [left, top]]);
   }
   function underbrush(x, z, angle) {
     const base = [x, groundHeight(x, z) + 0.14, z];

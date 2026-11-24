@@ -34,8 +34,8 @@ Owns site styling for server-rendered pages and frontend components.
   row, Void brand mark, compact nav pills, auth actions, dark dropdowns, and
   notification/profile menu styling. The green `.void-signal-dot` uses a slow
   blink animation to read like an old router status light.
-- The home page uses `.home-void-*` classes for the Void-first gateway, primary
-  `/void` call to action, and live five-item Signal Rail.
+- The homepage uses `.home-tools` and `.home-tool-*` classes for its responsive
+  public tools grid and `.home-feed-link` for its secondary Void link.
 - The Void feed composer uses `.composer-preview-*` classes for the live draft
   preview, including mention links, clickable URLs, and shared rich media embeds.
 - Void survival messaging uses `.void-rules`; feed cards use
@@ -132,6 +132,9 @@ the existing HUD and game menus in view.
 The Survive viewport vitals panel shows enemy attention during shared combat,
 using the private enmity leader from the survivor snapshot.
 
-The Survive Main Menu keeps its category list visible while the selected panel
+The Survive Main Menu styles its page arrows and focused cursor inside the category window.
+Its panel headings stay visible while scrolling. The item inspector groups the
+selected stack, its description and the actions available for that stack.
+It keeps its category list visible while the selected panel
 opens beside it in the desktop world view. Narrow viewports and page view show
 the same panel beneath its category.

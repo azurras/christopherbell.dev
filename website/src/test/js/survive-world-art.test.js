@@ -63,7 +63,7 @@ test('authored actors draw bounded texture coordinates and animate with the equi
     assert.ok(mining[index + 1] >= 0 && mining[index + 1] <= 1);
     assert.ok(mining[index + 2] >= 0 && mining[index + 2] <= 1);
   }
-  assert.equal(texturedCorners, (2151 + 1144 + 1348 + 929) * 3);
+  assert.equal(texturedCorners, (2179 + 1144 + 1348 + 929) * 3);
 });
 
 test('the adventurer reshaping keeps clip topology and hand attachments', () => {
@@ -79,6 +79,27 @@ test('the adventurer reshaping keeps clip topology and hand attachments', () => 
   assert.ok(feet >= 0);
   assert.equal(refined.poses.idle[0][feet], 0);
   assert.ok(refined.hands.strike[0][1] > baseline.hands.strike[0][1]);
+});
+
+test('the adventurer face has nose and chin relief in each baked animation', () => {
+  const asset = JSON.parse(readFileSync(new URL('../../main/resources/static/images/survive/adventurer.json', import.meta.url), 'utf8'));
+  const noseTip = 466;
+  const chin = 1175;
+  const lowerLip = 1176;
+  const underNose = 1177;
+  const position = (frame, index) => frame.slice(index * 3, index * 3 + 3);
+  const distance = (a, b) => Math.hypot(...a.map((coordinate, axis) => coordinate - b[axis]));
+  const rest = asset.poses.idle[0];
+  assert.ok(rest[noseTip * 3 + 2] - rest[underNose * 3 + 2] >= 40);
+  assert.ok(rest[lowerLip * 3 + 1] - rest[chin * 3 + 1] >= 65);
+  const corners = asset.faces.filter(vertex => vertex === underNose);
+  assert.ok(corners.length >= 4);
+  const chinToNose = distance(position(rest, chin), position(rest, noseTip));
+  for (const frames of Object.values(asset.poses)) {
+    for (const frame of frames) {
+      assert.ok(Math.abs(distance(position(frame, chin), position(frame, noseTip)) - chinToNose) < 22);
+    }
+  }
 });
 
 test('authored lighting interpolates across triangle corners without adding vertices', () => {
@@ -98,6 +119,17 @@ test('authored lighting interpolates across triangle corners without adding vert
   assert.equal(flat.shades[0], tilted.shades[1]);
   assert.equal(flat.shades[1], tilted.shades[0]);
   assert.notEqual(flat.shades[0], crease.shades[0]);
+});
+
+test('adventurer skin has continuous shading across the nose and jaw', () => {
+  const asset = JSON.parse(readFileSync(new URL('../../main/resources/static/images/survive/adventurer.json', import.meta.url), 'utf8'));
+  const model = prepareActorArt(asset, { adventurer: true });
+  for (const vertex of [466, 1175, 1177]) {
+    const shades = model.triangles.flatMap(triangle =>
+      triangle.indices.flatMap((index, corner) => index === vertex ? [triangle.shades[corner]] : []));
+    assert.ok(shades.length > 2);
+    assert.ok(shades.every(shade => shade === shades[0] && shade >= 0.85 && shade <= 1));
+  }
 });
 
 test('enemy motion requires a confirmed bite or guard and winds back before lunging', () => {
@@ -213,12 +245,98 @@ test('terrain, ruin masonry, bark and cutout foliage are represented in the same
   assert.ok(materials.has(4.5));
 });
 
+test('pine and broadleaf crowns use separate padded regions of the foliage atlas', () => {
+  const foliageCoordinates = broadleaf => {
+    const mesh = meshBuilder();
+    mesh.tree(-22, -14, 7, 1.2, broadleaf);
+    const coordinates = [];
+    for (let index = 6; index < mesh.vertices.length; index += MESH_VERTEX_FLOATS) {
+      if (mesh.vertices[index] === 4.5) coordinates.push([mesh.vertices[index + 1], mesh.vertices[index + 2]]);
+    }
+    return coordinates;
+  };
+  const pine = foliageCoordinates(false);
+  const broadleaf = foliageCoordinates(true);
+  assert.equal(pine.length, broadleaf.length);
+  assert.ok(pine.length > 0);
+  assert.ok(pine.every(([u, v]) => u > 0.5 && u < 1 && v > 0 && v < 1));
+  assert.ok(broadleaf.every(([u, v]) => u > 0 && u < 0.5 && v > 0 && v < 1));
+});
+
+test('woodland trunks share bark coordinates at their joints and meet the ground across their roots', () => {
+  const [x, z, height, angle] = [-22, -14, 7, 1.2];
+  const trunk = broadleaf => {
+    const mesh = meshBuilder();
+    mesh.tree(x, z, height, angle, broadleaf);
+    const corners = [];
+    for (let index = 0; index < mesh.vertices.length; index += MESH_VERTEX_FLOATS) {
+      const corner = mesh.vertices.slice(index, index + MESH_VERTEX_FLOATS);
+      if (corner[6] === 3.75) corners.push(corner);
+    }
+    return corners;
+  };
+  const broadleaf = trunk(true);
+  const pine = trunk(false);
+  assert.ok(broadleaf.length > 0 && pine.length > 0);
+  const roots = corners => corners.filter(corner => corner[8] === 0);
+  for (const tree of [broadleaf, pine]) {
+    const base = roots(tree);
+    assert.ok(base.length >= 16);
+    assert.ok(base.every(([px, py, pz]) => py < groundHeight(px, pz) && py > groundHeight(px, pz) - 0.5));
+    const chartByPoint = new Map();
+    for (const corner of tree) {
+      const key = corner.slice(0, 3).join(',');
+      const u = corner[7];
+      if (chartByPoint.has(key)) assert.ok(Math.abs(chartByPoint.get(key) - u - Math.round(chartByPoint.get(key) - u)) < 1e-9);
+      chartByPoint.set(key, u);
+    }
+  }
+  const rootRadius = corners => Math.max(...roots(corners).map(([px, , pz]) => Math.hypot(px - x, pz - z)));
+  assert.ok(rootRadius(broadleaf) > 1.3 * rootRadius(pine));
+  assert.ok(broadleaf.some(([px, py, pz]) =>
+    Math.hypot(px - x, pz - z) > rootRadius(broadleaf) && py < groundHeight(px, pz)));
+});
+
 test('the gate route has raised banks and a walkable bridge over rendered water', () => {
   const { vertices } = islandMesh();
   assert.ok(groundHeight(-8, -13) > groundHeight(0, -13) + 2.2);
   assert.ok(groundHeight(0, -26) > groundHeight(4, -26) + 0.8);
-  const materials = vertices.filter((_, index) => index % MESH_VERTEX_FLOATS === 6);
-  assert.ok(materials.includes(13.5));
+  const stream = [];
+  for (let index = 0; index < vertices.length; index += MESH_VERTEX_FLOATS) {
+    if (vertices[index + 6] === 13.5) stream.push(vertices.slice(index, index + MESH_VERTEX_FLOATS));
+  }
+  const underBridge = stream.filter(([x]) => x === 0);
+  assert.ok(underBridge.length > 0);
+  assert.ok(stream.every(([, y]) => Math.abs(y + 0.33) < 1e-6));
+  assert.ok(underBridge.some(vertex => vertex[7] === 0 && vertex[8] > 0.26));
+  assert.ok(underBridge.some(vertex => vertex[7] < -1 && vertex[8] < 0.06));
+  assert.ok(underBridge.some(vertex => vertex[7] > 1 && vertex[8] < 0.06));
+});
+
+test('North Gate face joints reveal recessed mortar and the passage stays open', () => {
+  const { vertices } = islandMesh();
+  const stride = MESH_VERTEX_FLOATS;
+  const spring = groundHeight(0, -18) + 3.2;
+  const frontDepthAt = (x, y) => {
+    let depth = -Infinity;
+    for (let start = 0; start < vertices.length; start += stride * 3) {
+      if (vertices[start + 6] !== 2.5) continue;
+      const [ax, ay, az] = vertices.slice(start, start + 3);
+      if (az < -19.5 || az > -16.5) continue;
+      const [bx, by, bz] = vertices.slice(start + stride, start + stride + 3);
+      const [cx, cy, cz] = vertices.slice(start + 2 * stride, start + 2 * stride + 3);
+      const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+      if (Math.abs(area) < 1e-9) continue;
+      const u = ((x - ax) * (cy - ay) - (y - ay) * (cx - ax)) / area;
+      const v = ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / area;
+      if (u >= 0 && v >= 0 && u + v <= 1) depth = Math.max(depth, az + (bz - az) * u + (cz - az) * v);
+    }
+    return depth;
+  };
+  const joint = 6 * Math.PI / 13;
+  assert.ok(Math.abs(frontDepthAt(2.8 * Math.cos(joint), spring + 2.8 * Math.sin(joint)) - (-17.17)) < 1e-6);
+  assert.ok(frontDepthAt(0, spring + 2.8) > -17);
+  assert.equal(frontDepthAt(0, spring + 1.25), -Infinity);
 });
 
 test('animated adventurers and each animal use bounded local texture coordinates', () => {

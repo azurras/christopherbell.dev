@@ -108,9 +108,9 @@ final class SurvivePresence {
       case HUNT -> true;
       case FISH, REEL_IN -> atFishingBank(x, z);
       case BUILD_BOAT, ESCAPE -> near(x, z, 0, 62, 13);
-      case BUILD_SHELTER, REST, GUARD, SLEEP, CRAFT_CLUB, CRAFT_AXE, CRAFT_SPEAR -> near(x, z, 0, 0, 15);
+      case BUILD_SHELTER, REST, GUARD, SLEEP, CRAFT_CLUB, CRAFT_AXE, CRAFT_SPEAR, EXPAND_PACK -> near(x, z, 0, 0, 15);
       case EAT, ATTACK, ENGAGE, DISENGAGE, WEAPON_SKILL, DEFEND, FLEE, WAKE, TALK_WAYSTATION, EQUIP_WEAPON, STOW_WEAPON,
-          CANCEL_FISHING -> true;
+          CANCEL_FISHING, DROP_ITEM -> true;
     };
   }
 

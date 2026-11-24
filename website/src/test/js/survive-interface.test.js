@@ -17,7 +17,8 @@ test('the Main Menu groups its categories and gives each a separate panel', () =
   const menu = template.slice(template.indexOf('id="surviveMainMenu"'), template.indexOf('id="surviveWorldHelp"'));
   assert.equal([...menu.matchAll(/<details name="survive-main-category"/g)].length, 7);
   assert.equal([...menu.matchAll(/<div class="survive-main-menu-panel">/g)].length, 7);
-  assert.match(menu, /id="surviveEquipment"[\s\S]*?<div class="survive-main-menu-panel">\s*<details>/);
+  assert.equal([...menu.matchAll(/<button type="button" data-menu-back>Back<\/button>/g)].length, 7);
+  assert.match(menu, /id="surviveEquipment"[\s\S]*?<h2>Equipment<\/h2>[\s\S]*?<details>\s*<summary>Main/);
 });
 
 test('the in-game guide explains timed fishing, fullness and weapon swaps', () => {

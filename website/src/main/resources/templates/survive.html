@@ -80,6 +80,7 @@
                 <details name="survive-main-category" class="survive-panel survive-section survive-status-card">
                   <summary>Status</summary>
                   <div class="survive-main-menu-panel">
+                    <header class="survive-window-heading"><h2>Status</h2><button type="button" data-menu-back>Back</button></header>
                     <div class="survive-status-head"><h2 id="survivePlayerName"></h2><p id="surviveSaveStatus" class="survive-muted" role="status"></p></div>
                     <label class="survive-health-label" for="surviveHealth">Health <strong id="surviveHealthText"></strong></label>
                     <meter id="surviveHealth" min="0" max="10" low="3" high="7" optimum="10" value="10"></meter>
@@ -93,6 +94,7 @@
                 <details name="survive-main-category" class="survive-panel survive-section">
                   <summary>Party</summary>
                   <div class="survive-main-menu-panel">
+                    <header class="survive-window-heading"><h2>Party</h2><button type="button" data-menu-back>Back</button></header>
                     <form id="survivePartyForm">
                     <label for="survivePartyRecipient">Invite survivor</label>
                     <select id="survivePartyRecipient" name="recipient"></select>
@@ -110,17 +112,33 @@
                 <details name="survive-main-category" class="survive-panel survive-section">
                   <summary>Items</summary>
                   <div class="survive-main-menu-panel">
-                    <p>Carried <strong id="surviveInventoryCount"></strong></p>
-                    <button id="surviveItemSort" type="button">Sort: Type</button>
+                    <header class="survive-window-heading"><h2>Items</h2><button type="button" data-menu-back>Back</button></header>
+                    <div class="survive-pack-toolbar">
+                      <span>Pack <strong id="surviveInventoryCount"></strong></span>
+                      <button id="surviveItemSort" type="button">Sort: Type</button>
+                    </div>
                     <select id="surviveItemList" class="survive-item-list" size="5" aria-label="Carried items"
                           aria-describedby="surviveItemDetail"></select>
-                    <p id="surviveItemDetail" class="survive-muted"></p>
-                    <button id="surviveItemUse" type="button" hidden>Use Food</button>
+                    <section class="survive-item-inspect" aria-labelledby="surviveSelectedItem">
+                      <h3 id="surviveSelectedItem">Empty pack</h3>
+                      <p id="surviveItemDetail" class="survive-muted"></p>
+                      <div class="survive-item-commands">
+                        <button id="surviveItemUse" type="button" hidden>Use Food</button>
+                        <button id="surviveItemDrop" type="button" hidden>Drop one…</button>
+                      </div>
+                    </section>
+                    <div id="surviveDropConfirm" role="group" aria-labelledby="surviveDropPrompt" hidden>
+                      <p id="surviveDropPrompt"></p>
+                      <button id="surviveConfirmDrop" type="button">Drop item</button>
+                      <button id="surviveCancelDrop" type="button">Cancel</button>
+                    </div>
+                    <button id="surviveExpandPack" type="button">Expand pack (+5) · 4 wood, 2 stone</button>
                   </div>
                 </details>
                 <details name="survive-main-category" id="surviveEquipment" class="survive-panel survive-section">
                   <summary>Equipment</summary>
                   <div class="survive-main-menu-panel">
+                    <header class="survive-window-heading"><h2>Equipment</h2><button type="button" data-menu-back>Back</button></header>
                     <details>
                       <summary>Main · <strong id="surviveWeapon"></strong></summary>
                       <div id="surviveWeaponChoices" aria-label="Main weapon choices"></div>
@@ -128,9 +146,10 @@
                     </details>
                   </div>
                 </details>
-                <details name="survive-main-category" id="surviveMapSection" class="survive-panel survive-section survive-map-section">
+                <details name="survive-main-category" data-menu-page="2" id="surviveMapSection" class="survive-panel survive-section survive-map-section">
                   <summary>Map</summary>
                   <div class="survive-main-menu-panel">
+                    <header class="survive-window-heading"><h2>Map</h2><button type="button" data-menu-back>Back</button></header>
                     <svg class="survive-island-map" role="img" aria-labelledby="surviveMapTitle surviveMapDescription" viewBox="-82 -82 164 164">
                     <title id="surviveMapTitle">Island map</title>
                     <desc id="surviveMapDescription">North is up. The blue marker shows your location.</desc>
@@ -157,9 +176,10 @@
                     </svg>
                   </div>
                 </details>
-                <details name="survive-main-category" id="surviveSectionCamp" class="survive-panel survive-section">
+                <details name="survive-main-category" data-menu-page="2" id="surviveSectionCamp" class="survive-panel survive-section">
                   <summary>Camp &amp; sharing</summary>
                   <div class="survive-main-menu-panel">
+                    <header class="survive-window-heading"><h2>Camp &amp; sharing</h2><button type="button" data-menu-back>Back</button></header>
                     <h3 class="survive-panel-title">Shared camp</h3>
                     <p id="surviveCampSummary" class="survive-muted"></p>
                     <dl class="survive-stats"><div><dt>Shelters</dt><dd id="surviveShelters"></dd></div><div><dt>Beds in use</dt><dd id="surviveBeds"></dd></div><div><dt>Boats</dt><dd id="surviveBoats"></dd></div></dl>
@@ -175,12 +195,34 @@
                       <button id="surviveGive" type="submit">Give supplies</button>
                       <p id="surviveGiftHint" class="survive-muted"></p>
                     </form>
+                    <details id="surviveTrade" class="survive-gift">
+                      <summary>Trade</summary>
+                      <form id="surviveTradeOffer">
+                        <label for="surviveTradePartner">Trade with</label>
+                        <select id="surviveTradePartner" name="recipientId" required></select>
+                        <div class="survive-gift-amount">
+                          <div><label for="surviveTradeOffered">You offer</label><select id="surviveTradeOffered" name="offered"><option value="WOOD">Wood</option><option value="FOOD">Food</option><option value="STONE">Stone</option></select></div>
+                          <div><label for="surviveTradeOfferedQuantity">Amount</label><input id="surviveTradeOfferedQuantity" name="offeredQuantity" type="number" min="1" max="30" value="1" required /></div>
+                        </div>
+                        <div class="survive-gift-amount">
+                          <div><label for="surviveTradeRequested">You request</label><select id="surviveTradeRequested" name="requested"><option value="FOOD">Food</option><option value="WOOD">Wood</option><option value="STONE">Stone</option></select></div>
+                          <div><label for="surviveTradeRequestedQuantity">Amount</label><input id="surviveTradeRequestedQuantity" name="requestedQuantity" type="number" min="1" max="30" value="1" required /></div>
+                        </div>
+                        <button id="surviveTradeSend" type="submit">Send offer</button>
+                      </form>
+                      <div id="surviveTradePending" hidden>
+                        <p id="surviveTradeTerms"></p>
+                        <button type="button" id="surviveTradeAccept" data-trade-reply="accept">Accept trade</button>
+                        <button type="button" id="surviveTradeEnd" data-trade-reply="end">Decline offer</button>
+                      </div>
+                    </details>
                     <p class="survive-muted">Camp updates every 5 seconds while this page is visible.</p>
                   </div>
                 </details>
-                <details name="survive-main-category" id="surviveSectionGuide" class="survive-panel survive-section survive-guide">
+                <details name="survive-main-category" data-menu-page="2" id="surviveSectionGuide" class="survive-panel survive-section survive-guide">
                   <summary>Guide</summary>
                   <div class="survive-main-menu-panel">
+                    <header class="survive-window-heading"><h2>Guide</h2><button type="button" data-menu-back>Back</button></header>
                     <p>Use Map to find the pine forest, stone ridge, fishing bank and Waystation. Walk to a landmark and open Commands to see the actions available there. In page view, use the camp illustration and its action menus.</p>
                     <p>The island clock is shared. At nightfall an armed raider approaches camp. Defeat the raider before the raid deadline to repel it. If the raider survives, guards contribute to the camp defense and structures can be lost.</p>
                     <p>In the 3D world, hogs roam peacefully. Wolves attack within seven metres and bears within ten, so give hostile animals a wide berth. Move within five metres of an available animal to Hunt. The camp illustration uses its own hunt and ambush rolls. Fleeing costs one bite.</p>
@@ -189,17 +231,22 @@
                     <p>Five minutes of awake, active play spend one fullness. At zero fullness, each subsequent interval costs one HP. The meter pauses during sleep. Food restores up to 5 fullness and 2 HP.</p>
                     <p>Each shelter has two beds. Sleep at dusk or night to recover 1 health for every 2 minutes asleep, or fully if you sleep until dawn. If raiders burn your shelter while you sleep, you wake with 2 damage.</p>
                     <p>Share supplies chooses another survivor by name and camp ID. Give 1–10 wood, food or stone while both of you are at camp. Gifts move items directly into their inventory, which must have room; both survivors and the chat log receive an update.</p>
-                    <p>Gather wood to improve strength and stamina. Your inventory holds 10 items. Five wood builds a shelter everyone can rest in; ten wood builds a boat any survivor can use to escape.</p>
+                    <p>Gather wood to improve strength and stamina. Your pack starts with 10 slots. At camp, open Items to spend 4 wood and 2 stone for 5 more slots, up to 30. Use Drop one to discard a carried item permanently. Five wood builds a shelter everyone can rest in; ten wood builds a boat any survivor can use to escape.</p>
                     <p>Select a creature and choose Engage to start automatic attacks. Attacks build TP for weapon skills. Defend blocks one bite. In a shared fight, the enemy can counter the fighter with the most enmity. Defeating a creature can yield food if your pack has room.</p>
                     <p>Sail away to survive, or start again after death. New survivor replaces only your character. Saved account characters can start again after death or escape; joining again resumes a living character. Shelters, boats, and other players remain in the shared world. Names and recent actions are visible to other players; use a nickname.</p>
                     <p>Your logged-in account has one saved survivor. Moves, supplies, combat and the shared camp are saved after each successful command and survive server restarts. Log in again to resume. Guests use a temporary browser session and expire after two idle hours. Saved survivors keep their progress while inactive and return to the active camp when resumed. Guest progress stays separate from your account character. Use Party to invite another survivor. The chat log records shared events and combat results.</p>
                   </div>
                 </details>
-                <button id="surviveGameViewToggle" type="button">Show page view</button>
+                <button id="surviveGameViewToggle" data-menu-page="2" type="button">Show page view</button>
+                <div class="survive-menu-pages" hidden>
+                  <button type="button" aria-label="Previous menu page">‹</button>
+                  <span aria-live="polite">1 / 2</span>
+                  <button type="button" aria-label="Next menu page">›</button>
+                </div>
               </div>
             </details>
           </div>
-          <p id="surviveWorldHelp" class="survive-muted">Walk with WASD or arrows. Drag or use Q / R to turn the camera, use the wheel or Page Up / Page Down to zoom, and press Home to reset. Click a creature’s name or cycle targets with Tab or keypad 0. Enter opens Commands and L or keypad * locks onto a combat target. Minus opens Main Menu, plus opens Chat log, and Escape closes a window. On a controller, use the D-pad to select targets and menu items. The sticks walk, turn and zoom. Click the left stick to lock on and the right stick to reset. A confirms, B cancels, X opens Main Menu, and Y opens Chat log.</p>
+          <p id="surviveWorldHelp" class="survive-muted">Walk with WASD or arrows. Drag or use Q / R to turn the camera, use the wheel or Page Up / Page Down to zoom, and press Home to reset. Click a creature’s name or cycle targets with Tab or keypad 0. Enter opens Commands and L or keypad * locks onto a combat target. Minus opens Main Menu. Up and Down select a row, Left and Right switch pages, Enter opens a selection, and Escape goes back one window. Plus opens Chat log. On a controller, use the D-pad to select targets and menu items. The sticks walk, turn and zoom. Click the left stick to lock on and the right stick to reset. A confirms, B cancels, X opens Main Menu, and Y opens Chat log.</p>
         </div>
         <svg id="surviveCampScene" class="survive-scene" role="img" aria-label="The camp" viewBox="0 0 960 540"></svg>
         <h2 id="surviveScene">At the edge of the wilderness</h2>

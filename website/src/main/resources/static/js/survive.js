@@ -3,7 +3,8 @@ import { API } from './lib/api.js';
 import { fetchJson } from './lib/util.js';
 import { appendSurviveLogMessage, syncSurviveLog } from './survive-log.js';
 import { mountSurviveController } from './survive-controller.js';
-import { renderSurviveItems } from './survive-items.js';
+import { mountMainMenu } from './survive-main-menu.js';
+import { attackDelayLabel, renderSurviveItems } from './survive-items.js';
 import { keepFocusInActionBar, mountActionMenus, syncActionMenus } from './survive-menus.js';
 import { mountPanelSections, summarizeCamp } from './survive-panel.js';
 import { mountSurviveParty } from './survive-party.js';
@@ -83,8 +84,8 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveInventoryCount', `${carried} / ${state.inventoryCapacity}`);
   renderSurviveItems(documentRoot, state, mutationPending);
   setText('surviveWeapon', state.weapon
-    ? `${WEAPON_LABELS[state.weapon] || state.weapon} · ${state.weaponDurability} uses left`
-    : 'Bare hands');
+    ? `${WEAPON_LABELS[state.weapon] || state.weapon}${attackDelayLabel(state.attackDelayMilliseconds)} · ${state.weaponDurability} uses left`
+    : `Bare hands${attackDelayLabel(state.attackDelayMilliseconds)}`);
   renderWeaponChoices(documentRoot, packedWeapons, state.actions, mutationPending);
   setText('surviveShelters', state.shelters);
   setText('surviveBeds', `${state.bedsInUse} / ${state.beds}`);
@@ -121,23 +122,7 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   documentRoot.getElementById('survivePlayers').replaceChildren(...players);
   syncSurviveLog(documentRoot, state);
   const recipientPicker = documentRoot.getElementById('surviveRecipient');
-  const previousRecipient = recipientPicker.value;
-  const recipientSignature = JSON.stringify(state.recipients);
-  // Preserve the native chooser and input focus when a poll has no recipient changes.
-  if (recipientPicker.dataset.recipientSignature !== recipientSignature) {
-    const chooseRecipient = documentRoot.createElement('option');
-    chooseRecipient.value = '';
-    chooseRecipient.textContent = 'Choose a survivor';
-    recipientPicker.replaceChildren(chooseRecipient, ...state.recipients.map(recipient => {
-      const option = documentRoot.createElement('option');
-      option.value = recipient.survivorId;
-      option.textContent = `${recipient.name} · ${recipient.survivorId.slice(0, 8)}`;
-      return option;
-    }));
-    recipientPicker.dataset.recipientSignature = recipientSignature;
-  }
-  recipientPicker.value = state.recipients.some(recipient => recipient.survivorId === previousRecipient)
-    ? previousRecipient : '';
+  renderRecipientOptions(documentRoot, recipientPicker, state.recipients);
   const unavailable = !state.recipients.length || carried === 0;
   for (const id of ['surviveRecipient', 'surviveGiftResource', 'surviveGiftQuantity']) {
     documentRoot.getElementById(id).disabled = mutationPending || unavailable;
@@ -146,6 +131,50 @@ export function renderSurviveState(documentRoot, state, pending = false, mutatio
   setText('surviveGiftHint', !state.recipients.length
     ? 'You and another survivor must be at camp to share supplies.'
     : 'Give supplies to help another survivor. Their inventory must have room.');
+  renderTrade(documentRoot, state, pending);
+}
+
+function renderRecipientOptions(documentRoot, recipientPicker, recipients) {
+  const previousRecipient = recipientPicker.value;
+  const recipientSignature = JSON.stringify(recipients);
+  // Preserve the native chooser and input focus when a poll has no recipient changes.
+  if (recipientPicker.dataset.recipientSignature !== recipientSignature) {
+    const chooseRecipient = documentRoot.createElement('option');
+    chooseRecipient.value = '';
+    chooseRecipient.textContent = 'Choose a survivor';
+    recipientPicker.replaceChildren(chooseRecipient, ...recipients.map(recipient => {
+      const option = documentRoot.createElement('option');
+      option.value = recipient.survivorId;
+      option.textContent = `${recipient.name} · ${recipient.survivorId.slice(0, 8)}`;
+      return option;
+    }));
+    recipientPicker.dataset.recipientSignature = recipientSignature;
+  }
+  recipientPicker.value = recipients.some(recipient => recipient.survivorId === previousRecipient)
+    ? previousRecipient : '';
+}
+
+function renderTrade(documentRoot, state, pending) {
+  const picker = documentRoot.getElementById('surviveTradePartner');
+  if (!picker) return;
+  const offer = state.trade;
+  const offerForm = documentRoot.getElementById('surviveTradeOffer');
+  offerForm.hidden = Boolean(offer);
+  renderRecipientOptions(documentRoot, picker, state.recipients);
+  documentRoot.getElementById('surviveTradeSend').disabled = pending || state.recipients.length === 0;
+  documentRoot.getElementById('surviveTradePending').hidden = !offer;
+  if (!offer) return;
+  const { offered, requested } = offer.offer;
+  const give = offer.incoming ? requested : offered;
+  const receive = offer.incoming ? offered : requested;
+  documentRoot.getElementById('surviveTradeTerms').textContent =
+    `Trade with ${offer.partner}. Give ${give.quantity} ${give.resource.toLowerCase()} and receive ${receive.quantity} ${receive.resource.toLowerCase()}.`;
+  const accept = documentRoot.getElementById('surviveTradeAccept');
+  accept.hidden = !offer.incoming;
+  accept.disabled = pending;
+  const end = documentRoot.getElementById('surviveTradeEnd');
+  end.textContent = offer.incoming ? 'Decline offer' : 'Withdraw offer';
+  end.disabled = pending;
 }
 
 function renderWeaponChoices(documentRoot, weapons, actions, pending) {
@@ -160,7 +189,7 @@ function renderWeaponChoices(documentRoot, weapons, actions, pending) {
       button.type = 'button';
       button.dataset.equipmentAction = 'EQUIP_WEAPON';
       button.dataset.itemId = weapon.id;
-      button.textContent = `Equip ${weapon.name} · +${weapon.damageBonus} damage · ${weapon.durability} uses left`;
+      button.textContent = `Equip ${weapon.name} · +${weapon.damageBonus} damage${attackDelayLabel(weapon.attackDelayMilliseconds)} · ${weapon.durability} uses left`;
       row.append(button);
       return row;
     });
@@ -201,6 +230,13 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const itemList = documentRoot.getElementById('surviveItemList');
   const itemSort = documentRoot.getElementById('surviveItemSort');
   const itemUse = documentRoot.getElementById('surviveItemUse');
+  const itemDrop = documentRoot.getElementById('surviveItemDrop');
+  const dropConfirm = documentRoot.getElementById('surviveDropConfirm');
+  const dropPrompt = documentRoot.getElementById('surviveDropPrompt');
+  const confirmDrop = documentRoot.getElementById('surviveConfirmDrop');
+  const cancelDrop = documentRoot.getElementById('surviveCancelDrop');
+  const expandPack = documentRoot.getElementById('surviveExpandPack');
+  let pendingDrop;
   const playShell = documentRoot.getElementById('survivePlayShell');
   const gameViewToggle = documentRoot.getElementById('surviveGameViewToggle');
   const game = documentRoot.getElementById('surviveGame');
@@ -208,6 +244,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   const logToggle = documentRoot.getElementById('surviveLogToggle');
   const logScrollback = documentRoot.getElementById('surviveLogScrollback');
   const world = mountSurviveWorld(documentRoot, requestJson, performAction, undefined, () => readWorld());
+  const removeMainMenu = mountMainMenu(documentRoot);
   const controller = mountSurviveController(documentRoot, world, () => { if (state) readWorld(); });
   const party = mountSurviveParty(documentRoot, (command, targetId) => {
     void sendRequest(API.survive.party, { method: 'POST', body: JSON.stringify({ command, targetId }) });
@@ -251,6 +288,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   }
 
   function acceptState(serverState) {
+    const previous = state;
     state = serverState?.name ? serverState : null;
     documentRoot.getElementById('surviveGame').hidden = !state;
     joinForm.hidden = Boolean(state);
@@ -261,6 +299,18 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
         : state.fishing ? Math.min(5000, state.fishing.millisecondsUntilEscape + 50) : 5000;
       nextWorldPollAt = Date.now() + delay;
       renderSurviveState(documentRoot, state, pending, mutationPending);
+      if (previous?.survivorId === state.survivorId) {
+        if (state.trade && state.trade.offer.id !== previous.trade?.offer.id) {
+          const { offered, requested } = state.trade.offer;
+          const terms = `${offered.quantity} ${offered.resource.toLowerCase()} for ${requested.quantity} ${requested.resource.toLowerCase()}`;
+          appendSurviveLogMessage(documentRoot, state.trade.incoming
+            ? `${state.trade.partner} offered ${terms}. Open Trade in the camp menu to respond.`
+            : `You offered ${terms} to ${state.trade.partner}.`);
+        } else if (previous.trade && !state.trade) {
+          const tradeResult = state.message?.startsWith('You traded ') || state.message?.endsWith(' ended the trade offer.');
+          appendSurviveLogMessage(documentRoot, tradeResult ? state.message : 'The trade offer is no longer available.');
+        }
+      }
     }
     party?.render(state, mutationPending);
     world.setState(state, mutationPending);
@@ -324,6 +374,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   equipment?.addEventListener('click', useEquipment);
   const updateItems = () => {
     if (state) renderSurviveItems(documentRoot, state, mutationPending);
+    if (pendingDrop && pendingDrop.id !== itemList.value) clearDrop();
   };
   const sortItems = () => {
     itemList.dataset.sort = itemList.dataset.sort === 'name' ? 'type' : 'name';
@@ -334,6 +385,41 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   };
   itemList?.addEventListener('change', updateItems);
   itemSort?.addEventListener('click', sortItems);
+  function clearDrop() {
+    pendingDrop = undefined;
+    dropConfirm.hidden = true;
+  }
+  const itemWindow = itemList?.closest?.('details');
+  const clearClosedDrop = () => { if (!itemWindow.open && pendingDrop) clearDrop(); };
+  itemWindow?.addEventListener('toggle', clearClosedDrop);
+  function closeDrop() {
+    clearDrop();
+    itemList.focus({ preventScroll: true });
+  }
+
+  function openDrop() {
+    if (mutationPending || !state?.actions.includes('DROP_ITEM') || !itemList.value) return;
+    pendingDrop = { id: itemList.value, survivorId: state.survivorId };
+    dropPrompt.textContent = 'Permanently discard one ' + itemList.selectedOptions[0].textContent.split(' ×')[0] + '?';
+    dropConfirm.hidden = false;
+    cancelDrop.focus({ preventScroll: true });
+  }
+
+  function dropItem() {
+    const selected = pendingDrop;
+    closeDrop();
+    if (selected && selected.survivorId === state?.survivorId && selected.id === itemList.value
+        && state?.actions.includes('DROP_ITEM') && !mutationPending) performAction('DROP_ITEM', selected.id);
+  }
+
+  function upgradePack() {
+    if (!mutationPending && state?.actions.includes('EXPAND_PACK')) performAction('EXPAND_PACK');
+  }
+
+  itemDrop?.addEventListener('click', openDrop);
+  confirmDrop?.addEventListener('click', dropItem);
+  cancelDrop?.addEventListener('click', closeDrop);
+  expandPack?.addEventListener('click', upgradePack);
   itemUse?.addEventListener('click', useItem);
   const toggleGameView = () => {
     const showPage = playShell.dataset.windowed !== 'true';
@@ -368,6 +454,36 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       }),
     }, 'GIVE');
   };
+  const tradePanel = documentRoot.getElementById('surviveTrade');
+  const tradeOfferForm = documentRoot.getElementById('surviveTradeOffer');
+  const sendTrade = event => {
+    event.preventDefault();
+    if (!state || pending || state.trade) return;
+    const fields = new FormData(tradeOfferForm);
+    void sendRequest(API.survive.trades, {
+      method: 'POST', body: JSON.stringify({
+        recipientId: fields.get('recipientId'),
+        offered: fields.get('offered'),
+        offeredQuantity: Number(fields.get('offeredQuantity')),
+        requested: fields.get('requested'),
+        requestedQuantity: Number(fields.get('requestedQuantity')),
+        revision: state.revision,
+      }),
+    });
+  };
+  const replyToTrade = event => {
+    const reply = event.target.closest('[data-trade-reply]');
+    if (!reply || !state?.trade || pending) return;
+    void sendRequest(API.survive.tradeReply, {
+      method: 'POST', body: JSON.stringify({
+        offerId: state.trade.offer.id,
+        accept: reply.dataset.tradeReply === 'accept',
+        revision: state.revision,
+      }),
+    });
+  };
+  tradeOfferForm?.addEventListener('submit', sendTrade);
+  tradePanel?.addEventListener('click', replyToTrade);
   giftForm.addEventListener('submit', give);
   documentRoot.getElementById('surviveRecipient').addEventListener('change', chooseRecipient);
   joinForm.addEventListener('submit', join);
@@ -415,10 +531,16 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       party?.dispose();
       equipment?.removeEventListener('click', useEquipment);
       itemList?.removeEventListener('change', updateItems);
+      itemWindow?.removeEventListener('toggle', clearClosedDrop);
       itemSort?.removeEventListener('click', sortItems);
+      itemDrop?.removeEventListener('click', openDrop);
+      confirmDrop?.removeEventListener('click', dropItem);
+      cancelDrop?.removeEventListener('click', closeDrop);
+      expandPack?.removeEventListener('click', upgradePack);
       itemUse?.removeEventListener('click', useItem);
       gameViewToggle?.removeEventListener('click', toggleGameView);
       controller.dispose();
+      removeMainMenu();
       world.dispose();
       documentRoot.getElementById('surviveCampScene').removeEventListener('click', act);
       restart.removeEventListener('click', showJoin);
@@ -426,6 +548,8 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       refresh.removeEventListener('click', readWorld);
       logToggle.removeEventListener('click', toggleLog);
       game.removeEventListener('keydown', useLogShortcut);
+      tradeOfferForm?.removeEventListener('submit', sendTrade);
+      tradePanel?.removeEventListener('click', replyToTrade);
       giftForm.removeEventListener('submit', give);
       documentRoot.getElementById('surviveRecipient').removeEventListener('change', chooseRecipient);
     },

@@ -4,6 +4,11 @@ const MATERIALS = [
   { id: 'stone', name: 'Stone', detail: 'Material for crafting a stone axe or spear.' },
 ];
 
+/** Old snapshots can omit delay while the browser and server update independently. */
+export function attackDelayLabel(milliseconds) {
+  return Number.isFinite(milliseconds) && milliseconds > 0 ? ` · ${milliseconds / 1000}s delay` : '';
+}
+
 /** Render the carried items from a confirmed snapshot without replacing the focused list control. */
 export function renderSurviveItems(documentRoot, state, pending) {
   const list = documentRoot.getElementById('surviveItemList');
@@ -15,7 +20,7 @@ export function renderSurviveItems(documentRoot, state, pending) {
       id: weapon.id,
       name: weapon.name.charAt(0).toUpperCase() + weapon.name.slice(1),
       quantity: 1,
-      detail: `+${weapon.damageBonus} damage · ${weapon.durability} uses left. Equip from Equipment → Main.`,
+      detail: `+${weapon.damageBonus} damage${attackDelayLabel(weapon.attackDelayMilliseconds)} · ${weapon.durability} uses left. Equip from Equipment → Main.`,
     });
   }
   const sortByName = list.dataset.sort === 'name';
@@ -38,7 +43,16 @@ export function renderSurviveItems(documentRoot, state, pending) {
     list.dataset.owner = state.survivorId;
   }
   const selected = entries.find(item => item.id === list.value);
+  const heading = documentRoot.getElementById('surviveSelectedItem');
+  if (heading) heading.textContent = selected?.name ?? 'Empty pack';
   documentRoot.getElementById('surviveItemDetail').textContent = selected?.detail ?? 'Your pack is empty.';
+  const drop = documentRoot.getElementById('surviveItemDrop');
+  if (drop) drop.hidden = !selected || !state.actions.includes('DROP_ITEM');
+  const expand = documentRoot.getElementById('surviveExpandPack');
+  if (expand) {
+    expand.hidden = state.inventoryCapacity >= 30;
+    expand.disabled = pending || !state.actions.includes('EXPAND_PACK');
+  }
   const use = documentRoot.getElementById('surviveItemUse');
   const wasFocused = documentRoot.activeElement === use;
   use.hidden = selected?.id !== 'food';

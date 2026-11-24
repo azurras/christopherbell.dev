@@ -6,7 +6,7 @@ Owns browser-side behavior for server-rendered pages.
 
 - `survive.js` renders the Java-owned shared survival world and serializes commands; it owns no game rules. See the `survive` Java package README for the API and lifetime contract.
 - The viewport vitals card shows an accepted partner's HP and TP from the same game snapshot. Invitations, ended parties and older snapshots without vitals clear the partner row.
-- `survive-world-materials.js` paints the adventurer's eyes, brows and lips on the mirrored face chart when staging the shared actor atlas. Keep the paint coordinates paired with `adventurer.json` and `authored-actors.jpg` when changing those assets.
+- `adventurer.json` bakes the sculpted brow, nose, jaw and swept-back hair into every adventurer animation frame. The face shares its edge vertices across cheeks and neck. `survive-authored-actors.js` softens the lighting over that skin chart. `survive-world-materials.js` paints those features on the mirrored face chart when staging the shared actor atlas. Keep the paint and shade coordinates paired with `adventurer.json` and `authored-actors.jpg` when changing those assets.
 
 - Page entry modules such as `home-feed.js`, `messages.js`, `profile.js`,
   `post.js`, `user-feed.js`, `vin-decoder.js`, `zip-coordinates.js`, and
@@ -25,9 +25,8 @@ Owns browser-side behavior for server-rendered pages.
 - Templates load one page entry module after `app.js`.
 - Page modules should own DOM selectors for that page and delegate reusable work
   to `lib` or `components`.
-- `home.js` renders the `/` homepage Signal Rail. It polls the public Void feed
-  every five seconds, picks the five posts with the highest likes plus direct
-  replies, and links each snapshot to that post page.
+- The homepage tool cards render in Thymeleaf. The shared nav shows
+  tools based on the current account capabilities on every route.
 - Shared modules should not assume a specific page exists. They should accept
   selectors, callbacks, or small context objects from page modules.
 - `messages.js` renders the `/messages` Signal Bridge interactions: conversation
@@ -227,6 +226,31 @@ bounded coverage, dashboard-only results and deferred billing/email delivery.
 
 ### Survive island
 
+`survive-main-menu.js` manages the two Main Menu pages and remembers the cursor on each.
+Left and Right change pages from the category list. Up and Down browse the active window.
+Confirm enters a category or advances from a carried item to its available commands.
+Cancel backs out one level, including the item drop confirmation. The controller uses the
+same navigation as the keyboard. The page arrows also support the mouse.
+Each category has a Back button that returns the cursor to its row. In Items,
+Confirm on a stack moves to its first available command and Cancel from a command
+returns to the stack. Confirming a drop still requires a separate decision.
+
+The North Gate ruin uses a continuous arch behind its face stones. Recessed joints
+and staggered wall courses give the masonry visible depth without adding a texture
+or changing the opening over the trail.
+
+The North Gate stream uses the terrain's bed depth to shade its water. The
+shallows show stone beneath the surface, ripples flow along the channel, and a
+shadow dims the water under the bridge's planks and timber supports. The
+material reuses the island's stone texture.
+
+Woodland trees use continuous bark across bent trunk rings. The roots sink into
+the terrain, with greener bark at the base and exposed root ridges on broadleaf
+trees. Branch heights and spread vary deterministically with each tree.
+Pines use shallow, tapering tiers with a painted needle bough. Broadleaf crowns
+and underbrush use the leaf cutout. Both regions share one foliage atlas and
+the same scenery buffer.
+
 The desktop Main Menu switches between the browser-filling game and the site
 page view without resetting the session.
 The North Gate waystation uses roof courses and a cloth pennant to mark the
@@ -280,6 +304,7 @@ Local firelight falls off around the pit, and reduced motion freezes the effect.
 sequenced presence pulses, timeout/backoff, player labels and frame/listener cleanup.
 Nearby survivors render their confirmed main weapon, engagement and guard stance
 from the presence response. Standing combat poses stay visible with reduced motion.
+Equipment and weapon item details display the server-provided automatic attack delay.
 Fishing projects a line and bite cue on the water and offers Reel In during the
 server-timed window. The bobber remains visible when reduced motion is enabled.
 The connection label uses the island-wide online count, independent of nearby poses.
@@ -340,3 +365,8 @@ keeps its encounter heading.
 
 Shared combat uses the acknowledged enemy position for both fighters.
 Personal encounters retain the local approach animation.
+
+The Items panel confirms a permanent discard and shows the camp pack upgrade.
+The server owns the pack capacity and validates the selected item.
+
+The Survive camp menu lets players offer, review, and respond to supply trades. Trade terms arrive through the normal survivor snapshot, and trade feedback goes to the participant's in-world chat log.

@@ -342,8 +342,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       event.preventDefault();
       if (event.repeat) return;
       mainMenu.open = !mainMenu.open;
-      const focusTarget = mainMenu.open ? mainMenu.querySelector('.survive-main-menu-list summary') : canvas;
-      focusTarget.focus({ preventScroll: true });
+      if (!mainMenu.open) canvas.focus({ preventScroll: true });
+      else if (!mainMenu.dataset.paged) mainMenu.querySelector('.survive-main-menu-list summary').focus();
     } else if (event.code === 'Escape' && !event.target.closest('.survive-game-log')
         && (mainMenu.open || !actionList.hidden)) {
       event.preventDefault();

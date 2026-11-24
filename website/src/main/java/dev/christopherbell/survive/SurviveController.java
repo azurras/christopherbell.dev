@@ -80,6 +80,22 @@ public class SurviveController {
         .body(survivors.giveSuppliesForOwner(token, accountId(), request.recipientId(), request.resource(),
             request.quantity(), request.revision()));
   }
+  /** Publishes exact terms privately to the two participants. */
+  @PostMapping("/trades")
+  public ResponseEntity<SurviveSnapshot> offerTrade(
+      @CookieValue(name = COOKIE_NAME, required = false) String token,
+      @Valid @RequestBody SurviveRequests.TradeOffer request) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(survivors.offerTrade(token, accountId(), request));
+  }
+
+  /** Accepts, declines or withdraws an existing offer. */
+  @PostMapping("/trades/reply")
+  public ResponseEntity<SurviveSnapshot> replyToTrade(
+      @CookieValue(name = COOKIE_NAME, required = false) String token,
+      @Valid @RequestBody SurviveRequests.TradeReply request) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(survivors.replyToTrade(token, accountId(), request));
+  }
+
   /** Mutates only the requesting survivor's party relationship. */
   @PostMapping("/party")
   public ResponseEntity<SurviveSnapshot> changeParty(
