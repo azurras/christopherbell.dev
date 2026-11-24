@@ -133,6 +133,8 @@ The Survive viewport vitals panel shows enemy attention during shared combat,
 using the private enmity leader from the survivor snapshot.
 
 The Survive Main Menu styles its page arrows and focused cursor inside the category window.
+Its panel headings stay visible while scrolling. The item inspector groups the
+selected stack, its description and the actions available for that stack.
 It keeps its category list visible while the selected panel
 opens beside it in the desktop world view. Narrow viewports and page view show
 the same panel beneath its category.

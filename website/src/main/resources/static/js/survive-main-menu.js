@@ -46,6 +46,13 @@ export function mountMainMenu(documentRoot) {
   }
 
   function onClick(event) {
+    const back = event.target.closest('[data-menu-back]');
+    if (back) {
+      const category = back.closest('details');
+      category.open = false;
+      category.querySelector('summary').focus();
+      return;
+    }
     if (pager.contains(event.target.closest('button'))) {
       switchPage();
       return;
@@ -57,7 +64,8 @@ export function mountMainMenu(documentRoot) {
     window.open = !window.open;
     if (!window.open) return;
     const panel = summary.nextElementSibling;
-    const first = window.querySelector('#surviveItemList') ?? visibleControls(window).find(row => row !== summary);
+    const first = window.querySelector('#surviveItemList')
+      ?? visibleControls(window).find(row => row !== summary && !row.hasAttribute('data-menu-back'));
     if (first) first.focus();
     else if (panel) {
       panel.tabIndex = -1;
@@ -82,6 +90,11 @@ export function mountMainMenu(documentRoot) {
         return;
       }
       const window = target.closest('details[open]');
+      if (target.closest('.survive-item-commands')) {
+        event.preventDefault();
+        documentRoot.getElementById('surviveItemList').focus();
+        return;
+      }
       if (window && window !== menu) {
         event.preventDefault();
         window.open = false;
@@ -91,12 +104,9 @@ export function mountMainMenu(documentRoot) {
     }
     const panel = target.closest('.survive-main-menu-panel');
     if (panel && target.matches('select[size]') && event.key === 'Enter') {
-      const options = visibleControls(panel);
-      const next = options[options.indexOf(target) + 1];
-      if (next) {
-        event.preventDefault();
-        next.focus();
-      }
+      const commands = panel.querySelector('.survive-item-commands');
+      event.preventDefault();
+      if (commands) visibleControls(commands)[0]?.focus();
       return;
     }
     if (!panel && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
@@ -112,7 +122,8 @@ export function mountMainMenu(documentRoot) {
       return;
     }
     const nested = target.closest('.survive-main-menu-panel details[open]');
-    const rows = panel ? visibleControls(nested ?? panel) : rootRows();
+    const confirmation = target.closest('#surviveDropConfirm');
+    const rows = panel ? visibleControls(confirmation ?? nested ?? panel) : rootRows();
     if (!rows.length) return;
     const index = rows.indexOf(target);
     const step = event.key === 'ArrowDown' ? 1 : -1;

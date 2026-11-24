@@ -396,6 +396,7 @@ test('Items sorts named stacks, retains selection after a refresh, and uses food
     list.value = 'food';
     list.listeners.get('change')();
     assert.match(documentRoot.getElementById('surviveItemDetail').textContent, /2 HP.*5 fullness/);
+    assert.equal(documentRoot.getElementById('surviveSelectedItem').textContent, 'Food');
     documentRoot.getElementById('surviveItemSort').listeners.get('click')();
     assert.deepEqual(names(), ['Club ×1', 'Food ×1', 'Stone ×2', 'Wood ×4']);
     assert.equal(list.value, 'food');

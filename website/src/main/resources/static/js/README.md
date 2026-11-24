@@ -231,6 +231,9 @@ Left and Right change pages from the category list. Up and Down browse the activ
 Confirm enters a category or advances from a carried item to its available commands.
 Cancel backs out one level, including the item drop confirmation. The controller uses the
 same navigation as the keyboard. The page arrows also support the mouse.
+Each category has a Back button that returns the cursor to its row. In Items,
+Confirm on a stack moves to its first available command and Cancel from a command
+returns to the stack. Confirming a drop still requires a separate decision.
 
 The North Gate ruin uses a continuous arch behind its face stones. Recessed joints
 and staggered wall courses give the masonry visible depth without adding a texture

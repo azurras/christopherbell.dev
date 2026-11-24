@@ -232,6 +232,46 @@
 .survive-world-actions { display: grid; max-height: 12rem; overflow: auto; margin-top: .25rem; padding: .2rem; }
 .survive-world .survive-world-actions button { color: #f2f3ff; background: none; border: 0; border-radius: .15rem; min-height: 2.3rem; padding: .3rem .55rem; }
 .survive-world-actions button::before { margin-right: .5rem; }
+.survive-main-menu[open] > summary {
+  box-sizing: border-box; width: 100%; list-style: none; padding: .45rem .75rem;
+  color: #f5e4b9; font-weight: 700; border-bottom: 0; border-radius: .35rem .35rem 0 0;
+}
+.survive-main-menu[open] > summary::-webkit-details-marker { display: none; }
+.survive-main-menu[open] > .survive-main-menu-list { margin-top: 0; border-radius: 0 0 .35rem .35rem; }
+.survive-main-menu-list .survive-section > summary::before,
+.survive-world-actions button::before { visibility: hidden; }
+.survive-main-menu-list .survive-section > summary:focus::before,
+.survive-world-actions button:focus::before { visibility: visible; transform: none; }
+.survive-world .survive-main-menu :is(button, select, input) {
+  min-height: 2rem; border-radius: .2rem; border-color: #657798;
+  background-color: #1c2d4d; color: #edf2fa; font: inherit;
+}
+.survive-world .survive-main-menu button { padding: .3rem .65rem; }
+.survive-world .survive-main-menu button:hover { background-color: #344b70; }
+.survive-main-menu .survive-window-heading, .survive-pack-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: .6rem;
+}
+.survive-main-menu .survive-window-heading {
+  position: sticky; z-index: 1; top: -.65rem; margin: -.65rem -.65rem .65rem;
+  padding: .35rem .65rem; background: #233453; border-bottom: 1px solid #75839d;
+}
+.survive-main-menu .survive-window-heading h2 {
+  margin: 0; color: #f5e4b9; font-size: 1rem; line-height: 1.4;
+}
+.survive-main-menu:not([data-paged]) [data-menu-back] { display: none; }
+.survive-pack-toolbar { font-variant-numeric: tabular-nums; }
+.survive-world .survive-item-list { padding: .2rem; background-color: #101c34; }
+.survive-item-list option { padding: .3rem .45rem; }
+.survive-main-menu .survive-item-inspect { padding: .65rem; background: #192741; border-left: .15rem solid #b79e68; }
+.survive-main-menu .survive-item-inspect h3 { margin: 0; color: #f6e7bd; font-size: .9rem; }
+.survive-main-menu .survive-item-inspect p { margin: .25rem 0 .5rem; color: #d1d9e7; }
+.survive-item-commands { display: flex; flex-wrap: wrap; gap: .35rem; }
+#surviveDropConfirm { margin-top: .5rem; padding: .5rem; border: 1px solid #d8b876; }
+#surviveDropConfirm p { margin: 0 0 .4rem; }
+#surviveExpandPack { margin-top: .65rem; }
+@media (pointer: coarse) {
+  .survive-world .survive-main-menu button { min-height: 44px; }
+}
 .survive-game-vitals { display: flex; flex-wrap: wrap; gap: .15rem .65rem; padding: .35rem .55rem; font-variant-numeric: tabular-nums; }
 .survive-game-vitals strong { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .survive-enemy-attention { width: 100%; color: #f3d392; }

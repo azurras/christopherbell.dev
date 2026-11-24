@@ -374,6 +374,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   equipment?.addEventListener('click', useEquipment);
   const updateItems = () => {
     if (state) renderSurviveItems(documentRoot, state, mutationPending);
+    if (pendingDrop && pendingDrop.id !== itemList.value) clearDrop();
   };
   const sortItems = () => {
     itemList.dataset.sort = itemList.dataset.sort === 'name' ? 'type' : 'name';
@@ -384,9 +385,15 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
   };
   itemList?.addEventListener('change', updateItems);
   itemSort?.addEventListener('click', sortItems);
-  function closeDrop() {
+  function clearDrop() {
     pendingDrop = undefined;
     dropConfirm.hidden = true;
+  }
+  const itemWindow = itemList?.closest?.('details');
+  const clearClosedDrop = () => { if (!itemWindow.open && pendingDrop) clearDrop(); };
+  itemWindow?.addEventListener('toggle', clearClosedDrop);
+  function closeDrop() {
+    clearDrop();
     itemList.focus({ preventScroll: true });
   }
 
@@ -524,6 +531,7 @@ export function mountSurvive(documentRoot = document, requestJson = fetchJson) {
       party?.dispose();
       equipment?.removeEventListener('click', useEquipment);
       itemList?.removeEventListener('change', updateItems);
+      itemWindow?.removeEventListener('toggle', clearClosedDrop);
       itemSort?.removeEventListener('click', sortItems);
       itemDrop?.removeEventListener('click', openDrop);
       confirmDrop?.removeEventListener('click', dropItem);
