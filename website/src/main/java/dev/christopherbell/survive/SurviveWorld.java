@@ -636,8 +636,7 @@ final class SurviveWorld {
 
   private static String revealAnimal(SurvivePlayer player, SurviveEnemy animal) {
     player.startFighting(animal);
-    return "A wild " + animal.displayName() + " appears! It has " + animal.health()
-        + " health. Select it to check or engage, or flee to camp.";
+    return "You spot a " + animal.displayName() + " with " + animal.health() + " health.";
   }
 
   private static String fish(SurvivePlayer player, IntSupplier rollPercent) {

@@ -220,6 +220,32 @@ test('a field encounter keeps one selected animal before the next movement reply
   } finally { world.dispose(); }
 });
 
+test('an aggro pulse keeps the attacker in view until the combat reply takes over', async () => {
+  const fixture = worldFixture();
+  const wolf = { id: 'pine-wolf', kind: 'WOLF', x: -3, z: 4 };
+  let frame;
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({
+    self: { survivorId: 'alice', status: 'COMBAT', sequence: 1, x: 0, z: 0, heading: 0 },
+    others: [], accepted: true, wildlife: [], encounter: wolf,
+  }), () => {}, () => ({ ...fixture.renderer,
+    draw(_pose, _yaw, _state, _others, _time, animals, enemy) {
+      frame = { ids: animals.map(animal => animal.id), enemy };
+      return { project: () => ({ visible: true, x: 0, y: 0 }) };
+    },
+  }));
+  try {
+    world.setState(worldState);
+    fixture.frame(0);
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.frame(16);
+    assert.deepEqual(frame.ids, [wolf.id]);
+    world.setState({ ...worldState, status: 'COMBAT', fieldEncounter: wolf, enemy: 'WOLF', enemyHealth: 8, nextStrikeAt: 'now' });
+    fixture.frame(32);
+    assert.deepEqual(frame.ids, []);
+    assert.equal(frame.enemy.id, wolf.id);
+  } finally { world.dispose(); }
+});
+
 test('clicking a visible body selects it while an orbit drag or a miss leaves selection alone', async () => {
   const fixture = worldFixture();
   const hog = { id: 'meadow-hog', kind: 'HOG', x: -2, z: 1 };

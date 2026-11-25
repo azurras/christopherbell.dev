@@ -339,7 +339,7 @@ export function createWorldRenderer(canvas) {
     }
     return {
       pickTarget,
-      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture, cameraZoom, counter, defeatedEnemy) {
+      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture, cameraZoom, counter, defeatedEnemy, fieldTargetId) {
         pickRanges.length = 0;
         const pixelBudgetRatio = Math.sqrt(2200000 / Math.max(1, canvas.clientWidth * canvas.clientHeight));
         const pixelRatio = Math.min(2, pixelBudgetRatio, globalThis.devicePixelRatio || 1);
@@ -395,6 +395,7 @@ export function createWorldRenderer(canvas) {
         if (keeper) {
           const distance = Math.hypot(keeper.x - position.x, keeper.z - position.z);
           if (distance <= 32) {
+            if (keeper.id === fieldTargetId) drawTargetRing(actors, keeper, 0.75, [0.64, 0.48, 0.21]);
             const first = dynamicMesh.vertexCount;
             actors.avatar(keeper.x, keeper.z, 0, [0.32, 0.43, 0.25], 'EXPLORING', 0,
               null, null, distance < 16, animationSeconds, [0.93, 0.91, 0.76], true);
@@ -411,6 +412,7 @@ export function createWorldRenderer(canvas) {
           drawBoat(actors, 5 + index * 4, 80);
         }
         for (const animal of wildlife) {
+          if (animal.id === fieldTargetId) drawTargetRing(actors, animal, animal.kind === 'BEAR' ? 1.38 : 0.86, [0.64, 0.48, 0.21]);
           const first = dynamicMesh.vertexCount;
           if (animal.kind === 'RAIDER') {
             actors.avatar(animal.x, animal.z, animal.heading, RAIDER_CLOTH, 'EXPLORING', stride(animal),

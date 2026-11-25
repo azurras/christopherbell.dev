@@ -513,7 +513,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       const rendered = renderer.draw({ ...position, moving, fishing, animate: !motionPreference?.matches }, yaw, state,
         others.map(other => ({ ...other, x: other.drawX, z: other.drawZ })), timestamp / 1000,
         wildlife.map(animal => ({ ...animal, x: animal.drawX, z: animal.drawZ })), enemy, pose, cameraZoom, counter,
-        fall ? { ...defeatedEnemy, fall } : null);
+        fall ? { ...defeatedEnemy, fall } : null, fieldTargetId);
       worldFeedback.draw(rendered.project, enemy);
       if (fishingCue) {
         const float = fishing ? rendered.project(fishingFloat(position.x, position.z)) : null;
