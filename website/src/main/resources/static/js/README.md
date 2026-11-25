@@ -277,6 +277,13 @@ Movement responses can include a claimed roaming animal. Party members in range
 can Engage it through Commands. Other players can select and Check the claim,
 and Hunt considers only free animals. Participants read the shared health from
 their game snapshots.
+The island resolves a body click against the last rendered frame using a
+one-pixel depth buffer allocated on the first pick. Scenery and nearer actors
+occlude targets. Dragging or cancelling a pointer gesture leaves selection alone.
+Tab and Shift+Tab wrap through visible targets. Escape on the canvas clears the
+field selection and lets the next Tab move keyboard focus out of the viewport.
+The combat snapshot identifies the animal before the next movement reply, so
+the roaming label and body give way to one combat marker and model.
 Commands uses the weapon skill name returned by the game snapshot. Impact
 opening and closing messages use the existing chat event stream.
 The Waystation Keeper uses the same field targeting controls as creatures.

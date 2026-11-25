@@ -43,6 +43,7 @@ uniform vec3 sky;
 uniform vec3 waystationLantern;
 uniform float time;
 uniform float fireTime;
+uniform float pickCode;
 uniform sampler2D grassTile;
 uniform sampler2D earthTile;
 uniform sampler2D stoneTile;
@@ -99,7 +100,7 @@ vec3 shadeGateStream() {
   float underDeck = 1.0 - smoothstep(1.42, 2.30, abs(surface.x + 0.36));
   return water * (1.0 - underDeck * 0.46);
 }
-void main() {
+void shadeSurface() {
   if (surfaceMaterial > 10.0 && surfaceMaterial < 11.0) {
     vec2 point = vec2(uv.x - 0.5, uv.y);
     float pulse = fireTime * 6.0;
@@ -193,6 +194,14 @@ void main() {
     lit = mix(lit * (1.0 + ripple * 0.12), lightBySky(vec3(0.62, 0.70, 0.68)), foam);
   }
   gl_FragColor = vec4(mix(lit, sky, smoothstep(36.0, 144.0, depth)), 1.0);
+}
+void main() {
+  shadeSurface();
+  if (pickCode > 0.0) {
+    if (surfaceMaterial > 9.0 && surfaceMaterial < 10.0) discard;
+    float index = pickCode - 1.0;
+    gl_FragColor = vec4(mod(index, 16.0) / 15.0, floor(index / 16.0) / 15.0, 0.0, 1.0);
+  }
 }`;
 
 /** Allocates GPU resources once; the caller owns draw/dispose and context-loss recovery. */
@@ -205,9 +214,15 @@ export function createWorldRenderer(canvas) {
   const actorArt = {};
   const program = gl.createProgram();
   let materials;
+  let pickBuffer;
+  let pickColor;
+  let pickDepth;
   function dispose() {
     actorRequests.abort();
     materials?.dispose();
+    if (pickBuffer) gl.deleteFramebuffer(pickBuffer);
+    if (pickColor) gl.deleteRenderbuffer(pickColor);
+    if (pickDepth) gl.deleteRenderbuffer(pickDepth);
     for (const buffer of buffers) gl.deleteBuffer(buffer);
     for (const shader of shaders) gl.deleteShader(shader);
     gl.deleteProgram(program);
@@ -254,21 +269,78 @@ export function createWorldRenderer(canvas) {
     const skyUniform = gl.getUniformLocation(program, 'sky');
     const timeUniform = gl.getUniformLocation(program, 'time');
     const fireTimeUniform = gl.getUniformLocation(program, 'fireTime');
+    const pickUniform = gl.getUniformLocation(program, 'pickCode');
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     const vertexBytes = MESH_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
     const attributes = [[positionAttribute, 3, 0], [colorAttribute, 3, 12], [materialAttribute, 1, 24], [uvAttribute, 2, 28]];
-    function drawBuffer(buffer, count) {
+    function drawBuffer(buffer, count, first = 0) {
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
       for (const [attribute, components, offset] of attributes) {
         gl.enableVertexAttribArray(attribute);
         gl.vertexAttribPointer(attribute, components, gl.FLOAT, false, vertexBytes, offset);
       }
-      gl.drawArrays(gl.TRIANGLES, 0, count);
+      gl.drawArrays(gl.TRIANGLES, first, count);
+    }
+    const pickRanges = [];
+    function recordBody(id, first) {
+      pickRanges.push({ id, first, end: dynamicMesh.vertexCount });
+    }
+    // Replay the last frame into one pixel on click. The depth buffer and foliage cutouts
+    // select the visible surface, including where two animals overlap.
+    function pickTarget(clientX, clientY) {
+      if (!pickRanges.length) return null;
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor((clientX - rect.left) * canvas.width / rect.width);
+      const y = canvas.height - 1 - Math.floor((clientY - rect.top) * canvas.height / rect.height);
+      if (!(x >= 0 && x < canvas.width && y >= 0 && y < canvas.height)) return null;
+      if (!pickBuffer) {
+        pickBuffer = gl.createFramebuffer();
+        pickColor = gl.createRenderbuffer();
+        pickDepth = gl.createRenderbuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, pickBuffer);
+        gl.bindRenderbuffer(gl.RENDERBUFFER, pickColor);
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA4, 1, 1);
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, pickColor);
+        gl.bindRenderbuffer(gl.RENDERBUFFER, pickDepth);
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, 1, 1);
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, pickDepth);
+        gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, pickBuffer);
+      try {
+        gl.viewport(-x, -y, canvas.width, canvas.height);
+        gl.disable(gl.BLEND);
+        gl.disable(gl.DITHER);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.uniform1f(pickUniform, 1);
+        drawBuffer(staticBuffer, sceneryVertexCount);
+        let first = 0;
+        for (const [index, range] of pickRanges.entries()) {
+          if (range.first > first) drawBuffer(actorBuffer, range.first - first, first);
+          gl.uniform1f(pickUniform, index + 2);
+          drawBuffer(actorBuffer, range.end - range.first, range.first);
+          gl.uniform1f(pickUniform, 1);
+          first = range.end;
+        }
+        if (first < dynamicMesh.vertexCount) drawBuffer(actorBuffer, dynamicMesh.vertexCount - first, first);
+        const pixel = new Uint8Array(4);
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+        return pickRanges[Math.round(pixel[0] / 17) + 16 * Math.round(pixel[1] / 17) - 1]?.id ?? null;
+      } finally {
+        gl.uniform1f(pickUniform, 0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.enable(gl.BLEND);
+        gl.enable(gl.DITHER);
+      }
     }
     return {
-      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture, cameraZoom, counter, defeatedEnemy) {
+      pickTarget,
+      draw(position, yaw, state, others, animationSeconds, wildlife, enemy, gesture, cameraZoom, counter, defeatedEnemy, fieldTargetId) {
+        pickRanges.length = 0;
         const pixelBudgetRatio = Math.sqrt(2200000 / Math.max(1, canvas.clientWidth * canvas.clientHeight));
         const pixelRatio = Math.min(2, pixelBudgetRatio, globalThis.devicePixelRatio || 1);
         const width = Math.max(1, Math.round(canvas.clientWidth * pixelRatio));
@@ -323,8 +395,11 @@ export function createWorldRenderer(canvas) {
         if (keeper) {
           const distance = Math.hypot(keeper.x - position.x, keeper.z - position.z);
           if (distance <= 32) {
+            if (keeper.id === fieldTargetId) drawTargetRing(actors, keeper, 0.75, [0.64, 0.48, 0.21]);
+            const first = dynamicMesh.vertexCount;
             actors.avatar(keeper.x, keeper.z, 0, [0.32, 0.43, 0.25], 'EXPLORING', 0,
               null, null, distance < 16, animationSeconds, [0.93, 0.91, 0.76], true);
+            recordBody(keeper.id, first);
           }
         }
         for (let index = 0; index < Math.min(8, state.shelters); index++) {
@@ -337,6 +412,8 @@ export function createWorldRenderer(canvas) {
           drawBoat(actors, 5 + index * 4, 80);
         }
         for (const animal of wildlife) {
+          if (animal.id === fieldTargetId) drawTargetRing(actors, animal, animal.kind === 'BEAR' ? 1.38 : 0.86, [0.64, 0.48, 0.21]);
+          const first = dynamicMesh.vertexCount;
           if (animal.kind === 'RAIDER') {
             actors.avatar(animal.x, animal.z, animal.heading, RAIDER_CLOTH, 'EXPLORING', stride(animal),
               'CLUB', null, true, animationSeconds, RAIDER_ARMOR_TINT);
@@ -344,6 +421,7 @@ export function createWorldRenderer(canvas) {
             actors.animal(animal.x, animal.z, animal.kind, animal.kind === 'BEAR' ? 1.6 : 1, animal.heading,
               stride(animal), 0, Math.hypot(animal.x - position.x, animal.z - position.z) < 16, animationSeconds);
           }
+          if (Math.hypot(animal.x - position.x, animal.z - position.z) <= 32) recordBody(animal.id, first);
         }
         if (state.status === 'COMBAT') {
           const scale = state.enemy === 'BEAR' ? 1.6 : 1;
@@ -353,6 +431,7 @@ export function createWorldRenderer(canvas) {
           const facing = enemyFacing(enemy, position, others, state.enemyAttention);
           const enemyX = enemy.x + Math.sin(facing) * (counter?.forward ?? 0);
           const enemyZ = enemy.z + Math.cos(facing) * (counter?.forward ?? 0);
+          const first = dynamicMesh.vertexCount;
           if (state.enemy === 'RAIDER') {
             actors.avatar(enemyX, enemyZ, facing, RAIDER_CLOTH, 'COMBAT', stride(enemy), 'CLUB',
               counter, true, animationSeconds, RAIDER_ARMOR_TINT);
@@ -361,6 +440,7 @@ export function createWorldRenderer(canvas) {
               !counter && pose?.kind === 'strike' ? pose.weight : 0,
               true, animationSeconds);
           }
+          recordBody(enemy.id ?? 'combat-enemy', first);
         }
         if (defeatedEnemy) {
           const { x, z, kind, heading, fall } = defeatedEnemy;

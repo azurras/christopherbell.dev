@@ -1,5 +1,6 @@
 package dev.christopherbell.survive.model;
 
+import dev.christopherbell.survive.SurviveWildlife;
 import java.time.Instant;
 import java.util.List;
 
@@ -15,7 +16,8 @@ public record SurviveSnapshot(
     Instant nextStrikeAt, long millisecondsUntilStrike, int tacticalPoints, boolean defending, String combatOutcome,
     SurviveParty.View party, String weaponSkill, SurviveWaystation.Keeper waystationKeeper,
     SurviveWaystation.Assignment waystationAssignment, List<WeaponChoice> packedWeapons, SurviveFishing.Timing fishing,
-    int attackDelayMilliseconds, SurviveStrike strike, EnemyAttention enemyAttention, SurviveTrade.View trade) {
+    int attackDelayMilliseconds, SurviveStrike strike, EnemyAttention enemyAttention, SurviveTrade.View trade,
+    SurviveWildlife.Animal fieldEncounter) {
 
   /** Owned weapon choice and the stats shown in Main before equipping. */
   public record WeaponChoice(String id, String name, int damageBonus, int durability, int attackDelayMilliseconds) {

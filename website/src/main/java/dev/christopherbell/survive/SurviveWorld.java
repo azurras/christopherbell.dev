@@ -146,6 +146,11 @@ final class SurviveWorld {
   }
 
   SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline, SurvivePresence presence) {
+    return snapshotFor(player, now, activeDeadline, presence, null);
+  }
+
+  SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline, SurvivePresence presence,
+      SurviveWildlife.Animal fieldEncounter) {
     return new SurviveSnapshot(player.name, player.health, player.strength, player.stamina,
         player.experience, player.experienceToNextLevel, player.wood, player.food,
         player.inventoryCapacity(), player.enemyHealth, player.status, player.revision, revision,
@@ -164,7 +169,7 @@ final class SurviveWorld {
         player.packedWeapons.stream().map(SurviveSnapshot.WeaponChoice::from).toList(),
         player.fishing == null ? null : player.fishing.timingAt(now), player.attackDelayMilliseconds(),
         player.lastStrike != null && player.lastStrike.visibleAt(now) ? player.lastStrike : null, enemyAttentionFor(player, now),
-        tradeView(player, now));
+        tradeView(player, now), fieldEncounter);
   }
 
   /** Settles elapsed fights even when their participants did not send any requests. */
@@ -635,8 +640,7 @@ final class SurviveWorld {
 
   private static String revealAnimal(SurvivePlayer player, SurviveEnemy animal) {
     player.startFighting(animal);
-    return "A wild " + animal.displayName() + " appears! It has " + animal.health()
-        + " health. Select it to check or engage, or flee to camp.";
+    return "You spot a " + animal.displayName() + " with " + animal.health() + " health.";
   }
 
   private static String fish(SurvivePlayer player, IntSupplier rollPercent) {

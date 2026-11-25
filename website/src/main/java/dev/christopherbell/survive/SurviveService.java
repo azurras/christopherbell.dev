@@ -258,11 +258,9 @@ public class SurviveService {
     if (fishingInterrupted) {
       commitWorld();
     }
-    var claimedFight = world.fieldFightFor(player);
     var animals = new ArrayList<>(wildlife.roaming(now, world.raiderApproaching(now), world.reservedFieldRoutes()));
     animals.addAll(world.visibleFieldClaims(player, now));
-    var encounter = claimedFight == null ? wildlife.encounter(player.survivorId) : SurviveWorld.fieldAnimal(claimedFight, false);
-    return view.withScene(player.status, describeVisiblePlayers(view.others(), now), animals, encounter);
+    return view.withScene(player.status, describeVisiblePlayers(view.others(), now), animals, fieldEncounterFor(player));
   }
 
   /** Resolve appearance from the settled world, even when the visible player has not sent another pulse. */
@@ -589,7 +587,16 @@ public class SurviveService {
 
   private SurviveSnapshot snapshotFor(SurvivePlayer player) {
     var now = clock.instant();
-    return world.snapshotFor(player, now, now.minus(IDLE_TIMEOUT), presence);
+    return world.snapshotFor(player, now, now.minus(IDLE_TIMEOUT), presence, fieldEncounterFor(player));
+  }
+
+  /** Both command and movement replies identify the same animal from the first combat frame. */
+  private SurviveWildlife.Animal fieldEncounterFor(SurvivePlayer player) {
+    if (player.status != Status.COMBAT) {
+      return null;
+    }
+    var fight = world.fieldFightFor(player);
+    return fight == null ? wildlife.encounter(player.survivorId) : SurviveWorld.fieldAnimal(fight, false);
   }
 
   /** Internal join result: the controller writes the credential only to a private cookie. */
