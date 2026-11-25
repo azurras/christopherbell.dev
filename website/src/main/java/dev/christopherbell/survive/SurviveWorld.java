@@ -145,7 +145,7 @@ final class SurviveWorld {
         storedPlayers, settledBoundaries, activeRaidNight, parties.save(), List.copyOf(fieldFights.values()), List.copyOf(trades.values()));
   }
 
-  SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline) {
+  SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline, SurvivePresence presence) {
     return new SurviveSnapshot(player.name, player.health, player.strength, player.stamina,
         player.experience, player.experienceToNextLevel, player.wood, player.food,
         player.inventoryCapacity(), player.enemyHealth, player.status, player.revision, revision,
@@ -153,7 +153,8 @@ final class SurviveWorld {
         List.copyOf(events), actionsFor(player, now), player.message, player.survivorId,
         player.status == Status.EXPLORING ? players.values().stream()
             .filter(recipient -> recipient != player && recipient.status == Status.EXPLORING && recipient.lastSeen.isAfter(activeDeadline))
-            .map(recipient -> new Recipient(recipient.survivorId, recipient.name)).toList() : List.of(), player.accountId != null,
+            .map(recipient -> new Recipient(recipient.survivorId, recipient.name,
+                presence.withinTradeRange(player.survivorId, recipient.survivorId, now))).toList() : List.of(), player.accountId != null,
         SurviveClock.phaseAt(now), SurviveClock.dayAt(now), SurviveClock.secondsToNextPhaseAt(now),
         player.hunger, player.stone, player.weapon, player.weaponDurability, player.enemy,
         bedsInUse(), shelters * BEDS_PER_SHELTER, player.guarding,
@@ -251,6 +252,32 @@ final class SurviveWorld {
     }
   }
 
+  /** Releases expired offers and offers whose participants no longer exist. */
+  boolean settleTradesUntil(Instant now) {
+    if (trades.isEmpty()) {
+      return false;
+    }
+    var survivorsById = new LinkedHashMap<String, SurvivePlayer>();
+    players.values().forEach(player -> survivorsById.put(player.survivorId, player));
+    return trades.values().removeIf(offer -> {
+      var sender = survivorsById.get(offer.senderId());
+      var recipient = survivorsById.get(offer.recipientId());
+      if (sender == null || recipient == null) {
+        var remaining = sender == null ? recipient : sender;
+        if (remaining != null) {
+          recordTradeMessage(remaining, "Your trade partner left camp. The trade offer ended.");
+        }
+        return true;
+      }
+      if (!now.isBefore(offer.expiresAt())) {
+        recordTradeMessage(sender, "The trade offer expired.");
+        recordTradeMessage(recipient, "The trade offer expired.");
+        return true;
+      }
+      return false;
+    });
+  }
+
   private SurviveTrade.View tradeView(SurvivePlayer player, Instant now) {
     return trades.values().stream()
         .filter(offer -> offer.involves(player.survivorId) && now.isBefore(offer.expiresAt()))
@@ -267,15 +294,23 @@ final class SurviveWorld {
 
   /** Swaps both stacks after the service validates both packs. */
   void completeTrade(SurviveTrade offer, SurvivePlayer sender, SurvivePlayer recipient) {
-    addSupplies(sender, offer.offered().resource(), -offer.offered().quantity());
-    addSupplies(recipient, offer.requested().resource(), -offer.requested().quantity());
-    addSupplies(sender, offer.requested().resource(), offer.requested().quantity());
-    addSupplies(recipient, offer.offered().resource(), offer.offered().quantity());
+    offer.offeredLots().forEach(lot -> transferTradeLot(sender, recipient, lot));
+    offer.requestedLots().forEach(lot -> transferTradeLot(recipient, sender, lot));
     trades.remove(offer.id());
-    recordTradeMessage(sender, "You traded " + offer.offered().description() + " for " + offer.requested().description()
+    recordTradeMessage(sender, "You traded " + SurviveTrade.describe(offer.offeredLots()) + " for " + SurviveTrade.describe(offer.requestedLots())
         + " with " + recipient.name + ".");
-    recordTradeMessage(recipient, "You traded " + offer.requested().description() + " for " + offer.offered().description()
+    recordTradeMessage(recipient, "You traded " + SurviveTrade.describe(offer.requestedLots()) + " for " + SurviveTrade.describe(offer.offeredLots())
         + " with " + sender.name + ".");
+  }
+
+  private static void transferTradeLot(SurvivePlayer sender, SurvivePlayer recipient, SurviveTrade.Lot lot) {
+    if (lot.packedWeapon() == null) {
+      addSupplies(sender, lot.resource(), -lot.quantity());
+      addSupplies(recipient, lot.resource(), lot.quantity());
+    } else {
+      sender.packedWeapons.remove(lot.packedWeapon());
+      recipient.packedWeapons.add(lot.packedWeapon());
+    }
   }
 
   /** Applies a previously validated gift while the service holds the world's monitor. */

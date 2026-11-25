@@ -257,6 +257,9 @@ The desktop Main Menu switches between the browser-filling game and the site
 page view without resetting the session.
 The North Gate waystation uses roof courses and a cloth pennant to mark the
 staffed building. The keeper wears a mantle and cap distinct from the player.
+At night, the waystation lantern lights the entrance with a warm pool of light.
+Cool ambient lighting and horizon haze distinguish night from dusk across the
+terrain and water.
 The North Gate road has grouped verge plants outside the walking line.
 Enemy counter animation follows a confirmed hit or spent guard in the combat
 snapshot. The player's attack pose stays separate, and reduced motion disables
@@ -285,7 +288,7 @@ same request path as game actions. Its roster and chat notices come from the
 requesting survivor's snapshot. Polls preserve the selected invite recipient.
 
 `survive-world-model.js` owns display-only landmark filtering, camera projection and
-movement prediction. `survive-world-art.js` generates terrain, layered tree
+movement prediction. The sky dome has its own material so its lower hemisphere uses the same horizon color as the upper sky. `survive-world-art.js` generates terrain, layered tree
 crowns, underbrush and actor
 meshes. `survive-world-materials.js` loads original grass, path, mossy stone,
 bark and foliage images from `static/images/survive` into WebGL textures.
@@ -299,6 +302,8 @@ The fishing bank groups textured rocks, driftwood and bent reeds around the dock
 leaving the central approach open. These props share the static scenery buffer.
 Sand extends below the ocean surface and darkens near the waterline.
 `survive-world-renderer.js` owns WebGL buffers, lighting, fog and disposal.
+After uploading the scenery it keeps the GPU buffer and its vertex count.
+Renderer initialization rebuilds the scenery when a new context is needed.
 The starting campfire uses one camera-facing quad for soft flames and embers.
 Local firelight falls off around the pit, and reduced motion freezes the effect.
 `survive-dynamic-mesh.js` reuses typed vertex and GPU buffer capacity across frames.
@@ -318,7 +323,7 @@ does not make the local adventurer swing.
 constants in `lib/api.js`; it never computes survival rewards. The SVG scene remains
 the fallback for unavailable/lost WebGL. Labels use text nodes, never HTML.
 
-`survive-world-feedback.js` renders the current enemy name, health and marker.
+`survive-world-feedback.js` renders the current enemy name, health and marker. Its heading distinguishes an available Engage from active automatic attacks.
 The Chat log is the only surface for command results. Roaming animals interpolate
 between server poses and approach the player visually on engagement.
 `survive-action-pose.js` maps confirmed commands to timed body and tool poses.
@@ -368,7 +373,12 @@ keeps its encounter heading.
 Shared combat uses the acknowledged enemy position for both fighters.
 Personal encounters retain the local approach animation.
 
+Check stays available on a selected target during automatic combat. It reports
+the enemy's current health and threat description in the chat log.
+
 The Items panel confirms a permanent discard and shows the camp pack upgrade.
 The server owns the pack capacity and validates the selected item.
 
-The Survive camp menu lets players offer, review, and respond to supply trades. Trade terms arrive through the normal survivor snapshot, and trade feedback goes to the participant's in-world chat log.
+The Survive camp menu lets players offer, review, and counter trades for supplies or packed weapons. Trade terms arrive through the normal survivor snapshot, and trade feedback goes to the participant's in-world chat log, including expiry or a partner leaving the camp roster.
+
+The Trade menu uses the server-confirmed range flags in the survivor snapshot to filter recipients and to show when an open trade partner is out of range.

@@ -5,12 +5,16 @@ import { addFishingBank, addResourceProps, drawQuarryRock } from './survive-worl
 
 const TAU = Math.PI * 2;
 export const MESH_VERTEX_FLOATS = 9;
+export const SKY_MATERIAL = 15.5;
 const STONE_MATERIAL = 2.5;
 const BARK_MATERIAL = 3.5;
 const TRUNK_MATERIAL = 3.75;
 const FOLIAGE_MATERIAL = 4.5;
 const STREAM_MATERIAL = 13.5;
+const LANTERN_MATERIAL = 14.5;
 const BRIDGE_HEIGHT = 0.43;
+const WAYSTATION_X = 3.5;
+const WAYSTATION_Z = -38;
 const GRASS = [0.30, 0.37, 0.19];
 const EARTH = [0.48, 0.41, 0.28];
 const SAND = [0.63, 0.57, 0.40];
@@ -41,6 +45,11 @@ function terrainHeight(x, z) {
   const bankHeight = uphillBank + Math.max(0, 0.08 - uphillBank) * bankReach;
   return bankHeight + (-0.60 - bankHeight) * channel;
 }
+
+/** Keep the point light centered inside the glass mounted beside the waystation door. */
+export const WAYSTATION_LANTERN = Object.freeze([
+  WAYSTATION_X + 0.79, terrainHeight(WAYSTATION_X, WAYSTATION_Z) + 1.48, WAYSTATION_Z + 1.96,
+]);
 
 /** Anchors walking and rendering to the surface, including the bridge deck. */
 export function groundHeight(x, z) {
@@ -104,7 +113,7 @@ function woodland() {
 export function islandMesh() {
   const mesh = meshBuilder();
   const trees = woodland();
-  mesh.ellipsoid(0, 0, 0, 174, 135, 174, [1, 1, 1], 28, 10);
+  mesh.ellipsoid(0, 0, 0, 174, 135, 174, [1, 1, 1], 28, 10, 0, SKY_MATERIAL);
   mesh.disk(0, -0.66, 0, 380, [0.19, 0.34, 0.39], 72);
   const sectors = 144;
   const rings = 52;
@@ -280,8 +289,8 @@ function buildGateCrossing(mesh) {
     mesh.beam([x, BRIDGE_HEIGHT + 0.68, -29.1], [x, BRIDGE_HEIGHT + 0.68, -22.9],
       0.08, 0.08, BARK, 5, BARK_MATERIAL);
   }
-  const waystationX = 3.5;
-  const waystationZ = -38;
+  const waystationX = WAYSTATION_X;
+  const waystationZ = WAYSTATION_Z;
   const base = terrainHeight(waystationX, waystationZ);
   const stone = [0.48, 0.48, 0.42];
   mesh.box(waystationX, base + 1.16, waystationZ, 4.1, 2.8, 3.4, stone, STONE_MATERIAL);
@@ -289,6 +298,13 @@ function buildGateCrossing(mesh) {
   mesh.box(waystationX, base + 0.74, front, 1.03, 1.84, 0.08, BARK, BARK_MATERIAL);
   mesh.box(waystationX, base + 1.71, front + 0.04, 1.48, 0.23, 0.28, tint(stone, 1.18), STONE_MATERIAL);
   mesh.box(waystationX, base - 0.05, front + 0.35, 1.49, 0.21, 0.64, stone, STONE_MATERIAL);
+  const [lanternX, lanternY, lanternZ] = WAYSTATION_LANTERN;
+  const iron = [0.21, 0.19, 0.15];
+  mesh.box(lanternX, lanternY, lanternZ, 0.18, 0.24, 0.17, [0.57, 0.46, 0.28], LANTERN_MATERIAL);
+  mesh.box(lanternX, lanternY - 0.13, lanternZ, 0.24, 0.055, 0.22, iron);
+  mesh.beam([lanternX, lanternY + 0.11, lanternZ], [lanternX, lanternY + 0.22, lanternZ],
+    0.15, 0.046, iron, 4);
+  mesh.box(lanternX, lanternY + 0.19, (lanternZ + front) * 0.5, 0.055, 0.065, lanternZ - front + 0.06, iron);
   for (const side of [-1, 1]) {
     const windowX = waystationX + side * 1.36;
     mesh.box(windowX, base + 1.30, front, 0.63, 0.71, 0.09, [0.17, 0.19, 0.14]);

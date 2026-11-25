@@ -81,6 +81,7 @@ public class SurviveService {
     if (replacingPlayer) {
       presence.remove(world.players.get(ownerKey).survivorId);
       world.players.remove(ownerKey);
+      world.settleTradesUntil(clock.instant());
     }
     String token = UUID.randomUUID().toString();
     var player = new SurvivePlayer(name, clock.instant(), accountId, UUID.randomUUID().toString());
@@ -314,6 +315,7 @@ public class SurviveService {
     var idleDeadline = clock.instant().minus(IDLE_TIMEOUT);
     boolean removed = world.players.values().removeIf(player -> player.accountId == null && !player.lastSeen.isAfter(idleDeadline));
     if (removed) {
+      world.settleTradesUntil(clock.instant());
       world.recordEvent("Inactive survivors left camp.");
     }
   }
@@ -365,26 +367,69 @@ public class SurviveService {
     var now = clock.instant();
     var recipient = activeTradePartner(request.recipientId().toString(), now);
     requireTradeLocation(sender, recipient, now);
-    if (request.offered() == request.requested()) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose different supplies to trade.");
+    var offered = tradeLot(sender, request.offered(), request.offeredQuantity(), request.offeredWeaponId());
+    var additionalOffered = request.additionalOffered() == null ? List.<SurviveTrade.Lot>of()
+        : request.additionalOffered().stream()
+            .map(item -> tradeLot(sender, item.resource(), item.quantity(), item.weaponId())).toList();
+    var counteredOffer = request.counterOfferId() == null ? null
+        : requireCounteredOffer(request.counterOfferId(), sender, recipient);
+    var requested = counteredOffer == null ? requestedSupplyLot(request) : counteredOffer.offered();
+    var additionalRequested = counteredOffer == null ? List.<SurviveTrade.Lot>of() : counteredOffer.additionalOffered();
+    SurviveTrade offer;
+    try {
+      offer = new SurviveTrade(UUID.randomUUID().toString(), sender.survivorId, recipient.survivorId,
+          offered, requested, now.plus(Duration.ofMinutes(2)), additionalOffered, additionalRequested);
+    } catch (IllegalArgumentException invalid) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
     }
-    var offered = new SurviveTrade.Lot(request.offered(), request.offeredQuantity());
-    var requested = new SurviveTrade.Lot(request.requested(), request.requestedQuantity());
-    requireTradeStock(sender, offered);
-    world.trades.values().removeIf(offer -> !now.isBefore(offer.expiresAt()));
-    if (world.trades.values().stream().anyMatch(offer -> offer.involves(sender.survivorId)
-        || offer.involves(recipient.survivorId))) {
+    var requestedKeys = offer.requestedLots().stream().map(SurviveTrade.Lot::itemKey).collect(Collectors.toSet());
+    if (offer.offeredLots().stream().anyMatch(lot -> requestedKeys.contains(lot.itemKey()))) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Each item can appear on only one side of the trade.");
+    }
+    offer.offeredLots().forEach(lot -> requireTradeStock(sender, lot));
+    if (counteredOffer != null) {
+      offer.requestedLots().forEach(lot -> requireTradeStock(recipient, lot));
+      world.trades.remove(counteredOffer.id());
+    } else if (world.trades.values().stream().anyMatch(pending -> pending.involves(sender.survivorId)
+        || pending.involves(recipient.survivorId))) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "One of you already has a pending trade.");
     }
-    var offer = new SurviveTrade(UUID.randomUUID().toString(), sender.survivorId, recipient.survivorId,
-        offered, requested, now.plus(Duration.ofMinutes(2)));
     world.trades.put(offer.id(), offer);
-    world.recordTradeMessage(sender, "You offered " + offered.description() + " for " + requested.description()
+    world.recordTradeMessage(sender, "You offered " + SurviveTrade.describe(offer.offeredLots()) + " for " + SurviveTrade.describe(offer.requestedLots())
         + " to " + recipient.name + ".");
-    world.recordTradeMessage(recipient, sender.name + " offered you " + offered.description() + " for "
-        + requested.description() + ". Open Trade in the camp menu to respond.");
+    world.recordTradeMessage(recipient, sender.name + " offered you " + SurviveTrade.describe(offer.offeredLots()) + " for "
+        + SurviveTrade.describe(offer.requestedLots()) + ". Open Trade in the camp menu to respond.");
     commitWorld();
     return snapshotFor(sender);
+  }
+
+  private static SurviveTrade.Lot tradeLot(SurvivePlayer owner, SurviveResource resource, int quantity, UUID weaponId) {
+    if ((resource == null) == (weaponId == null) || weaponId != null && quantity != 1) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Offer a supply stack or a single packed weapon per slot.");
+    }
+    if (weaponId == null) {
+      return new SurviveTrade.Lot(resource, quantity);
+    }
+    var weapon = owner.packedWeapons.stream().filter(item -> item.id().equals(weaponId.toString()))
+        .findFirst().orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
+            "That weapon is no longer in your pack."));
+    return new SurviveTrade.Lot(null, 1, weapon);
+  }
+
+  private SurviveTrade requireCounteredOffer(UUID offerId, SurvivePlayer countering, SurvivePlayer originalSender) {
+    var offer = world.trades.get(offerId.toString());
+    if (offer == null || !offer.recipientId().equals(countering.survivorId)
+        || !offer.senderId().equals(originalSender.survivorId)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "That incoming trade offer is unavailable.");
+    }
+    return offer;
+  }
+
+  private static SurviveTrade.Lot requestedSupplyLot(SurviveRequests.TradeOffer request) {
+    if (request.requested() == null || request.requestedQuantity() == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose the supplies you want to receive.");
+    }
+    return new SurviveTrade.Lot(request.requested(), request.requestedQuantity());
   }
 
   /** Only the recipient can accept; either participant can end an offer. */
@@ -401,10 +446,10 @@ public class SurviveService {
       }
       var sender = activeTradePartner(offer.senderId(), now);
       requireTradeLocation(sender, player, now);
-      requireTradeStock(sender, offer.offered());
-      requireTradeStock(player, offer.requested());
-      requireTradeSpace(sender, offer.offered(), offer.requested());
-      requireTradeSpace(player, offer.requested(), offer.offered());
+      offer.offeredLots().forEach(lot -> requireTradeStock(sender, lot));
+      offer.requestedLots().forEach(lot -> requireTradeStock(player, lot));
+      requireTradeSpace(sender, offer.offeredLots(), offer.requestedLots());
+      requireTradeSpace(player, offer.requestedLots(), offer.offeredLots());
       world.completeTrade(offer, sender, player);
     } else {
       world.trades.remove(offer.id());
@@ -435,21 +480,27 @@ public class SurviveService {
   }
 
   private void requireTradeLocation(SurvivePlayer sender, SurvivePlayer recipient, Instant now) {
-    if (sender == recipient || sender.status != Status.EXPLORING || recipient.status != Status.EXPLORING
-        || !presence.permits(sender.survivorId, SurviveAction.EXPAND_PACK, now)
-        || !presence.permits(recipient.survivorId, SurviveAction.EXPAND_PACK, now)) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Both survivors must be free to trade at camp.");
+    if (sender == recipient || sender.status != Status.EXPLORING || recipient.status != Status.EXPLORING) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Both survivors must be free to trade.");
+    }
+    if (!presence.withinTradeRange(sender.survivorId, recipient.survivorId, now)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Move within five metres of your trade partner.");
     }
   }
 
   private static void requireTradeStock(SurvivePlayer player, SurviveTrade.Lot lot) {
-    if (SurviveWorld.suppliesOf(player, lot.resource()) < lot.quantity()) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, player.name + " no longer has the supplies for this trade.");
+    boolean hasStock = lot.packedWeapon() == null
+        ? SurviveWorld.suppliesOf(player, lot.resource()) >= lot.quantity()
+        : player.packedWeapons.contains(lot.packedWeapon());
+    if (!hasStock) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, player.name + " no longer has the items for this trade.");
     }
   }
 
-  private static void requireTradeSpace(SurvivePlayer player, SurviveTrade.Lot outgoing, SurviveTrade.Lot incoming) {
-    if (player.inventoryCount() - outgoing.quantity() + incoming.quantity() > player.inventoryCapacity()) {
+  private static void requireTradeSpace(SurvivePlayer player, List<SurviveTrade.Lot> outgoing, List<SurviveTrade.Lot> incoming) {
+    int outgoingCount = outgoing.stream().mapToInt(SurviveTrade.Lot::quantity).sum();
+    int incomingCount = incoming.stream().mapToInt(SurviveTrade.Lot::quantity).sum();
+    if (player.inventoryCount() - outgoingCount + incomingCount > player.inventoryCapacity()) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, player.name + " needs more pack space for this trade.");
     }
   }
@@ -498,7 +549,8 @@ public class SurviveService {
     boolean worldAdvanced = world.settleUntil(now);
     boolean combatAdvanced = world.settleCombatUntil(now);
     boolean fishingAdvanced = world.settleFishingUntil(now);
-    if (worldAdvanced || combatAdvanced || fishingAdvanced) {
+    boolean tradesAdvanced = world.settleTradesUntil(now);
+    if (worldAdvanced || combatAdvanced || fishingAdvanced || tradesAdvanced) {
       commitWorld();
     }
   }
@@ -537,7 +589,7 @@ public class SurviveService {
 
   private SurviveSnapshot snapshotFor(SurvivePlayer player) {
     var now = clock.instant();
-    return world.snapshotFor(player, now, now.minus(IDLE_TIMEOUT));
+    return world.snapshotFor(player, now, now.minus(IDLE_TIMEOUT), presence);
   }
 
   /** Internal join result: the controller writes the credential only to a private cookie. */
