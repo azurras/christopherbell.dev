@@ -25,7 +25,7 @@ export function createWorldFeedback(documentRoot) {
       }
       combat.hidden = false;
       marker.hidden = false;
-      const heading = state.nextStrikeAt ? 'In combat' : state.enemy === 'RAIDER' ? 'Raider nearby' : 'Animal nearby';
+      const heading = state.nextStrikeAt ? 'In combat' : 'Ready to engage';
       targetHeight = state.enemy === 'BEAR' ? 3.1 : state.enemy === 'RAIDER' ? 2.8 : 2;
       const label = `${ENEMIES[state.enemy] || 'Wild animal'} · ${state.enemyHealth} health`;
       if (title.textContent !== heading) title.textContent = heading;
