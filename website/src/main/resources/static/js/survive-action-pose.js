@@ -23,6 +23,22 @@ export function acceptRemoteStrike(previous, strike, receivedAtSeconds) {
   return { ...strike, receivedAtSeconds };
 }
 
+/** Compare consecutive confirmed appearances; reconnects and old servers establish no damage cue. */
+export function receivedCombatDamage(previous, current) {
+  const before = previous?.appearance?.health;
+  const after = current?.appearance?.health;
+  return previous?.survivorId === current?.survivorId
+    && previous?.status === 'COMBAT' && current?.status === 'COMBAT'
+    && Number.isSafeInteger(before) && before >= 0 && Number.isSafeInteger(after) && after >= 0
+    && after < before;
+}
+
+/** A short response to damage already confirmed by the server, with no delayed wind-up. */
+export function hitRecoil(ageSeconds) {
+  if (!Number.isFinite(ageSeconds) || ageSeconds < 0 || ageSeconds >= 0.65) return 0;
+  return Math.sin(ageSeconds / 0.65 * Math.PI);
+}
+
 /** Convert a confirmed command into a bounded, frame-rate-independent visual pose. */
 export function actionPose(gesture) {
   const definition = POSES[gesture?.action];
