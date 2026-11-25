@@ -133,20 +133,20 @@ class SurviveWorldTest {
   @Test
   void sharedFightShowsAttentionOnlyToItsCurrentFighters() {
     var guard = startSkillchainFight();
-    assertNull(world.snapshotFor(player, DAY, Instant.MIN).enemyAttention());
+    assertNull(world.snapshotFor(player, DAY, Instant.MIN, new SurvivePresence()).enemyAttention());
 
     world.perform(SurviveAction.WEAPON_SKILL, player, DAY, () -> 1);
-    var scoutAttention = world.snapshotFor(player, DAY, Instant.MIN).enemyAttention();
-    var guardAttention = world.snapshotFor(guard, DAY, Instant.MIN).enemyAttention();
+    var scoutAttention = world.snapshotFor(player, DAY, Instant.MIN, new SurvivePresence()).enemyAttention();
+    var guardAttention = world.snapshotFor(guard, DAY, Instant.MIN, new SurvivePresence()).enemyAttention();
     assertEquals("Chris", scoutAttention.name());
     assertTrue(scoutAttention.self());
     assertEquals(player.survivorId, guardAttention.survivorId());
     assertEquals("Chris", guardAttention.name());
     assertFalse(guardAttention.self());
-    assertNull(world.snapshotFor(new SurvivePlayer("Observer", DAY), DAY, Instant.MIN).enemyAttention());
+    assertNull(world.snapshotFor(new SurvivePlayer("Observer", DAY), DAY, Instant.MIN, new SurvivePresence()).enemyAttention());
 
     world.perform(SurviveAction.FLEE, player, DAY.plusSeconds(1), () -> 1);
-    assertNull(world.snapshotFor(guard, DAY.plusSeconds(1), Instant.MIN).enemyAttention());
+    assertNull(world.snapshotFor(guard, DAY.plusSeconds(1), Instant.MIN, new SurvivePresence()).enemyAttention());
   }
 
   @Test
@@ -186,7 +186,7 @@ class SurviveWorldTest {
     var restored = SurviveWorld.restore(world.saveState(0L));
     var restoredGuard = restored.players.get(guard.survivorId);
     restored.perform(SurviveAction.WEAPON_SKILL, restoredGuard, DAY.plusSeconds(1), () -> 1);
-    var state = restored.snapshotFor(restoredGuard, DAY.plusSeconds(1), Instant.MIN);
+    var state = restored.snapshotFor(restoredGuard, DAY.plusSeconds(1), Instant.MIN, new SurvivePresence());
     assertEquals(Status.EXPLORING, state.status());
     assertEquals(0, state.tacticalPoints());
     assertEquals(1, state.events().stream().filter(line -> line.contains("Impact skillchain")).count());
@@ -283,7 +283,7 @@ class SurviveWorldTest {
       perform(SurviveAction.GATHER, 1);
     }
     assertEquals(10, player.wood);
-    assertEquals(30, world.snapshotFor(player, DAY, Instant.MIN).events().size());
+    assertEquals(30, world.snapshotFor(player, DAY, Instant.MIN, new SurvivePresence()).events().size());
     assertTrue(player.message.contains("full"));
   }
 
@@ -295,7 +295,7 @@ class SurviveWorldTest {
     player.wood = 5;
     perform(SurviveAction.BUILD_SHELTER, 1);
     assertEquals(0, player.wood);
-    assertEquals(1, world.snapshotFor(player, DAY, Instant.MIN).shelters());
+    assertEquals(1, world.snapshotFor(player, DAY, Instant.MIN, new SurvivePresence()).shelters());
     player.health = 7;
     perform(SurviveAction.REST, 1);
     assertEquals(9, player.health);
@@ -304,10 +304,10 @@ class SurviveWorldTest {
     player.wood = 10;
     perform(SurviveAction.BUILD_BOAT, 1);
     assertEquals(0, player.wood);
-    assertEquals(1, world.snapshotFor(player, DAY, Instant.MIN).boats());
+    assertEquals(1, world.snapshotFor(player, DAY, Instant.MIN, new SurvivePresence()).boats());
     perform(SurviveAction.ESCAPE, 1);
     assertEquals(Status.ESCAPED, player.status);
-    assertEquals(0, world.snapshotFor(player, DAY, Instant.MIN).boats());
+    assertEquals(0, world.snapshotFor(player, DAY, Instant.MIN, new SurvivePresence()).boats());
     assertTrue(actionsAt(DAY).isEmpty());
   }
 
@@ -359,7 +359,7 @@ class SurviveWorldTest {
 
   @Test
   void snapshotsDoNotExposeMutableWorldCollections() {
-    var snapshot = world.snapshotFor(player, DAY, Instant.MIN);
+    var snapshot = world.snapshotFor(player, DAY, Instant.MIN, new SurvivePresence());
     assertThrows(UnsupportedOperationException.class, () -> snapshot.events().add("injected"));
     assertThrows(UnsupportedOperationException.class, () -> snapshot.actions().clear());
   }
@@ -556,9 +556,9 @@ class SurviveWorldTest {
     player.wood = 10;
     perform(SurviveAction.BUILD_BOAT, 1);
     world.settleUntil(NIGHTFALL);
-    assertEquals(2, world.snapshotFor(player, NIGHTFALL, Instant.MIN).shelters());
+    assertEquals(2, world.snapshotFor(player, NIGHTFALL, Instant.MIN, new SurvivePresence()).shelters());
     world.settleUntil(NIGHT);
-    var camp = world.snapshotFor(player, NIGHT, Instant.MIN);
+    var camp = world.snapshotFor(player, NIGHT, Instant.MIN, new SurvivePresence());
     assertEquals(0, camp.shelters());
     assertEquals(1, camp.boats());
     assertTrue(lastEvent().contains("destroyed 2 shelters"));
@@ -601,7 +601,7 @@ class SurviveWorldTest {
     world.perform(SurviveAction.SLEEP, alice, NIGHT, () -> 1);
     assertFalse(world.actionsFor(bob, NIGHT).contains(SurviveAction.SLEEP));
     assertEquals(List.of(SurviveAction.WAKE), actionsAt(NIGHT));
-    assertEquals(2, world.snapshotFor(bob, NIGHT, Instant.MIN).bedsInUse());
+    assertEquals(2, world.snapshotFor(bob, NIGHT, Instant.MIN, new SurvivePresence()).bedsInUse());
     performAt(SurviveAction.WAKE, NIGHT.plus(Duration.ofMinutes(4)), 1);
     assertEquals(Status.EXPLORING, player.status);
     assertEquals(5, player.health);
@@ -645,7 +645,7 @@ class SurviveWorldTest {
     world.perform(SurviveAction.SLEEP, bob, DUSK.plusSeconds(60), () -> 1);
     performAt(SurviveAction.SLEEP, DUSK.plusSeconds(120), 1);
     world.settleUntil(NIGHT);
-    assertEquals(1, world.snapshotFor(player, NIGHT, Instant.MIN).shelters());
+    assertEquals(1, world.snapshotFor(player, NIGHT, Instant.MIN, new SurvivePresence()).shelters());
     assertEquals(Status.EXPLORING, player.status);
     assertEquals(8, player.health);
     assertEquals(Status.SLEEPING, alice.status);
@@ -656,13 +656,13 @@ class SurviveWorldTest {
   void firstSettlementStartsTheClockAndMissedNightsAreCapped() {
     world.players.put("chris", player);
     world.settleUntil(DAY.plus(Duration.ofMinutes(240)));
-    assertTrue(world.snapshotFor(player, DAY, Instant.MIN).events().isEmpty());
+    assertTrue(world.snapshotFor(player, DAY, Instant.MIN, new SurvivePresence()).events().isEmpty());
     world.settleUntil(DAY.plus(Duration.ofMinutes(480)));
-    var events = world.snapshotFor(player, DAY, Instant.MIN).events();
+    var events = world.snapshotFor(player, DAY, Instant.MIN, new SurvivePresence()).events();
     assertEquals(7, events.size());
     assertTrue(events.getFirst().contains("quietly"));
     world.settleUntil(DAY.plus(Duration.ofMinutes(480)));
-    assertEquals(events, world.snapshotFor(player, DAY, Instant.MIN).events());
+    assertEquals(events, world.snapshotFor(player, DAY, Instant.MIN, new SurvivePresence()).events());
   }
 
   @Test
@@ -692,7 +692,7 @@ class SurviveWorldTest {
   }
 
   private String lastEvent() {
-    return world.snapshotFor(player, DAY, Instant.MIN).events().getLast();
+    return world.snapshotFor(player, DAY, Instant.MIN, new SurvivePresence()).events().getLast();
   }
 
   private void perform(SurviveAction action, int rollPercent) {

@@ -4,6 +4,7 @@ import test from 'node:test';
 import { prepareActorArt } from '../../main/resources/static/js/survive-authored-actors.js';
 import { createDynamicMesh } from '../../main/resources/static/js/survive-dynamic-mesh.js';
 import { groundHeight, islandMesh, meshBuilder, MESH_VERTEX_FLOATS, SKY_MATERIAL, WAYSTATION_LANTERN } from '../../main/resources/static/js/survive-world-art.js';
+import { createWorldRenderer } from '../../main/resources/static/js/survive-world-renderer.js';
 import { cameraMatrix, fishingFloat, fishingPhase, LANDMARKS, projectPoint } from '../../main/resources/static/js/survive-world-model.js';
 import { acceptRemoteStrike, actionPose, combatStance, enemyCountered, enemyCounterPose, enemyDefeated, enemyFallPose } from '../../main/resources/static/js/survive-action-pose.js';
 import { drawBoat, drawCampFlame, drawShelter } from '../../main/resources/static/js/survive-world-props.js';
@@ -29,6 +30,44 @@ test('dynamic frames upload the same vertices while reusing their allocated capa
   assert.equal(allocations.length, 1);
   const expected = Array.from(new Float32Array(ordinary.vertices));
   assert.deepEqual(uploads, [expected, expected]);
+});
+
+test('the renderer draws the full scenery from one static upload across frames', () => {
+  const staticUploads = [];
+  const draws = [];
+  const deletedBuffers = [];
+  let boundBuffer;
+  const gl = new Proxy({
+    STATIC_DRAW: 0x88E4,
+    createBuffer: () => ({}),
+    getShaderParameter: () => true,
+    getProgramParameter: () => true,
+    bindBuffer(_target, buffer) { boundBuffer = buffer; },
+    bufferData(_target, data, usage) {
+      if (usage === this.STATIC_DRAW) {
+        assert.ok(data instanceof Float32Array);
+        staticUploads.push({ buffer: boundBuffer, count: data.length / MESH_VERTEX_FLOATS });
+      }
+    },
+    drawArrays(_mode, _first, count) { draws.push({ buffer: boundBuffer, count }); },
+    deleteBuffer(buffer) { deletedBuffers.push(buffer); },
+  }, { get: (target, key) => target[key] ?? (() => {}) });
+  const canvas = { clientWidth: 1200, clientHeight: 720, getContext: () => gl,
+    ownerDocument: { defaultView: { Image: class {} } } };
+  const renderer = createWorldRenderer(canvas);
+  try {
+    const position = { x: 0, z: -9, heading: Math.PI };
+    const world = { status: 'EXPLORING', phase: 'DAY', shelters: 0, boats: 0 };
+    renderer.draw(position, 0, world, [], 0, []);
+    renderer.draw(position, 0.12, world, [], 1, []);
+  } finally {
+    renderer.dispose();
+  }
+  assert.equal(staticUploads.length, 1);
+  const [scenery] = staticUploads;
+  assert.equal(scenery.count, islandMesh().vertices.length / MESH_VERTEX_FLOATS);
+  assert.deepEqual(draws.filter(draw => draw.buffer === scenery.buffer), [scenery, scenery]);
+  assert.ok(deletedBuffers.includes(scenery.buffer));
 });
 
 test('authored actors draw bounded texture coordinates and animate with the equipped tool', () => {
