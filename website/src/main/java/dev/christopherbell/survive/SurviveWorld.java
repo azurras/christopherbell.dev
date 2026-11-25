@@ -145,6 +145,10 @@ final class SurviveWorld {
         storedPlayers, settledBoundaries, activeRaidNight, parties.save(), List.copyOf(fieldFights.values()), List.copyOf(trades.values()));
   }
 
+  SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline, SurvivePresence presence) {
+    return snapshotFor(player, now, activeDeadline, presence, null);
+  }
+
   SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline, SurvivePresence presence,
       SurviveWildlife.Animal fieldEncounter) {
     return new SurviveSnapshot(player.name, player.health, player.strength, player.stamina,
