@@ -8,9 +8,9 @@ test('the island offers Check and Engage after selection and weapon skills only 
   assert.deepEqual(targetActionsFor(encounter, true), ['CHECK_TARGET', 'ENGAGE', 'FLEE']);
   const engaged = { ...encounter, nextStrikeAt: '2026-11-05T14:00:00Z',
     actions: ['DISENGAGE', 'DEFEND', 'FLEE'] };
-  assert.deepEqual(targetActionsFor(engaged, true), ['DEFEND', 'DISENGAGE', 'FLEE']);
+  assert.deepEqual(targetActionsFor(engaged, true), ['DEFEND', 'CHECK_TARGET', 'DISENGAGE', 'FLEE']);
   assert.deepEqual(targetActionsFor({ ...engaged, actions: [...engaged.actions, 'WEAPON_SKILL'] }, true),
-    ['WEAPON_SKILL', 'DEFEND', 'DISENGAGE', 'FLEE']);
+    ['WEAPON_SKILL', 'DEFEND', 'CHECK_TARGET', 'DISENGAGE', 'FLEE']);
 });
 import { mountSurviveWorld } from '../../main/resources/static/js/survive-world.js';
 
