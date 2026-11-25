@@ -10,7 +10,7 @@ import java.util.Set;
 import java.util.stream.Stream;
 
 /** Shared, process-local routes and encounter reservations. Mutated only under the service lock. */
-final class SurviveWildlife {
+public final class SurviveWildlife {
   static final double HUNT_RANGE_METRES = 5;
   static final long RESPAWN_SECONDS = 35;
   private static final List<Route> ROUTES = List.of(

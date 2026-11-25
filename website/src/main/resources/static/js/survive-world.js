@@ -87,6 +87,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   let lastActionSignature = '';
   let lastActionsBlocked;
   let drag = null;
+  let leaveCanvasOnTab = false;
   let requestGeneration = 0;
   let desiredNameLabels = [];
 
@@ -124,6 +125,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   async function sendPulse() {
     if (pulsePromise || !isVisible() || disposed) return pulsePromise;
     const generation = requestGeneration;
+    const submittedState = state;
     const submitted = { ...position };
     const sentAt = Date.now();
     controller = new AbortController();
@@ -135,6 +137,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
           body: JSON.stringify({ ...submitted, sequence: ++sequence }),
         });
         if (disposed || generation !== requestGeneration) return;
+        if (submittedState.status !== state?.status || submittedState.fieldEncounter?.id !== state?.fieldEncounter?.id) return;
         if (!snapshot?.self || snapshot.self.survivorId !== state?.survivorId) throw new Error('The island session changed. Refresh your survivor.');
         sequence = Math.max(sequence, snapshot.self.sequence);
         confirmed = { x: snapshot.self.x, z: snapshot.self.z, heading: snapshot.self.heading };
@@ -150,13 +153,19 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
             strike: acceptRemoteStrike(previous?.strike, other.appearance?.strike, receivedAtSeconds) };
         });
         const previousWildlife = new Map(wildlife.map(animal => [animal.id, animal]));
-        wildlife = (snapshot.wildlife || []).map(animal => ({ ...animal,
+        const roaming = snapshot.wildlife || [];
+        // Aggro can arrive on the movement channel before the combat status refresh.
+        const fieldAnimals = state.status === 'EXPLORING' && snapshot.encounter && snapshot.self.status === 'COMBAT'
+          && !roaming.some(animal => animal.id === snapshot.encounter.id)
+          ? [...roaming, snapshot.encounter] : roaming;
+        const combatTarget = state.status === 'COMBAT' ? state.fieldEncounter ?? snapshot.encounter : null;
+        wildlife = fieldAnimals.filter(animal => animal.id !== combatTarget?.id).map(animal => ({ ...animal,
           drawX: previousWildlife.get(animal.id)?.drawX ?? animal.x,
           drawZ: previousWildlife.get(animal.id)?.drawZ ?? animal.z,
         }));
         if (fieldTargetId !== state.waystationKeeper?.id && !wildlife.some(animal => animal.id === fieldTargetId)) fieldTargetId = null;
-        if (snapshot.encounter?.id !== encounter?.id) approachStartedAt = null;
-        encounter = snapshot.encounter || null;
+        if (combatTarget?.id !== encounter?.id) approachStartedAt = null;
+        encounter = combatTarget;
         if (snapshot.self.status === 'COMBAT' && state?.status === 'EXPLORING') {
           stopWalking();
           onAggro();
@@ -170,7 +179,6 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         position = { ...confirmed };
         others = [];
         wildlife = [];
-        fieldTargetId = null;
         syncNameLabels();
         stopWalking();
         pulseInterval = Math.min(15000, Math.max(1500, pulseInterval * 2));
@@ -193,16 +201,12 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     openCommands();
   }
 
-  function cycleFieldTarget(direction, wrap) {
+  function cycleFieldTarget(direction) {
     if (state?.status !== 'EXPLORING' || busy || !connected || mainMenu.open || !actionList.hidden) return false;
     const visible = desiredNameLabels.filter(label => (label.kind || label.npc) && !label.element.hidden);
     if (!visible.length) return false;
     const current = visible.findIndex(label => label.id === fieldTargetId);
     const next = current < 0 ? (direction > 0 ? 0 : visible.length - 1) : current + direction;
-    if (!wrap && (next < 0 || next >= visible.length)) {
-      fieldTargetId = null;
-      return false;
-    }
     fieldTargetId = visible[(next + visible.length) % visible.length].id;
     return true;
   }
@@ -316,12 +320,16 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (button) void interact(button.dataset.worldAction);
   });
   listen(target, 'click', selectTarget);
-  listen(labels, 'click', event => {
-    const id = event.target.closest('[data-field-target]')?.dataset.fieldTarget;
-    if (id && state?.status === 'EXPLORING' && connected && !busy) {
+  function selectFieldTarget(id) {
+    if (id && state?.status === 'EXPLORING' && connected && !busy
+        && (id === state.waystationKeeper?.id || wildlife.some(animal => animal.id === id))) {
+      leaveCanvasOnTab = false;
       fieldTargetId = id;
       openCommands();
     }
+  }
+  listen(labels, 'click', event => {
+    selectFieldTarget(event.target.closest('[data-field-target]')?.dataset.fieldTarget);
   });
   listen(commandButton, 'click', () => {
     if (actionList.hidden) openCommands();
@@ -381,7 +389,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (direction) { event.preventDefault(); pressed.add(direction); }
     if (event.code === 'Tab' || event.code === 'Numpad0' || event.code === 'NumpadDecimal') {
       const step = event.shiftKey || event.code === 'NumpadDecimal' ? -1 : 1;
-      if (cycleFieldTarget(step, event.code !== 'Tab')) event.preventDefault();
+      if (event.code === 'Tab' && leaveCanvasOnTab) leaveCanvasOnTab = false;
+      else if (cycleFieldTarget(step)) event.preventDefault();
     }
     if (event.code === 'KeyQ') { event.preventDefault(); if (!cameraLocked) yaw -= 0.12; }
     if (event.code === 'KeyR') { event.preventDefault(); if (!cameraLocked) yaw += 0.12; }
@@ -407,6 +416,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (event.code === 'Escape') {
       stopWalking();
       fieldTargetId = null;
+      leaveCanvasOnTab = true;
     }
   });
   listen(view, 'keyup', event => pressed.delete(directionKeys.get(event.code)));
@@ -418,17 +428,29 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     else nextPulseAt = 0;
   });
   listen(canvas, 'pointerdown', event => {
+    if (event.button !== 0 || drag) return;
     canvas.focus({ preventScroll: true });
-    drag = { id: event.pointerId, x: event.clientX };
+    drag = { id: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, moved: false };
     canvas.setPointerCapture(event.pointerId);
   });
   listen(canvas, 'pointermove', event => {
     if (drag?.id !== event.pointerId) return;
+    if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return;
+    drag.moved = true;
     if (!cameraLocked) yaw -= (event.clientX - drag.x) * 0.006;
     drag.x = event.clientX;
   });
-  listen(canvas, 'pointerup', () => { drag = null; });
-  listen(canvas, 'pointercancel', () => { drag = null; });
+  listen(canvas, 'pointerup', event => {
+    if (drag?.id !== event.pointerId) return;
+    const clicked = !drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4;
+    drag = null;
+    if (!clicked || !connected || busy || !isVisible()) return;
+    const id = renderer.pickTarget(event.clientX, event.clientY);
+    if (id && state.status === 'COMBAT' && id === (encounter?.id ?? 'combat-enemy')) selectTarget();
+    else selectFieldTarget(id);
+  });
+  listen(canvas, 'lostpointercapture', event => { if (drag?.id === event.pointerId) drag = null; });
+  listen(canvas, 'pointercancel', event => { if (drag?.id === event.pointerId) drag = null; });
   listen(canvas, 'wheel', event => {
     if (documentRoot.activeElement !== canvas || event.ctrlKey || event.metaKey) return;
     event.preventDefault();
@@ -583,7 +605,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         cameraLocked = false;
         target.setAttribute('aria-pressed', 'false');
       }
-      if (nextState?.nextStrikeAt) {
+      if (nextState?.fieldEncounter || nextState?.nextStrikeAt) {
         targetSelected = true;
         target.setAttribute('aria-pressed', 'true');
       }
@@ -608,6 +630,17 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         defeatedEnemy = null;
         stopWalking();
         nextPulseAt = 0;
+      }
+      if (nextState?.status !== 'COMBAT') {
+        encounter = null;
+        approachStartedAt = null;
+      } else if (nextState.fieldEncounter) {
+        if (encounter?.id !== nextState.fieldEncounter.id) approachStartedAt = null;
+        encounter = nextState.fieldEncounter;
+        if (wildlife.some(animal => animal.id === encounter.id)) {
+          wildlife = wildlife.filter(animal => animal.id !== encounter.id);
+          syncNameLabels();
+        }
       }
       if (state !== nextState) {
         const now = Date.now();

@@ -180,11 +180,76 @@ test('field targeting sends the selected creature ID after a fresh movement puls
     fixture.frame(16);
     press('Tab');
     press('Tab');
+    press('Tab');
+    press('Tab');
     press('Enter');
     assert.deepEqual(commands.children.map(button => button.textContent), ['Check', 'Engage']);
     commands.emit('click', { target: { closest: () => commands.children[1] } });
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(sent, [['ENGAGE', 'selected-hog']]);
+  } finally { world.dispose(); }
+});
+
+test('a field encounter keeps one selected animal before the next movement reply', async () => {
+  const fixture = worldFixture();
+  const hog = { id: 'meadow-hog', kind: 'HOG', x: -3, z: 2, heading: 0 };
+  const otherHog = { ...hog, id: 'shore-hog', x: 9 };
+  let drawn;
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({
+    self: { survivorId: 'alice', sequence: 1, x: 0, z: 0, heading: 0 }, others: [], accepted: true, wildlife: [hog, otherHog],
+  }), () => {}, () => ({ ...fixture.renderer,
+    draw(_pose, _yaw, _state, _others, _time, wildlife, enemy) {
+      drawn = { ids: wildlife.map(animal => animal.id), enemy };
+      return { project: () => ({ visible: true, x: 0, y: 0 }) };
+    },
+  }));
+  const byId = id => fixture.documentRoot.getElementById(id);
+  try {
+    world.setState(worldState);
+    fixture.frame(0);
+    await new Promise(resolve => setImmediate(resolve));
+    byId('surviveWorldLabels').emit('click', { target: { closest: () => ({ dataset: { fieldTarget: hog.id } }) } });
+    const combat = { ...worldState, status: 'COMBAT', fieldEncounter: hog, enemy: 'HOG', enemyHealth: 5, actions: ['ENGAGE', 'FLEE'] };
+    world.setState(combat);
+    fixture.frame(16);
+    assert.deepEqual(drawn.ids, [otherHog.id]);
+    assert.deepEqual(drawn.enemy, hog);
+    assert.equal(byId('surviveWorldEnemyMarker').getAttribute('aria-pressed'), 'true');
+    assert.deepEqual(byId('surviveWorldActions').children.map(b => b.dataset.worldAction), ['CHECK_TARGET', 'ENGAGE', 'FLEE']);
+    assert.ok(!byId('surviveWorldLabels').children.some(label => label.dataset.fieldTarget === hog.id));
+  } finally { world.dispose(); }
+});
+
+test('clicking a visible body selects it while an orbit drag or a miss leaves selection alone', async () => {
+  const fixture = worldFixture();
+  const hog = { id: 'meadow-hog', kind: 'HOG', x: -2, z: 1 };
+  const picked = [];
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({
+    self: { survivorId: 'alice', sequence: 1, x: 0, z: 0, heading: 0 }, others: [], accepted: true, wildlife: [hog],
+  }), () => {}, () => ({ ...fixture.renderer,
+    pickTarget(x, y) { picked.push([x, y]); return x === 40 && y === 30 ? hog.id : null; },
+  }));
+  const byId = id => fixture.documentRoot.getElementById(id);
+  const canvas = byId('surviveWorldCanvas');
+  const commands = byId('surviveWorldActions');
+  const point = (type, x, y) => canvas.emit(type, { pointerId: 1, button: 0, clientX: x, clientY: y });
+  try {
+    commands.hidden = true;
+    world.setState(worldState);
+    fixture.frame(0);
+    await new Promise(resolve => setImmediate(resolve));
+    point('pointerdown', 40, 30);
+    point('pointermove', 52, 30);
+    point('pointerup', 40, 30);
+    assert.deepEqual(picked, []);
+    point('pointerdown', 95, 3);
+    point('pointerup', 95, 3);
+    assert.equal(commands.hidden, true);
+    point('pointerdown', 40, 30);
+    point('pointerup', 40, 30);
+    assert.deepEqual(picked, [[95, 3], [40, 30]]);
+    assert.deepEqual(commands.children.map(b => b.dataset.worldAction), ['CHECK_TARGET', 'ENGAGE']);
+    assert.equal(commands.hidden, false);
   } finally { world.dispose(); }
 });
 

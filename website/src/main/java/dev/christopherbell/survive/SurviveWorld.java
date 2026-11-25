@@ -145,7 +145,8 @@ final class SurviveWorld {
         storedPlayers, settledBoundaries, activeRaidNight, parties.save(), List.copyOf(fieldFights.values()), List.copyOf(trades.values()));
   }
 
-  SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline, SurvivePresence presence) {
+  SurviveSnapshot snapshotFor(SurvivePlayer player, Instant now, Instant activeDeadline, SurvivePresence presence,
+      SurviveWildlife.Animal fieldEncounter) {
     return new SurviveSnapshot(player.name, player.health, player.strength, player.stamina,
         player.experience, player.experienceToNextLevel, player.wood, player.food,
         player.inventoryCapacity(), player.enemyHealth, player.status, player.revision, revision,
@@ -164,7 +165,7 @@ final class SurviveWorld {
         player.packedWeapons.stream().map(SurviveSnapshot.WeaponChoice::from).toList(),
         player.fishing == null ? null : player.fishing.timingAt(now), player.attackDelayMilliseconds(),
         player.lastStrike != null && player.lastStrike.visibleAt(now) ? player.lastStrike : null, enemyAttentionFor(player, now),
-        tradeView(player, now));
+        tradeView(player, now), fieldEncounter);
   }
 
   /** Settles elapsed fights even when their participants did not send any requests. */

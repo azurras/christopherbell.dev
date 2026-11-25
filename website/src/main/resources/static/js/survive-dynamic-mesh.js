@@ -4,6 +4,7 @@ export function createDynamicMesh(gl, buffer) {
   let length = 0;
   let allocatedBytes = 0;
   return {
+    get vertexCount() { return length / 9; },
     append(x, y, z, red, green, blue, material, u, v) {
       if (length + 9 > vertices.length) {
         const expanded = new Float32Array(Math.max(4096, vertices.length * 2));

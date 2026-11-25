@@ -57,6 +57,10 @@ class SurviveWildlifeTest {
     var encounter = service.pulseForOwner(joined.token(), null,
         new SurviveMovement(view.self().x(), view.self().z(), 0, 21)).encounter();
     assertEquals("meadow-hog", encounter.id());
+    assertEquals(encounter, engaged.fieldEncounter());
+    var disengaged = service.act(joined.token(), SurviveAction.DISENGAGE, engaged.revision());
+    assertEquals(encounter, disengaged.fieldEncounter());
+    assertNull(disengaged.nextStrikeAt());
   }
 
   @Test
@@ -110,9 +114,11 @@ class SurviveWildlifeTest {
     var resumed = restarted.pulseForOwner(guard.token(), null, new SurviveMovement(0, 0, 0, 0));
     assertEquals(outsiderClaim.x(), resumed.self().x());
     assertEquals("meadow-hog", resumed.encounter().id());
+    assertEquals(resumed.encounter(), guardBeforeDefeat.fieldEncounter());
     clock.now = clock.now.plusSeconds(3);
     var finished = restarted.find(scout.token()).orElseThrow();
     assertEquals(Status.EXPLORING, finished.status());
+    assertNull(finished.fieldEncounter());
     assertEquals(Status.EXPLORING, restarted.find(guard.token()).orElseThrow().status());
     assertEquals(1, finished.events().stream().filter(event -> event.contains("The party defeated the hog")).count());
     assertEquals(1, restarted.find(scout.token()).orElseThrow().food() + restarted.find(guard.token()).orElseThrow().food());
