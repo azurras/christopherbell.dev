@@ -282,6 +282,10 @@ one-pixel depth buffer allocated on the first pick. Scenery and nearer actors
 occlude targets. Dragging or cancelling a pointer gesture leaves selection alone.
 Tab and Shift+Tab wrap through visible targets. Escape on the canvas clears the
 field selection and lets the next Tab move keyboard focus out of the viewport.
+F8 selects the closest creature or NPC with a visible field label. L, keypad *
+or a left-stick click locks the camera to the selected actor, including from
+Commands. The player can walk up to it and Engage with the same camera lock.
+Unlock to cycle again. Losing the actor or pressing Home releases the lock.
 The combat snapshot identifies the animal before the next movement reply, so
 the roaming label and body give way to one combat marker and model.
 Commands uses the weapon skill name returned by the game snapshot. Impact

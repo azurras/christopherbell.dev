@@ -148,6 +148,18 @@ test('a desktop controller works in a normal window and never locks mouse or key
     assert.equal(documentRoot.activeElement, nextRow);
     menu.open = false;
 
+    const keys = [];
+    const canvas = documentRoot.getElementById('surviveWorldCanvas');
+    canvas.dispatchEvent = event => keys.push(event.code);
+    documentRoot.defaultView.KeyboardEvent = class { constructor(_type, options) { this.code = options.code; } };
+    const commands = documentRoot.getElementById('surviveWorldActions');
+    commands.hidden = false;
+    commands.contains = element => element === nextRow;
+    gamepad.buttons[10].pressed = true;
+    nextFrame();
+    nextFrame();
+    assert.deepEqual(keys, ['NumpadMultiply']);
+
     gamepad = null;
     nextFrame();
     assert.deepEqual(axes.at(-1), [0, 0, 0, 0]);

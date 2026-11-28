@@ -66,7 +66,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   let sequence = 0;
   let yaw = 0;
   let cameraZoom = 1;
-  let cameraLocked = false;
+  let lockedTargetId = null;
   let others = [];
   let wildlife = [];
   let encounter = null;
@@ -201,10 +201,17 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     openCommands();
   }
 
-  function cycleFieldTarget(direction) {
+  function chooseFieldTarget(direction) {
     if (state?.status !== 'EXPLORING' || busy || !connected || mainMenu.open || !actionList.hidden) return false;
+    if (lockedTargetId) return true;
     const visible = desiredNameLabels.filter(label => (label.kind || label.npc) && !label.element.hidden);
     if (!visible.length) return false;
+    if (direction === 0) {
+      const distance = label => Math.hypot(label.x - position.x, label.z - position.z);
+      fieldTargetId = visible.reduce((nearest, label) => distance(label) < distance(nearest) ? label : nearest).id;
+      leaveCanvasOnTab = false;
+      return true;
+    }
     const current = visible.findIndex(label => label.id === fieldTargetId);
     const next = current < 0 ? (direction > 0 ? 0 : visible.length - 1) : current + direction;
     fieldTargetId = visible[(next + visible.length) % visible.length].id;
@@ -214,6 +221,20 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   function closeCommands() {
     actionList.hidden = true;
     commandButton.setAttribute('aria-expanded', 'false');
+  }
+
+  function toggleTargetLock(event) {
+    if (event.code !== 'KeyL' && event.code !== 'NumpadMultiply') return;
+    if (event.altKey || event.ctrlKey || event.metaKey || !isVisible() || mainMenu.open) return;
+    const id = state.status === 'COMBAT' ? encounter?.id : fieldTargetId;
+    if (!lockedTargetId && (!connected || !id)) return;
+    event.preventDefault();
+    if (event.repeat) return;
+    lockedTargetId = lockedTargetId ? null : id;
+    if (!actionList.hidden) {
+      closeCommands();
+      canvas.focus({ preventScroll: true });
+    }
   }
 
   function openCommands() {
@@ -321,6 +342,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
   });
   listen(target, 'click', selectTarget);
   function selectFieldTarget(id) {
+    if (lockedTargetId && lockedTargetId !== id) return;
     if (id && state?.status === 'EXPLORING' && connected && !busy
         && (id === state.waystationKeeper?.id || wildlife.some(animal => animal.id === id))) {
       leaveCanvasOnTab = false;
@@ -343,6 +365,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       mapSection.open = false;
     }
   });
+  listen(actionList, 'keydown', toggleTargetLock);
   listen(shell, 'keydown', event => {
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey
         || event.target.closest('input, select, textarea')) return;
@@ -390,10 +413,11 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (event.code === 'Tab' || event.code === 'Numpad0' || event.code === 'NumpadDecimal') {
       const step = event.shiftKey || event.code === 'NumpadDecimal' ? -1 : 1;
       if (event.code === 'Tab' && leaveCanvasOnTab) leaveCanvasOnTab = false;
-      else if (cycleFieldTarget(step)) event.preventDefault();
+      else if (chooseFieldTarget(step)) event.preventDefault();
     }
-    if (event.code === 'KeyQ') { event.preventDefault(); if (!cameraLocked) yaw -= 0.12; }
-    if (event.code === 'KeyR') { event.preventDefault(); if (!cameraLocked) yaw += 0.12; }
+    if (event.code === 'F8' && chooseFieldTarget(0)) event.preventDefault();
+    if (event.code === 'KeyQ') { event.preventDefault(); if (!lockedTargetId) yaw -= 0.12; }
+    if (event.code === 'KeyR') { event.preventDefault(); if (!lockedTargetId) yaw += 0.12; }
     if (event.code === 'PageUp' || event.code === 'PageDown') {
       event.preventDefault();
       zoomCamera(event.code === 'PageUp' ? -0.13 : 0.13);
@@ -401,13 +425,10 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (event.code === 'Home') {
       event.preventDefault();
       cameraZoom = 1;
-      cameraLocked = false;
+      lockedTargetId = null;
       yaw = position.x === 0 && position.z === 0 ? 0 : position.heading + Math.PI;
     }
-    if ((event.code === 'NumpadMultiply' || event.code === 'KeyL') && !event.repeat && state?.status === 'COMBAT' && encounter) {
-      event.preventDefault();
-      cameraLocked = !cameraLocked;
-    }
+    toggleTargetLock(event);
     if ((event.code === 'Enter' || event.code === 'KeyE') && !event.repeat) {
       event.preventDefault();
       if (state?.status === 'COMBAT') selectTarget();
@@ -416,6 +437,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (event.code === 'Escape') {
       stopWalking();
       fieldTargetId = null;
+      lockedTargetId = null;
       leaveCanvasOnTab = true;
     }
   });
@@ -437,7 +459,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     if (drag?.id !== event.pointerId) return;
     if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return;
     drag.moved = true;
-    if (!cameraLocked) yaw -= (event.clientX - drag.x) * 0.006;
+    if (!lockedTargetId) yaw -= (event.clientX - drag.x) * 0.006;
     drag.x = event.clientX;
   });
   listen(canvas, 'pointerup', event => {
@@ -477,7 +499,7 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
     previousFrameAt = timestamp;
     if (isVisible()) {
       const previousPosition = position;
-      if (!cameraLocked) yaw += controllerAxes.camera * seconds * 2.4;
+      if (!lockedTargetId) yaw += controllerAxes.camera * seconds * 2.4;
       if (controllerAxes.zoom) zoomCamera(controllerAxes.zoom * seconds * 0.8);
       if (connected && !busy && state.status === 'EXPLORING') {
         const right = Number(pressed.has('right')) - Number(pressed.has('left')) + controllerAxes.right;
@@ -502,7 +524,15 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         lastCombatEnemy = { x: enemy.x, z: enemy.z, kind: state.enemy,
           heading: Math.atan2(position.x - enemy.x, position.z - enemy.z) };
       }
-      if (cameraLocked && encounter) yaw = Math.atan2(position.x - enemy.x, position.z - enemy.z);
+      if (lockedTargetId) {
+        const focus = state.status === 'COMBAT' ? enemy
+          : wildlife.find(animal => animal.id === lockedTargetId) ?? state.waystationKeeper;
+        if (focus?.id === lockedTargetId && (state.status === 'COMBAT' || Math.hypot(focus.x - position.x, focus.z - position.z) <= 32)) {
+          yaw = Math.atan2(position.x - (focus.drawX ?? focus.x), position.z - (focus.drawZ ?? focus.z));
+        } else {
+          lockedTargetId = null;
+        }
+      }
       const pose = gesture && !motionPreference?.matches ? { action: gesture.action, ageSeconds: (Date.now() - gesture.at) / 1000 } : null;
       const counter = enemyCounter && !motionPreference?.matches
         ? enemyCounterPose((Date.now() - enemyCounter.at) / 1000, enemyCounter.landed) : null;
@@ -602,7 +632,6 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
       if (nextState?.status !== 'COMBAT' || state?.survivorId !== nextState.survivorId || state?.enemy !== nextState.enemy) {
         enemyCounter = null;
         targetSelected = false;
-        cameraLocked = false;
         target.setAttribute('aria-pressed', 'false');
       }
       if (nextState?.fieldEncounter || nextState?.nextStrikeAt) {
@@ -610,6 +639,8 @@ export function mountSurviveWorld(documentRoot, requestJson, onAction, rendererF
         target.setAttribute('aria-pressed', 'true');
       }
       if (nextState?.status !== 'EXPLORING') fieldTargetId = null;
+      const nextTargetId = nextState?.status === 'COMBAT' ? (nextState.fieldEncounter ?? encounter)?.id : fieldTargetId;
+      if (!sameSurvivor || lockedTargetId !== nextTargetId) lockedTargetId = null;
       if (state?.survivorId !== nextState?.survivorId) {
         requestGeneration++;
         controller?.abort();
