@@ -155,6 +155,53 @@ test('zoom resets and a locked camera tracks the acknowledged enemy without orbi
   } finally { world.dispose(); }
 });
 
+test('F8 selects the closest visible field target and lock follows its identity into combat', async () => {
+  const fixture = worldFixture();
+  const animals = [
+    { id: 'far', kind: 'HOG', x: -7, z: -7 },
+    { id: 'behind', kind: 'HOG', x: 0, z: 1 },
+    { id: 'near', kind: 'HOG', x: -3, z: -4 },
+  ];
+  const byId = id => fixture.documentRoot.getElementById(id);
+  const press = code => byId('surviveWorldCanvas').emit('keydown', { code, preventDefault() {} });
+  let selectedId;
+  let cameraYaw;
+  const actions = [];
+  const world = mountSurviveWorld(fixture.documentRoot, async () => ({
+    self: { survivorId: 'alice', x: 0, z: 0, heading: 0, sequence: 1 }, others: [], accepted: true, wildlife: animals,
+  }), action => actions.push(action), () => ({ ...fixture.renderer, draw(...args) {
+    cameraYaw = args[1];
+    selectedId = args.at(-1);
+    return { project: ([, , z]) => ({ visible: z < 0, x: 0, y: 0 }) };
+  } }));
+  try {
+    byId('surviveWorldActions').hidden = true;
+    world.setState(worldState);
+    fixture.frame(0);
+    await new Promise(resolve => setImmediate(resolve));
+    fixture.frame(16);
+    press('F8');
+    fixture.frame(32);
+    assert.equal(selectedId, 'near');
+    assert.equal(byId('surviveWorldActions').hidden, true);
+    press('KeyL');
+    press('Numpad0');
+    world.setState({ ...worldState, revision: 2 });
+    fixture.frame(48);
+    assert.equal(selectedId, 'near');
+    assert.equal(cameraYaw, Math.atan2(3, 4));
+    const combat = { ...worldState, status: 'COMBAT', enemy: 'HOG', enemyHealth: 5 };
+    world.setState({ ...combat, fieldEncounter: { ...animals[2], x: -4, z: -3, claimed: true } });
+    fixture.frame(64);
+    assert.equal(cameraYaw, Math.atan2(4, 3));
+    world.setState({ ...combat, fieldEncounter: animals[0] });
+    press('KeyR');
+    fixture.frame(80);
+    assert.equal(cameraYaw, Math.atan2(4, 3) + 0.12);
+    assert.deepEqual(actions, []);
+  } finally { world.dispose(); }
+});
+
 test('field targeting sends the selected creature ID after a fresh movement pulse', async () => {
   const fixture = worldFixture();
   const sent = [];

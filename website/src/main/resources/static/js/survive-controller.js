@@ -132,10 +132,12 @@ export function mountSurviveController(documentRoot, world, onResume) {
     if (game.hidden) return;
     if (pressed(MAIN_MENU)) key(canvas, 'Minus', '-');
     if (pressed(CHAT_LOG)) key(canvas, 'Equal', '+');
-    if (!currentMenu() && (focused === canvas || focused === documentRoot.body)) {
-      if (pressed(LOCK_TARGET)) key(canvas, 'NumpadMultiply', '*');
-      if (pressed(RESET_CAMERA)) key(canvas, 'Home');
+    const menu = currentMenu();
+    const inWorld = !menu && (focused === canvas || focused === documentRoot.body);
+    if (pressed(LOCK_TARGET) && (inWorld || (menu === commands && commands.contains(focused)))) {
+      key(canvas, 'NumpadMultiply', '*');
     }
+    if (inWorld && pressed(RESET_CAMERA)) key(canvas, 'Home');
     if (pressed(CANCEL)) {
       if (game.contains(focused) && focused !== canvas) key(focused, 'Escape');
       else key(canvas, 'Escape');
